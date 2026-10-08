@@ -39,9 +39,14 @@ fn content_rect(window: &Window<tauri::Wry>) -> (LogicalPosition<f64>, LogicalSi
 }
 
 fn build_content_webview() -> WebviewBuilder<tauri::Wry> {
+    // DUOPULSE_START_URL переопределяет стартовую страницу content-webview —
+    // используется e2e-стендами (например, звуковой тест duopulse-006,
+    // e2e/m0-audio/audio-test.html) вместо ручного ввода адреса.
+    let start_url =
+        std::env::var("DUOPULSE_START_URL").unwrap_or_else(|_| "https://www.youtube.com/".into());
     WebviewBuilder::new(
         "content",
-        WebviewUrl::External(Url::parse("https://www.youtube.com/").unwrap()),
+        WebviewUrl::External(Url::parse(&start_url).expect("DUOPULSE_START_URL: некорректный URL")),
     )
     // Критерий M0: скрипт выполняется в каждом новом документе
     // (WebView2: AddScriptToExecuteOnDocumentCreatedAsync).

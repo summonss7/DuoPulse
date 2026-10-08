@@ -1,0 +1,359 @@
+<!doctype html>
+<!-- DuoPulse duopulse-006 — стенд проверки многоканального звука 5.1/7.1 в WebView2/Chromium.
+
+     Открывается в спайке M0 (npm run tauri dev → webview "content") и в любом
+     Chromium-браузере для сравнения. Сервируется локально: node e2e/m0-audio/serve.mjs
+     → http://127.0.0.1:8788/audio-test.html
+
+     Три режима:
+     1. «Автотест» — программный, тихий: каждый файл играется через <audio>/<video>,
+        звук заводится в WebAudio (MediaElementAudioSource → ChannelSplitter →
+        AnalyserNode на каждый канал), для каждого канала измеряется пик в своём
+        временном окне и в чужих. Воспроизведение декодера НЕ заглушается до нуля
+        в графах данных — на выход стоит GainNode(0), т.е. динамики молчат.
+        Проверяет: декодер отдаёт N дискретных каналов, сведения на пути
+        элемент→WebAudio нет.
+     2. «Прослушивание» — обычные <audio>/<video> без WebAudio: для человека
+        на системе 5.1/7.1 (голосовая метка канала + свой тон).
+     3. «Соло канала» — WebAudio: играет только выбранный канал файла.
+
+     Результаты: таблицы на странице + window.__AUDIO_TEST_RESULTS__ (для CDP). -->
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DuoPulse — тест многоканального звука 5.1/7.1</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px 22px 60px;
+    background: #0b0e14; color: #d7dce6;
+    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; color: #bdfE4f; margin: 0 0 4px; letter-spacing: .3px; }
+  h1 span { color: #8fa3b8; font-weight: 400; }
+  h2 { font-size: 15px; color: #bdfE4f; margin: 26px 0 8px; border-bottom: 1px solid #232a36; padding-bottom: 6px; }
+  .sub { color: #7d8aa0; font-size: 12px; margin-bottom: 14px; }
+  code, .mono { font-family: Consolas, "Cascadia Mono", monospace; }
+  .env { background: #10141d; border: 1px solid #232a36; border-radius: 8px; padding: 10px 14px; font-family: Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; color: #aab6c8; }
+  .env b { color: #bdfE4f; font-weight: 600; }
+  button {
+    background: #1a2230; color: #d7dce6; border: 1px solid #2c374a; border-radius: 6px;
+    padding: 8px 16px; font: 600 13px "Segoe UI", sans-serif; cursor: pointer; margin: 2px 4px 2px 0;
+  }
+  button:hover { border-color: #bdfE4f; color: #bdfE4f; }
+  button:disabled { opacity: .45; cursor: default; }
+  #runAuto { background: #bdfE4f; color: #0b0e14; border-color: #bdfE4f; font-size: 14px; padding: 10px 22px; }
+  #runAuto:disabled { background: #3a4352; color: #0b0e14; }
+  .status { font: 600 13px Consolas, monospace; margin-left: 10px; color: #bdfE4f; }
+  table { border-collapse: collapse; margin: 10px 0 4px; font: 12.5px Consolas, monospace; }
+  th, td { border: 1px solid #232a36; padding: 4px 10px; text-align: left; }
+  th { background: #131926; color: #8fa3b8; font-weight: 600; }
+  td.v { text-align: center; font-weight: 700; }
+  .pass { color: #6fe08a; } .fail { color: #ff7a76; } .warn { color: #ffcf6b; } .dim { color: #5d6a80; }
+  .filehead { margin-top: 16px; font: 600 13.5px Consolas, monospace; color: #e6ecf5; }
+  .filehead .verdict { margin-left: 10px; }
+  .listen audio, .listen video { width: 420px; max-width: 100%; height: 28px; display: block; margin: 4px 0; }
+  .listen video { height: auto; }
+  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .lbl { min-width: 150px; font-family: Consolas, monospace; font-size: 12.5px; color: #aab6c8; }
+  #soloNow { font: 700 15px Consolas, monospace; color: #bdfE4f; min-height: 22px; }
+  .note { color: #7d8aa0; font-size: 12px; max-width: 900px; }
+</style>
+</head>
+<body>
+<h1>DuoPulse · стенд многоканального звука 5.1/7.1 <span>— WebView2 / Chromium (карточка duopulse-006)</span></h1>
+<div class="sub">Файлы: у каждого канала своё окно (голосовая метка + опорный тон), вне окна — тишина. Автотест меряет пик каждого канала в своём и чужих окнах.</div>
+
+<h2>1. Окружение</h2>
+<div class="env" id="env">измеряю…</div>
+
+<h2>2. Автотест каналов (программный, тихий)</h2>
+<div class="row">
+  <button id="runAuto">▶ Запустить автотест</button>
+  <span class="status" id="autoStatus"></span>
+</div>
+<div class="note">Каждый файл играется через &lt;audio&gt;/&lt;video&gt; с выводом в WebAudio-анализаторы; выход заглушен (Gain 0). «PASS» у канала = пик в своём окне ≥ −42 dB и в чужих окнах ≤ −56 dB.</div>
+<div id="autoResults"></div>
+
+<h2>3. Прослушивание человеком (для системы 5.1/7.1)</h2>
+<div class="note">Обычные элементы без WebAudio — ровно как в браузере. На ОС с колонками 5.1/7.1 метка каждого канала должна звучать из своего динамика. Порядок каналов в 5.1: FL → FR → Center → LFE → BL → BR; в 7.1 добавляются SL → SR.</div>
+<div class="listen" id="listen"></div>
+
+<h2>4. Соло канала (WebAudio, слышно выбранный канал)</h2>
+<div class="row"><div class="lbl">5.1 WAV:</div><span id="solo51"></span></div>
+<div class="row"><div class="lbl">7.1 WAV:</div><span id="solo71"></span></div>
+<div id="soloNow"></div>
+
+<script>
+"use strict";
+/* ---- Конфигурация матрицы ------------------------------------------------ */
+var SEG = 2; // сек на канал — синхронизировано с generate-assets.ps1 (-Seg 2)
+var CH51 = ["FL", "FR", "Center", "LFE", "BL", "BR"];
+var CH71 = ["FL", "FR", "Center", "LFE", "BL", "BR", "SL", "SR"];
+var FILES = [
+  { file: "test-2.0.wav",     kind: "audio", chs: ["FL", "FR"] },
+  { file: "test-5.1.wav",     kind: "audio", chs: CH51 },
+  { file: "test-7.1.wav",     kind: "audio", chs: CH71 },
+  { file: "test-5.1.flac",    kind: "audio", chs: CH51 },
+  { file: "test-5.1.opus.ogg",kind: "audio", chs: CH51 },
+  { file: "test-5.1-aac.mp4", kind: "video", chs: CH51 },
+  { file: "test-7.1-aac.mp4", kind: "video", chs: CH71 },
+  { file: "test-5.1-ac3.mp4", kind: "video", chs: CH51, expect: "fail: AC-3/EAC-3 в Chromium обычно не декодируется" },
+];
+
+/* ---- Результаты для CDP --------------------------------------------------- */
+window.__AUDIO_TEST_RESULTS__ = { env: null, files: [], startedAt: null, finishedAt: null };
+
+/* ---- 1. Окружение --------------------------------------------------------- */
+var ctx = new (window.AudioContext || window.webkitAudioContext)();
+function fmtEnv() {
+  var d = ctx.destination;
+  var maxCh6;
+  try { var c6 = new AudioContext({ channelCount: 6, sampleRate: ctx.sampleRate }); maxCh6 = "создан (destination.maxChannelCount=" + c6.destination.maxChannelCount + ")"; c6.close(); }
+  catch (e) { maxCh6 = "НЕ создан: " + (e && e.name ? e.name : e); }
+  return [
+    "userAgent:        " + navigator.userAgent,
+    "AudioContext:     sampleRate=" + ctx.sampleRate + " Hz, state=" + ctx.state,
+    "destination:      channelCount=" + d.channelCount + ", channelCountMode=" + d.channelCountMode + ", maxChannelCount=" + d.maxChannelCount,
+    "                  → устройство вывода сейчас: " + (d.maxChannelCount >= 6 ? "МНОГОКАНАЛЬНОЕ (≥ " + d.maxChannelCount + " кан.)" : d.maxChannelCount + " кан. (СТЕРЕО)" ),
+    "AudioContext(6ch):" + maxCh6,
+  ].join("\n");
+}
+function renderEnv() {
+  var el = document.getElementById("env");
+  var txt = fmtEnv();
+  el.textContent = txt;
+  window.__AUDIO_TEST_RESULTS__.env = txt;
+}
+renderEnv();
+
+/* ---- helpers -------------------------------------------------------------- */
+function db(p) { return p > 0 ? (20 * Math.log10(p)).toFixed(1) + " dB" : "−∞"; }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+function fetchBuf(file) {
+  return fetch("assets/" + file).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.arrayBuffer();
+  });
+}
+
+/* ---- 2. Автотест ---------------------------------------------------------- */
+var bufferCache = {};
+function decodeChannels(file) {
+  if (bufferCache[file]) return Promise.resolve(bufferCache[file].numberOfChannels);
+  return fetchBuf(file)
+    .then(function (ab) { return ctx.decodeAudioData(ab); })
+    .then(function (buf) { bufferCache[file] = buf; return buf.numberOfChannels; });
+}
+
+function testElement(item) {
+  // Играем файл через <audio>/<video>, отводим в splitter+analysers, меряем
+  // пик каждого канала в своём и чужих временных окнах. Выход заглушен.
+  return new Promise(function (resolve) {
+    var el = document.createElement(item.kind);
+    el.src = "assets/" + item.file;
+    el.preload = "auto";
+    el.muted = false; // звук уходит в WebAudio-граф; на колонки — через Gain(0)
+    var src = ctx.createMediaElementSource(el);
+    var split = ctx.createChannelSplitter(8);
+    var mute = ctx.createGain(); mute.gain.value = 0;
+    src.connect(split);
+    src.connect(mute); mute.connect(ctx.destination);
+
+    var N = item.chs.length;
+    var analysers = [];
+    for (var i = 0; i < 8; i++) {
+      var an = ctx.createAnalyser();
+      an.fftSize = 512;
+      split.connect(an, i);
+      analysers.push({ an: an, buf: new Float32Array(512), peakOwn: 0, peakOther: 0 });
+    }
+    var windows = [];
+    for (var w = 0; w < N; w++) windows.push([w * SEG + 0.2, (w + 1) * SEG - 0.2]);
+
+    var timer = null;
+    function sample() {
+      for (var c = 0; c < 8; c++) {
+        var a = analysers[c];
+        a.an.getFloatTimeDomainData(a.buf);
+        var pk = 0;
+        for (var k = 0; k < a.buf.length; k++) { var v = Math.abs(a.buf[k]); if (v > pk) pk = v; }
+        var t = el.currentTime;
+        for (var w2 = 0; w2 < N; w2++) {
+          var inWin = t >= windows[w2][0] && t <= windows[w2][1];
+          if (w2 === c) { if (inWin && pk > a.peakOwn) a.peakOwn = pk; }
+          else { if (inWin && pk > a.peakOther) a.peakOther = pk; }
+        }
+      }
+    }
+
+    var res = { file: item.file, kind: item.kind, chs: item.chs, expect: item.expect || null,
+                decodedChannels: null, decodeError: null, elementError: null,
+                duration: null, channels: [], verdict: null };
+
+    function finish(verdict) {
+      if (timer) clearInterval(timer);
+      try { src.disconnect(); split.disconnect(); mute.disconnect(); } catch (e) {}
+      el.remove();
+      res.verdict = verdict;
+      resolve(res);
+    }
+
+    el.addEventListener("error", function () {
+      var e = el.error;
+      res.elementError = e ? ("code " + e.code + ": " + (e.message || { 1: "ABORTED", 2: "NETWORK", 3: "DECODE", 4: "SRC_NOT_SUPPORTED" }[e.code] || "?")) : "unknown";
+      finish("ERROR");
+    });
+    el.addEventListener("loadedmetadata", function () { res.duration = +el.duration.toFixed(3); });
+    el.addEventListener("canplay", function () {
+      el.play().then(function () {
+        timer = setInterval(sample, 20);
+      }).catch(function (err) {
+        res.elementError = "play() отклонён: " + (err && err.name) + " — " + (err && err.message);
+        finish("NO-PLAY");
+      });
+    });
+    el.addEventListener("ended", function () {
+      setTimeout(function () {
+        var chans = [];
+        var allPass = true, anyActive = false;
+        for (var c = 0; c < N; c++) {
+          var a = analysers[c];
+          var active = a.peakOwn >= 0.008;    // ≈ −42 dB
+          var isolated = a.peakOther <= 0.0016; // ≈ −56 dB
+          if (active) anyActive = true;
+          if (!active || !isolated) allPass = false;
+          chans.push({ ch: item.chs[c], peakOwn: a.peakOwn, peakOther: a.peakOther, active: active, isolated: isolated });
+        }
+        res.channels = chans;
+        // для ожидаемо-неработающего кодека (AC-3) «нет активных каналов» — это ожидаемый исход
+        if (item.expect && /^fail/.test(item.expect)) finish(anyActive ? "UNEXPECTED-PLAY" : "EXPECTED-FAIL");
+        else finish(allPass ? "PASS" : "FAIL");
+      }, 120);
+    });
+    document.body.appendChild(el);
+    el.style.display = "none";
+    el.load();
+  });
+}
+
+function renderFileResult(res) {
+  var html = '<div class="filehead">' + esc(res.file) +
+    ' <span class="dim">(' + res.kind + ", " + res.chs.length + " кан. в файле, " + (res.duration != null ? res.duration + " с" : "?") + ")</span>" +
+    ' <span class="filehead verdict ' + (res.verdict === "PASS" || res.verdict === "EXPECTED-FAIL" ? "pass" : res.verdict === "FAIL" || res.verdict === "UNEXPECTED-PLAY" ? "fail" : "warn") + '">' + res.verdict + "</span></div>";
+  if (res.expect) html += '<div class="note">ожидание: ' + esc(res.expect) + "</div>";
+  if (res.decodeError) html += '<div class="note warn">decodeAudioData: ' + esc(res.decodeError) + " (для вывода через элементы не критично)</div>";
+  if (res.elementError) html += '<div class="note fail">ошибка элемента: ' + esc(res.elementError) + "</div>";
+  html += "<table><tr><th>канал</th><th>пик в своём окне</th><th>пик в чужих окнах</th><th>активен</th><th>изолирован</th><th>итог</th></tr>";
+  if (res.channels.length) {
+    res.channels.forEach(function (c) {
+      var ok = c.active && c.isolated;
+      html += "<tr><td>" + esc(c.ch) + "</td><td>" + db(c.peakOwn) + "</td><td>" + db(c.peakOther) +
+        '</td><td class="v ' + (c.active ? "pass" : "fail") + '">' + (c.active ? "да" : "НЕТ") +
+        '</td><td class="v ' + (c.isolated ? "pass" : "fail") + '">' + (c.isolated ? "да" : "НЕТ") +
+        '</td><td class="v ' + (ok ? "pass" : "fail") + '">' + (ok ? "PASS" : "FAIL") + "</td></tr>";
+    });
+  } else {
+    html += '<tr><td colspan="6" class="dim">канальных измерений нет (файл не проигрался)</td></tr>';
+  }
+  html += "</table>";
+  return html;
+}
+
+function runAutoTest() {
+  var status = document.getElementById("autoStatus");
+  var out = document.getElementById("autoResults");
+  var btn = document.getElementById("runAuto");
+  btn.disabled = true;
+  out.textContent = "";
+  window.__AUDIO_TEST_RESULTS__.files = [];
+  window.__AUDIO_TEST_RESULTS__.startedAt = new Date().toISOString();
+  ctx.resume();
+  status.textContent = "идёт…";
+
+  var chain = Promise.resolve();
+  FILES.forEach(function (item) {
+    chain = chain.then(function () {
+      status.textContent = "идёт… " + item.file;
+      return decodeChannels(item.file)
+        .then(function (n) { return { decodedChannels: n }; })
+        .catch(function (e) { return { decodeError: (e && e.message) || String(e) }; })
+        .then(function (pre) {
+          return testElement(item).then(function (res) {
+            res.decodedChannels = pre.decodedChannels != null ? pre.decodedChannels : null;
+            res.decodeError = pre.decodeError || null;
+            window.__AUDIO_TEST_RESULTS__.files.push(res);
+            out.insertAdjacentHTML("beforeend", renderFileResult(res));
+          });
+        });
+    });
+  });
+  return chain.then(function () {
+    window.__AUDIO_TEST_RESULTS__.finishedAt = new Date().toISOString();
+    var r = window.__AUDIO_TEST_RESULTS__;
+    var pass = r.files.filter(function (f) { return f.verdict === "PASS"; }).length;
+    var expected = r.files.filter(function (f) { return f.verdict === "EXPECTED-FAIL"; }).length;
+    var bad = r.files.length - pass - expected;
+    status.textContent = "готово: PASS " + pass + " / ожидалось-и-не-играет " + expected + " / проблемных " + bad;
+    btn.disabled = false;
+    return r;
+  });
+}
+window.__runAutoTest = runAutoTest;
+document.getElementById("runAuto").addEventListener("click", function () { runAutoTest(); });
+
+/* ---- 3. Прослушивание (нативные элементы, без WebAudio) -------------------- */
+(function () {
+  var host = document.getElementById("listen");
+  FILES.filter(function (f) { return !f.expect; }).forEach(function (f) {
+    var row = document.createElement("div");
+    row.className = "row";
+    var l = document.createElement("div"); l.className = "lbl"; l.textContent = f.file + " (" + f.chs.length + "ch)";
+    var el = document.createElement(f.kind);
+    el.src = "assets/" + f.file;
+    el.controls = true;
+    if (f.kind === "video") { el.style.width = "320px"; el.style.height = "auto"; }
+    row.appendChild(l); row.appendChild(el);
+    host.appendChild(row);
+  });
+})();
+
+/* ---- 4. Соло канала -------------------------------------------------------- */
+function soloButtons(hostId, file, chs) {
+  var host = document.getElementById(hostId);
+  chs.forEach(function (name, idx) {
+    var b = document.createElement("button");
+    b.textContent = name;
+    b.addEventListener("click", function () {
+      document.getElementById("soloNow").textContent = "▶ " + file + " — только канал " + name + " (" + (idx + 1) + "/" + chs.length + ")";
+      ctx.resume();
+      fetchBuf(file)
+        .then(function (ab) { return ctx.decodeAudioData(ab); })
+        .then(function (buf) {
+          var src = ctx.createBufferSource(); src.buffer = buf;
+          var split = ctx.createChannelSplitter(buf.numberOfChannels);
+          var merge = ctx.createChannelMerger(buf.numberOfChannels);
+          src.connect(split);
+          for (var c = 0; c < buf.numberOfChannels; c++) {
+            var g = ctx.createGain();
+            g.gain.value = c === idx ? 1 : 0;
+            split.connect(g, c);
+            g.connect(merge, 0, c);
+          }
+          merge.connect(ctx.destination);
+          src.onended = function () { document.getElementById("soloNow").textContent = ""; try { merge.disconnect(); } catch (e) {} };
+          src.start();
+        })
+        .catch(function (e) { document.getElementById("soloNow").textContent = "ошибка: " + e.message; });
+    });
+    host.appendChild(b);
+  });
+}
+soloButtons("solo51", "test-5.1.wav", CH51);
+soloButtons("solo71", "test-7.1.wav", CH71);
+</script>
+</body>
+</html>
