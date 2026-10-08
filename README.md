@@ -73,7 +73,9 @@ DuoPulse/
 - Перед серьёзными изменениями — запустить `backup.bat` (копия в `backups/`).
 - Задачи ведутся карточками в `CARDS/` (протокол — в `AGENTS.md`).
 - Отчёт о каждой задаче дописывается в `promt.txt`.
-- После задачи — осмысленный коммит (и push, когда настроен remote).
+- После задачи — осмысленный коммит и push на GitHub
+  (remote: `https://github.com/summonss7/DuoPulse`, ветка `main`;
+  учётные данные — в Windows credential store, `git push` проходит без запросов).
 
 ## Лицензия
 
