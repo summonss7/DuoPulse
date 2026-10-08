@@ -29,7 +29,7 @@ DuoPulse/
 │   ├── main.ts                     # монтирование хрома
 │   ├── chrome/                     # TabBar, Omnibox, Navbar, MainMenu
 │   ├── pages/                      # NewTab (статический), Settings, Diagnostics
-│   ├── subtitles-panel/            # панель настройки субтитров (языки, стиль, сдвиг)
+│   ├── subtitles-panel/            # панель настройки субтитров (набор дорожек 1–3, стиль, сдвиг)
 │   ├── bridge/                     # типизированный IPC-клиент (генерится из контракта)
 │   └── theme/                      # токены фирменного стиля (см. 06-brand-style)
 ├── content/                        # Content-слой (инжектируемый движок, TS)
@@ -60,13 +60,13 @@ DuoPulse/
   nav.{go_back, go_forward, reload, resolve_omnibox}
   history.{visit, search, bookmark_add, bookmark_remove}
   adblock.{set_enabled(site), status, update_lists}
-  subtitles.{enable(pair), disable, list_tracks(videoKey), load_file(path),
+  subtitles.{set_tracks(trackRefs[]), disable, list_tracks(videoKey), load_file(path),
              set_offset(ms), set_style(style), translate_track(trackId, lang)}
   settings.{get, set, export, import}
 События (Core → UI|Content):
   page.{loaded, video_detected(videoKey, canTracks)}
-  subtitles.{tracks_ready(videoKey, tracks[]), pair_ready, translate_progress,
-             translate_unavailable(reason)}
+  subtitles.{tracks_ready(videoKey, tracks[]), set_applied(tracks[]),
+             translate_progress, translate_unavailable(reason)}
   adblock.{blocked_count(delta), site_exception_changed}
   perf.{startup_ms, tab_switch_ms}
 ```
@@ -92,6 +92,7 @@ DuoPulse/
 | 1.4 | История и закладки (SQLite + страница управления) | запись/поиск/удаление работают |
 | 1.5 | Фирменный тёмный UI-хром по гайду 06 | сверка с гайдом по чек-листу |
 | 1.6 | Восстановление сессии (ленивое) | 10 вкладок восстанавливаются, старт не деградирует > 10% |
+| 1.7 | Спайк многоканального звука 5.1/7.1 (карточка duopulse-006): поканальные тесты + YouTube 5.1 на реальной системе 5.1/7.1 | протокол e2e заполнен; все каналы звучат из правильных динамиков не хуже Chrome/Edge; при провале — карточка-решение и запись в ROADMAP |
 
 ### M2 — скорость
 | # | Задача | DoD |
@@ -102,16 +103,16 @@ DuoPulse/
 | 2.4 | Тёплый старт + преждекватная настройка кэшей | метрики P-01..P-03 в бюджете docs/04 §2 |
 | 2.5 | Страница «Диагностика»: съём и история метрик | график последних прогонов |
 
-### M3 — двойные субтитры v1 (центральный этап)
+### M3 — многоязычные субтитры v1 (центральный этап)
 | # | Задача | DoD |
 |---|---|---|
 | 3.1 | Парсеры srt/vtt/timedtext (Rust) + фикстурные тесты | 100% фикстур проходят, границы cue корректны |
 | 3.2 | content: детектор видео + каркас движка cue-таймлайна | на тест-странице overlay показывает тест-cue точно по времени |
-| 3.3 | YouTube-адаптер: список дорожек + загрузка двух (orig + tlang) | 10 случайных видео → пары дорожек получены |
-| 3.4 | Оверлей: плашка «оригинал/перевод», стили, позиция, колесо-размер | сверки по гайду; без миганий при коротких cue |
+| 3.3 | YouTube-адаптер: полный список дорожек + загрузка выбранных N (оригинал + 1–2 `tlang`-перевода или любые языки) | 10 случайных видео → наборы из 2–3 дорожек получены |
+| 3.4 | Оверлей: плашка из N строк (1–3), стили строк, позиция, колесо-размер | сверки по гайду; без миганий при коротких cue |
 | 3.5 | Синхронизация: offset-слайдер, горячие клавиши, seek-устойчивость | скачки по таймлайну не дают «призраков» cue |
-| 3.6 | Ручные субтитры: drag&drop .srt/.vtt на любой сайт | работает на 3 тестовых сайтах с `<video>` |
-| 3.7 | Кнопка «duo» в omnibox + Alt+D + панель настроек субтитров | сценарии docs/01 §5.1 и §5.3 проходят |
+| 3.6 | Ручные субтитры: drag&drop 1–3 файлов .srt/.vtt на любой сайт, смешивание с дорожками платформы | работает на 3 тестовых сайтах с `<video>` |
+| 3.7 | Кнопка «duo» в omnibox + Alt+D + панель настроек набора (языки, источники, порядок) | сценарии docs/01 §5.1 и §5.3 проходят, включая тройной набор |
 | 3.8 | E2E-прогон «10 случайных видео» + фикстуры YouTube в CI | прогон зелёный, фиксация рабочих путей адаптера |
 
 ### M4 — перевод
