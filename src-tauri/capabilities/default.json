@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "UI-окно (адресная строка) имеет доступ к командам приложения; дочерний webview content (удалённые сайты) — нет.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

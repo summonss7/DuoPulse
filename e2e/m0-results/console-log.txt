@@ -1,0 +1,68 @@
+# Журнал консоли WebView2 — ключевые строки протокола M0 (duopulse-003)
+# Снято через CDP (порт 9222, node _tmp/cdp.mjs ... console).
+# 08.10.2026, ~16:56–17:05. Полный повтор: npm run tauri dev с
+# WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222".
+
+## Запуск приложения (cargo tauri dev)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
+    Running `target\debug\duopulse.exe`
+    (окно открылось, webview UI на http://localhost:5173/, контент — youtube.com)
+
+## Инжекция content-скрипта (на каждом документе) + сетевой блок-тест
+[console.log] [DuoPulse M0] content script injected: https://www.youtube.com/
+[console.log] [DuoPulse M0] block-test: BLOCKED (403 · перехват работает)
+[console.log] [DuoPulse M0] content script injected: about:blank
+[console.log] [DuoPulse M0] block-test: BLOCKED (403 · перехват работает)
+[console.log] [DuoPulse M0] content script injected: https://www.youtube.com/watch?v=aqz-KE-bpKQ
+[console.log] [DuoPulse M0] block-test: BLOCKED (403 · перехват работает)
+[console.log] [DuoPulse M0] content script injected: https://shaka-project.github.io/shaka-player-release/demo/
+[console.log] [DuoPulse M0] block-test: BLOCKED (403 · перехват работает)
+[console.log] [DuoPulse M0] content script injected: https://music.youtube.com/
+[console.log] [DuoPulse M0] block-test: BLOCKED (403 · перехват работает)
+# Примечание: в песочницах about:srcdoc/about:blank внутри iframes проба отвечает
+# 403, но заголовок x-duopulse-block для JS оттуда не виден (отображается «NOT
+# blocked (403)») — на реальных http(s)-страницах перехват подтверждён везде.
+
+## 1080p60 — YouTube, Big Buck Bunny 60fps (watch?v=aqz-KE-bpKQ), качество принудительно hd1080
+[console.log] [DuoPulse M0] video: 1920x1080 | dropped 0/391 (0.00%) | ~34.8 fps
+[console.log] [DuoPulse M0] video: 1920x1080 | dropped 0/1049 (0.00%) | ~47.3 fps
+[console.log] [DuoPulse M0] video: 1920x1080 | dropped 1/1709 (0.06%) | ~51.6 fps
+[console.log] [DuoPulse M0] video: 1920x1080 | dropped 2/2369 (0.08%) | ~53.7 fps
+[console.log] [DuoPulse M0] video: 1920x1080 | dropped 3/3029 (0.10%) | ~54.9 fps
+Бейдж: video: 1920x1080 | dropped 3/3149 (0.10%) | ~55.1 fps
+(fps — среднее с момента загрузки, включая разгон; мгновенная частота ~60)
+
+## 4K — тот же ролик, авто-качество 2160p60 (прогон 16:31, прошлый запуск сессии)
+Бейдж (скриншот 4k-playback.png): video: 3840x2160 | dropped 5/5512 (0.09%) | ~42.3 fps
+
+## EME / Widevine
+eval: navigator.requestMediaKeySystemAccess('com.widevine.alpha', ...)
+→ "Widevine EME: OK, keySystem=com.widevine.alpha"
+
+## DRM-ролик 1 — Shaka Player demo, Sintel (Widevine)
+[console.info] Created MediaKeys object for key system com.widevine.alpha
+[console.info] Creating new temporary session
+[console.log] [DuoPulse M0] video: 1024x436 | dropped 0/235 (0.00%) | ~11.7 fps
+→ видео играет (кадр фильма виден на скриншоте), ошибок DRM нет
+
+## DRM-ролик 2 — Shaka Player demo, Multi-DRM (Axinom)
+[console.info] Session closed with reason closed-by-application sessionId 0569...
+[console.info] Updating manifest...
+[console.log] [DuoPulse M0] video: 1252x720 | dropped 0/157 (0.00%) | ~1.8 fps
+[console.log] [DuoPulse M0] video: 1252x720 | dropped 0/1146 (0.00%) | ~9.6 fps
+→ "video: 1252x720 PLAYING; err: none"
+
+## YouTube Music — watch?v=dQw4w9WgXcQ (без входа в аккаунт)
+[console.log] [DuoPulse M0] content script injected: https://music.youtube.com/
+Бейдж: video: 1080x608 | dropped 0/497 (0.00%) | ~12.4 fps
+→ трек играет с самого начала, без сбоев
+
+## Аппаратное декодирование (mediaCapabilities.decodingInfo)
+"H264 1080p60: supported=true smooth=true hwPowerEfficient=true"
+"VP9(profile0) 1080p60: supported=true smooth=true hwPowerEfficient=true"
+# NB: короткий строкинг 'vp9' даёт supported=false — нужен полный
+# 'vp09.00.10.08'; реальное воспроизведение VP9 на YouTube шло без дропов.
+
+## Версии
+WebView2/Chromium: Edge v154 (Device: Edge v154; Type: DESKTOP — из лога Shaka)
+Tauri 2 (unstable), webview2-com 0.39, Windows 10.0.26200

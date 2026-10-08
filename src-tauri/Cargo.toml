@@ -1,0 +1,24 @@
+[package]
+name = "duopulse"
+version = "0.1.0"
+description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# unstable: API нескольких webview в одном окне (WebviewBuilder/Window::add_child,
+# AppHandle::get_webview/get_window) — нужен для схемы «UI-полоса + контентный webview».
+tauri = { version = "2", features = ["unstable"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Прямой доступ к COM-API WebView2 (WebResourceRequested) для сетевого перехвата M0.
+webview2-com = "0.39"
+windows-core = "0.62"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+strip = true

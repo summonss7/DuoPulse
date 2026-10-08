@@ -11,8 +11,20 @@ DuoPulse — настольный браузер (Windows-first) для повс
    **оригинальная дорожка и её перевод** (например, английский + русский), с настройкой
    размера, позиции и стиля.
 
-**Текущий статус:** этап проектирования. Документация и план готовы, код ещё не начат —
-см. [ROADMAP.md](ROADMAP.md); первый шаг — технический спайк M0.
+**Текущий статус:** этап **M1 «Каркас браузера»**. Спайк M0 пройден 08.10.2026 —
+**решение GO на Tauri 2 + WebView2**: YouTube играет 1080p60/4K без дропов, Widevine-DRM
+работает, инжекция скриптов и сетевой перехват подтверждены (протокол:
+[e2e/m0-results/PROTOCOL.md](e2e/m0-results/PROTOCOL.md)). План — в
+[ROADMAP.md](ROADMAP.md).
+
+### Запуск спайка M0
+
+```bash
+npm install
+npm run tauri dev        # окно с адресной строкой-заглушкой + webview youtube.com
+# для автоматических проверок (CDP-протокол e2e):
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run tauri dev
+```
 
 ---
 
@@ -47,6 +59,10 @@ DuoPulse/
 ├── backup.bat              резервная копия проекта (перед серьёзными изменениями)
 ├── promt.txt               журнал отчётов о выполненных задачах
 ├── CARDS/                  карточки задач диспетчера
+├── src-tauri/              Rust-ядро спайка (Tauri 2: окно, webview, COM-перехват)
+├── src/                    UI-полоса спайка (TypeScript + Vite)
+├── content/                content-скрипты, инжектируемые в страницы
+├── e2e/m0-results/         протокол испытаний M0 + скриншоты-доказательства
 ├── docs/
 │   ├── 01-concept.md       концепция, требования, сценарии
 │   ├── 02-architecture.md  архитектура и выбор стека
@@ -55,7 +71,7 @@ DuoPulse/
 │   ├── 05-implementation-map.md  карта реализации: эпики, структура кода
 │   └── 06-brand-style.md   фирменный стиль (палитра, типографика, UI)
 ├── Gemini_Generated_Image_x3plulx3plulx3pl.jpg   эталон фирменного стиля
-└── (в будущем: src-tauri/, src/, content/ — см. карту реализации)
+└── package.json, vite.config.ts, tsconfig.json   сборка фронтенда спайка
 ```
 
 ## Документация

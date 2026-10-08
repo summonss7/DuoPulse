@@ -1,0 +1,76 @@
+/* DuoPulse M0 — фирменная тёмная полоса адресной строки.
+   Высота = 52px — синхронизирована с TOP_BAR_HEIGHT в src-tauri/src/main.rs. */
+:root {
+  --bg: #0a0e17;
+  --bg2: #111d2b;
+  --accent: #bdfe4f;
+  --text: #e8f0f8;
+  --line: #223247;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+#app {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 52px;
+  padding: 0 10px;
+  background: linear-gradient(180deg, var(--bg2), var(--bg));
+  border-bottom: 1px solid var(--line);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.logo {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.4px;
+  color: var(--text);
+  margin-right: 4px;
+}
+.logo span {
+  color: var(--accent);
+  text-shadow: 0 0 8px rgba(189, 254, 79, 0.45);
+}
+button {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #0d1622;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#omnibox {
+  flex: 1;
+  height: 32px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: #0d1622;
+  color: var(--text);
+  padding: 0 14px;
+  font-size: 13px;
+  outline: none;
+}
+#omnibox:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(189, 254, 79, 0.15);
+}
+.go {
+  width: auto;
+  padding: 0 12px;
+  font-size: 12px;
+}
