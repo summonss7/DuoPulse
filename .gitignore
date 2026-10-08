@@ -1,0 +1,25 @@
+# Резервные копии проекта (backup.bat)
+backups/
+
+# Временные файлы анализа
+_tmp*
+brand_tmp.jpg
+
+# Node / фронтенд (будущие src/, content/)
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Rust (будущий src-tauri/)
+target/
+
+# Сборки
+builds/
+
+# Мусор
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
