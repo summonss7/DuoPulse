@@ -1,6 +1,6 @@
 # DuoPulse duopulse-006 — генератор поканальных аудио-тестов 5.1/7.1.
 # Требования: PowerShell 5+ (SAPI TTS), ffmpeg в PATH.
-# Продукты складываются в e2e\m0-audio\assets\, промежуточные — в _tmp\audio-build\.
+# Продукты складываются в e2e\m0-audio\assets\, промежуточные — в %TEMP%\duopulse-m0-audio-build\.
 #
 # Каждому каналу — свой отрезок (сегмент SEG секунд): голосовая метка (SAPI,
 # en-US) поверх опорного тона своей частоты. В любой момент активен ровно один
@@ -12,9 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot   # e2e
-$root = Split-Path -Parent $root           # репо
-$build = Join-Path $root '_tmp\audio-build'
+$build = Join-Path $env:TEMP 'duopulse-m0-audio-build'   # промежуточные — вне репо
 $assets = Join-Path $PSScriptRoot 'assets'
 New-Item -ItemType Directory -Force -Path $build | Out-Null
 New-Item -ItemType Directory -Force -Path $assets | Out-Null

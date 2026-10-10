@@ -4,7 +4,7 @@
 Дата прогонов: **08.10.2026, 18:06–18:25**. Машина: Windows 10.0.26200 (ноутбук Acer,
 Realtek HDA ALC-подконтроллер DEV_0245 + NVIDIA HDMI Audio), доступ по NoMachine.
 Спайк: `npm run tauri dev` (Tauri 2 + WebView2 = Chromium/Edge **154**), управление — CDP 9222
-(`_tmp/cdp.mjs`), доверенные клики через Input domain.
+(`e2e/tools/cdp.mjs`), доверенные клики через Input domain.
 
 ## Сводка
 
@@ -26,7 +26,7 @@ Realtek HDA ALC-подконтроллер DEV_0245 + NVIDIA HDMI Audio), дос
 
 - WASAPI shared mix format устройства по умолчанию (все 3 роли: console/multimedia/communications):
   **2 канала, 48000 Гц, 32 бит, channel mask 0x3 (стерео)** — измерено напрямую
-  `IMMDeviceEnumerator::GetDefaultAudioEndpoint` + `IAudioClient::GetMixFormat` (`_tmp/wasapi-check.ps1`).
+  `IMMDeviceEnumerator::GetDefaultAudioEndpoint` + `IAudioClient::GetMixFormat` (`e2e/m0-audio/wasapi-check.ps1`).
 - Активные эндпоинты (`Get-PnpDevice -Class AudioEndpoint`, state=ACTIVE):
   - **Speakers (Realtek(R) Audio)** — встроенные динамики ноутбука; `PKEY_AudioEndpoint_PhysicalSpeakers`
     содержит WAVEFORMATEXTENSIBLE **2 ch, mask 0x3** (реестр MMDevices);
@@ -52,6 +52,10 @@ Realtek HDA ALC-подконтроллер DEV_0245 + NVIDIA HDMI Audio), дос
   (3) обычные элементы для прослушивания человеком; (4) «соло канала» через WebAudio.
   Результаты дублируются в `window.__AUDIO_TEST_RESULTS__` для CDP.
 - `e2e/m0-audio/serve.mjs` — статический сервер стенда (`http://127.0.0.1:8788`).
+- `e2e/m0-audio/wasapi-check.ps1`, `e2e/m0-audio/audio-enum.ps1` — диагностика аудио-конфигурации
+  Windows (инструменты §1: микшер WASAPI по ролям, эндпоинты MMDevices с масками
+  PhysicalSpeakers) — понадобятся на шагах 1–2 повторного прогона (§6).
+- `e2e/m0-audio/voices.ps1` — список установленных SAPI-голосов (выбор голоса для генератора).
 - `src-tauri/src/main.rs` — добавлен `DUOPULSE_START_URL`: стартовая страница content-webview
   переопределяется переменной окружения (использовано этим стендом, пригодится будущим e2e).
 

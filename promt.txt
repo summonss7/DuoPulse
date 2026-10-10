@@ -176,3 +176,43 @@
   уточнён — пуш в summonss7/DuoPulse (main).
 ✗ ЗАБЛОКИРОВАНО — 08.10.2026, 19:12 (карточка CARDS/005: нужен аккаунт YouTube Premium
 с активной подпиской от автора; после входа в спайк — скриншот, запись в PROTOCOL.md)
+
+## 11.10.2026 00:32 — duopulse-007: разбор временной папки _tmp/ — done
+- Что сделано:
+  - Карточка: CARDS/007 (duopulse-007). Перед правками — backup.bat
+    (backup_2026-10-11_00-30-10).
+  - Сверка «ничего нужного не потеряно»: просмотрены AGENTS.md, ROADMAP.md, активные
+    карточки (005 blocked, 006 blocked — стенд ждёт повторного прогона §6), протоколы
+    e2e/m0-results/. Ссылки на инструменты из _tmp/ найдены в PROTOCOL.md и
+    AUDIO-PROTOCOL.md — все учтены ниже.
+  - Сохранено (постоянные места):
+    - e2e/tools/cdp.mjs — общий CDP-помощник (eval/shot/shotfull/click/console; порт 9222
+      или CDP_PORT); ссылался из обоих протоколов, понадобится будущим e2e.
+    - e2e/m0-audio/wasapi-check.ps1 — прямой замер WASAPI-микша (GetMixFormat по ролям),
+      e2e/m0-audio/audio-enum.ps1 — эндпоинты MMDevices с масками PhysicalSpeakers:
+      инструменты §1 AUDIO-PROTOCOL, нужны для повторного прогона §6 (карточка 006).
+    - e2e/m0-audio/voices.ps1 — список SAPI-голосов (помощник generate-assets.ps1).
+    - generate-assets.ps1: промежуточные файлы теперь в %TEMP%\duopulse-m0-audio-build
+      (было _tmp\audio-build) — _tmp/ больше не появится при перегенерации ассетов.
+  - Удалено (одноразовое): _tmp/audio-build/ (16 регенерируемых WAV), _tmp/edgeprof/
+    (128 МБ временный профиль Edge), crop.ps1 + crop-edge-tr.png/crop-spike-tr.png
+    (финальные скриншоты уже в m0-results/), audio-props.ps1 (разовый дамп по
+    захардкоженным GUID), kill-edge.ps1, console-yt.log, shaka-state.png (доказательства
+    DRM уже в m0-results/), _tmp_window.png в корне.
+  - Документация: PROTOCOL.md и AUDIO-PROTOCOL.md — пути обновлены на e2e/tools/cdp.mjs
+    и e2e/m0-audio/wasapi-check.ps1; AUDIO-PROTOCOL §2 дополнен списком диагностических
+    скриптов; AGENTS.md — новый раздел «e2e-инструменты (постоянные места)». ROADMAP не
+    менялся (задача планов не касается).
+- Как проверено: node --check cdp.mjs OK; PowerShell-парс wasapi-check/audio-enum/voices/
+  generate-assets OK; npm run build (vite) OK — 6 модулей, без ошибок; git-статус чист
+  от _tmp-файлов (маска _tmp* в .gitignore остаётся как страховка).
+  Примечание: _tmp_window.png оказался не проектным файлом — случайно сохранённый снимок
+  личной переписки (мессенджер) с банковскими реквизитами; в git никогда не попадал
+  (маска _tmp*), удалён.
+- Наблюдение вне карточки: в корне лежит Gemini_Generated_Image_x3plulx3plulx3pl.jpg
+  (отслеживается в git) — назначение неясно (возможно, ранний логотип-набросок);
+  трогать не стал, к следующему разу решить: оставить осознанно или убрать.
+- Коммит: chore: разобрана временная папка _tmp/ — инструменты в e2e/, мусор удалён
+  (duopulse-007) — пуш в summonss7/DuoPulse (main).
+✓ ГОТОВО — 11.10.2026, 00:32 (карточка CARDS/007: _tmp/ разобрана, постоянные места
+описаны в AGENTS.md)
