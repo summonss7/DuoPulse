@@ -9,12 +9,20 @@
 ```
 DuoPulse/
 ├── src-tauri/                      # Core + Shell (Rust)
-│   ├── Cargo.toml                  # deps: tauri 2, adblock, rusqlite, reqwest, serde
+│   ├── Cargo.toml                  # deps: tauri 2, adblock, rusqlite, reqwest, serde,
+│   │                               #   boringtun + fast-socks5 (vpn, этап M6)
 │   ├── src/
 │   │   ├── main.rs                 # точка входа, сборка приложения
 │   │   ├── bridge.rs               # регистрация IPC-команд/событий (контракт §3)
 │   │   ├── tabs/                   # менеджер вкладок, спящий режим, восстановление сессии
 │   │   ├── adblock/                # обёртка adblock-rs, загрузка списков, cosmetic-правила
+│   │   ├── vpn/                    # маршрутизация сети (docs/02 §6): локальный SOCKS5-роутер,
+│   │   │   ├── mod.rs              #   сервис-менеджер: состояния, события в UI
+│   │   │   ├── router.rs           #   fail-closed роутер direct|proxy|wg, kill-switch
+│   │   │   ├── upstream.rs         #   исходящие транcпорты: внешний SOCKS5/HTTP (1.8)
+│   │   │   ├── wg.rs               #   WireGuard-сессия (boringtun): handshake, keepalive
+│   │   │   ├── rules.rs            #   split-tunnel: домен → маршрут, персист правил
+│   │   │   └── dns.rs              #   резолв только через маршрут, без утечек
 │   │   ├── subtitles/
 │   │   │   ├── mod.rs              # сервис: включение пары, кэш, offset
 │   │   │   ├── srt.rs              # парсер SubRip (+тесты на фикстурах)
@@ -30,6 +38,8 @@ DuoPulse/
 │   ├── chrome/                     # TabBar, Omnibox, Navbar, MainMenu
 │   ├── pages/                      # NewTab (статический), Settings, Diagnostics
 │   ├── subtitles-panel/            # панель настройки субтитров (набор дорожек 1–3, стиль, сдвиг)
+│   ├── vpn-panel/                  # панель VPN: тумблер, режим off/global/split, сервер, правила
+│   │                               #   (индикатор-щит в Navbar — статусы по гайду 06 §2)
 │   ├── bridge/                     # типизированный IPC-клиент (генерится из контракта)
 │   └── theme/                      # токены фирменного стиля (см. 06-brand-style)
 ├── content/                        # Content-слой (инжектируемый движок, TS)
@@ -60,11 +70,16 @@ DuoPulse/
   nav.{go_back, go_forward, reload, resolve_omnibox}
   history.{visit, search, bookmark_add, bookmark_remove}
   adblock.{set_enabled(site), status, update_lists}
+  vpn.{set_enabled(on), set_mode(off|global|split), status, test_connection,
+       import_profile(file), remove_profile(id), list_profiles,
+       set_site_rule(domain, tunnel|direct), site_rules}
   subtitles.{set_tracks(trackRefs[]), disable, list_tracks(videoKey), load_file(path),
              set_offset(ms), set_style(style), translate_track(trackId, lang)}
   settings.{get, set, export, import}
 События (Core → UI|Content):
   page.{loaded, video_detected(videoKey, canTracks)}
+  vpn.{state_changed(disconnected|connecting|connected|error, reason),
+       route_changed(domain, route), stats(rx_tx, ping_ms), connection_test(result)}
   subtitles.{tracks_ready(videoKey, tracks[]), set_applied(tracks[]),
              translate_progress, translate_unavailable(reason)}
   adblock.{blocked_count(delta), site_exception_changed}
@@ -93,6 +108,7 @@ DuoPulse/
 | 1.5 | Фирменный тёмный UI-хром по гайду 06 | сверка с гайдом по чек-листу |
 | 1.6 | Восстановление сессии (ленивое) | 10 вкладок восстанавливаются, старт не деградирует > 10% |
 | 1.7 | Спайк многоканального звука 5.1/7.1 (карточка duopulse-006): поканальные тесты + YouTube 5.1 на реальной системе 5.1/7.1 | протокол e2e заполнен; все каналы звучат из правильных динамиков не хуже Chrome/Edge; при провале — карточка-решение и запись в ROADMAP |
+| 1.8 | Прокси (F-12, инкремент A): настройки SOCKS5/HTTP(S) с аутентификацией, применение через аргументы WebView2 (перезапуск), тумблер и статус в меню (карточка CARDS/009) | браузер ходит через внешний прокси (проверка IP-эхом), без прокси — напрямую; пароль прокси — в DPAPI |
 
 ### M2 — скорость
 | # | Задача | DoD |
@@ -130,7 +146,20 @@ DuoPulse/
 | 5.3 | Чек-лист приёмки релиза + прогон метрик | все P-метрики в бюджете |
 | 5.4 | Лицензия и README-финал | выбрана и проставлена |
 
-### M6 — платформы (по карточкам): vimeo-адаптер, импорт из Chrome/Edge, локализация UI, OCR-исследование.
+### M6 — VPN и доступ к заблокированным сайтам (F-12, инкремент B)
+Дизайн — docs/02 §6 (локальный роутер, fail-closed, split-tunnel). Карточки
+создаются при старте эпика, как для других этапов.
+
+| # | Задача | DoD |
+|---|---|---|
+| 6.1 | Локальный SOCKS5-роутер в Core (`vpn/router.rs`): WebView2 постоянно направлен на `127.0.0.1:<port>`, маршруты direct/upstream | с роутером в режиме off страницы грузятся как без него; отказ upstream → ошибка клиенту, а не прямой ход (fail-closed) |
+| 6.2 | Клиент WireGuard (`vpn/wg.rs`, boringtun): импорт `.conf`, handshake, keepalive, roaming | подключение к серверу пользователя стабильно ≥ 30 мин; пропускная способность ≥ 100 Мбит/с на эталонной машине; ключ — в DPAPI |
+| 6.3 | Split-tunnel (`vpn/rules.rs` + `vpn/dns.rs`): правила домен → маршрут, режимы off/global/split, DNS только через маршрут | заблокированный домен открывается через туннель, YouTube — напрямую, одновременно; правила переживают перезапуск; DNS-утечек нет (трассировка) |
+| 6.4 | Kill-switch: разрыв туннеля не выпускает туннельный трафик в открытую | автотест: обрыв upstream при загрузке страницы — соединение закрывается, не уходит напрямую |
+| 6.5 | UI VPN: индикатор-щит в Navbar, панель (тумблер, режим, сервер, правила, статистика), дисклеймер | сверка с гайдом 06; сценарий docs/01 §5.6 проходит руками |
+| 6.6 | E2E маршрутные тесты: direct / tunnel / kill-switch / split-правила | автотесты зелёные, включены в CI-контур проекта |
+
+### M7 — платформы (по карточкам): vimeo-адаптер, импорт из Chrome/Edge, локализация UI, OCR-исследование.
 
 ## 4. Definition of Done (для любой карточки кода)
 
