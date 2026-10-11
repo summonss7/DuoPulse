@@ -1,6 +1,7 @@
 // DuoPulse M0 — UI-полоса спайка: адресная строка-заглушка.
 // Ввод URL/запроса → команда navigate в Rust → дочерний webview "content".
 import { invoke } from "@tauri-apps/api/core";
+import "./proxy-menu";
 import "./style.css";
 
 const omnibox = document.getElementById("omnibox") as HTMLInputElement;

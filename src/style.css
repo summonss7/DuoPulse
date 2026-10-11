@@ -1,11 +1,19 @@
 /* DuoPulse M0 — фирменная тёмная полоса адресной строки.
-   Высота = 52px — синхронизирована с TOP_BAR_HEIGHT в src-tauri/src/main.rs. */
+   Высота = 52px — синхронизирована с TOP_BAR_HEIGHT в src-tauri/src/main.rs.
+   Токены — гайд docs/06-brand-style.md §2 (сигнальные: успех/предупреждение/ошибка). */
 :root {
   --bg: #0a0e17;
   --bg2: #111d2b;
   --accent: #bdfe4f;
   --text: #e8f0f8;
   --line: #223247;
+  --elevated: #1d282b; /* --bg-elevated, гайд 06 §2 */
+  --warm: #37302a; /* --bg-warm */
+  --warm-2: #555138; /* --bg-warm-2 */
+  --muted: #96a0a8; /* --text-muted */
+  --ok: #7fe08a;
+  --warn: #f5c04e;
+  --err: #ff5d5d;
 }
 * {
   box-sizing: border-box;
@@ -73,4 +81,218 @@ button:hover {
   width: auto;
   padding: 0 12px;
   font-size: 12px;
+}
+#proxyBtn {
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* --- Меню «Прокси» (гайд 06: панель 12px, контролы 8px, неон — акцентом) --- */
+#app {
+  position: relative;
+}
+.proxy-menu {
+  position: absolute;
+  top: 52px;
+  right: 10px;
+  z-index: 100;
+  width: 344px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--elevated);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  font-size: 13px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.proxy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proxy-head {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.proxy-title {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.proxy-status {
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+.proxy-status .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+.proxy-status .state {
+  font-weight: 700;
+}
+.proxy-status[data-state="on"] .dot {
+  background: var(--ok);
+  box-shadow: 0 0 6px rgba(127, 224, 138, 0.6);
+}
+.proxy-status[data-state="on"] .state {
+  color: var(--ok);
+}
+.proxy-status[data-state="error"] .dot {
+  background: var(--err);
+  box-shadow: 0 0 6px rgba(255, 93, 93, 0.6);
+}
+.proxy-status[data-state="error"] .state {
+  color: var(--err);
+}
+.proxy-status .detail {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proxy-form {
+  display: grid;
+  grid-template-columns: 96px 1fr 76px;
+  gap: 8px;
+}
+.proxy-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.proxy-field.grow {
+  grid-column: span 2;
+}
+.proxy-field input,
+.proxy-field select {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  padding: 0 8px;
+  font-size: 12px;
+  outline: none;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.proxy-field input:focus,
+.proxy-field select:focus {
+  border-color: var(--accent);
+}
+.proxy-field select {
+  font-family: inherit;
+}
+.proxy-error {
+  margin-top: 8px;
+  color: var(--err);
+  font-size: 12px;
+}
+.proxy-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.proxy-actions button,
+.proxy-restart button {
+  width: auto;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.proxy-actions button.ghost {
+  background: transparent;
+}
+.proxy-actions button.primary,
+.proxy-restart button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0a0e17;
+  font-weight: 700;
+}
+.proxy-actions button.primary:hover,
+.proxy-restart button.primary:hover {
+  box-shadow: 0 0 0 2px rgba(189, 254, 79, 0.25);
+  color: #0a0e17;
+}
+.proxy-restart {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warm);
+  border: 1px solid var(--warm-2);
+  color: var(--text);
+  font-size: 12px;
+}
+.proxy-foot {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.proxy-foot .link {
+  width: auto;
+  height: auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  text-decoration: underline;
+  padding: 0;
+  cursor: pointer;
+}
+.proxy-foot .link:hover {
+  color: var(--accent);
+}
+/* Тумблер (гайд 06: скругление контролов, неон — активное состояние) */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 20px;
+  flex: none;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch .slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  transition: 0.15s;
+}
+.switch .slider::before {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: 0.15s;
+}
+.switch input:checked + .slider {
+  background: rgba(189, 254, 79, 0.18);
+  border-color: var(--accent);
+}
+.switch input:checked + .slider::before {
+  transform: translateX(18px);
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(189, 254, 79, 0.45);
 }

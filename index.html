@@ -13,6 +13,62 @@
       <button id="reload" title="Обновить">&#10227;</button>
       <input id="omnibox" type="text" placeholder="Введите адрес и нажмите Enter" spellcheck="false" autocomplete="off" />
       <button id="go" class="go">Перейти</button>
+      <button id="proxyBtn" title="Прокси (VPN-инкремент A)">&#9874;</button>
+      <div id="proxyMenu" class="proxy-menu" hidden>
+        <div class="proxy-row proxy-head">
+          <span class="proxy-title">Прокси</span>
+          <label class="switch" title="Вкл/выкл прокси (применяется после перезапуска)">
+            <input type="checkbox" id="proxyEnabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="proxy-row proxy-status" id="proxyStatus" data-state="off">
+          <span class="dot"></span><span class="state"></span>
+          <span class="detail" id="proxyStatusDetail"></span>
+        </div>
+        <div class="proxy-form">
+          <label class="proxy-field">
+            <span>Тип</span>
+            <select id="proxyProto">
+              <option value="socks5">SOCKS5</option>
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+            </select>
+          </label>
+          <label class="proxy-field grow">
+            <span>Адрес</span>
+            <input id="proxyHost" type="text" placeholder="127.0.0.1" spellcheck="false" autocomplete="off" />
+          </label>
+          <label class="proxy-field port">
+            <span>Порт</span>
+            <input id="proxyPort" type="number" min="1" max="65535" value="1080" />
+          </label>
+          <label class="proxy-field grow">
+            <span>Логин</span>
+            <input id="proxyLogin" type="text" placeholder="не обязательно" spellcheck="false" autocomplete="off" />
+          </label>
+          <label class="proxy-field grow">
+            <span>Пароль&nbsp;<button type="button" id="proxyPassClear" class="link" hidden>удалить</button></span>
+            <input id="proxyPassword" type="password" placeholder="пароль" autocomplete="new-password" />
+          </label>
+        </div>
+        <div class="proxy-error" id="proxyError" hidden></div>
+        <div class="proxy-actions">
+          <button id="proxyCheck" class="ghost" title="Проверить достижимость прокси">Проверить</button>
+          <button id="proxySave" class="primary">Сохранить</button>
+        </div>
+        <div class="proxy-restart" id="proxyRestartBlock" hidden>
+          <span>Применяется после перезапуска браузера.</span>
+          <button id="proxyRestart" class="primary">Перезапустить сейчас</button>
+        </div>
+        <div class="proxy-foot">
+          Пароль хранится в DPAPI (не в settings.json). localhost и локальные адреса
+          всегда идут напрямую.
+          <button id="proxyIpEcho" class="link" title="Откроет api.ipify.org в браузере: при включённом прокси покажет адрес прокси">
+            Проверить IP-эхом &rarr;
+          </button>
+        </div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

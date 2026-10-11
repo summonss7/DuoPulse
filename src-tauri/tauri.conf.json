@@ -11,17 +11,7 @@
   },
   "app": {
     "withGlobalTauri": false,
-    "windows": [
-      {
-        "label": "main",
-        "title": "DuoPulse — M0 spike (Tauri 2 + WebView2)",
-        "width": 1360,
-        "height": 860,
-        "minWidth": 800,
-        "minHeight": 600,
-        "resizable": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
