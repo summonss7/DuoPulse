@@ -1,22 +1,13 @@
-// DuoPulse — меню «Прокси» (задача 1.8, VPN-инкремент A, карточка duopulse-009).
-// Настройки внешнего прокси SOCKS5/HTTP(S) хранятся в Rust (settings.json +
-// пароль в DPAPI), применяются аргументами окружения WebView2 — после
-// перезапуска, который предлагается явно.
-import { invoke } from "@tauri-apps/api/core";
+// DuoPulse — меню «Прокси» (задача 1.8, VPN-инкремент A, карточка duopulse-009;
+// задача 1.1 — переведено на контракт bridge).
+// Настройки внешнего прокси SOCKS5/HTTP(S) ходят в Core командами словаря
+// (settings.get/set, vpn.set_enabled/status/test_connection, app.restart —
+// docs/05 §2): хранятся в Rust (settings.json + пароль в DPAPI), применяются
+// аргументами окружения WebView2 — после перезапуска, который предлагается явно.
+import { bridge } from "./bridge";
+import type { ProxyConfig, ProxySettings, VpnStatusResult } from "./bridge";
 
-interface ProxySettings {
-  enabled: boolean;
-  proto: "socks5" | "http" | "https";
-  host: string;
-  port: number;
-  login: string | null;
-  hasPassword: boolean;
-}
-
-interface ProxyStatus {
-  state: "off" | "on" | "error";
-  detail: string;
-}
+const IP_ECHO_URL = "https://api.ipify.org/";
 
 // Поля, влияющие на аргументы WebView2: их смена требует перезапуска
 // (login читается обработчиком аутентификации на лету — перезапуска не требует).
@@ -26,8 +17,6 @@ interface ProxyArgs {
   host: string;
   port: number;
 }
-
-const IP_ECHO_URL = "https://api.ipify.org/";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const btn = $("proxyBtn");
@@ -46,14 +35,18 @@ const restartBlock = $("proxyRestartBlock");
 
 let appliedArgs: ProxyArgs | null = null; // конфиг на старте приложения
 
-function readForm(): ProxySettings {
+/** Конфиг из формы + порт отдельным числом (в схеме ProxyConfig.port опционален). */
+function readConfig(): { cfg: ProxyConfig; port: number } {
+  const port = parseInt(portEl.value, 10) || 0;
   return {
-    enabled: enabledEl.checked,
-    proto: protoEl.value as ProxySettings["proto"],
-    host: hostEl.value.trim(),
-    port: parseInt(portEl.value, 10) || 0,
-    login: loginEl.value.trim() || null,
-    hasPassword: false, // заполняется в refresh()
+    port,
+    cfg: {
+      enabled: enabledEl.checked,
+      proto: protoEl.value as ProxyConfig["proto"],
+      host: hostEl.value.trim(),
+      port,
+      login: loginEl.value.trim() || null,
+    },
   };
 }
 
@@ -74,7 +67,7 @@ function showError(message: string | null): void {
 }
 
 async function refresh(): Promise<ProxySettings> {
-  const s = await invoke<ProxySettings>("proxy_get");
+  const s = await bridge.settings.get({ key: "proxy" });
   fillForm(s);
   if (appliedArgs === null) {
     appliedArgs = { enabled: s.enabled, proto: s.proto, host: s.host, port: s.port };
@@ -86,33 +79,37 @@ function argsOf(s: { enabled: boolean; proto: string; host: string; port: number
   return { enabled: s.enabled, proto: s.proto, host: s.host, port: s.port };
 }
 
-async function refreshStatus(): Promise<void> {
-  const st = await invoke<ProxyStatus>("proxy_status");
-  statusEl.dataset.state = st.state;
-  statusEl.querySelector<HTMLElement>(".state")!.textContent =
-    st.state === "on" ? "ВКЛ" : st.state === "error" ? "ОШИБКА" : "ВЫКЛ";
-  statusDetailEl.textContent = st.detail;
-  statusDetailEl.title = st.detail;
+/** Показать предложение перезапуска, если сохранённый конфиг отличается от стартового. */
+async function afterSave(): Promise<void> {
+  const saved = await refresh();
+  restartBlock.hidden = JSON.stringify(argsOf(saved)) === JSON.stringify(appliedArgs);
+  await refreshStatus();
 }
 
-/** Сохранить конфиг; при успехе — обновить форму/статус и предложение перезапуска. */
-async function save(password: string | null): Promise<boolean> {
-  const cfg = readForm();
-  if (cfg.enabled && (!cfg.host || cfg.port < 1 || cfg.port > 65535)) {
+async function refreshStatus(st?: VpnStatusResult): Promise<void> {
+  const s = st ?? (await bridge.vpn.status());
+  statusEl.dataset.state = s.state;
+  statusEl.querySelector<HTMLElement>(".state")!.textContent =
+    s.state === "on" ? "ВКЛ" : s.state === "error" ? "ОШИБКА" : "ВЫКЛ";
+  statusDetailEl.textContent = s.detail;
+  statusDetailEl.title = s.detail;
+}
+
+/** Сохранить конфиг формы (settings.set); при успехе — обновить форму/статус. */
+async function save(secret: string | null): Promise<boolean> {
+  const { cfg, port } = readConfig();
+  if (cfg.enabled && (!cfg.host || port < 1 || port > 65535)) {
     showError("Заполните адрес и порт (1–65535).");
     return false;
   }
   try {
-    await invoke("proxy_save", { cfg, password });
+    await bridge.settings.set({ key: "proxy", value: cfg, secret: secret ?? undefined });
   } catch (e) {
     showError(String(e));
     return false;
   }
   showError(null);
-  const saved = await refresh();
-  const needsRestart = JSON.stringify(argsOf(saved)) !== JSON.stringify(appliedArgs);
-  restartBlock.hidden = !needsRestart;
-  await refreshStatus();
+  await afterSave();
   return true;
 }
 
@@ -140,13 +137,19 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !menu.hidden) menu.hidden = true;
 });
 
-// Тумблер — быстрое вкл/выкл с немедленным сохранением.
+// Тумблер — быстрое вкл/выкл (vpn.set_enabled: сохранённый конфиг + новый флаг),
+// форма при этом не сохраняется — только кнопкой «Сохранить» (settings.set).
 enabledEl.addEventListener("change", async () => {
   const on = enabledEl.checked;
-  if (!(await save(null))) {
-    // не сохранилось (например, адрес не заполнен) — откатываем тумблер
-    enabledEl.checked = !on;
+  try {
+    await bridge.vpn.setEnabled({ on });
+  } catch (e) {
+    showError(String(e));
+    enabledEl.checked = !on; // не включилось (например, адрес не сохранён) — откат
+    return;
   }
+  showError(null);
+  await afterSave();
 });
 
 $("proxySave").addEventListener("click", () => {
@@ -155,11 +158,14 @@ $("proxySave").addEventListener("click", () => {
 });
 
 $("proxyCheck").addEventListener("click", () => {
-  void refreshStatus().catch((e) => showError(String(e)));
+  void bridge.vpn
+    .testConnection()
+    .then((st) => refreshStatus(st))
+    .catch((e) => showError(String(e)));
 });
 
 $("proxyRestart").addEventListener("click", () => {
-  void invoke("proxy_restart").catch(console.error);
+  void bridge.app.restart().catch(console.error);
 });
 
 // Пароль сохранён только в DPAPI: «удалить» стирает blob, поле оставляет как есть.
@@ -171,6 +177,6 @@ passClearEl.addEventListener("click", async (e) => {
 
 // Проверка IP-эхом: страница грузится в content-webview, т.е. через прокси.
 $("proxyIpEcho").addEventListener("click", () => {
-  void invoke("navigate", { url: IP_ECHO_URL }).catch(console.error);
+  void bridge.nav.navigate({ url: IP_ECHO_URL }).catch(console.error);
   menu.hidden = true;
 });

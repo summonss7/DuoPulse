@@ -10,6 +10,7 @@
 //!   - vpn/proxy-pass.bin — пароль прокси, зашифрованный DPAPI (только blob,
 //!     открытого секрета на диске нет).
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -39,7 +40,7 @@ fn password_path(dir: &Path) -> PathBuf {
 
 /// Тип прокси. Схемы --proxy-server у Chromium: socks5/http/https
 /// (для socks5 Chromium резолвит домены на стороне прокси).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ProxyProto {
     Socks5,
@@ -62,7 +63,7 @@ fn default_proto() -> ProxyProto {
 }
 
 /// Конфиг прокси в settings.json. Пароль сюда НЕ пишется — только DPAPI.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ProxyConfig {
     pub enabled: bool,
     #[serde(default = "default_proto")]
@@ -266,7 +267,7 @@ pub fn browser_args(cfg: Option<&ProxyConfig>) -> String {
 // Статус: вкл / выкл / ошибка (гайд 06 §2 — сигнальные цвета в UI)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ProxyState {
     /// Прокси выключен — все соединения прямые.
@@ -277,7 +278,7 @@ pub enum ProxyState {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ProxyStatus {
     pub state: ProxyState,
     pub detail: String,
@@ -348,7 +349,7 @@ fn socks5_greeting(cfg: &ProxyConfig, stream: &mut TcpStream) -> ProxyStatus {
         Ok(buf)
     })();
     match reply {
-        Ok([ver, method]) if ver == 0x05 => {
+        Ok([0x05, method]) => {
             let auth = match method {
                 0x00 => "без аутентификации",
                 0x02 => "запрашивает логин/пароль",

@@ -52,6 +52,8 @@ DuoPulse/
 │   ├── engine/                     # cue-таймлайн, бинарный поиск, offset
 │   ├── overlay/                    # плашка «оригинал/перевод», стили, позиция
 │   └── messaging/                  # канал до Core
+├── bridge/                         # IPC-контракт: contract.json (генерится из Rust-типов
+│                                   #   src-tauri/src/bridge.rs; из него — src/bridge/gen/types.ts)
 ├── e2e/                            # сценарии приёмки (по этапам)
 │   ├── fixtures/youtube/           # записанные снапшоты player-ответов
 │   └── runners/                    # эталонный прогон метрик P-01..P-08
@@ -92,6 +94,23 @@ DuoPulse/
 при миграции на bridge они ложатся на `vpn.{set_enabled, status, test_connection}`
 и `settings.{get, set}`.
 
+**Статус (12.10.2026, задача 1.1 выполнена — карточка duopulse-011).**
+`bridge` реализован: единственный источник контракта — Rust-типы
+`src-tauri/src/bridge.rs` (schemars); из них генерируется `bridge/contract.json`
+(JSON Schema draft-07, версионируется в git, версия контракта — поле `version`),
+из него — TS-типы `src/bridge/gen/types.ts` (`npm run gen:bridge`). Ручные правки
+генерённого исключены тестами с обеих сторон (cargo `contract_file_is_up_to_date`,
+vitest `src/bridge/client.test.ts`). Словарь v1 — фактически реализованные команды:
+`bridge.version`, `tabs.list`, `nav.{navigate, go_back, go_forward, reload}`,
+`settings.{get, set}`, `vpn.{set_enabled, status, test_connection}`, `app.restart`;
+события-каркас (схемы зарегистрированы, эмит — в последующих задачах):
+`page.loaded`, `page.video_detected`, `vpn.state_changed`. Прокси-инкремент A
+мигрирован: `proxy_*` → `settings.{get, set}` + `vpn.{set_enabled, status,
+test_connection}` + `app.restart`; состояние vpn в v1 — `off/on/error`, при
+WireGuard (M6) расширится до словаря выше с bump версии контракта. Типы событий
+для Content-слоя — `content/messaging/events.ts`. Сквозной e2e — 
+[e2e/bridge/run.mjs](../e2e/bridge/run.mjs).
+
 ## 3. Эпики → карточки (порядок работ)
 
 Каждая строка — кандидат в карточку CARDS/ (создаётся диспетчером/разработчиком при
@@ -114,7 +133,7 @@ Gate-проверки этапов включены в последние кар
 ### M1 — каркас браузера
 | # | Задача | DoD |
 |---|---|---|
-| 1.1 | IPC-контракт bridge + кодогенерация типов | команда `tabs.list` проходит сквозной тест |
+| 1.1 | **✅ выполнено 12.10.2026 (карточка duopulse-011)** IPC-контракт bridge + кодогенерация типов | команда `tabs.list` проходит сквозной тест |
 | 1.2 | Таб-бар: вкладки, закрытие, Ctrl+Tab, восстановление закрытой | ручной чек-лист проходит |
 | 1.3 | Omnibox: URL/поиск, подсказки (история+закладки, FTS5) | поиск по 10k записей истории < 50 мс |
 | 1.4 | История и закладки (SQLite + страница управления) | запись/поиск/удаление работают |

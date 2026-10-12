@@ -394,3 +394,57 @@
   Сборка/тесты кода не прогонялись — код не менялся.
 - Коммит: «plan: проверка плана и разбиение на задания — бэклог M1–M6 карточками
   CARDS/011–042 (duopulse-010)» (+ пуш в summonss7/DuoPulse, main)
+
+## 2026-10-12, 04:16–04:41 — M1 · задача 1.1: IPC-мост bridge и кодогенерация типов
+- Начало работы: 2026-10-12, 04:16:24 (диспетчер взял карточку в 04:11)
+- Окончание работы: 2026-10-12, 04:41
+- Что сделано (карточка duopulse-011, задача 1.1 из docs/05 §3):
+  - IPC-контракт bridge (docs/05 §2): единственный источник — Rust-типы
+    `src-tauri/src/bridge.rs` (serde ↔ schemars). Из них генерируется
+    `bridge/contract.json` (JSON Schema draft-07, версионируется в git,
+    версия v1 в поле "version"), из него — TS-типы `src/bridge/gen/types.ts`
+    (16 типов с JSDoc). Генерация: `npm run gen:bridge` (scripts/gen-bridge.mjs:
+    cargo-тест-генератор → json-schema-to-typescript). Ручные правки генерённого
+    исключены тестами с обеих сторон: cargo `contract_file_is_up_to_date`
+    (contract.json == Rust-код) и vitest `src/bridge/client.test.ts`
+    (TS-клиент покрывает все команды контракта и зовёт их tauri-хендлеры).
+  - Команды зарегистрированы в Core (bridge::register, main.rs — только сборка
+    приложения): словарь v1 — `bridge.version`, `tabs.list`,
+    `nav.{navigate, go_back, go_forward, reload}`, `settings.{get, set}`,
+    `vpn.{set_enabled, status, test_connection}`, `app.restart`; события-каркас
+    (схемы в контракте, типизированный emit-хелпер, эмит — в задачах M3/M6):
+    `page.loaded`, `page.video_detected`, `vpn.state_changed`.
+  - Миграция фактических команд спайка на словарь (docs/05 §2, примечание):
+    `navigate`→`nav.navigate`, `go_back/go_forward/reload`→`nav.*`,
+    `proxy_get`→`settings.get`, `proxy_save`→`settings.set`,
+    `proxy_status`→`vpn.status`, `proxy_restart`→`app.restart`; тумблер меню
+    «Прокси» — `vpn.set_enabled`, кнопка «Проверить» — `vpn.test_connection`.
+    Прежних proxy_*-хендлеров больше нет. UI (src/main.ts, src/proxy-menu.ts)
+    переведён на типизированный клиент src/bridge/client.ts; dev-хук
+    window.__duopulse (src/bridge/dev-probe.ts, только vite-dev) для e2e.
+  - Content-слой: content/messaging/events.ts — словарь событий контракта
+    (имена + payload-типы) для будущего content-бандла (M3).
+  - Попутно: clippy-фикс старого кода proxy.rs (redundant guard в
+    socks5_greeting); devDeps: json-schema-to-typescript, vitest, @types/node;
+    tsconfig — include content + types node/vite-client; package.json — скрипты
+    gen:bridge/typecheck/test.
+  - Документация: docs/05 §2 — статус контракта и фактический словарь v1, §1 —
+    bridge/ в структуре, §3 — задача 1.1 отмечена выполненной; README — статус,
+    команды e2e/bridge и gen:bridge, структура репозитория.
+- Как проверено:
+  - cargo fmt --check / clippy --all-targets -D warnings / test — чисто,
+    11 passed (+1 ignored-генератор); tsc --noEmit — чисто; vitest — 3/3
+    (синхронизация клиент ↔ contract.json, включая проверку handler-имён).
+  - Новый сквозной e2e `node e2e/bridge/run.mjs` — 14/14 PASS (DoD 1.1):
+    tabs.list UI → Core → ответ (вкладка content, URL, active), bridge.version=1,
+    nav.navigate/go_back/go_forward/reload через bridge меняют URL (проверка
+    повторным tabs.list) и перезагружают страницу, settings.get/set читается/пишется
+    (в settings.json нет пароля), включение прокси без адреса отклоняется,
+    vpn.set_enabled/vpn.status работают.
+  - Регресс e2e `node e2e/proxy-a/run.mjs` — 16/16 PASS: прокси применяется
+    аргументами WebView2, меню «Прокси» (тумблер, статус, форма, перезапуск)
+    работает через bridge без регрессий; скриншот e2e/proxy-a/menu-open.png.
+  - backup.bat перед изменениями: backup_2026-10-12_04-16-42.
+- Коммит: «feat: IPC-мост bridge — контракт команд/событий + кодогенерация TS-типов,
+  миграция навигации и прокси на словарь — задача 1.1 (duopulse-011)» (+ пуш в
+  summonss7/DuoPulse, main)

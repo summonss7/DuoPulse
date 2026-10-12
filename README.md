@@ -27,9 +27,11 @@ DuoPulse — настольный браузер (Windows-first) для повс
 готова (11.10.2026): **внешний прокси SOCKS5/HTTP(S)** — меню «Прокси» с тумблером,
 статусом и проверкой соединения; применяется после перезапуска, пароль — в DPAPI
 (задача 1.8, карточка duopulse-009; e2e-стенд — [e2e/proxy-a/](e2e/proxy-a/run.mjs)).
-12.10.2026 план проверен на полноту: весь оставшийся бэклог M1–M6 разбит на карточки
-CARDS/011–042 (priority 9; одна карточка = одна задача = один сеанс), выполнение — по
-порядку нумерации, следующая — задача 1.1 «IPC-мост bridge». План — в
+12.10.2026 готов **IPC-мост `bridge`** (задача 1.1, карточка duopulse-011): единый
+контракт команд/событий UI|Content ↔ Core с кодогенерацией TS-типов из Rust-типов
+(Rust → [bridge/contract.json](bridge/contract.json) → `src/bridge/gen/types.ts`,
+`npm run gen:bridge`); навигация и меню «Прокси» переведены на словарь контракта,
+сквозной прогон — [e2e/bridge/run.mjs](e2e/bridge/run.mjs). План — в
 [ROADMAP.md](ROADMAP.md).
 
 ### Запуск спайка M0
@@ -41,6 +43,10 @@ npm run tauri dev        # окно с адресной строкой-загл�
 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run tauri dev
 # e2e-прогон прокси (локальный SOCKS5-стенд + CDP; нужен cargo build):
 node e2e/proxy-a/run.mjs
+# e2e-прогон IPC-моста (сквозной tabs.list: UI → Core → ответ):
+node e2e/bridge/run.mjs
+# перегенерация TS-типов контракта bridge после правки Rust-типов:
+npm run gen:bridge
 ```
 
 ---
@@ -78,10 +84,12 @@ DuoPulse/
 ├── backup.bat              резервная копия проекта (перед серьёзными изменениями)
 ├── promt.txt               замороженный архив отчётов (новые — в CHANGELOG.md)
 ├── CARDS/                  карточки задач диспетчера
-├── src-tauri/              Rust-ядро спайка (Tauri 2: окно, webview, COM-перехват)
-├── src/                    UI-полоса спайка (TypeScript + Vite)
-├── content/                content-скрипты, инжектируемые в страницы
-├── e2e/m0-results/         протокол испытаний M0 + скриншоты-доказательства
+├── src-tauri/              Rust-ядро (Tauri 2: окно, webview, COM-перехват; bridge.rs — IPC-контракт)
+├── src/                    UI-полоса (TypeScript + Vite; bridge/ — типизированный IPC-клиент)
+├── content/                content-скрипты, инжектируемые в страницы (messaging/ — словарь событий)
+├── bridge/                 IPC-контракт: contract.json (генерится из Rust-типов)
+├── scripts/                gen-bridge.mjs — генерация TS-типов контракта
+├── e2e/                    стенды приёмки: m0-results/ (протокол M0), proxy-a/, bridge/
 ├── docs/
 │   ├── 01-concept.md       концепция, требования, сценарии
 │   ├── 02-architecture.md  архитектура и выбор стека

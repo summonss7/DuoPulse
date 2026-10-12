@@ -1,0 +1,474 @@
+{
+  "commands": {
+    "app.restart": {
+      "handler": "app_restart",
+      "params": null,
+      "result": null
+    },
+    "bridge.version": {
+      "handler": "bridge_version",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "bridge.version: версия контракта живого приложения (диагностика, e2e).",
+        "properties": {
+          "version": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "BridgeVersionResult",
+        "type": "object"
+      }
+    },
+    "nav.go_back": {
+      "handler": "nav_go_back",
+      "params": null,
+      "result": null
+    },
+    "nav.go_forward": {
+      "handler": "nav_go_forward",
+      "params": null,
+      "result": null
+    },
+    "nav.navigate": {
+      "handler": "nav_navigate",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "nav.navigate: переход активной вкладки по URL.",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "NavNavigateParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "nav.reload": {
+      "handler": "nav_reload",
+      "params": null,
+      "result": null
+    },
+    "settings.get": {
+      "handler": "settings_get",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "SettingsKey": {
+            "description": "settings.get / settings.set: ключи настроек профиля. M1: один ключ.",
+            "enum": [
+              "proxy"
+            ],
+            "type": "string"
+          }
+        },
+        "description": "settings.get: ключ, значение которого читаем.",
+        "properties": {
+          "key": {
+            "$ref": "#/definitions/SettingsKey"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "SettingsGetParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProxyProto": {
+            "description": "Тип прокси. Схемы --proxy-server у Chromium: socks5/http/https (для socks5 Chromium резолвит домены на стороне прокси).",
+            "enum": [
+              "socks5",
+              "http",
+              "https"
+            ],
+            "type": "string"
+          }
+        },
+        "description": "Значение ключа \"proxy\" для UI: конфиг прокси + факт наличия пароля в DPAPI (сам пароль наружу не отдаётся).",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "hasPassword": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "login": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "port": {
+            "format": "uint16",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "proto": {
+            "$ref": "#/definitions/ProxyProto"
+          }
+        },
+        "required": [
+          "enabled",
+          "hasPassword",
+          "host",
+          "port",
+          "proto"
+        ],
+        "title": "ProxySettings",
+        "type": "object"
+      }
+    },
+    "settings.set": {
+      "handler": "settings_set",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProxyConfig": {
+            "description": "Конфиг прокси в settings.json. Пароль сюда НЕ пишется — только DPAPI.",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "host": {
+                "default": "",
+                "type": "string"
+              },
+              "login": {
+                "default": null,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "port": {
+                "default": 0,
+                "format": "uint16",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "proto": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ProxyProto"
+                  }
+                ],
+                "default": "socks5"
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "type": "object"
+          },
+          "ProxyProto": {
+            "description": "Тип прокси. Схемы --proxy-server у Chromium: socks5/http/https (для socks5 Chromium резолвит домены на стороне прокси).",
+            "enum": [
+              "socks5",
+              "http",
+              "https"
+            ],
+            "type": "string"
+          },
+          "SettingsKey": {
+            "description": "settings.get / settings.set: ключи настроек профиля. M1: один ключ.",
+            "enum": [
+              "proxy"
+            ],
+            "type": "string"
+          }
+        },
+        "description": "settings.set: value — значение ключа; secret — секрет ключа в DPAPI: None — не менять, Some(\"\") — удалить, Some(p) — перезаписать. Для \"proxy\" value без пароля (пароль — только DPAPI, docs/02 §9).",
+        "properties": {
+          "key": {
+            "$ref": "#/definitions/SettingsKey"
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "$ref": "#/definitions/ProxyConfig"
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "SettingsSetParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "tabs.list": {
+      "handler": "tabs_list",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TabInfo": {
+            "properties": {
+              "active": {
+                "description": "Активна ли вкладка (в M1 единственная — всегда true).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Идентификатор webview-вкладки.",
+                "type": "string"
+              },
+              "title": {
+                "description": "Заголовок страницы (заполнится в задаче 1.2 — таб-бар).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "description": "Текущий URL вкладки.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "active",
+              "id",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "tabs.list: вкладки окна. M1: единственная контентная вкладка \"content\".",
+        "properties": {
+          "tabs": {
+            "items": {
+              "$ref": "#/definitions/TabInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "TabsListResult",
+        "type": "object"
+      }
+    },
+    "vpn.set_enabled": {
+      "handler": "vpn_set_enabled",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется.",
+        "properties": {
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "on"
+        ],
+        "title": "VpnSetEnabledParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "vpn.status": {
+      "handler": "vpn_status",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProxyState": {
+            "oneOf": [
+              {
+                "description": "Прокси выключен — все соединения прямые.",
+                "enum": [
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён и отвечает.",
+                "enum": [
+                  "on"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён, но недоступен — показываем сигнальный цвет ошибки.",
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "vpn.status / vpn.test_connection: состояние маршрутизации. state — словарь M1 (off/on/error); в M6 при WireGuard контракт расширится состояниями из docs/05 §2 (connecting/connected) с bump версии.",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/definitions/ProxyState"
+          }
+        },
+        "required": [
+          "detail",
+          "state"
+        ],
+        "title": "VpnStatusResult",
+        "type": "object"
+      }
+    },
+    "vpn.test_connection": {
+      "handler": "vpn_test_connection",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProxyState": {
+            "oneOf": [
+              {
+                "description": "Прокси выключен — все соединения прямые.",
+                "enum": [
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён и отвечает.",
+                "enum": [
+                  "on"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён, но недоступен — показываем сигнальный цвет ошибки.",
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "vpn.status / vpn.test_connection: состояние маршрутизации. state — словарь M1 (off/on/error); в M6 при WireGuard контракт расширится состояниями из docs/05 §2 (connecting/connected) с bump версии.",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/definitions/ProxyState"
+          }
+        },
+        "required": [
+          "detail",
+          "state"
+        ],
+        "title": "VpnStatusResult",
+        "type": "object"
+      }
+    }
+  },
+  "events": {
+    "page.loaded": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "page.loaded: документ загружен (M3 — детектор контента; каркас с 1.1).",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "PageLoaded",
+        "type": "object"
+      }
+    },
+    "page.video_detected": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "page.video_detected: на странице найден <video> (M3; каркас с 1.1).",
+        "properties": {
+          "canTracks": {
+            "type": "boolean"
+          },
+          "videoKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "canTracks",
+          "videoKey"
+        ],
+        "title": "PageVideoDetected",
+        "type": "object"
+      }
+    },
+    "vpn.state_changed": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProxyState": {
+            "oneOf": [
+              {
+                "description": "Прокси выключен — все соединения прямые.",
+                "enum": [
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён и отвечает.",
+                "enum": [
+                  "on"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён, но недоступен — показываем сигнальный цвет ошибки.",
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "vpn.state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/definitions/ProxyState"
+          }
+        },
+        "required": [
+          "detail",
+          "state"
+        ],
+        "title": "VpnStateChanged",
+        "type": "object"
+      }
+    }
+  },
+  "version": 1
+}

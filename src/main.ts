@@ -1,6 +1,7 @@
 // DuoPulse M0 — UI-полоса спайка: адресная строка-заглушка.
-// Ввод URL/запроса → команда navigate в Rust → дочерний webview "content".
-import { invoke } from "@tauri-apps/api/core";
+// Ввод URL/запроса → команда nav.navigate контракта bridge → Core → webview "content".
+import { bridge } from "./bridge";
+import "./bridge/dev-probe";
 import "./proxy-menu";
 import "./style.css";
 
@@ -20,9 +21,9 @@ async function nav(): Promise<void> {
   const url = normalize(omnibox.value);
   if (!url) return;
   try {
-    await invoke("navigate", { url });
+    await bridge.nav.navigate({ url });
   } catch (e) {
-    console.error("navigate failed:", e);
+    console.error("nav.navigate failed:", e);
   }
 }
 
@@ -30,6 +31,6 @@ omnibox.addEventListener("keydown", (e) => {
   if (e.key === "Enter") void nav();
 });
 document.getElementById("go")?.addEventListener("click", () => void nav());
-document.getElementById("back")?.addEventListener("click", () => void invoke("go_back").catch(console.error));
-document.getElementById("fwd")?.addEventListener("click", () => void invoke("go_forward").catch(console.error));
-document.getElementById("reload")?.addEventListener("click", () => void invoke("reload").catch(console.error));
+document.getElementById("back")?.addEventListener("click", () => void bridge.nav.goBack().catch(console.error));
+document.getElementById("fwd")?.addEventListener("click", () => void bridge.nav.goForward().catch(console.error));
+document.getElementById("reload")?.addEventListener("click", () => void bridge.nav.reload().catch(console.error));

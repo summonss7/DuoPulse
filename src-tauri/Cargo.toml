@@ -13,6 +13,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# JSON Schema из Rust-типов: единый источник IPC-контракта bridge (задача 1.1,
+# docs/05 §2) — из схем генерируются TS-типы (src/bridge/gen/types.ts).
+schemars = "0.8"
 # Прямой доступ к COM-API WebView2 (WebResourceRequested) для сетевого перехвата M0
 # и BasicAuthentication (креденшалы прокси, задача 1.8).
 webview2-com = "0.39"

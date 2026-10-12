@@ -1,5 +1,7 @@
 // DuoPulse — M0 спайк: Tauri 2 + WebView2 против YouTube (карточка duopulse-003).
 // Внешний прокси SOCKS5/HTTP(S) — задача 1.8 этапа M1 (карточка duopulse-009).
+// IPC-контракт bridge (команды/события UI|Content ↔ Core) — задача 1.1,
+// реализация и регистрация команд — src/bridge.rs (docs/05 §1–2).
 //
 // Архитектура спайка (docs/02-architecture.md, слои Shell/UI):
 //   окно "main"
@@ -19,6 +21,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bridge;
 mod proxy;
 
 use tauri::{
@@ -148,112 +151,9 @@ unsafe fn install_request_blocker(wv: tauri::webview::PlatformWebview) {
     .expect("add_WebResourceRequested");
 }
 
-#[tauri::command]
-fn navigate(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    let webview = app
-        .get_webview("content")
-        .ok_or_else(|| "webview content не найден".to_string())?;
-    webview
-        .navigate(Url::parse(&url).map_err(|e| format!("некорректный URL: {e}"))?)
-        .map_err(|e| format!("navigate: {e}"))
-}
-
-#[tauri::command]
-fn go_back(app: tauri::AppHandle) -> Result<(), String> {
-    eval_content(&app, "history.back()")
-}
-
-#[tauri::command]
-fn go_forward(app: tauri::AppHandle) -> Result<(), String> {
-    eval_content(&app, "history.forward()")
-}
-
-#[tauri::command]
-fn reload(app: tauri::AppHandle) -> Result<(), String> {
-    eval_content(&app, "location.reload()")
-}
-
-fn eval_content(app: &tauri::AppHandle, js: &str) -> Result<(), String> {
-    app.get_webview("content")
-        .ok_or_else(|| "webview content не найден".to_string())?
-        .eval(js)
-        .map_err(|e| format!("eval: {e}"))
-}
-
-// --- Прокси (duopulse-009) ---------------------------------------------------
-
-/// Конфиг прокси для UI; пароль не возвращаем — только факт его наличия.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProxySettingsUi {
-    enabled: bool,
-    proto: String,
-    host: String,
-    port: u16,
-    login: Option<String>,
-    has_password: bool,
-}
-
-#[tauri::command]
-fn proxy_get() -> ProxySettingsUi {
-    let dir = proxy::profile_dir();
-    let c = proxy::load_config(&dir);
-    ProxySettingsUi {
-        enabled: c.enabled,
-        proto: c.proto.as_str().into(),
-        host: c.host,
-        port: c.port,
-        login: c.login,
-        has_password: proxy::has_password(&dir),
-    }
-}
-
-/// Сохраняет конфиг. Семантика пароля: None — не менять, Some("") — удалить,
-/// Some(p) — перезаписать (шифруется DPAPI). Выключенный прокси можно сохранить
-/// с незаполненным адресом (черновик), включённый — только после валидации.
-#[tauri::command]
-fn proxy_save(cfg: proxy::ProxyConfig, password: Option<String>) -> Result<(), String> {
-    if cfg.enabled {
-        cfg.validate()?;
-    }
-    let dir = proxy::profile_dir();
-    proxy::save_config(&dir, &cfg)?;
-    match password.as_deref() {
-        None => {}
-        Some("") => proxy::clear_password(&dir),
-        Some(p) => proxy::save_password(&dir, p)?,
-    }
-    Ok(())
-}
-
-/// Статус прокси: off / on / error (проверка достижимости — вне главного потока).
-#[tauri::command]
-async fn proxy_status() -> Result<proxy::ProxyStatus, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        proxy::check(&proxy::load_config(&proxy::profile_dir()))
-    })
-    .await
-    .map_err(|e| e.to_string())
-}
-
-/// Перезапуск для применения аргументов прокси (перезапуск предлагается явно).
-#[tauri::command]
-fn proxy_restart(app: tauri::AppHandle) {
-    app.restart();
-}
-
 fn main() {
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
-            navigate,
-            go_back,
-            go_forward,
-            reload,
-            proxy_get,
-            proxy_save,
-            proxy_status,
-            proxy_restart
-        ])
+    // IPC-контракт bridge (задача 1.1): все команды/события — src/bridge.rs.
+    bridge::register(tauri::Builder::default())
         .setup(|app| {
             // Прокси задаётся аргументами окружения WebView2 только на старте
             // (docs/02 §6.1) — конфиг читаем ДО создания webview.
