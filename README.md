@@ -37,7 +37,14 @@ DuoPulse — настольный браузер (Windows-first) для повс
 контекстное меню вкладки — мульти-webview менеджер в Core
 (`src-tauri/src/tabs/`) + `src/chrome/tabbar.ts` в тёмном стиле по гайду 06;
 приёмка — [e2e/tabs/run.mjs](e2e/tabs/run.mjs) и
-[e2e/tabs/CHECKLIST.md](e2e/tabs/CHECKLIST.md). План — в
+[e2e/tabs/CHECKLIST.md](e2e/tabs/CHECKLIST.md). Готова **адресная строка
+omnibox** (задача 1.3, карточка duopulse-013): разбор ввода «URL (догадка
+схемы) или поиск» в Core (`src-tauri/src/omnibox.rs`), подсказки при вводе —
+полнотекстовый поиск FTS5 по истории и закладкам (пока на временных данных,
+живые визиты — задача 1.4): строка-действие «Поиск в YouTube»/«Перейти по
+адресу» + совпадения, навигация стрелками, Enter — переход, Esc — фокус
+странице; приёмка — [e2e/omnibox/run.mjs](e2e/omnibox/run.mjs) (поиск по 10k
+записей < 50 мс — cargo-тест). План — в
 [ROADMAP.md](ROADMAP.md).
 
 ### Запуск спайка M0
@@ -53,6 +60,8 @@ node e2e/proxy-a/run.mjs
 node e2e/bridge/run.mjs
 # e2e-прогон таб-бара (вкладки, Ctrl+Tab, Ctrl+Shift+T, контекст-меню):
 node e2e/tabs/run.mjs
+# e2e-прогон omnibox (URL/поиск, подсказки FTS5, Enter/Esc/клик):
+node e2e/omnibox/run.mjs
 # перегенерация TS-типов контракта bridge после правки Rust-типов:
 npm run gen:bridge
 ```
@@ -92,8 +101,8 @@ DuoPulse/
 ├── backup.bat              резервная копия проекта (перед серьёзными изменениями)
 ├── promt.txt               замороженный архив отчётов (новые — в CHANGELOG.md)
 ├── CARDS/                  карточки задач диспетчера
-├── src-tauri/              Rust-ядро (Tauri 2: окно, webview, COM-перехват; bridge.rs — IPC-контракт; tabs/ — менеджер вкладок)
-├── src/                    UI-полоса (TypeScript + Vite; chrome/ — таб-бар, bridge/ — типизированный IPC-клиент)
+├── src-tauri/              Rust-ядро (Tauri 2: окно, webview, COM-перехват; bridge.rs — IPC-контракт; tabs/ — менеджер вкладок; omnibox.rs — разбор ввода; history/ — FTS5-подсказки)
+├── src/                    UI-полоса (TypeScript + Vite; chrome/ — таб-бар и omnibox, bridge/ — типизированный IPC-клиент)
 ├── content/                content-скрипты, инжектируемые в страницы (messaging/ — словарь событий, chrome-hotkeys.js — хоткеи таб-бара)
 ├── bridge/                 IPC-контракт: contract.json (генерится из Rust-типов)
 ├── scripts/                gen-bridge.mjs — генерация TS-типов контракта

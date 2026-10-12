@@ -88,6 +88,77 @@ pub struct NavNavigateParams {
     pub url: String,
 }
 
+/// nav.resolve_omnibox: разобрать ввод адресной строки — адрес (с догадкой
+/// схемы) или поисковый запрос; результат — готовый URL для nav.navigate
+/// (задача 1.3, разбор — src/omnibox.rs).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct NavResolveOmniboxParams {
+    pub input: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NavResolveOmniboxResult {
+    pub url: String,
+    /// Ввод распознан как поисковый запрос (не как адрес).
+    pub is_search: bool,
+}
+
+/// history.search: подсказки omnibox — полнотекстовый поиск по истории и
+/// закладкам (FTS5, задача 1.3; хранилище — src/history/, пока временные
+/// данные, полная интеграция — задача 1.4).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistorySearchParams {
+    pub query: String,
+    /// Максимум подсказок в ответе (по умолчанию 8, диапазон 1–20).
+    #[serde(default = "default_suggest_limit")]
+    pub limit: u32,
+}
+
+fn default_suggest_limit() -> u32 {
+    8
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct HistorySearchResult {
+    pub hits: Vec<HistoryHit>,
+}
+
+/// Откуда подсказка: посещение из истории или закладка.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HistorySource {
+    History,
+    Bookmark,
+}
+
+impl HistorySource {
+    /// Строка в UNINDEXED-колонке FTS5 (хранение — только текст).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::History => "history",
+            Self::Bookmark => "bookmark",
+        }
+    }
+
+    /// Обратное преобразование (не-«bookmark» считается историей).
+    pub fn from_db(s: &str) -> Self {
+        if s == "bookmark" {
+            Self::Bookmark
+        } else {
+            Self::History
+        }
+    }
+}
+
+/// Одна подсказка omnibox: источник, адрес и заголовок страницы.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct HistoryHit {
+    pub source: HistorySource,
+    pub url: String,
+    pub title: String,
+}
+
 /// settings.get: ключ, значение которого читаем.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SettingsGetParams {
@@ -250,9 +321,15 @@ pub fn contract_json() -> serde_json::Value {
                                "result": schema!(TabsListResult) },
             "nav.navigate": { "handler": "nav_navigate", "params": schema!(NavNavigateParams),
                               "result": null },
+            "nav.resolve_omnibox": { "handler": "nav_resolve_omnibox",
+                                     "params": schema!(NavResolveOmniboxParams),
+                                     "result": schema!(NavResolveOmniboxResult) },
+            "nav.focus_page": { "handler": "nav_focus_page", "params": null, "result": null },
             "nav.go_back": { "handler": "nav_go_back", "params": null, "result": null },
             "nav.go_forward": { "handler": "nav_go_forward", "params": null, "result": null },
             "nav.reload": { "handler": "nav_reload", "params": null, "result": null },
+            "history.search": { "handler": "history_search", "params": schema!(HistorySearchParams),
+                                "result": schema!(HistorySearchResult) },
             "settings.get": { "handler": "settings_get", "params": schema!(SettingsGetParams),
                               "result": schema!(ProxySettings) },
             "settings.set": { "handler": "settings_set", "params": schema!(SettingsSetParams),
@@ -418,6 +495,41 @@ fn nav_go_forward(
     eval_active(&app, &manager, "history.forward()")
 }
 
+/// nav.resolve_omnibox: разбор ввода адресной строки (URL vs поиск) —
+/// src/omnibox.rs, правила и тесты там.
+#[tauri::command]
+fn nav_resolve_omnibox(params: NavResolveOmniboxParams) -> NavResolveOmniboxResult {
+    let r = crate::omnibox::resolve(&params.input);
+    NavResolveOmniboxResult {
+        url: r.url,
+        is_search: r.is_search,
+    }
+}
+
+/// nav.focus_page: вернуть фокус контенту активной вкладки (Esc из omnibox —
+/// задача 1.3). Вкладок нет — тихо ок (фокусить нечего).
+#[tauri::command]
+fn nav_focus_page(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<(), String> {
+    if let Ok(wv) = active_webview(&app, &manager) {
+        wv.set_focus().map_err(|e| format!("focus: {e}"))?;
+    }
+    Ok(())
+}
+
+/// history.search: подсказки omnibox по FTS5-индексу истории и закладок.
+#[tauri::command]
+fn history_search(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistorySearchParams,
+) -> HistorySearchResult {
+    HistorySearchResult {
+        hits: history.search(&params.query, params.limit),
+    }
+}
+
 #[tauri::command]
 fn nav_reload(
     app: AppHandle,
@@ -542,9 +654,12 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         tabs_reopen,
         tabs_activate,
         nav_navigate,
+        nav_resolve_omnibox,
+        nav_focus_page,
         nav_go_back,
         nav_go_forward,
         nav_reload,
+        history_search,
         settings_get,
         settings_set,
         vpn_set_enabled,

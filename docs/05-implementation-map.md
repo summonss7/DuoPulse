@@ -94,7 +94,7 @@ DuoPulse/
 при миграции на bridge они ложатся на `vpn.{set_enabled, status, test_connection}`
 и `settings.{get, set}`.
 
-**Статус (12.10.2026, задачи 1.1 и 1.2 выполнены — карточки duopulse-011/012).**
+**Статус (12.10.2026, задачи 1.1–1.3 выполнены — карточки duopulse-011/012/013).**
 `bridge` реализован: единственный источник контракта — Rust-типы
 `src-tauri/src/bridge.rs` (schemars); из них генерируется `bridge/contract.json`
 (JSON Schema draft-07, версионируется в git, версия контракта — поле `version`),
@@ -104,9 +104,13 @@ vitest `src/bridge/client.test.ts` — команды и события). Сло
 команды `bridge.version`,
 `tabs.{list, open, close, reopen, activate}` (менеджер вкладок — задача 1.2,
 `src-tauri/src/tabs/`), `nav.{navigate, go_back, go_forward, reload}` (действуют
-на активную вкладку), `settings.{get, set}`, `vpn.{set_enabled, status,
-test_connection}`, `app.restart`; событие `tabs:updated` (снапшот списка вкладок
-после любого изменения — им перерисовывается таб-бар `src/chrome/tabbar.ts`) и
+на активную вкладку), `nav.{resolve_omnibox, focus_page}` + `history.search`
+(задача 1.3: разбор ввода omnibox — `src-tauri/src/omnibox.rs`, подсказки —
+FTS5-индекс `src-tauri/src/history/`, пока на временных данных — живые визиты
+и файл в профиле подключит задача 1.4), `settings.{get, set}`,
+`vpn.{set_enabled, status, test_connection}`, `app.restart`; событие `tabs:updated`
+(снапшот списка вкладок после любого изменения — им перерисовывается таб-бар
+`src/chrome/tabbar.ts`, omnibox-подсказки — `src/chrome/omnibox.ts`) и
 события-каркас `page:loaded`, `page:video_detected` (эмит — M3),
 `vpn:state_changed` (M6). Имена событий — через `:` (словарь `домен:событие`):
 tauri 2 разрешает в именах событий только alnum/`-`/`/`/`:`/`_`, точечные имена
@@ -116,7 +120,8 @@ tauri 2 разрешает в именах событий только alnum/`-`
 `vpn.{set_enabled, status, test_connection}` + `app.restart`; состояние vpn —
 `off/on/error`, при WireGuard (M6) расширится до словаря выше с bump версии.
 Типы событий для Content-слоя — `content/messaging/events.ts`. Сквозные e2e —
-[e2e/bridge/run.mjs](../e2e/bridge/run.mjs), [e2e/tabs/run.mjs](../e2e/tabs/run.mjs)
+[e2e/bridge/run.mjs](../e2e/bridge/run.mjs), [e2e/tabs/run.mjs](../e2e/tabs/run.mjs),
+[e2e/omnibox/run.mjs](../e2e/omnibox/run.mjs)
 (чек-лист приёмки таб-бара — [e2e/tabs/CHECKLIST.md](../e2e/tabs/CHECKLIST.md)).
 
 ## 3. Эпики → карточки (порядок работ)
@@ -143,7 +148,7 @@ Gate-проверки этапов включены в последние кар
 |---|---|---|
 | 1.1 | **✅ выполнено 12.10.2026 (карточка duopulse-011)** IPC-контракт bridge + кодогенерация типов | команда `tabs.list` проходит сквозной тест |
 | 1.2 | **✅ выполнено 12.10.2026 (карточка duopulse-012)** Таб-бар: вкладки, закрытие, Ctrl+Tab, восстановление закрытой | ручной чек-лист проходит ([e2e/tabs/CHECKLIST.md](../e2e/tabs/CHECKLIST.md)) |
-| 1.3 | Omnibox: URL/поиск, подсказки (история+закладки, FTS5) | поиск по 10k записей истории < 50 мс |
+| 1.3 | **✅ выполнено 12.10.2026 (карточка duopulse-013)** Omnibox: URL/поиск, подсказки (история+закладки, FTS5) | поиск по 10k записей истории < 50 мс |
 | 1.4 | История и закладки (SQLite + страница управления) | запись/поиск/удаление работают |
 | 1.5 | Фирменный тёмный UI-хром по гайду 06 | сверка с гайдом по чек-листу |
 | 1.6 | Восстановление сессии (ленивое) | 10 вкладок восстанавливаются, старт не деградирует > 10% |

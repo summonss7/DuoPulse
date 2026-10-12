@@ -6,7 +6,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   BridgeVersionResult,
+  HistorySearchParams,
+  HistorySearchResult,
   NavNavigateParams,
+  NavResolveOmniboxParams,
+  NavResolveOmniboxResult,
   ProxySettings,
   SettingsGetParams,
   SettingsSetParams,
@@ -38,9 +42,18 @@ export const bridge = {
   nav: {
     /** nav.navigate: переход активной вкладки по URL. */
     navigate: (params: NavNavigateParams) => invoke<void>("nav_navigate", { params }),
+    /** nav.resolve_omnibox: разобрать ввод адресной строки (URL vs поиск). */
+    resolveOmnibox: (params: NavResolveOmniboxParams) =>
+      invoke<NavResolveOmniboxResult>("nav_resolve_omnibox", { params }),
+    /** nav.focus_page: вернуть фокус контенту активной вкладки (Esc из omnibox). */
+    focusPage: () => invoke<void>("nav_focus_page"),
     goBack: () => invoke<void>("nav_go_back"),
     goForward: () => invoke<void>("nav_go_forward"),
     reload: () => invoke<void>("nav_reload"),
+  },
+  history: {
+    /** history.search: подсказки omnibox — FTS-поиск по истории и закладкам. */
+    search: (params: HistorySearchParams) => invoke<HistorySearchResult>("history_search", { params }),
   },
   settings: {
     /** settings.get: значение ключа профиля. */

@@ -16,7 +16,8 @@
         <button id="back" title="Назад">&#8592;</button>
         <button id="fwd" title="Вперёд">&#8594;</button>
         <button id="reload" title="Обновить">&#10227;</button>
-        <input id="omnibox" type="text" placeholder="Введите адрес и нажмите Enter" spellcheck="false" autocomplete="off" />
+        <input id="omnibox" type="text" placeholder="Введите адрес или поисковый запрос" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest" />
+        <div id="suggest" class="suggest" hidden role="listbox" aria-label="Подсказки адресной строки"></div>
         <button id="go" class="go">Перейти</button>
         <button id="proxyBtn" title="Прокси (VPN-инкремент A)">&#9874;</button>
       </div>

@@ -525,3 +525,75 @@
 - Коммит: «feat: таб-бар и менеджер вкладок — открытие/закрытие, Ctrl+Tab,
   Ctrl+Shift+T, контекст-меню; контракт v2 (tabs.*, tabs:updated) — задача 1.2
   (duopulse-012)» (+ пуш в summonss7/DuoPulse, main)
+
+## 2026-10-12, 18:26–21:56 — M1 · задача 1.3: omnibox — URL/поиск и подсказки (история+закладки, FTS5)
+
+Карточка CARDS/013 (duopulse-013), docs/05 §3 задача 1.3. Работа в два захода:
+18:26–18:40 — Core (Rust); 21:20–21:56 — контракт/клиент/UI/e2e/документация
+(продолжение прерванного сеанса).
+
+- Что сделано:
+  - Core, разбор ввода `src-tauri/src/omnibox.rs` (решение принимает Core,
+    UI только зовёт nav.navigate): whitelist схем (http/https/file/about/
+    data/view-source/tauri); адрес без пробелов — домен (≥2 метки, TLD с
+    буквы) → https, localhost/IPv4/IPv6 → http (локальная разработка);
+    домен:порт — адрес (как Chrome), посторонние «схемы»/числа с точками/
+    пробелы — поисковый запрос YouTube (encodeURIComponent-семантика RFC 3986);
+    7 юнит-тестов.
+  - Core, подсказки `src-tauri/src/history/mod.rs`: in-memory SQLite + FTS5
+    (токенизатор unicode61 — латиница и кириллица), каждый токен запроса —
+    префиксный, ранжирование bm25, пустой запрос — закладки (подсказки на
+    фокус); временный сид-набор 25 записей (4 закладки + 21 история); схема
+    (title, url, source) спроектирована под задачу 1.4 — та же заменит
+    хранение на файл в профиле без смены словаря. DoD-замер: тест
+    search_10k_under_50ms — 5 разных запросов по 10k записей подряд < 50 мс
+    (прогрев включён) — зелёный. Зависимость rusqlite 0.31 (bundled).
+  - Контракт bridge (совместимое расширение, версия осталась v2): команды
+    `nav.resolve_omnibox`, `nav.focus_page` (Esc из omnibox → фокус странице),
+    `history.search` (query + limit 1–20, default 8); типы NavResolveOmnibox*,
+    HistorySearch*/HistoryHit/HistorySource; перегенерация bridge/contract.json
+    → src/bridge/gen/types.ts (25 типов, npm run gen:bridge); TS-клиент
+    (nav.resolveOmnibox/focusPage, history.search) + cases в client.test.ts.
+  - UI `src/chrome/omnibox.ts` + #suggest (index.html) + стиль (style.css,
+    гайд 06: панель elevated 12px, выделение тёплым, строка-действие неоном,
+    монохромные SVG-иконки): дропдаун подсказок = строка-действие («<запрос> —
+    Поиск в YouTube» / «Перейти по адресу») + FTS-совпадения истории/закладок;
+    ввод с дебаунсом 150 мс, защита от устаревших ответов (seq); ↑↓ —
+    выделение по кольцу, Enter — переход по выделению (без выделения — разбор
+    ввода), клик по подсказке — переход, Esc — закрыть + nav.focus_page, фокус
+    строки — select-all + закладки; main.ts мигрировал с локальной заглушки
+    normalize() на nav.resolveOmnibox; кнопка-щит прокси и слот «duo» (3.7)
+    не тронуты.
+  - E2E-приёмка `e2e/omnibox/run.mjs` (DoD «ручной чек» автоматизирован через
+    CDP в UI-webview): 21 проверка — разбор URL/запрос (5 случаев, включая
+    кодирование), FTS (префикс по URL и заголовку, кириллица, AND-токены,
+    пустой → закладки), UI (дропдаун с строкой-действием, клик по подсказке,
+    Enter с выделением и без, ↑↓, Esc + focusPage, пустой ввод → закладки);
+    скриншот дропдауна e2e/omnibox/suggest.png (сверка с гайдом 06 — ок).
+  - Фикс e2e-инфраструктуры (несерьёзная проблема — устранена сразу):
+    vite.kill() на Windows убивал только npm-оболочку, дерево npm→node выживало
+    и держало порт 5173 (strictPort) — во всех четырёх run.mjs (bridge, tabs,
+    proxy-a, omnibox) заменил на taskkill /PID /T /F.
+- Как проверено:
+  - cargo fmt --check / clippy --all-targets -D warnings / test — чисто,
+    25 passed (+1 ignored-генератор); tsc --noEmit — чисто; vitest — 4/4;
+    vite build — ок.
+  - E2E `node e2e/omnibox/run.mjs` — 21/21 PASS (внешние цели навигации —
+    github/wikipedia — сравниваются по origin: цели могут редиректить).
+  - Регресс `node e2e/bridge/run.mjs` — 14/14 PASS; `node e2e/tabs/run.mjs` —
+    17/17 PASS; `node e2e/proxy-a/run.mjs` — 16/16 PASS.
+  - Замечено: proxy::tests::status_on_for_socks5_and_http упал в первом холодном
+    прогоне (фейковый SOCKS5-сервер + параллельная нагрузка новых тестов FTS),
+    во всех повторных и в изоляции — стабильно зелёный; на код задачи не влияет,
+    оставлен как есть.
+  - backup.bat перед изменениями: backup_2026-10-12_18-30-54.
+- Окружение: диск D: заполнен на 100% (сборка падала «not enough space»);
+  освобождён перегенерируемый кэш target/debug/incremental (1.2 ГБ); уведомление
+  с вопросом о чистке диска отправлено в Хаб ИИ Aila.
+- Документация: docs/05 §2 — словарь v2 пополнен nav.*/history.search (задача
+  1.3), §3 — задача 1.3 отмечена выполненной; README — статус, e2e-команда,
+  структура репозитория; ROADMAP — «Следующая работа» переведена на карточку
+  014 (задача 1.4).
+- Коммит: «feat: omnibox — разбор URL/поиск (nav.resolve_omnibox) и подсказки
+  FTS5 по истории/закладкам (history.search), дропдаун Enter/Esc/стрелки —
+  задача 1.3 (duopulse-013)» (+ пуш в summonss7/DuoPulse, main)

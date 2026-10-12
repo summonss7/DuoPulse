@@ -312,7 +312,13 @@ try {
   // только экземпляры НАШЕГО exe — чужие запущенные DuoPulse не трогаем
   app.kill("SIGKILL");
   await killOurExes();
-  vite.kill();
+  // vite.kill() на Windows убивает только npm-оболочку — дерево npm→node
+  // переживает скрипт и держит порт 5173 (strictPort) для следующих прогонов
+  try {
+    await run("taskkill", ["/PID", String(vite.pid), "/T", "/F"]);
+  } catch {
+    /* дерево уже мертво — ок */
+  }
   socks.server.close();
   httpServer.close();
   await sleep(1000);

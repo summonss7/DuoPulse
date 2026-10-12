@@ -25,6 +25,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bridge;
+mod history;
+mod omnibox;
 mod proxy;
 mod tabs;
 
@@ -192,8 +194,11 @@ pub(crate) unsafe fn install_content_handlers(
 fn main() {
     // IPC-контракт bridge (задача 1.1): все команды/события — src/bridge.rs.
     // Менеджер вкладок (задача 1.2) — состояние Core для tabs.* и nav.*.
+    // Подсказки omnibox (задача 1.3) — FTS5-индекс истории/закладок
+    // (временные данные; полное хранилище — задача 1.4).
     bridge::register(tauri::Builder::default())
         .manage(tabs::TabManager::new())
+        .manage(history::HistoryStore::seeded())
         .setup(|app| {
             // Прокси задаётся аргументами окружения WebView2 только на старте
             // (docs/02 §6.1) — конфиг читаем ДО создания webview; аргументы

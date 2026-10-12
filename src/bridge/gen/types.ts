@@ -2,6 +2,10 @@
 // Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 2); регенерация: npm run gen:bridge.
 
 /**
+ * Откуда подсказка: посещение из истории или закладка.
+ */
+export type HistorySource = "history" | "bookmark";
+/**
  * settings.get / settings.set: ключи настроек профиля. M1: один ключ.
  */
 export type SettingsKey = "proxy";
@@ -16,7 +20,13 @@ export type ProxyState = "off" | "on" | "error";
  */
 export interface DuoPulseBridgeContract {
   BridgeVersionResult: BridgeVersionResult;
+  HistorySearchParams: HistorySearchParams;
+  HistorySearchResult: HistorySearchResult;
+  HistoryHit: HistoryHit;
+  HistorySource: HistorySource;
   NavNavigateParams: NavNavigateParams;
+  NavResolveOmniboxParams: NavResolveOmniboxParams;
+  NavResolveOmniboxResult: NavResolveOmniboxResult;
   SettingsGetParams: SettingsGetParams;
   SettingsKey: SettingsKey;
   ProxySettings: ProxySettings;
@@ -42,9 +52,43 @@ export interface BridgeVersionResult {
   version: number;
 }
 /**
+ * history.search: подсказки omnibox — полнотекстовый поиск по истории и закладкам (FTS5, задача 1.3; хранилище — src/history/, пока временные данные, полная интеграция — задача 1.4).
+ */
+export interface HistorySearchParams {
+  /**
+   * Максимум подсказок в ответе (по умолчанию 8, диапазон 1–20).
+   */
+  limit?: number;
+  query: string;
+}
+export interface HistorySearchResult {
+  hits: HistoryHit[];
+}
+/**
+ * Одна подсказка omnibox: источник, адрес и заголовок страницы.
+ */
+export interface HistoryHit {
+  source: HistorySource;
+  title: string;
+  url: string;
+}
+/**
  * nav.navigate: переход активной вкладки по URL.
  */
 export interface NavNavigateParams {
+  url: string;
+}
+/**
+ * nav.resolve_omnibox: разобрать ввод адресной строки — адрес (с догадкой схемы) или поисковый запрос; результат — готовый URL для nav.navigate (задача 1.3, разбор — src/omnibox.rs).
+ */
+export interface NavResolveOmniboxParams {
+  input: string;
+}
+export interface NavResolveOmniboxResult {
+  /**
+   * Ввод распознан как поисковый запрос (не как адрес).
+   */
+  isSearch: boolean;
   url: string;
 }
 /**
