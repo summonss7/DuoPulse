@@ -7,13 +7,19 @@
   </head>
   <body>
     <div id="app">
-      <div class="logo">Duo<span>Pulse</span></div>
-      <button id="back" title="Назад">&#8592;</button>
-      <button id="fwd" title="Вперёд">&#8594;</button>
-      <button id="reload" title="Обновить">&#10227;</button>
-      <input id="omnibox" type="text" placeholder="Введите адрес и нажмите Enter" spellcheck="false" autocomplete="off" />
-      <button id="go" class="go">Перейти</button>
-      <button id="proxyBtn" title="Прокси (VPN-инкремент A)">&#9874;</button>
+      <div id="tabbar">
+        <div id="tabs" role="tablist" aria-label="Вкладки браузера"></div>
+        <button id="newtab" title="Новая вкладка">&#65291;</button>
+      </div>
+      <div id="navbar">
+        <div class="logo">Duo<span>Pulse</span></div>
+        <button id="back" title="Назад">&#8592;</button>
+        <button id="fwd" title="Вперёд">&#8594;</button>
+        <button id="reload" title="Обновить">&#10227;</button>
+        <input id="omnibox" type="text" placeholder="Введите адрес и нажмите Enter" spellcheck="false" autocomplete="off" />
+        <button id="go" class="go">Перейти</button>
+        <button id="proxyBtn" title="Прокси (VPN-инкремент A)">&#9874;</button>
+      </div>
       <div id="proxyMenu" class="proxy-menu" hidden>
         <div class="proxy-row proxy-head">
           <span class="proxy-title">Прокси</span>
@@ -68,6 +74,12 @@
             Проверить IP-эхом &rarr;
           </button>
         </div>
+      </div>
+      <div id="tabMenu" class="tab-menu" hidden>
+        <button type="button" data-act="duplicate">Дублировать вкладку</button>
+        <button type="button" data-act="close">Закрыть вкладку</button>
+        <button type="button" data-act="closeOthers">Закрыть другие вкладки</button>
+        <button type="button" data-act="reopen">Переоткрыть закрытую <span class="kbd">Ctrl+Shift+T</span></button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

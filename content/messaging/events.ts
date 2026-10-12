@@ -11,9 +11,9 @@ import type {
 
 /** Имена событий контракта (Core → UI|Content). */
 export const BRIDGE_EVENT_NAMES = {
-  pageLoaded: "page.loaded",
-  pageVideoDetected: "page.video_detected",
-  vpnStateChanged: "vpn.state_changed",
+  pageLoaded: "page:loaded",
+  pageVideoDetected: "page:video_detected",
+  vpnStateChanged: "vpn:state_changed",
 } as const;
 
 /** payload по имени события. */

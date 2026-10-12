@@ -2,85 +2,65 @@
 // Внешний прокси SOCKS5/HTTP(S) — задача 1.8 этапа M1 (карточка duopulse-009).
 // IPC-контракт bridge (команды/события UI|Content ↔ Core) — задача 1.1,
 // реализация и регистрация команд — src/bridge.rs (docs/05 §1–2).
+// Менеджер вкладок (мульти-webview, таб-бар) — задача 1.2, src/tabs/.
 //
-// Архитектура спайка (docs/02-architecture.md, слои Shell/UI):
+// Архитектура (docs/02-architecture.md, слои Shell/UI):
 //   окно "main"
-//     ├─ webview UI (label "main", фронтенд из ../dist): адресная строка + меню «Прокси»
-//     └─ webview "content" (дочерний, удалённые сайты): youtube.com и т.п.
+//     ├─ webview UI (label "main", фронтенд из ../dist): таб-бар + адресная строка
+//     └─ webview вкладок "tab-N" (дочерние, удалённые сайты): активная видна,
+//        остальные скрыты; жизненным циклом управляет src/tabs/ (задача 1.2)
 //
-// Проверяемые гипотезы M0:
+// Проверяемые гипотезы M0 (сохранены на каждой вкладке):
 //   1) WebView2 играет видео YouTube (1080p60/4K) — мониторит инжектируемый скрипт;
 //   2) инжекция content-скрипта в каждый документ
 //      (WebviewBuilder::initialization_script → AddScriptToExecuteOnDocumentCreatedAsync);
-//   3) перехват сетевых запросов (on_web_resource_request → WebResourceRequested):
+//   3) перехват сетевых запросов (WebResourceRequested):
 //      запросы с путём /duopulse_block_test_probe получают 403 + X-DuoPulse-Block: 1.
 //
 // Прокси (duopulse-009, docs/02 §6.3 «A»): конфиг читается ДО создания webview —
 // аргументы окружения WebView2 (--proxy-server/--proxy-bypass-list) задаются только
-// на старте, смена настроек применяется перезапуском приложения.
+// на старте, смена настроек применяется перезапуском приложения. Аргументы старта
+// фиксируются в STARTUP_PROXY_ARGS — новые вкладки создаются с теми же.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bridge;
 mod proxy;
+mod tabs;
 
-use tauri::{
-    webview::{Webview, WebviewBuilder},
-    LogicalPosition, LogicalSize, Manager, Url, WebviewUrl, Window, WindowEvent,
-};
+use std::sync::OnceLock;
 
-/// Высота UI-полосы (адресная строка) в логических пикселях.
-/// Синхронизирована с #app { height } в src/style.css.
-const TOP_BAR_HEIGHT: f64 = 52.0;
+use tauri::{AppHandle, Manager, Window, WindowEvent};
+
+#[cfg(windows)]
+use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2Environment};
 
 /// Путь-маркер для теста сетевого перехвата: такие запросы блокируются (403).
 const BLOCK_TEST_PATH: &str = "/duopulse_block_test_probe";
 
-const CONTENT_INIT_SCRIPT: &str = include_str!("../../content/m0-spike.js");
+/// Content-скрипты каждой вкладки (docs/02 §4): монитор M0 + горячие клавиши
+/// таб-бара (задача 1.2).
+pub(crate) const CONTENT_INIT_SCRIPT_M0: &str = include_str!("../../content/m0-spike.js");
+pub(crate) const CONTENT_INIT_SCRIPT_HOTKEYS: &str =
+    include_str!("../../content/chrome-hotkeys.js");
 
-/// Размер дочернего webview под адресной строкой.
-fn content_rect(window: &Window<tauri::Wry>) -> (LogicalPosition<f64>, LogicalSize<f64>) {
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let size = window
-        .inner_size()
-        .unwrap_or_default()
-        .to_logical::<f64>(scale);
-    (
-        LogicalPosition::new(0.0, TOP_BAR_HEIGHT),
-        LogicalSize::new(size.width, (size.height - TOP_BAR_HEIGHT).max(0.0)),
-    )
-}
+/// Аргументы окружения WebView2, зафиксированные на старте приложения:
+/// каждая новая вкладка наследует их (сменить можно только перезапуском).
+static STARTUP_PROXY_ARGS: OnceLock<String> = OnceLock::new();
 
-fn build_content_webview(proxy_args: &str) -> WebviewBuilder<tauri::Wry> {
-    // DUOPULSE_START_URL переопределяет стартовую страницу content-webview —
-    // используется e2e-стендами (например, звуковой тест duopulse-006,
-    // e2e/m0-audio/audio-test.html) вместо ручного ввода адреса.
-    let start_url =
-        std::env::var("DUOPULSE_START_URL").unwrap_or_else(|_| "https://www.youtube.com/".into());
-    WebviewBuilder::new(
-        "content",
-        WebviewUrl::External(Url::parse(&start_url).expect("DUOPULSE_START_URL: некорректный URL")),
-    )
-    // Критерий M0: скрипт выполняется в каждом новом документе
-    // (WebView2: AddScriptToExecuteOnDocumentCreatedAsync).
-    .initialization_script(CONTENT_INIT_SCRIPT)
-    // Аргументы те же, что у UI-webview: окружение WebView2 создаётся первым
-    // webview, но дублируем для устойчивости к порядку создания.
-    .additional_browser_args(proxy_args)
+pub(crate) fn startup_proxy_args() -> &'static str {
+    STARTUP_PROXY_ARGS.get().map(String::as_str).unwrap_or("")
 }
 
 /// Аутентификация прокси: WebView2 не принимает логин/пароль внутри --proxy-server,
 /// на вызов 407 (basic challenge) отвечает событие BasicAuthenticationRequested —
 /// подставляем сохранённые креденшалы (логин из settings.json, пароль из DPAPI).
 #[cfg(windows)]
-unsafe fn install_proxy_auth(wv: tauri::webview::PlatformWebview) {
-    use webview2_com::{
-        BasicAuthenticationRequestedEventHandler, Microsoft::Web::WebView2::Win32::ICoreWebView2_10,
-    };
+unsafe fn install_proxy_auth(core: &ICoreWebView2) {
+    use webview2_com::BasicAuthenticationRequestedEventHandler;
     use windows_core::{Interface, HSTRING};
 
-    let core = wv.controller().CoreWebView2().expect("CoreWebView2");
-    let core10: ICoreWebView2_10 = core
+    let core10: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_10 = core
         .cast()
         .expect("ICoreWebView2_10 (BasicAuthentication, WebView2 SDK 1.0.1155+)");
     core10
@@ -115,18 +95,17 @@ unsafe fn install_proxy_auth(wv: tauri::webview::PlatformWebview) {
 /// AddWebResourceRequestedFilter("*", ALL) + add_WebResourceRequested.
 /// Запросы с путём BLOCK_TEST_PATH получают 403 + заголовок X-DuoPulse-Block: 1.
 #[cfg(windows)]
-unsafe fn install_request_blocker(wv: tauri::webview::PlatformWebview) {
+unsafe fn install_request_blocker(core: &ICoreWebView2, env: &ICoreWebView2Environment) {
     use webview2_com::{
         Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
         WebResourceRequestedEventHandler,
     };
     use windows_core::{HSTRING, PWSTR};
 
-    let core = wv.controller().CoreWebView2().expect("CoreWebView2");
     core.AddWebResourceRequestedFilter(&HSTRING::from("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)
         .expect("AddWebResourceRequestedFilter");
 
-    let env = wv.environment();
+    let env = env.clone();
     core.add_WebResourceRequested(
         &WebResourceRequestedEventHandler::create(Box::new(move |_sender, args| {
             let Some(args) = args else {
@@ -151,47 +130,106 @@ unsafe fn install_request_blocker(wv: tauri::webview::PlatformWebview) {
     .expect("add_WebResourceRequested");
 }
 
+/// Сообщения content-слоя вкладки (window.chrome.webview.postMessage, задача 1.2):
+/// горячие клавиши таб-бара из content/chrome-hotkeys.js → tabs::handle_hotkey.
+/// Прочие сообщения (IPC tauri обрабатывает свои параллельно) игнорируются.
+#[cfg(windows)]
+unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle) {
+    use webview2_com::WebMessageReceivedEventHandler;
+    use windows_core::PWSTR;
+
+    let app = app.clone();
+    core.add_WebMessageReceived(
+        &WebMessageReceivedEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let mut msg_pw = PWSTR::null();
+            if args.TryGetWebMessageAsString(&mut msg_pw).is_err() {
+                return Ok(()); // бинарное сообщение — не наше
+            }
+            let msg = webview2_com::CoTaskMemPWSTR::from(msg_pw).to_string();
+            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&msg) else {
+                return Ok(());
+            };
+            if parsed["duopulse"] == "hotkey" {
+                if let Some(key) = parsed["key"].as_str() {
+                    app.state::<tabs::TabManager>().handle_hotkey(&app, key);
+                }
+            }
+            Ok(())
+        })),
+        std::ptr::null_mut(),
+    )
+    .expect("add_WebMessageReceived");
+}
+
+/// Полный набор COM-обработчиков для каждой вкладки: сетевой перехват M0,
+/// аутентификация прокси (1.8), сообщения content (горячие клавиши, 1.2).
+#[cfg(windows)]
+pub(crate) unsafe fn install_content_handlers(
+    wv: tauri::webview::PlatformWebview,
+    app: &AppHandle,
+) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2Environment};
+
+    let controller = wv.controller();
+    let core: ICoreWebView2 = controller.CoreWebView2().expect("CoreWebView2 вкладки");
+    let env: ICoreWebView2Environment = wv.environment();
+    install_request_blocker(&core, &env);
+    install_proxy_auth(&core);
+    install_content_messaging(&core, app);
+}
+
+/// Нешиндовс-фолбэк: без COM (сборка проекта — только Windows, см. Cargo.toml).
+#[cfg(not(windows))]
+pub(crate) unsafe fn install_content_handlers(
+    _wv: tauri::webview::PlatformWebview,
+    _app: &AppHandle,
+) {
+}
+
 fn main() {
     // IPC-контракт bridge (задача 1.1): все команды/события — src/bridge.rs.
+    // Менеджер вкладок (задача 1.2) — состояние Core для tabs.* и nav.*.
     bridge::register(tauri::Builder::default())
+        .manage(tabs::TabManager::new())
         .setup(|app| {
             // Прокси задаётся аргументами окружения WebView2 только на старте
-            // (docs/02 §6.1) — конфиг читаем ДО создания webview.
+            // (docs/02 §6.1) — конфиг читаем ДО создания webview; аргументы
+            // фиксируем для всех будущих вкладок (STARTUP_PROXY_ARGS).
             let proxy_cfg = proxy::load_config(&proxy::profile_dir());
             let proxy_args = proxy::browser_args(Some(&proxy_cfg));
+            STARTUP_PROXY_ARGS
+                .set(proxy_args.clone())
+                .expect("STARTUP_PROXY_ARGS инициализируется один раз");
 
             // Окно создаётся кодом (не из tauri.conf.json), чтобы подставить
-            // аргументы: UI-webview и дочерний content-webview делят одно
-            // окружение WebView2 — прокси действует на оба (localhost обходит).
-            tauri::WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("DuoPulse")
-                .inner_size(1360.0, 860.0)
-                .min_inner_size(800.0, 600.0)
-                .resizable(true)
-                .additional_browser_args(&proxy_args)
-                .build()?;
+            // аргументы: UI-webview и дочерние webview вкладок делят одно
+            // окружение WebView2 — прокси действует на все (localhost обходит).
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("DuoPulse")
+            .inner_size(1360.0, 860.0)
+            .min_inner_size(800.0, 600.0)
+            .resizable(true)
+            .additional_browser_args(&proxy_args)
+            .build()?;
+            let app = app.handle().clone();
             let window: Window<tauri::Wry> =
                 app.get_window("main").expect("окно main создано выше");
 
-            // Дочерний webview с контентной частью (YouTube) — под адресной строкой.
-            let (pos, size) = content_rect(&window);
-            let content: Webview<tauri::Wry> =
-                window.add_child(build_content_webview(&proxy_args), pos, size)?;
+            // Первая вкладка (стартовый URL / DUOPULSE_START_URL) — задача 1.2.
+            app.state::<tabs::TabManager>().init(&app)?;
 
-            // Перехват сетевых запросов (WebResourceRequested) — см. install_request_blocker.
-            content.with_webview(|wv| unsafe { install_request_blocker(wv) })?;
-
-            // Ответ на вызовы аутентификации прокси (407/basic) — см. install_proxy_auth.
-            #[cfg(windows)]
-            content.with_webview(|wv| unsafe { install_proxy_auth(wv) })?;
-
-            // Держим контентный webview растянутым при изменении размера окна.
-            let window_for_events = window.clone();
+            // Все вкладки растягиваются при изменении размера окна (в т.ч.
+            // скрытые — чтобы активация не показала старую геометрию).
             window.on_window_event(move |event| {
                 if let WindowEvent::Resized(_) = event {
-                    let (pos, size) = content_rect(&window_for_events);
-                    let _ = content.set_position(pos);
-                    let _ = content.set_size(size);
+                    app.state::<tabs::TabManager>().relayout(&app);
                 }
             });
 

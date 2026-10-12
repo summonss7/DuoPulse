@@ -10,7 +10,10 @@ import type {
   ProxySettings,
   SettingsGetParams,
   SettingsSetParams,
+  TabsActivateParams,
+  TabsCloseParams,
   TabsListResult,
+  TabsOpenParams,
   VpnSetEnabledParams,
   VpnStatusResult,
 } from "./gen/types";
@@ -21,8 +24,16 @@ export const bridge = {
     version: () => invoke<BridgeVersionResult>("bridge_version"),
   },
   tabs: {
-    /** tabs.list: вкладки окна (M1: единственная — "content"). */
+    /** tabs.list: вкладки окна в порядке таб-бара. */
     list: () => invoke<TabsListResult>("tabs_list"),
+    /** tabs.open: новая вкладка (без url — стартовая), становится активной. */
+    open: (params: TabsOpenParams) => invoke<TabsListResult>("tabs_open", { params }),
+    /** tabs.close: закрыть вкладку; активной станет соседняя. */
+    close: (params: TabsCloseParams) => invoke<TabsListResult>("tabs_close", { params }),
+    /** tabs.reopen: вернуть последнюю закрытую (Ctrl+Shift+T). */
+    reopen: () => invoke<TabsListResult>("tabs_reopen"),
+    /** tabs.activate: сделать вкладку активной (клик по вкладке). */
+    activate: (params: TabsActivateParams) => invoke<TabsListResult>("tabs_activate", { params }),
   },
   nav: {
     /** nav.navigate: переход активной вкладки по URL. */
@@ -49,4 +60,15 @@ export const bridge = {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */
     restart: () => invoke<void>("app_restart"),
   },
+  /** Имена событий контракта (Core → UI) для @tauri-apps/api/event.listen. */
+  events: {
+    /** tabs.updated: снапшот списка вкладок после любого изменения. */
+    tabsUpdated: "tabs:updated",
+    /** page.loaded: документ загружен (эмит — с M3, каркас с 1.1). */
+    pageLoaded: "page:loaded",
+    /** page.video_detected: на странице найден <video> (M3; каркас с 1.1). */
+    pageVideoDetected: "page:video_detected",
+    /** vpn.state_changed: состояние маршрутизации изменилось (M6; каркас). */
+    vpnStateChanged: "vpn:state_changed",
+  } as const,
 };

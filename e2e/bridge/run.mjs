@@ -3,7 +3,7 @@
 // На реальном приложении проверяет через CDP в UI-webview:
 //   1) bridge.version — живое приложение отдаёт версию контракта;
 //   2) tabs.list — сквозной вызов UI → Core → ответ: единственная вкладка
-//      "content" с URL стартовой страницы;
+//      tab-N с URL стартовой страницы (менеджер вкладок — задача 1.2);
 //   3) nav.navigate / nav.go_back / nav.go_forward / nav.reload — навигация
 //      через bridge меняет URL вкладки (проверяется повторным tabs.list);
 //   4) settings.get / settings.set / vpn.status — прокси-словарь контракта
@@ -148,14 +148,14 @@ try {
 
   // (1) bridge.version
   const version = await evalIn(uiWs, `window.__duopulse.bridge.version()`);
-  check("bridge.version: приложение отдаёт версию контракта", version?.version === 1, JSON.stringify(version));
+  check("bridge.version: приложение отдаёт версию контракта", version?.version === 2, JSON.stringify(version));
 
   // (2) tabs.list — СКВОЗНОЙ DoD-тест: UI → Core → ответ
   const tabs = await evalIn(uiWs, `window.__duopulse.tabs.list()`);
   check(
-    "tabs.list: единственная вкладка content со стартовым URL",
+    "tabs.list: единственная вкладка со стартовым URL",
     tabs?.tabs?.length === 1 &&
-      tabs.tabs[0].id === "content" &&
+      /^tab-\d+$/.test(tabs.tabs[0].id) &&
       tabs.tabs[0].url.includes(`127.0.0.1:${HTTP_PORT}/start`) &&
       tabs.tabs[0].active === true,
     JSON.stringify(tabs),

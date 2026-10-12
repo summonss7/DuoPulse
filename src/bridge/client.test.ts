@@ -18,12 +18,17 @@ const contract = JSON.parse(
 ) as {
   version: number;
   commands: Record<string, { handler: string }>;
+  events: Record<string, unknown>;
 };
 
 // контрактное имя → [путь в клиенте, пример params]
 const cases: Record<string, { path: string[]; params?: unknown }> = {
   "bridge.version": { path: ["bridge", "version"] },
   "tabs.list": { path: ["tabs", "list"] },
+  "tabs.open": { path: ["tabs", "open"], params: {} },
+  "tabs.close": { path: ["tabs", "close"], params: { id: "tab-1" } },
+  "tabs.reopen": { path: ["tabs", "reopen"] },
+  "tabs.activate": { path: ["tabs", "activate"], params: { id: "tab-1" } },
   "nav.navigate": { path: ["nav", "navigate"], params: { url: "https://example.com/" } },
   "nav.go_back": { path: ["nav", "goBack"] },
   "nav.go_forward": { path: ["nav", "goForward"] },
@@ -72,6 +77,12 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(1);
+    expect(contract.version).toBe(2);
+  });
+
+  it("клиент знает все события контракта (listen по имени из bridge.events)", () => {
+    const eventNames = Object.values(bridge.events) as string[];
+    expect(eventNames.sort()).toEqual(Object.keys(contract.events).sort());
+    expect(new Set(eventNames).size).toBe(eventNames.length); // имена уникальны
   });
 });

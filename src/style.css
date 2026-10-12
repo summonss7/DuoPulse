@@ -1,5 +1,6 @@
-/* DuoPulse M0 — фирменная тёмная полоса адресной строки.
-   Высота = 52px — синхронизирована с TOP_BAR_HEIGHT в src-tauri/src/main.rs.
+/* DuoPulse — фирменный тёмный хром: таб-бар + адресная строка (задача 1.2).
+   Полоса хрома = 84px (таб-бар 40 + навбар 44) — синхронизировано с
+   CHROME_HEIGHT в src-tauri/src/tabs/mod.rs.
    Токены — гайд docs/06-brand-style.md §2 (сигнальные: успех/предупреждение/ошибка). */
 :root {
   --bg: #0a0e17;
@@ -14,6 +15,9 @@
   --ok: #7fe08a;
   --warn: #f5c04e;
   --err: #ff5d5d;
+  --chrome-h: 84px; /* = CHROME_HEIGHT (src-tauri/src/tabs/mod.rs) */
+  --tabbar-h: 40px;
+  --navbar-h: 44px;
 }
 * {
   box-sizing: border-box;
@@ -27,15 +31,194 @@ body {
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 #app {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 52px;
-  padding: 0 10px;
-  background: linear-gradient(180deg, var(--bg2), var(--bg));
+  position: relative;
+  display: grid;
+  grid-template-rows: var(--tabbar-h) var(--navbar-h);
+  height: var(--chrome-h);
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* --- Таб-бар (гайд 06 §2–§5: неон — акцентом, активная вкладка светится) --- */
+#tabbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px; /* сетка 4px, §5 */
+  padding: 6px 8px 0;
+  background: var(--bg); /* фон окна, §2 --bg-base */
+}
+#tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+#tabs::-webkit-scrollbar {
+  display: none;
+}
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 64px;
+  max-width: 220px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px 8px 0 0; /* контролы 8px, §5 */
+  background: var(--bg2); /* --bg-surface — панель вкладок, §2 */
+  color: var(--muted);
+  font-size: 13px; /* UI-текст 13–14px, §4 */
+  white-space: nowrap;
+  cursor: default;
+}
+.tab:hover:not(.active) {
+  /* hover нейтральный тёплый, без свечения — §3 */
+  background: color-mix(in srgb, var(--warm-2) 45%, var(--bg2));
+  color: var(--text);
+}
+.tab.active {
+  color: var(--text);
+  box-shadow: 0 0 12px rgba(189, 254, 79, 0.32); /* --glow-neon, §2 */
+}
+.tab.active::before {
+  /* активная вкладка: неоновая кромка 2px по верху, §3 */
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 8px 8px 0 0;
+  background: var(--accent);
+}
+.tab[data-loading="true"]::after {
+  /* индикатор загрузки: неоновая линия, ползущая по верху вкладки 1.2s, §3 */
+  content: "";
+  position: absolute;
+  top: 0;
+  height: 2px;
+  width: 40%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: tab-pulse 1.2s ease-in-out infinite;
+}
+@keyframes tab-pulse {
+  0% {
+    left: 0;
+    width: 20%;
+  }
+  50% {
+    left: 40%;
+    width: 40%;
+  }
+  100% {
+    left: 80%;
+    width: 20%;
+  }
+}
+.tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tab-close:hover {
+  background: var(--warm-2);
+  color: var(--text);
+}
+#newtab {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin: 0 2px 2px;
+  border: none;
+  border-radius: 8px; /* контролы 8px, §5 */
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+#newtab:hover {
+  color: var(--accent); /* иконка: muted → неон (активно), §5 */
+}
+
+/* --- Контекстное меню вкладки (панель 12px, elevated, §5) --- */
+.tab-menu {
+  position: absolute;
+  top: var(--tabbar-h);
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--elevated);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.tab-menu[hidden] {
+  /* display:flex выше перебивает UA-стиль [hidden] — возвращаем */
+  display: none;
+}
+.tab-menu button {
+  width: auto;
+  height: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.tab-menu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warm-2) 45%, transparent);
+}
+.tab-menu button:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+.tab-menu .kbd {
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+/* --- Навбар (тулбар) --- */
+#navbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: linear-gradient(180deg, var(--bg2), var(--bg));
 }
 .logo {
   font-weight: 700;
@@ -88,12 +271,9 @@ button:hover {
 }
 
 /* --- Меню «Прокси» (гайд 06: панель 12px, контролы 8px, неон — акцентом) --- */
-#app {
-  position: relative;
-}
 .proxy-menu {
   position: absolute;
-  top: 52px;
+  top: var(--chrome-h);
   right: 10px;
   z-index: 100;
   width: 344px;

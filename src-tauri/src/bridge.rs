@@ -16,17 +16,20 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, Url};
+use tauri::{AppHandle, Emitter, Url};
 
 use crate::proxy;
 
 /// Версия контракта. Несовместимое изменение схем/имён (удаление команды,
 /// смена типа поля без умолчания) — bump версии + правка потребителей в той же
 /// задаче. Совместимые расширения версию не меняют.
-pub const CONTRACT_VERSION: u32 = 1;
-
-/// UI-webview (полоса хрома) не попадает в список вкладок.
-const UI_WEBVIEW_LABEL: &str = "main";
+///
+/// v2 (задача 1.2): события переименованы `домен.событие` → `домен:событие`
+/// (page:loaded, page:video_detected, vpn:state_changed, + новое tabs:updated):
+/// tauri 2 разрешает в именах событий только alnum/`-`/`/`/`:`/`_` — точечные
+/// имена не проходили валидацию listen/emit. Команды не затронуты: в tauri
+/// идёт snake_case-хендлер из поля "handler", словарное имя в рантайме не звучит.
+pub const CONTRACT_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -38,7 +41,7 @@ pub struct BridgeVersionResult {
     pub version: u32,
 }
 
-/// tabs.list: вкладки окна. M1: единственная контентная вкладка "content".
+/// tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct TabsListResult {
     pub tabs: Vec<TabInfo>,
@@ -50,11 +53,33 @@ pub struct TabInfo {
     pub id: String,
     /// Текущий URL вкладки.
     pub url: String,
-    /// Заголовок страницы (заполнится в задаче 1.2 — таб-бар).
+    /// Заголовок страницы (пусто — до первого on_document_title_changed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// Активна ли вкладка (в M1 единственная — всегда true).
+    /// Активна ли вкладка (виден её webview).
     pub active: bool,
+    /// Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).
+    pub loading: bool,
+}
+
+/// tabs.open: открыть вкладку; без url — стартовая страница (до страницы
+/// «Новая вкладка» задачи 1.5). Новая вкладка становится активной.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TabsOpenParams {
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// tabs.close: закрыть вкладку по id; активной становится соседняя.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TabsCloseParams {
+    pub id: String,
+}
+
+/// tabs.activate: сделать вкладку активной (клик по вкладке таб-бара).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TabsActivateParams {
+    pub id: String,
 }
 
 /// nav.navigate: переход активной вкладки по URL.
@@ -133,7 +158,7 @@ pub trait BridgeEvent {
     type Payload: Serialize + JsonSchema;
 }
 
-/// page.loaded: документ загружен (M3 — детектор контента; каркас с 1.1).
+/// page:loaded: документ загружен (M3 — детектор контента; каркас с 1.1).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[allow(dead_code)]
 pub struct PageLoaded {
@@ -141,11 +166,11 @@ pub struct PageLoaded {
 }
 
 impl BridgeEvent for PageLoaded {
-    const NAME: &'static str = "page.loaded";
+    const NAME: &'static str = "page:loaded";
     type Payload = Self;
 }
 
-/// page.video_detected: на странице найден <video> (M3; каркас с 1.1).
+/// page:video_detected: на странице найден <video> (M3; каркас с 1.1).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -155,11 +180,11 @@ pub struct PageVideoDetected {
 }
 
 impl BridgeEvent for PageVideoDetected {
-    const NAME: &'static str = "page.video_detected";
+    const NAME: &'static str = "page:video_detected";
     type Payload = Self;
 }
 
-/// vpn.state_changed: состояние маршрутизации изменилось (каркас с 1.1;
+/// vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1;
 /// начнёт эмититься с локальным роутером M6, docs/02 §6).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -170,8 +195,20 @@ pub struct VpnStateChanged {
 }
 
 impl BridgeEvent for VpnStateChanged {
-    const NAME: &'static str = "vpn.state_changed";
+    const NAME: &'static str = "vpn:state_changed";
     type Payload = Self;
+}
+
+/// tabs:updated: снапшот списка вкладок после любого изменения (открытие/
+/// закрытие/переключение/переход/заголовок) — таб-бар перерисовывается им
+/// (задача 1.2).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct TabsUpdated;
+
+impl BridgeEvent for TabsUpdated {
+    const NAME: &'static str = "tabs:updated";
+    type Payload = TabsListResult;
 }
 
 /// Эмитить событие контракта в UI|Content.
@@ -203,6 +240,14 @@ pub fn contract_json() -> serde_json::Value {
                                 "result": schema!(BridgeVersionResult) },
             "tabs.list": { "handler": "tabs_list", "params": null,
                            "result": schema!(TabsListResult) },
+            "tabs.open": { "handler": "tabs_open", "params": schema!(TabsOpenParams),
+                           "result": schema!(TabsListResult) },
+            "tabs.close": { "handler": "tabs_close", "params": schema!(TabsCloseParams),
+                            "result": schema!(TabsListResult) },
+            "tabs.reopen": { "handler": "tabs_reopen", "params": null,
+                             "result": schema!(TabsListResult) },
+            "tabs.activate": { "handler": "tabs_activate", "params": schema!(TabsActivateParams),
+                               "result": schema!(TabsListResult) },
             "nav.navigate": { "handler": "nav_navigate", "params": schema!(NavNavigateParams),
                               "result": null },
             "nav.go_back": { "handler": "nav_go_back", "params": null, "result": null },
@@ -221,9 +266,10 @@ pub fn contract_json() -> serde_json::Value {
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
-            "page.loaded": { "payload": schema!(PageLoaded) },
-            "page.video_detected": { "payload": schema!(PageVideoDetected) },
-            "vpn.state_changed": { "payload": schema!(VpnStateChanged) },
+            "tabs:updated": { "payload": schema!(TabsListResult) },
+            "page:loaded": { "payload": schema!(PageLoaded) },
+            "page:video_detected": { "payload": schema!(PageVideoDetected) },
+            "vpn:state_changed": { "payload": schema!(VpnStateChanged) },
         },
     })
 }
@@ -276,6 +322,7 @@ fn event_names_match_registry() {
                 <VpnStateChanged as BridgeEvent>::NAME,
                 schema!(VpnStateChanged),
             ),
+            (<TabsUpdated as BridgeEvent>::NAME, schema!(TabsListResult)),
         ]
         .into_iter()
         .map(|(n, s)| (n, s["title"].as_str().expect("title у схемы").to_string()))
@@ -301,51 +348,99 @@ fn bridge_version() -> BridgeVersionResult {
 }
 
 #[tauri::command]
-fn tabs_list(app: AppHandle) -> Result<TabsListResult, String> {
-    let tabs = app
-        .webviews()
-        .into_iter()
-        .filter(|(label, _)| label != UI_WEBVIEW_LABEL)
-        .map(|(label, wv)| TabInfo {
-            id: label,
-            url: wv.url().map(|u| u.to_string()).unwrap_or_default(),
-            title: None,
-            active: true,
-        })
-        .collect();
-    Ok(TabsListResult { tabs })
+fn tabs_list(manager: tauri::State<'_, crate::tabs::TabManager>) -> TabsListResult {
+    manager.snapshot()
+}
+
+/// tabs.open: async — создание webview это блокирующий round-trip на главный
+/// поток, его нельзя делать на потоке цикла событий (см. tabs::open).
+#[tauri::command]
+async fn tabs_open(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: TabsOpenParams,
+) -> Result<TabsListResult, String> {
+    manager.open(&app, params.url, None)
 }
 
 #[tauri::command]
-fn nav_navigate(app: AppHandle, params: NavNavigateParams) -> Result<(), String> {
-    let webview = content_webview(&app)?;
+fn tabs_close(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: TabsCloseParams,
+) -> Result<TabsListResult, String> {
+    manager.close(&app, &params.id)
+}
+
+/// tabs.reopen: async — как tabs.open, создаёт webview.
+#[tauri::command]
+async fn tabs_reopen(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<TabsListResult, String> {
+    manager.reopen(&app)
+}
+
+#[tauri::command]
+fn tabs_activate(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: TabsActivateParams,
+) -> Result<TabsListResult, String> {
+    manager.activate(&app, &params.id)
+}
+
+#[tauri::command]
+fn nav_navigate(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: NavNavigateParams,
+) -> Result<(), String> {
+    let webview = active_webview(&app, &manager)?;
     webview
         .navigate(Url::parse(&params.url).map_err(|e| format!("некорректный URL: {e}"))?)
         .map_err(|e| format!("navigate: {e}"))
 }
 
 #[tauri::command]
-fn nav_go_back(app: AppHandle) -> Result<(), String> {
-    eval_content(&app, "history.back()")
+fn nav_go_back(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<(), String> {
+    eval_active(&app, &manager, "history.back()")
 }
 
 #[tauri::command]
-fn nav_go_forward(app: AppHandle) -> Result<(), String> {
-    eval_content(&app, "history.forward()")
+fn nav_go_forward(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<(), String> {
+    eval_active(&app, &manager, "history.forward()")
 }
 
 #[tauri::command]
-fn nav_reload(app: AppHandle) -> Result<(), String> {
-    eval_content(&app, "location.reload()")
+fn nav_reload(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<(), String> {
+    eval_active(&app, &manager, "location.reload()")
 }
 
-fn content_webview(app: &AppHandle) -> Result<tauri::Webview<tauri::Wry>, String> {
-    app.get_webview("content")
-        .ok_or_else(|| "webview content не найден".to_string())
+fn active_webview(
+    app: &AppHandle,
+    manager: &tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<tauri::Webview<tauri::Wry>, String> {
+    manager
+        .active_webview(app)
+        .ok_or_else(|| "активной вкладки нет".to_string())
 }
 
-fn eval_content(app: &AppHandle, js: &str) -> Result<(), String> {
-    content_webview(app)?
+fn eval_active(
+    app: &AppHandle,
+    manager: &tauri::State<'_, crate::tabs::TabManager>,
+    js: &str,
+) -> Result<(), String> {
+    active_webview(app, manager)?
         .eval(js)
         .map_err(|e| format!("eval: {e}"))
 }
@@ -442,6 +537,10 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
     builder.invoke_handler(tauri::generate_handler![
         bridge_version,
         tabs_list,
+        tabs_open,
+        tabs_close,
+        tabs_reopen,
+        tabs_activate,
         nav_navigate,
         nav_go_back,
         nav_go_forward,

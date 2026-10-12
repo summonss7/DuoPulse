@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 
 // Спайк M0: простой dev-сервер для UI-полосы (адресная строка).
@@ -12,5 +13,9 @@ export default defineConfig({
     target: "chrome105",
     minify: false,
     sourcemap: false,
+  },
+  test: {
+    // резервные копии backup.bat (backups/) — не исходный код, их тесты не гоняем
+    exclude: ["**/node_modules/**", "**/dist/**", "backups/**"],
   },
 });

@@ -31,7 +31,13 @@ DuoPulse — настольный браузер (Windows-first) для повс
 контракт команд/событий UI|Content ↔ Core с кодогенерацией TS-типов из Rust-типов
 (Rust → [bridge/contract.json](bridge/contract.json) → `src/bridge/gen/types.ts`,
 `npm run gen:bridge`); навигация и меню «Прокси» переведены на словарь контракта,
-сквозной прогон — [e2e/bridge/run.mjs](e2e/bridge/run.mjs). План — в
+сквозной прогон — [e2e/bridge/run.mjs](e2e/bridge/run.mjs). Готов **таб-бар с
+вкладками** (задача 1.2, карточка duopulse-012): открытие/закрытие/переключение
+вкладок (Ctrl+Tab / Ctrl+Shift+Tab), восстановление закрытой (Ctrl+Shift+T),
+контекстное меню вкладки — мульти-webview менеджер в Core
+(`src-tauri/src/tabs/`) + `src/chrome/tabbar.ts` в тёмном стиле по гайду 06;
+приёмка — [e2e/tabs/run.mjs](e2e/tabs/run.mjs) и
+[e2e/tabs/CHECKLIST.md](e2e/tabs/CHECKLIST.md). План — в
 [ROADMAP.md](ROADMAP.md).
 
 ### Запуск спайка M0
@@ -45,6 +51,8 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" npm run tau
 node e2e/proxy-a/run.mjs
 # e2e-прогон IPC-моста (сквозной tabs.list: UI → Core → ответ):
 node e2e/bridge/run.mjs
+# e2e-прогон таб-бара (вкладки, Ctrl+Tab, Ctrl+Shift+T, контекст-меню):
+node e2e/tabs/run.mjs
 # перегенерация TS-типов контракта bridge после правки Rust-типов:
 npm run gen:bridge
 ```
@@ -84,12 +92,12 @@ DuoPulse/
 ├── backup.bat              резервная копия проекта (перед серьёзными изменениями)
 ├── promt.txt               замороженный архив отчётов (новые — в CHANGELOG.md)
 ├── CARDS/                  карточки задач диспетчера
-├── src-tauri/              Rust-ядро (Tauri 2: окно, webview, COM-перехват; bridge.rs — IPC-контракт)
-├── src/                    UI-полоса (TypeScript + Vite; bridge/ — типизированный IPC-клиент)
-├── content/                content-скрипты, инжектируемые в страницы (messaging/ — словарь событий)
+├── src-tauri/              Rust-ядро (Tauri 2: окно, webview, COM-перехват; bridge.rs — IPC-контракт; tabs/ — менеджер вкладок)
+├── src/                    UI-полоса (TypeScript + Vite; chrome/ — таб-бар, bridge/ — типизированный IPC-клиент)
+├── content/                content-скрипты, инжектируемые в страницы (messaging/ — словарь событий, chrome-hotkeys.js — хоткеи таб-бара)
 ├── bridge/                 IPC-контракт: contract.json (генерится из Rust-типов)
 ├── scripts/                gen-bridge.mjs — генерация TS-типов контракта
-├── e2e/                    стенды приёмки: m0-results/ (протокол M0), proxy-a/, bridge/
+├── e2e/                    стенды приёмки: m0-results/ (протокол M0), proxy-a/, bridge/, tabs/
 ├── docs/
 │   ├── 01-concept.md       концепция, требования, сценарии
 │   ├── 02-architecture.md  архитектура и выбор стека

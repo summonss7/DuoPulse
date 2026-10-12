@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 1); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 2); регенерация: npm run gen:bridge.
 
 /**
  * settings.get / settings.set: ключи настроек профиля. M1: один ключ.
@@ -23,8 +23,11 @@ export interface DuoPulseBridgeContract {
   ProxyProto: ProxyProto;
   SettingsSetParams: SettingsSetParams;
   ProxyConfig: ProxyConfig;
+  TabsActivateParams: TabsActivateParams;
   TabsListResult: TabsListResult;
   TabInfo: TabInfo;
+  TabsCloseParams: TabsCloseParams;
+  TabsOpenParams: TabsOpenParams;
   VpnSetEnabledParams: VpnSetEnabledParams;
   VpnStatusResult: VpnStatusResult;
   ProxyState: ProxyState;
@@ -80,14 +83,20 @@ export interface ProxyConfig {
   proto?: ProxyProto & string;
 }
 /**
- * tabs.list: вкладки окна. M1: единственная контентная вкладка "content".
+ * tabs.activate: сделать вкладку активной (клик по вкладке таб-бара).
+ */
+export interface TabsActivateParams {
+  id: string;
+}
+/**
+ * tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).
  */
 export interface TabsListResult {
   tabs: TabInfo[];
 }
 export interface TabInfo {
   /**
-   * Активна ли вкладка (в M1 единственная — всегда true).
+   * Активна ли вкладка (виден её webview).
    */
   active: boolean;
   /**
@@ -95,13 +104,29 @@ export interface TabInfo {
    */
   id: string;
   /**
-   * Заголовок страницы (заполнится в задаче 1.2 — таб-бар).
+   * Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).
+   */
+  loading: boolean;
+  /**
+   * Заголовок страницы (пусто — до первого on_document_title_changed).
    */
   title?: string | null;
   /**
    * Текущий URL вкладки.
    */
   url: string;
+}
+/**
+ * tabs.close: закрыть вкладку по id; активной становится соседняя.
+ */
+export interface TabsCloseParams {
+  id: string;
+}
+/**
+ * tabs.open: открыть вкладку; без url — стартовая страница (до страницы «Новая вкладка» задачи 1.5). Новая вкладка становится активной.
+ */
+export interface TabsOpenParams {
+  url?: string | null;
 }
 /**
  * vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется.
@@ -117,20 +142,20 @@ export interface VpnStatusResult {
   state: ProxyState;
 }
 /**
- * page.loaded: документ загружен (M3 — детектор контента; каркас с 1.1).
+ * page:loaded: документ загружен (M3 — детектор контента; каркас с 1.1).
  */
 export interface PageLoaded {
   url: string;
 }
 /**
- * page.video_detected: на странице найден <video> (M3; каркас с 1.1).
+ * page:video_detected: на странице найден <video> (M3; каркас с 1.1).
  */
 export interface PageVideoDetected {
   canTracks: boolean;
   videoKey: string;
 }
 /**
- * vpn.state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).
+ * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).
  */
 export interface VpnStateChanged {
   detail: string;

@@ -216,24 +216,41 @@
       },
       "result": null
     },
-    "tabs.list": {
-      "handler": "tabs_list",
-      "params": null,
+    "tabs.activate": {
+      "handler": "tabs_activate",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "tabs.activate: сделать вкладку активной (клик по вкладке таб-бара).",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TabsActivateParams",
+        "type": "object"
+      },
       "result": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
           "TabInfo": {
             "properties": {
               "active": {
-                "description": "Активна ли вкладка (в M1 единственная — всегда true).",
+                "description": "Активна ли вкладка (виден её webview).",
                 "type": "boolean"
               },
               "id": {
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "loading": {
+                "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
+                "type": "boolean"
+              },
               "title": {
-                "description": "Заголовок страницы (заполнится в задаче 1.2 — таб-бар).",
+                "description": "Заголовок страницы (пусто — до первого on_document_title_changed).",
                 "type": [
                   "string",
                   "null"
@@ -247,12 +264,268 @@
             "required": [
               "active",
               "id",
+              "loading",
               "url"
             ],
             "type": "object"
           }
         },
-        "description": "tabs.list: вкладки окна. M1: единственная контентная вкладка \"content\".",
+        "description": "tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).",
+        "properties": {
+          "tabs": {
+            "items": {
+              "$ref": "#/definitions/TabInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "TabsListResult",
+        "type": "object"
+      }
+    },
+    "tabs.close": {
+      "handler": "tabs_close",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "tabs.close: закрыть вкладку по id; активной становится соседняя.",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TabsCloseParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TabInfo": {
+            "properties": {
+              "active": {
+                "description": "Активна ли вкладка (виден её webview).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Идентификатор webview-вкладки.",
+                "type": "string"
+              },
+              "loading": {
+                "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
+                "type": "boolean"
+              },
+              "title": {
+                "description": "Заголовок страницы (пусто — до первого on_document_title_changed).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "description": "Текущий URL вкладки.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "active",
+              "id",
+              "loading",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).",
+        "properties": {
+          "tabs": {
+            "items": {
+              "$ref": "#/definitions/TabInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "TabsListResult",
+        "type": "object"
+      }
+    },
+    "tabs.list": {
+      "handler": "tabs_list",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TabInfo": {
+            "properties": {
+              "active": {
+                "description": "Активна ли вкладка (виден её webview).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Идентификатор webview-вкладки.",
+                "type": "string"
+              },
+              "loading": {
+                "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
+                "type": "boolean"
+              },
+              "title": {
+                "description": "Заголовок страницы (пусто — до первого on_document_title_changed).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "description": "Текущий URL вкладки.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "active",
+              "id",
+              "loading",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).",
+        "properties": {
+          "tabs": {
+            "items": {
+              "$ref": "#/definitions/TabInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "TabsListResult",
+        "type": "object"
+      }
+    },
+    "tabs.open": {
+      "handler": "tabs_open",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "tabs.open: открыть вкладку; без url — стартовая страница (до страницы «Новая вкладка» задачи 1.5). Новая вкладка становится активной.",
+        "properties": {
+          "url": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "TabsOpenParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TabInfo": {
+            "properties": {
+              "active": {
+                "description": "Активна ли вкладка (виден её webview).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Идентификатор webview-вкладки.",
+                "type": "string"
+              },
+              "loading": {
+                "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
+                "type": "boolean"
+              },
+              "title": {
+                "description": "Заголовок страницы (пусто — до первого on_document_title_changed).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "description": "Текущий URL вкладки.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "active",
+              "id",
+              "loading",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).",
+        "properties": {
+          "tabs": {
+            "items": {
+              "$ref": "#/definitions/TabInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "TabsListResult",
+        "type": "object"
+      }
+    },
+    "tabs.reopen": {
+      "handler": "tabs_reopen",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TabInfo": {
+            "properties": {
+              "active": {
+                "description": "Активна ли вкладка (виден её webview).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Идентификатор webview-вкладки.",
+                "type": "string"
+              },
+              "loading": {
+                "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
+                "type": "boolean"
+              },
+              "title": {
+                "description": "Заголовок страницы (пусто — до первого on_document_title_changed).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "description": "Текущий URL вкладки.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "active",
+              "id",
+              "loading",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).",
         "properties": {
           "tabs": {
             "items": {
@@ -386,10 +659,10 @@
     }
   },
   "events": {
-    "page.loaded": {
+    "page:loaded": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "page.loaded: документ загружен (M3 — детектор контента; каркас с 1.1).",
+        "description": "page:loaded: документ загружен (M3 — детектор контента; каркас с 1.1).",
         "properties": {
           "url": {
             "type": "string"
@@ -402,10 +675,10 @@
         "type": "object"
       }
     },
-    "page.video_detected": {
+    "page:video_detected": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "page.video_detected: на странице найден <video> (M3; каркас с 1.1).",
+        "description": "page:video_detected: на странице найден <video> (M3; каркас с 1.1).",
         "properties": {
           "canTracks": {
             "type": "boolean"
@@ -422,7 +695,62 @@
         "type": "object"
       }
     },
-    "vpn.state_changed": {
+    "tabs:updated": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TabInfo": {
+            "properties": {
+              "active": {
+                "description": "Активна ли вкладка (виден её webview).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Идентификатор webview-вкладки.",
+                "type": "string"
+              },
+              "loading": {
+                "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
+                "type": "boolean"
+              },
+              "title": {
+                "description": "Заголовок страницы (пусто — до первого on_document_title_changed).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "description": "Текущий URL вкладки.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "active",
+              "id",
+              "loading",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).",
+        "properties": {
+          "tabs": {
+            "items": {
+              "$ref": "#/definitions/TabInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "TabsListResult",
+        "type": "object"
+      }
+    },
+    "vpn:state_changed": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
@@ -452,7 +780,7 @@
             ]
           }
         },
-        "description": "vpn.state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).",
+        "description": "vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).",
         "properties": {
           "detail": {
             "type": "string"
@@ -470,5 +798,5 @@
       }
     }
   },
-  "version": 1
+  "version": 2
 }
