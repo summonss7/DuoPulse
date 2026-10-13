@@ -1,7 +1,15 @@
 //! Менеджер вкладок Core (задача 1.2, docs/02 §3, docs/05 §1–2): жизненный
 //! цикл WebView2-инстансов «одна вкладка = один дочерний webview» под полосой
 //! хрома, порядок/активная вкладка/стек закрытых для восстановления.
-//! Спящий режим (M2) и восстановление сессии (задача 1.6) добавятся сюда же.
+//! Спящий режим (M2) добавится сюда же.
+//!
+//! Восстановление сессии (задача 1.6, docs/04 §1.3 «отложенная активация»):
+//! список вкладок сохраняется в профиль при каждом изменении и при выходе
+//! (session.json, `session`-модуль); на старте таб-бар восстанавливается весь,
+//! но webview создаётся только для активной — остальные стоят в баре лениво
+//! (`TabEntry::lazy`) и материализуются при первом обращении (activate/
+//! navigate). DUOPULSE_START_URL (e2e-стенды) отключает сессию — старт
+//! детерминирован.
 //!
 //! Взаимодействие UI — только через команды/события контракта bridge
 //! (`tabs.{open, close, reopen, activate, list}`, событие `tabs:updated`);
@@ -21,6 +29,8 @@
 //! страниц пишет HistoryStore.visit; заголовок страницы (on_title)
 //! подтягивает note_title.
 
+mod session;
+
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
@@ -30,6 +40,7 @@ use tauri::{
 };
 
 use crate::bridge::{emit, TabInfo, TabsListResult, TabsUpdated};
+use crate::tabs::session::{Session, SessionTab};
 
 /// Высота полосы хрома в логических пикселях: таб-бар + навбар.
 /// Синхронизирована с #app (grid-template-rows) в src/style.css.
@@ -83,6 +94,10 @@ struct TabEntry {
     loading: bool,
     /// Внутренняя страница duopulse:// (см. модульный комментарий).
     internal: bool,
+    /// Ленивая вкладка восстановленной сессии (задача 1.6): стоит в баре с
+    /// сохранённым URL/заголовком, webview ещё не создан — появится при
+    /// первом обращении (materialize).
+    lazy: bool,
 }
 
 impl TabEntry {
@@ -131,10 +146,154 @@ impl TabManager {
         app.get_webview(&id)
     }
 
-    /// Первая вкладка приложения (вызывается из setup окна).
+    /// Первая вкладка приложения (вызывается из setup окна): восстановление
+    /// сессии из профиля (задача 1.6) либо стартовая страница. DUOPULSE_START_URL
+    /// (e2e-стенды) сессию игнорирует — старт детерминирован.
+    ///
+    /// Восстановление вставляет только записи вкладок (бар отрисовывается
+    /// сразу), webview активной создаёт задача по сигналу цикла событий
+    /// (main.rs, RunEvent::Ready): создание webview на главном потоке до
+    /// старта цикла и в первые его мгновения — гонка с дедлоком
+    /// (add_child → wait_with_pump цикла, который ещё не качает сообщения).
     pub fn init(&self, app: &AppHandle) -> Result<(), String> {
-        self.spawn_tab(app, default_tab_url(), None)?;
+        let restore = if std::env::var("DUOPULSE_START_URL").is_err() {
+            session::load(&crate::proxy::profile_dir())
+        } else {
+            None
+        };
+        match restore {
+            Some(session) => self.restore_entries(session),
+            // свежий старт — путь задач 1.2–1.5 (внутри setup, им прошёл весь
+            // e2e-парк); сессии нет — гонка восстановления его не касается
+            None => {
+                self.spawn_tab(app, default_tab_url(), None)?;
+            }
+        }
         Ok(())
+    }
+
+    /// Материализовать активную вкладку восстановленной сессии фоновой
+    /// задачей (RunEvent::Ready в main.rs + короткая пауза на прогрев цикла
+    /// событий). Сессии нет/активная не ленивая — no-op.
+    pub fn spawn_restore_materialize(&self, app: &AppHandle) {
+        if !self.has_lazy_active() {
+            return;
+        }
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let manager = app.state::<TabManager>();
+            if let Err(e) = manager.materialize_active(&app) {
+                eprintln!("session: материализация активной вкладки: {e}");
+            }
+        });
+    }
+
+    /// Есть ли ленивая активная вкладка (старт с восстановлением сессии).
+    fn has_lazy_active(&self) -> bool {
+        let st = self.state.lock().expect("tabs: лок не отравлен");
+        st.active.is_some_and(|i| st.tabs[i].lazy)
+    }
+
+    /// Восстановление сессии: все вкладки встают в бар лениво (записи без
+    /// webview с сохранёнными URL/заголовками); активную материализует задача,
+    /// порождённая init (материализация — только из async-контекста, см. open).
+    fn restore_entries(&self, session: Session) {
+        let mut st = self.state.lock().expect("tabs: лок не отравлен");
+        for tab in &session.tabs {
+            st.next_seq += 1;
+            let seq = st.next_seq;
+            let internal = internal_page_name(
+                &Url::parse(&tab.url).expect("session::load гарантирует разбираемый URL вкладки"),
+            );
+            let id =
+                internal.map_or_else(|| format!("tab-{seq}"), |name| format!("page-{name}-{seq}"));
+            st.tabs.push(TabEntry {
+                id,
+                url: tab.url.clone(),
+                title: tab.title.clone(),
+                loading: false,
+                internal: internal.is_some(),
+                lazy: true,
+            });
+        }
+        // session::load зажимает active в границы; None там не бывает
+        st.active = Some(session.active.unwrap_or(0));
+    }
+
+    /// Материализация ленивой вкладки: webview создаётся по её сохранённому
+    /// URL (id назначен при восстановлении). Не-lazy вкладка — no-op.
+    /// Вызывать только вне потока цикла событий (см. open): из async-команд
+    /// или setup.
+    pub fn materialize(&self, app: &AppHandle, id: &str) -> Result<(), String> {
+        let url = {
+            let st = self.state.lock().expect("tabs: лок не отравлен");
+            let entry = st
+                .tabs
+                .iter()
+                .find(|t| t.id == id)
+                .ok_or_else(|| format!("вкладка {id} не найдена"))?;
+            if !entry.lazy {
+                return Ok(());
+            }
+            entry.url.clone()
+        };
+        let parsed =
+            Url::parse(&url).map_err(|e| format!("некорректный URL вкладки «{url}»: {e}"))?;
+        let internal = internal_page_name(&parsed).is_some();
+        self.spawn_webview(app, id, &parsed, internal)?;
+        {
+            let mut st = self.state.lock().expect("tabs: лок не отравлен");
+            if let Some(entry) = st.tabs.iter_mut().find(|t| t.id == id) {
+                entry.lazy = false;
+            }
+            // Лок обязан быть снят до apply_visibility/finish: обе берут тот же
+            // Mutex, а std::sync::Mutex нереентерабелен — удержание лока здесь
+            // намертво вешало поток (и с ним главный поток в on_page_load).
+        }
+        self.apply_visibility(app);
+        Ok(())
+    }
+
+    /// Материализовать активную вкладку, если она ленивая (nav.navigate и
+    /// активации по кольцу из async-контекста).
+    pub fn materialize_active(&self, app: &AppHandle) -> Result<(), String> {
+        let id = {
+            let st = self.state.lock().expect("tabs: лок не отравлен");
+            st.active.map(|i| st.tabs[i].id.clone())
+        };
+        match id {
+            Some(id) => self.materialize(app, &id),
+            None => Ok(()),
+        }
+    }
+
+    /// nav.navigate активной вкладки: у ленивой вкладки webview ещё нет —
+    /// новый URL подставляется в запись, и webview создаётся под него фоновой
+    /// задачей (без двойной загрузки и без ожидания командой — см. activate).
+    pub fn navigate_active(&self, app: &AppHandle, url: &Url) -> Result<(), String> {
+        {
+            let mut st = self.state.lock().expect("tabs: лок не отравлен");
+            let active = st.active.ok_or("активной вкладки нет")?;
+            let entry = &mut st.tabs[active];
+            if entry.lazy {
+                entry.url = url.to_string();
+                entry.internal = internal_page_name(url).is_some();
+                drop(st);
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let manager = app.state::<TabManager>();
+                    if let Err(e) = manager.materialize_active(&app) {
+                        eprintln!("tabs: материализация для navigate: {e}");
+                    }
+                });
+                return Ok(());
+            }
+        }
+        let webview = self.active_webview(app).ok_or("активной вкладки нет")?;
+        webview
+            .navigate(url.clone())
+            .map_err(|e| format!("navigate: {e}"))
     }
 
     /// tabs.open: новая вкладка, становится активной (как в браузерах).
@@ -189,13 +348,14 @@ impl TabManager {
             wv.close().map_err(|e| format!("close webview: {e}"))?;
         }
         self.apply_visibility(app);
-        let snapshot = self.snapshot();
-        emit::<TabsUpdated>(app, &snapshot).ok();
-        Ok(snapshot)
+        Ok(self.finish(app))
     }
 
     /// tabs.activate / клик по вкладке: показать webview активной, скрыть
-    /// остальные, фокус — в контент.
+    /// остальные, фокус — в контент. Ленивая вкладка сессии (задача 1.6)
+    /// становится активной сразу (бар переключается), её webview создаёт
+    /// вызывающая async-команда (materialize) — webview-создание нельзя
+    /// делать на потоке цикла событий.
     pub fn activate(&self, app: &AppHandle, id: &str) -> Result<TabsListResult, String> {
         {
             let mut st = self.state.lock().expect("tabs: лок не отравлен");
@@ -210,9 +370,7 @@ impl TabManager {
         if let Some(wv) = self.active_webview(app) {
             wv.set_focus().ok();
         }
-        let snapshot = self.snapshot();
-        emit::<TabsUpdated>(app, &snapshot).ok();
-        Ok(snapshot)
+        Ok(self.finish(app))
     }
 
     /// Переключение по кольцу (Ctrl+Tab / Ctrl+Shift+Tab).
@@ -233,11 +391,21 @@ impl TabManager {
     /// → WebMessageReceived, main.rs) и из UI (src/chrome/tabbar.ts).
     pub fn handle_hotkey(&self, app: &AppHandle, key: &str) {
         match key {
-            "ctrl+tab" => {
-                self.cycle(app, 1).ok();
-            }
-            "ctrl+shift+tab" => {
-                self.cycle(app, -1).ok();
+            // Переключение по кольцу: активация может материализовать ленивую
+            // вкладку сессии (задача 1.6) — создание webview допустимо только
+            // вне потока цикла событий (см. open), как у ctrl+shift+t.
+            "ctrl+tab" | "ctrl+shift+tab" => {
+                let step = if key == "ctrl+tab" { 1 } else { -1 };
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let manager = app.state::<TabManager>();
+                    if let Err(e) = manager
+                        .cycle(&app, step)
+                        .and_then(|_| manager.materialize_active(&app))
+                    {
+                        eprintln!("tabs: cycle: {e}");
+                    }
+                });
             }
             // Создание webview — только вне главного потока (см. open).
             "ctrl+shift+t" => {
@@ -251,6 +419,14 @@ impl TabManager {
             }
             _ => {}
         }
+    }
+
+    /// Активная вкладка ещё без webview (ленивая, задача 1.6)? Навигационным
+    /// командам «назад/вперёд/обновить» по ленивой вкладке нечего делать —
+    /// документа и истории ещё не существует.
+    pub fn active_is_lazy(&self) -> bool {
+        let st = self.state.lock().expect("tabs: лок не отравлен");
+        st.active.is_some_and(|i| st.tabs[i].lazy)
     }
 
     /// Подгонка всех webview вкладок под размер окна (событие Resized):
@@ -280,45 +456,57 @@ impl TabManager {
         url: String,
         position: Option<usize>,
     ) -> Result<TabsListResult, String> {
-        let window = app
-            .get_window("main")
-            .ok_or_else(|| "окно main не найдено".to_string())?;
         let parsed =
             Url::parse(&url).map_err(|e| format!("некорректный URL вкладки «{url}»: {e}"))?;
         let internal = internal_page_name(&parsed);
 
-        let builder = {
+        let id = {
             let mut st = self.state.lock().expect("tabs: лок не отравлен");
             st.next_seq += 1;
             let seq = st.next_seq;
-            let (id, builder) = if let Some(name) = internal {
-                (
-                    format!("page-{name}-{seq}"),
-                    build_page_webview(&format!("page-{name}-{seq}")),
-                )
-            } else {
-                (
-                    format!("tab-{seq}"),
-                    build_tab_webview(app, &format!("tab-{seq}"), &parsed),
-                )
-            };
+            let id =
+                internal.map_or_else(|| format!("tab-{seq}"), |name| format!("page-{name}-{seq}"));
             let index = position.unwrap_or(st.tabs.len()).min(st.tabs.len());
             st.tabs.insert(
                 index,
                 TabEntry {
-                    id,
+                    id: id.clone(),
                     // канонический адрес: для внутренних страниц Url сериализует
                     // «duopulse://history» как «duopulse://history/»
                     url: parsed.to_string(),
                     title: None,
                     loading: false,
                     internal: internal.is_some(),
+                    lazy: false,
                 },
             );
             st.active = Some(index);
-            builder
+            id
         };
 
+        self.spawn_webview(app, &id, &parsed, internal.is_some())?;
+        self.apply_visibility(app);
+        Ok(self.finish(app))
+    }
+
+    /// Создание webview по назначенному id вкладки (общая часть spawn_tab и
+    /// materialize). Вызывать только вне потока цикла событий: add_child —
+    /// блокирующий round-trip на главный поток (см. open).
+    fn spawn_webview(
+        &self,
+        app: &AppHandle,
+        id: &str,
+        url: &Url,
+        internal: bool,
+    ) -> Result<(), String> {
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "окно main не найдено".to_string())?;
+        let builder = if internal {
+            build_page_webview(id)
+        } else {
+            build_tab_webview(app, id, url)
+        };
         let webview = {
             let (pos, size) = content_rect(&window);
             window
@@ -334,11 +522,46 @@ impl TabManager {
                 crate::install_content_handlers(wv, &app_for_handlers)
             })
             .map_err(|e| format!("установка обработчиков вкладки: {e}"))?;
+        Ok(())
+    }
 
-        self.apply_visibility(app);
+    /// Финал любой мутации списка вкладок: снапшот, сохранение сессии
+    /// (задача 1.6), событие таб-бару.
+    fn finish(&self, app: &AppHandle) -> TabsListResult {
         let snapshot = self.snapshot();
+        self.persist_session();
         emit::<TabsUpdated>(app, &snapshot).ok();
-        Ok(snapshot)
+        snapshot
+    }
+
+    /// Сохранить сессию в профиль (session.json). Сессия некритична: ошибка
+    /// записи логируется, работа браузера продолжается. DUOPULSE_START_URL
+    /// (e2e-стенды) — не сохранять, чтобы стенды не мутировали профили.
+    pub(crate) fn persist_session(&self) {
+        if std::env::var("DUOPULSE_START_URL").is_ok() {
+            return;
+        }
+        let (tabs, active) = {
+            let st = self.state.lock().expect("tabs: лок не отравлен");
+            (
+                st.tabs
+                    .iter()
+                    .map(|t| SessionTab {
+                        url: t.url.clone(),
+                        title: t.title.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+                st.active,
+            )
+        };
+        let session = Session {
+            tabs,
+            active,
+            saved_at: now_ms(),
+        };
+        if let Err(e) = session::save(&crate::proxy::profile_dir(), &session) {
+            eprintln!("session: не сохранена: {e}");
+        }
     }
 
     /// Показать webview активной вкладки, скрыть остальные.
@@ -379,8 +602,7 @@ impl TabManager {
         if entry.internal && is_app_origin(app, url) {
             entry.loading = matches!(event, PageLoadEvent::Started);
             drop(st);
-            let snapshot = self.snapshot();
-            emit::<TabsUpdated>(app, &snapshot).ok();
+            self.finish(app);
             return;
         }
         if entry.internal {
@@ -402,8 +624,7 @@ impl TabManager {
                 eprintln!("history: визит не записан ({visit_url}): {e}");
             }
         }
-        let snapshot = self.snapshot();
-        emit::<TabsUpdated>(app, &snapshot).ok();
+        self.finish(app);
     }
 
     /// on_document_title_changed: заголовок вкладки для таб-бара и последнего
@@ -431,9 +652,16 @@ impl TabManager {
                 eprintln!("history: заголовок не обновлён ({url}): {e}");
             }
         }
-        let snapshot = self.snapshot();
-        emit::<TabsUpdated>(app, &snapshot).ok();
+        self.finish(app);
     }
+}
+
+/// Текущее время, unix-ms (метка сохранения сессии, задача 1.6).
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Внутренние страницы duopulse:// (задача 1.4): адрес → имя страницы.

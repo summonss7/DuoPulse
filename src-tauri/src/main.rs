@@ -2,7 +2,9 @@
 // Внешний прокси SOCKS5/HTTP(S) — задача 1.8 этапа M1 (карточка duopulse-009).
 // IPC-контракт bridge (команды/события UI|Content ↔ Core) — задача 1.1,
 // реализация и регистрация команд — src/bridge.rs (docs/05 §1–2).
-// Менеджер вкладок (мульти-webview, таб-бар) — задача 1.2, src/tabs/.
+// Менеджер вкладок (мульти-webview, таб-бар) — задача 1.2, src/tabs/;
+// восстановление сессии (ленивое, session.json в профиле) — задача 1.6,
+// src/tabs/session.rs: сохранение при каждой мутации и при выходе (RunEvent).
 //
 // Архитектура (docs/02-architecture.md, слои Shell/UI):
 //   окно "main"
@@ -228,7 +230,6 @@ fn main() {
             let app = app.handle().clone();
             let window: Window<tauri::Wry> =
                 app.get_window("main").expect("окно main создано выше");
-
             // Первая вкладка (стартовый URL / DUOPULSE_START_URL) — задача 1.2.
             app.state::<tabs::TabManager>().init(&app)?;
 
@@ -242,6 +243,23 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("ошибка запуска DuoPulse");
+        .build(tauri::generate_context!())
+        .expect("ошибка сборки DuoPulse")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                // Сохранение сессии при выходе (задача 1.6): при закрытии окна
+                // (ExitRequested) и на финальном Exit (в т.ч. после app.restart).
+                // Запись идемпотентна — менеджер вкладок в момент выхода ещё жив,
+                // состояние списка не меняется между событиями.
+                app.state::<tabs::TabManager>().persist_session();
+            }
+            if let tauri::RunEvent::Ready = event {
+                // Восстановление сессии (задача 1.6): webview активной вкладки
+                // создаётся только когда цикл событий гарантированно качает
+                // сообщения (в setup и первые его мгновения — гонка с дедлоком
+                // создания webview, см. tabs::init).
+                app.state::<tabs::TabManager>()
+                    .spawn_restore_materialize(app);
+            }
+        });
 }

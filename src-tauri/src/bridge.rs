@@ -16,7 +16,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Url};
+use tauri::{AppHandle, Emitter, Manager, Url};
 
 use crate::proxy;
 
@@ -591,25 +591,42 @@ async fn tabs_reopen(
     manager.reopen(&app)
 }
 
+/// tabs.activate: смена активной — состояние сразу (бар переключается),
+/// webview ленивой вкладки создаёт фоновая задача (паттерн reopen —
+/// создание webview не ждётся командой: add_child на горячем цикле событий
+/// бывает медленным, команда обязана отвечать мгновенно).
 #[tauri::command]
-fn tabs_activate(
+async fn tabs_activate(
     app: AppHandle,
     manager: tauri::State<'_, crate::tabs::TabManager>,
     params: TabsActivateParams,
 ) -> Result<TabsListResult, String> {
-    manager.activate(&app, &params.id)
+    let snapshot = manager.activate(&app, &params.id)?;
+    let app = app.clone();
+    let id = params.id;
+    tauri::async_runtime::spawn(async move {
+        let manager = app.state::<crate::tabs::TabManager>();
+        if let Err(e) = manager.materialize(&app, &id) {
+            eprintln!("tabs: материализация {id}: {e}");
+            return;
+        }
+        if let Some(wv) = manager.active_webview(&app) {
+            wv.set_focus().ok();
+        }
+    });
+    Ok(snapshot)
 }
 
+/// nav.navigate: async — переход в ленивой вкладке сессии (задача 1.6)
+/// создаёт webview (round-trip на главный поток — только из async-контекста).
 #[tauri::command]
-fn nav_navigate(
+async fn nav_navigate(
     app: AppHandle,
     manager: tauri::State<'_, crate::tabs::TabManager>,
     params: NavNavigateParams,
 ) -> Result<(), String> {
-    let webview = active_webview(&app, &manager)?;
-    webview
-        .navigate(Url::parse(&params.url).map_err(|e| format!("некорректный URL: {e}"))?)
-        .map_err(|e| format!("navigate: {e}"))
+    let url = Url::parse(&params.url).map_err(|e| format!("некорректный URL: {e}"))?;
+    manager.navigate_active(&app, &url)
 }
 
 #[tauri::command]
@@ -768,9 +785,13 @@ fn eval_active(
     manager: &tauri::State<'_, crate::tabs::TabManager>,
     js: &str,
 ) -> Result<(), String> {
-    active_webview(app, manager)?
-        .eval(js)
-        .map_err(|e| format!("eval: {e}"))
+    match manager.active_webview(app) {
+        // Ленивая вкладка сессии (задача 1.6): документа и истории ещё нет —
+        // back/forward/reload по ней нечего делать, это не ошибка.
+        None if manager.active_is_lazy() => Ok(()),
+        None => Err("активной вкладки нет".to_string()),
+        Some(wv) => wv.eval(js).map_err(|e| format!("eval: {e}")),
+    }
 }
 
 #[tauri::command]
