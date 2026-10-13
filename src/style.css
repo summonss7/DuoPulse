@@ -1,58 +1,59 @@
-/* DuoPulse — фирменный тёмный хром: таб-бар + адресная строка (задача 1.2).
+/* DuoPulse — фирменный тёмный хром (задача 1.5, гайд docs/06-brand-style.md).
+   Все токены (палитра/свет/типографика/форма) — src/theme/tokens.css, шрифты —
+   src/theme/fonts.css; здесь только компоновка экранов. Правила: неон — только
+   акценты (≤5% площади), hover нейтральный тёплый без свечения, свечение =
+   «включено» (активная вкладка/фокус), тени заменены «плашками» поверх светлее.
    Полоса хрома = 84px (таб-бар 40 + навбар 44) — синхронизировано с
-   CHROME_HEIGHT в src-tauri/src/tabs/mod.rs.
-   Токены — гайд docs/06-brand-style.md §2 (сигнальные: успех/предупреждение/ошибка). */
-:root {
-  --bg: #0a0e17;
-  --bg2: #111d2b;
-  --accent: #bdfe4f;
-  --text: #e8f0f8;
-  --line: #223247;
-  --elevated: #1d282b; /* --bg-elevated, гайд 06 §2 */
-  --warm: #37302a; /* --bg-warm */
-  --warm-2: #555138; /* --bg-warm-2 */
-  --muted: #96a0a8; /* --text-muted */
-  --ok: #7fe08a;
-  --warn: #f5c04e;
-  --err: #ff5d5d;
-  --chrome-h: 84px; /* = CHROME_HEIGHT (src-tauri/src/tabs/mod.rs) */
-  --tabbar-h: 40px;
-  --navbar-h: 44px;
-}
+   CHROME_HEIGHT в src-tauri/src/tabs/mod.rs. */
 * {
   box-sizing: border-box;
+}
+button,
+input,
+select {
+  font: inherit; /* контролы наследуют Inter/моно по месту, не UA-шрифт */
 }
 html,
 body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--bg);
-  font-family: "Segoe UI", system-ui, sans-serif;
+  background: var(--bg-base);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--lh-ui);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+:root {
+  /* метрики хрома (не дизайн-токены): синхронизированы с CHROME_HEIGHT */
+  --chrome-h: 84px;
+  --tabbar-h: 40px;
+  --navbar-h: 44px;
 }
 #app {
   position: relative;
   display: grid;
   grid-template-rows: var(--tabbar-h) var(--navbar-h);
   height: var(--chrome-h);
-  background: var(--bg);
+  background: var(--bg-base);
   border-bottom: 1px solid var(--line);
   -webkit-user-select: none;
   user-select: none;
 }
 
-/* --- Таб-бар (гайд 06 §2–§5: неон — акцентом, активная вкладка светится) --- */
+/* --- Таб-бар (§2–§5: неон — акцентом, активная вкладка светится) --- */
 #tabbar {
   display: flex;
   align-items: flex-end;
-  gap: 4px; /* сетка 4px, §5 */
+  gap: var(--gap-1);
   padding: 6px 8px 0;
-  background: var(--bg); /* фон окна, §2 --bg-base */
+  background: var(--bg-base);
 }
 #tabs {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
+  gap: var(--gap-1);
   flex: 1;
   min-width: 0;
   overflow-x: auto;
@@ -72,21 +73,20 @@ body {
   max-width: 220px;
   height: 30px;
   padding: 0 8px;
-  border-radius: 8px 8px 0 0; /* контролы 8px, §5 */
-  background: var(--bg2); /* --bg-surface — панель вкладок, §2 */
-  color: var(--muted);
-  font-size: 13px; /* UI-текст 13–14px, §4 */
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  background: var(--bg-surface);
+  color: var(--text-muted);
   white-space: nowrap;
   cursor: default;
 }
 .tab:hover:not(.active) {
   /* hover нейтральный тёплый, без свечения — §3 */
-  background: color-mix(in srgb, var(--warm-2) 45%, var(--bg2));
-  color: var(--text);
+  background: color-mix(in srgb, var(--bg-warm-2) 45%, var(--bg-surface));
+  color: var(--text-primary);
 }
 .tab.active {
-  color: var(--text);
-  box-shadow: 0 0 12px rgba(189, 254, 79, 0.32); /* --glow-neon, §2 */
+  color: var(--text-primary);
+  box-shadow: var(--glow-neon); /* мягкое свечение активного, §2 */
 }
 .tab.active::before {
   /* активная вкладка: неоновая кромка 2px по верху, §3 */
@@ -96,8 +96,8 @@ body {
   left: 0;
   right: 0;
   height: 2px;
-  border-radius: 8px 8px 0 0;
-  background: var(--accent);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  background: var(--accent-neon);
 }
 .tab[data-loading="true"]::after {
   /* индикатор загрузки: неоновая линия, ползущая по верху вкладки 1.2s, §3 */
@@ -107,7 +107,7 @@ body {
   height: 2px;
   width: 40%;
   border-radius: 2px;
-  background: var(--accent);
+  background: var(--accent-neon);
   animation: tab-pulse 1.2s ease-in-out infinite;
 }
 @keyframes tab-pulse {
@@ -132,40 +132,45 @@ body {
 }
 .tab-close {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 18px;
   height: 18px;
   padding: 0;
   border: none;
   border-radius: 4px;
   background: none;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1;
+  color: var(--text-muted);
   cursor: pointer;
 }
 .tab-close:hover {
-  background: var(--warm-2);
-  color: var(--text);
+  background: var(--bg-warm-2);
+  color: var(--text-primary);
 }
 #newtab {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
   margin: 0 2px 2px;
   border: none;
-  border-radius: 8px; /* контролы 8px, §5 */
+  border-radius: var(--radius-control);
   background: none;
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
+  color: var(--text-muted);
   cursor: pointer;
 }
 #newtab:hover {
-  color: var(--accent); /* иконка: muted → неон (активно), §5 */
+  background: var(--hover-neutral);
+  color: var(--text-primary);
 }
 
-/* --- Контекстное меню вкладки (панель 12px, elevated, §5) --- */
-.tab-menu {
+/* --- Контекстное меню вкладки и главное меню (панель 12px, elevated, §5) ---
+   «Плашки вместо теней» (§5): панель светлее фона + деликатная тёплая граница. */
+.tab-menu,
+.main-menu {
   position: absolute;
   top: var(--tabbar-h);
   z-index: 110;
@@ -173,16 +178,22 @@ body {
   flex-direction: column;
   min-width: 220px;
   padding: 6px;
-  border-radius: 12px;
-  background: var(--elevated);
-  border: 1px solid var(--line);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
 }
-.tab-menu[hidden] {
+.main-menu {
+  top: var(--chrome-h); /* открывается из навбара — под полосой хрома */
+  right: 8px;
+  min-width: 240px;
+}
+.tab-menu[hidden],
+.main-menu[hidden] {
   /* display:flex выше перебивает UA-стиль [hidden] — возвращаем */
   display: none;
 }
-.tab-menu button {
+.tab-menu button,
+.main-menu button {
   width: auto;
   height: auto;
   display: flex;
@@ -191,25 +202,32 @@ body {
   gap: 12px;
   padding: 7px 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: none;
-  color: var(--text);
-  font-size: 13px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
 }
-.tab-menu button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--warm-2) 45%, transparent);
+.tab-menu button:hover:not(:disabled),
+.main-menu button:hover {
+  background: var(--hover-neutral);
 }
 .tab-menu button:disabled {
-  color: var(--muted);
+  color: var(--text-muted);
   opacity: 0.5;
   cursor: default;
 }
-.tab-menu .kbd {
-  color: var(--muted);
+.tab-menu .kbd,
+.main-menu .kbd {
+  color: var(--text-muted);
   font-size: 11px;
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--font-mono);
+}
+.menu-sep {
+  height: 1px;
+  margin: 6px 8px;
+  background: var(--line-soft);
 }
 
 /* --- Навбар (тулбар) --- */
@@ -219,55 +237,91 @@ body {
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  background: linear-gradient(180deg, var(--bg2), var(--bg));
+  background: var(--bg-surface); /* слоистость base → surface, §5 */
 }
 .logo {
+  font-family: var(--font-logo); /* логотип — Space Grotesk, §4 */
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--text-md);
   letter-spacing: 0.4px;
-  color: var(--text);
+  color: var(--text-primary);
   margin-right: 4px;
 }
 .logo span {
-  color: var(--accent);
-  text-shadow: 0 0 8px rgba(189, 254, 79, 0.45);
+  color: var(--accent-neon); /* «Pulse» — неон, §4; без свечения — §8 */
 }
-button {
+/* Иконки-кнопки (§3/§5): линейные 16px, покой muted, hover нейтральный тёплый,
+   свечение — только фокус. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   width: 30px;
   height: 30px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: #0d1622;
-  color: var(--text);
-  font-size: 14px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-muted);
   cursor: pointer;
 }
-button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+.icon-btn svg {
+  display: block;
+}
+.icon-btn:hover {
+  background: var(--hover-neutral);
+  color: var(--text-primary);
+}
+.icon-btn:active {
+  color: var(--accent-neon); /* нажатие — краткий неон-акцент */
+}
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-soft);
 }
 #omnibox {
   flex: 1;
+  min-width: 0;
   height: 32px;
-  border-radius: 16px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--line);
-  background: #0d1622;
-  color: var(--text);
-  padding: 0 14px;
-  font-size: 13px;
+  background: var(--bg-base); /* поле ввода темнее surface — слоистость §5 */
+  color: var(--text-primary);
+  padding: 0 12px;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono); /* адреса — JetBrains Mono, §4 */
   outline: none;
 }
+#omnibox::placeholder {
+  color: var(--text-muted);
+}
 #omnibox:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(189, 254, 79, 0.15);
+  border-color: var(--accent-neon); /* фокус ввода: неон-контур + свечение, §3 */
+  box-shadow: var(--focus-ring);
 }
 .go {
+  flex: none;
   width: auto;
+  height: 30px;
   padding: 0 12px;
-  font-size: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.go:hover {
+  background: var(--hover-neutral);
+  border-color: var(--line);
+}
+.go:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-soft);
 }
 
-/* --- Подсказки omnibox (задача 1.3; гайд 06: панель 12px, elevated, §5) --- */
+/* --- Подсказки omnibox (панель 12px, elevated, §5) --- */
 .suggest {
   position: absolute;
   top: 100%;
@@ -277,10 +331,9 @@ button:hover {
   max-height: 328px;
   overflow-y: auto;
   padding: 6px;
-  border-radius: 12px;
-  background: var(--elevated);
-  border: 1px solid var(--line);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
 }
 .suggest[hidden] {
   display: none;
@@ -290,9 +343,9 @@ button:hover {
   align-items: center;
   gap: 10px;
   padding: 7px 10px;
-  border-radius: 8px; /* контролы 8px, §5 */
-  color: var(--text);
-  font-size: 13px; /* UI-текст 13–14px, §4 */
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
   white-space: nowrap;
   cursor: default;
 }
@@ -302,7 +355,7 @@ button:hover {
   align-items: center;
   width: 16px;
   height: 16px;
-  color: var(--muted); /* иконка: muted, активно — неон, §5 */
+  color: var(--text-muted); /* иконка: muted, активно — неон, §5 */
 }
 .suggest-item .main {
   flex: 1;
@@ -315,35 +368,23 @@ button:hover {
   max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
+  font-family: var(--font-mono); /* адрес страницы подсказки — моно, §4 */
 }
 /* строка-действие: акцент неоном (что сделает Enter) */
 .suggest-item[data-kind="action-search"] .sub,
 .suggest-item[data-kind="action-url"] .sub {
-  color: var(--accent);
+  color: var(--accent-neon);
 }
 .suggest-item[data-sel="true"] {
-  background: color-mix(in srgb, var(--warm-2) 45%, transparent); /* hover нейтральный тёплый, §3 */
+  background: var(--hover-neutral); /* hover нейтральный тёплый, §3 */
 }
 .suggest-item[data-sel="true"] .ico {
-  color: var(--accent);
+  color: var(--accent-neon);
 }
 
-#proxyBtn {
-  font-size: 15px;
-  line-height: 1;
-}
-#libBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-#libBtn svg {
-  display: block;
-}
-
-/* --- Меню «Прокси» (гайд 06: панель 12px, контролы 8px, неон — акцентом) --- */
+/* --- Меню «Прокси» (duopulse-009; панель 12px, контролы 8px, неон — акцентом) --- */
 .proxy-menu {
   position: absolute;
   top: var(--chrome-h);
@@ -351,14 +392,16 @@ button:hover {
   z-index: 100;
   width: 344px;
   padding: 14px;
-  border-radius: 12px;
-  background: var(--elevated);
-  border: 1px solid var(--line);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  color: var(--text);
-  font-size: 13px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
   -webkit-user-select: none;
   user-select: none;
+}
+.proxy-menu[hidden] {
+  display: none;
 }
 .proxy-row {
   display: flex;
@@ -376,13 +419,13 @@ button:hover {
 .proxy-status {
   gap: 6px;
   margin-bottom: 12px;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .proxy-status .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--muted);
+  background: var(--text-muted);
   flex: none;
 }
 .proxy-status .state {
@@ -390,14 +433,14 @@ button:hover {
 }
 .proxy-status[data-state="on"] .dot {
   background: var(--ok);
-  box-shadow: 0 0 6px rgba(127, 224, 138, 0.6);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ok) 60%, transparent);
 }
 .proxy-status[data-state="on"] .state {
   color: var(--ok);
 }
 .proxy-status[data-state="error"] .dot {
   background: var(--err);
-  box-shadow: 0 0 6px rgba(255, 93, 93, 0.6);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--err) 60%, transparent);
 }
 .proxy-status[data-state="error"] .state {
   color: var(--err);
@@ -418,7 +461,7 @@ button:hover {
   flex-direction: column;
   gap: 3px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .proxy-field.grow {
   grid-column: span 2;
@@ -426,18 +469,19 @@ button:hover {
 .proxy-field input,
 .proxy-field select {
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg-base);
+  color: var(--text-primary);
   padding: 0 8px;
   font-size: 12px;
   outline: none;
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--font-mono); /* адрес/порт/логин — моно, §4 */
 }
 .proxy-field input:focus,
 .proxy-field select:focus {
-  border-color: var(--accent);
+  border-color: var(--accent-neon); /* фокус — неон, §3 */
+  box-shadow: var(--focus-ring-soft);
 }
 .proxy-field select {
   font-family: inherit;
@@ -458,22 +502,28 @@ button:hover {
   width: auto;
   height: 28px;
   padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
   font-size: 12px;
+  cursor: pointer;
 }
-.proxy-actions button.ghost {
-  background: transparent;
+.proxy-actions button:hover,
+.proxy-restart button:hover {
+  background: var(--hover-neutral);
 }
+/* Главная кнопка — неон-кромка, не заливка (§8: не заливать неоном кнопки) */
 .proxy-actions button.primary,
 .proxy-restart button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0a0e17;
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
   font-weight: 700;
 }
 .proxy-actions button.primary:hover,
 .proxy-restart button.primary:hover {
-  box-shadow: 0 0 0 2px rgba(189, 254, 79, 0.25);
-  color: #0a0e17;
+  background: color-mix(in srgb, var(--accent-neon) 10%, transparent);
+  box-shadow: var(--focus-ring-soft); /* «включено» — мягкое свечение, §3 */
 }
 .proxy-restart {
   display: flex;
@@ -482,33 +532,36 @@ button:hover {
   gap: 8px;
   margin-top: 10px;
   padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--warm);
-  border: 1px solid var(--warm-2);
-  color: var(--text);
+  border-radius: var(--radius-control);
+  background: var(--bg-warm); /* тёплая «полка» — внутренняя мебель, §2 */
+  border: 1px solid var(--line-soft);
+  color: var(--text-primary);
   font-size: 12px;
+}
+.proxy-restart[hidden] {
+  display: none;
 }
 .proxy-foot {
   margin-top: 10px;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11px;
-  line-height: 1.45;
+  line-height: var(--lh-ui);
 }
 .proxy-foot .link {
   width: auto;
   height: auto;
   border: none;
   background: none;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11px;
   text-decoration: underline;
   padding: 0;
   cursor: pointer;
 }
 .proxy-foot .link:hover {
-  color: var(--accent);
+  color: var(--text-primary);
 }
-/* Тумблер (гайд 06: скругление контролов, неон — активное состояние) */
+/* Тумблер (скругление контролов, неон — активное состояние) */
 .switch {
   position: relative;
   display: inline-block;
@@ -525,7 +578,7 @@ button:hover {
   position: absolute;
   inset: 0;
   border-radius: 10px;
-  background: var(--bg);
+  background: var(--bg-base);
   border: 1px solid var(--line);
   transition: 0.15s;
 }
@@ -537,23 +590,22 @@ button:hover {
   left: 2px;
   top: 2px;
   border-radius: 50%;
-  background: var(--muted);
+  background: var(--text-muted);
   transition: 0.15s;
 }
 .switch input:checked + .slider {
-  background: rgba(189, 254, 79, 0.18);
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-neon) 18%, transparent);
+  border-color: var(--accent-neon);
 }
 .switch input:checked + .slider::before {
   transform: translateX(18px);
-  background: var(--accent);
-  box-shadow: 0 0 8px rgba(189, 254, 79, 0.45);
+  background: var(--accent-neon);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-neon) 45%, transparent);
 }
 
 /* --- Внутренняя страница «История и закладки» (задача 1.4, duopulse://history) ---
-   Гайд 06: фон из сине-чёрной группы (--bg), всплывающие панели --elevated 12px,
-   неон — только акценты (кромка секции, фокус, звезда), текст 13px, адреса и
-   метки времени — моноширинные, hover нейтральный тёплый без свечения. */
+   Фон из сине-чёрной группы, панели --bg-elevated 12px, неон — только акценты
+   (кромка секции, фокус, звезда), текст 13px, адреса и время — моноширинные. */
 body.internal-page {
   overflow: hidden;
 }
@@ -561,20 +613,20 @@ body.internal-page {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 13px; /* UI-текст 13–14px, §4 */
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
   -webkit-user-select: none;
   user-select: none;
 }
 .mgr button {
-  /* глобальные button-стили хрома (30×30, рамка) странице не нужны */
+  /* глобальные button-стили хрома странице не нужны */
   width: auto;
   height: auto;
   border: none;
   background: none;
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .mgr-head {
@@ -584,54 +636,55 @@ body.internal-page {
   padding: 14px 22px 10px;
 }
 .mgr-logo {
+  font-family: var(--font-logo);
   font-weight: 700;
   font-size: 15px;
   letter-spacing: 0.4px;
+  color: var(--text-primary);
 }
 .mgr-logo span {
-  color: var(--accent);
-  text-shadow: 0 0 8px rgba(189, 254, 79, 0.45);
+  color: var(--accent-neon);
 }
 .mgr-title {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-md);
   font-weight: 500;
 }
 .mgr-search {
   margin-left: auto;
   width: min(420px, 40vw);
   height: 32px;
-  border-radius: 16px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--line);
-  background: #0d1622;
-  color: var(--text);
-  padding: 0 14px;
-  font-size: 13px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  padding: 0 12px;
+  font-size: var(--text-sm);
   outline: none;
 }
 .mgr-search:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(189, 254, 79, 0.15); /* фокус ввода — неон, §3 */
+  border-color: var(--accent-neon); /* фокус ввода — неон, §3 */
+  box-shadow: var(--focus-ring);
 }
 .mgr-tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-1);
   padding: 0 22px;
   border-bottom: 1px solid var(--line);
 }
 .mgr-tab {
   position: relative;
   padding: 9px 14px;
-  border-radius: 8px 8px 0 0; /* контролы 8px, §5 */
-  color: var(--muted);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  color: var(--text-muted);
 }
 .mgr-tab:hover {
-  background: color-mix(in srgb, var(--warm-2) 45%, transparent);
-  color: var(--text);
+  background: var(--hover-neutral);
+  color: var(--text-primary);
 }
 .mgr-tab.active {
-  color: var(--text);
+  color: var(--text-primary);
 }
 .mgr-tab.active::before {
   /* активная секция — неоновая кромка 2px по верху, как вкладка таб-бара, §3 */
@@ -641,8 +694,8 @@ body.internal-page {
   left: 0;
   right: 0;
   height: 2px;
-  border-radius: 8px 8px 0 0;
-  background: var(--accent);
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  background: var(--accent-neon);
 }
 .mgr-actions {
   position: relative;
@@ -656,9 +709,9 @@ body.internal-page {
   height: 28px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #0d1622;
-  color: var(--text);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
   font-size: 12px;
 }
 .mgr-clear:hover {
@@ -674,28 +727,27 @@ body.internal-page {
   flex-direction: column;
   min-width: 210px;
   padding: 6px;
-  border-radius: 12px; /* панели/меню 12px, §5 */
-  background: var(--elevated);
-  border: 1px solid var(--line);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
 }
 .mgr-menu[hidden] {
   display: none;
 }
 .mgr-menu button {
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   text-align: left;
-  color: var(--text);
+  color: var(--text-primary);
 }
 .mgr-menu button:hover {
-  background: color-mix(in srgb, var(--warm-2) 45%, transparent);
+  background: var(--hover-neutral);
 }
 .mgr-error {
   margin: 8px 22px 0;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(255, 93, 93, 0.12);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
   border: 1px solid var(--err);
   color: var(--err);
   font-size: 12px;
@@ -710,7 +762,7 @@ body.internal-page {
 }
 .mgr-group {
   padding: 14px 8px 6px;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.3px;
@@ -720,21 +772,21 @@ body.internal-page {
   align-items: center;
   gap: 12px;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   cursor: default;
 }
 .mgr-entry:hover {
-  background: color-mix(in srgb, var(--bg2) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 80%, transparent);
 }
 .mgr-entry .ico {
   flex: none;
   display: flex;
   width: 16px;
   height: 16px;
-  color: var(--muted); /* иконки: muted, активно — неон, §5 */
+  color: var(--text-muted); /* иконки: muted, активно — неон, §5 */
 }
 .mgr-entry.marked .ico {
-  color: var(--accent);
+  color: var(--accent-neon);
 }
 .entry-main {
   flex: 1;
@@ -749,15 +801,15 @@ body.internal-page {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
-  font-family: ui-monospace, Consolas, monospace; /* адреса — моно, §4 */
+  font-family: var(--font-mono); /* адреса — моно, §4 */
 }
 .entry-time {
   flex: none;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--font-mono); /* метки времени — моно, §4 */
 }
 .mgr-entry .act {
   flex: none;
@@ -773,11 +825,11 @@ body.internal-page {
   display: flex;
 }
 .mgr-entry .act:hover {
-  background: var(--warm-2);
-  color: var(--text);
+  background: var(--bg-warm-2);
+  color: var(--text-primary);
 }
 .mgr-entry .act.on {
-  color: var(--accent);
+  color: var(--accent-neon);
 }
 .mgr-entry .act-del:hover {
   color: var(--err); /* удаление — деструктивное действие */
@@ -786,17 +838,17 @@ body.internal-page {
   width: 100%;
   height: 24px;
   border-radius: 6px;
-  border: 1px solid var(--accent);
-  background: var(--bg);
-  color: var(--text);
+  border: 1px solid var(--accent-neon);
+  background: var(--bg-base);
+  color: var(--text-primary);
   padding: 0 8px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   outline: none;
 }
 .mgr-empty {
   padding: 60px 0;
   text-align: center;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .mgr-more {
   display: flex;
@@ -813,17 +865,135 @@ body.internal-page {
   height: 28px;
   padding: 0 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #0d1622;
-  color: var(--text);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
   font-size: 12px;
 }
 .mgr-more button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--hover-neutral);
 }
 .mgr-total {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
-  font-family: ui-monospace, Consolas, monospace;
+  font-family: var(--font-mono); /* счётчик — моно, §4 */
+}
+
+/* --- Внутренняя страница «Новая вкладка» (задача 1.5, duopulse://newtab; §7) ---
+   Тёмный --bg-base, по центру логотип с лёгкой пульсацией свечения (ambient 3 с —
+   явное исключение из §8 для этого экрана), ниже omnibox-подсказка и 8 топ-сайтов
+   из локальной истории; никаких внешних запросов. */
+.ntp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100vh;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ntp-logo {
+  margin-top: 16vh;
+  font-family: var(--font-logo);
+  font-weight: 700;
+  font-size: 56px;
+  letter-spacing: 1px;
+  line-height: 1.1;
+  animation: ntp-pulse 3s ease-in-out infinite; /* ambient-пульс логотипа, §7 */
+}
+.ntp-logo span {
+  color: var(--accent-neon); /* «Pulse» — неон, §4 */
+}
+@keyframes ntp-pulse {
+  0%,
+  100% {
+    text-shadow: 0 0 10px color-mix(in srgb, var(--accent-neon) 15%, transparent);
+  }
+  50% {
+    text-shadow: 0 0 26px color-mix(in srgb, var(--accent-neon) 45%, transparent);
+  }
+}
+.ntp-search {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  width: min(560px, 80vw);
+  height: 40px;
+  margin-top: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--bg-surface);
+}
+.ntp-search:focus-within {
+  border-color: var(--accent-neon); /* фокус ввода — неон-контур + свечение, §3 */
+  box-shadow: var(--focus-ring);
+}
+.ntp-search .ico {
+  flex: none;
+  display: flex;
+  color: var(--text-muted);
+}
+.ntp-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-family: var(--font-mono); /* адреса/запросы — моно, §4 */
+  outline: none;
+}
+.ntp-search input::placeholder {
+  color: var(--text-muted);
+}
+.ntp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(88px, 104px));
+  gap: 12px;
+  margin-top: 44px;
+}
+.ntp-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap-2);
+  padding: 14px 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-panel);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ntp-tile:hover {
+  border-color: var(--accent-neon); /* ховер плитки — неон-кромка, §7 */
+  color: var(--text-primary);
+}
+.ntp-tile:focus-visible {
+  outline: none;
+  border-color: var(--accent-neon);
+  box-shadow: var(--focus-ring-soft);
+}
+.ntp-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-control);
+  background: var(--accent-olive); /* оливковая заливка-акцент, §2 */
+  color: var(--bg-base);
+  font-family: var(--font-logo);
+  font-weight: 700;
+  font-size: 15px;
+  text-transform: uppercase;
+}
+.ntp-host {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
 }

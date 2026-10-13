@@ -4,6 +4,8 @@
 // src-tauri/src/tabs/). Ветка определяется меткой webview; импорты
 // динамические, чтобы слушатели хрома не жили в странице (и наоборот).
 // Новые внутренние страницы: имя в internal_page_name (Core) + ветка тут.
+import "./theme/fonts.css"; // фирменные шрифты (гайд 06 §4), локальные сабсеты
+import "./theme/tokens.css"; // токены стиля (§2–§5) — до всех стилей экранов
 import "./style.css";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 // dev-хук window.__duopulse нужен и хрому, и внутренним страницам (e2e).
@@ -12,6 +14,8 @@ import "./bridge/dev-probe";
 const page = getCurrentWebview().label.match(/^page-([a-z]+)-\d+$/)?.[1];
 if (page === "history") {
   void import("./pages/history");
+} else if (page === "newtab") {
+  void import("./pages/newtab");
 } else {
   void import("./chrome");
 }

@@ -1,10 +1,11 @@
 // DuoPulse — UI-хром браузера (webview «main»): таб-бар (задача 1.2),
-// адресная строка omnibox (задача 1.3), кнопки навигации. Внутренние
-// страницы duopulse:// (задача 1.4) имеют свой вход — src/pages/ + роутер
-// src/main.ts; сюда не импортируются.
+// адресная строка omnibox (задача 1.3), кнопки навигации, главное меню
+// (задача 1.5). Внутренние страницы duopulse:// (задача 1.4) имеют свой
+// вход — src/pages/ + роутер src/main.ts; сюда не импортируются.
 import { bridge } from "./bridge";
 import { initTabBar, onTabsChanged } from "./chrome/tabbar";
 import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
+import "./chrome/mainmenu";
 import "./proxy-menu";
 
 // Таб-бар (задача 1.2): рендер вкладок, хоткеи, контекст-меню.

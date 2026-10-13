@@ -50,8 +50,15 @@ Esc — фокус странице; приёмка — [e2e/omnibox/run.mjs](e2
 omnibox-подсказки — на реальных данных; страница управления
 **duopulse://history** (внутренняя страница-вкладка, `src/pages/history.ts`:
 история с поиском и группировкой по дням, закладки с правкой/удалением; вход —
-кнопка-часы в навбаре). План — в
-[ROADMAP.md](ROADMAP.md).
+кнопка-часы в навбаре). 13.10.2026 готов **фирменный тёмный UI-хром** (задача
+1.5, карточка duopulse-015): токены стиля в `src/theme/` (палитра/свет/
+типографика/форма по гайду 06, шрифты Space Grotesk/Inter/JetBrains Mono —
+локальные сабсеты, без сети), страница «Новая вкладка» **duopulse://newtab**
+(стартовая и по «+»: логотип с ambient-пульсом, omnibox-подсказка, 8 топ-сайтов
+из локальной истории — без внешних запросов), главное меню (⋮) в навбаре,
+меню прокси и все экраны приведены к токенам; сверка —
+[e2e/style/run.mjs](e2e/style/run.mjs) + [e2e/style/CHECKLIST.md](e2e/style/CHECKLIST.md).
+План — в [ROADMAP.md](ROADMAP.md).
 
 ### Запуск спайка M0
 
@@ -69,6 +76,8 @@ node e2e/tabs/run.mjs
 # e2e-прогон omnibox + история/закладки (URL/поиск, подсказки FTS5, страница
 # duopulse://history: запись/удаление/закладки):
 node e2e/omnibox/run.mjs
+# e2e-сверка фирменного стиля (токены/шрифты/«Новая вкладка», скриншоты экранов):
+node e2e/style/run.mjs
 # перегенерация TS-типов контракта bridge после правки Rust-типов:
 npm run gen:bridge
 ```
@@ -109,11 +118,11 @@ DuoPulse/
 ├── promt.txt               замороженный архив отчётов (новые — в CHANGELOG.md)
 ├── CARDS/                  карточки задач диспетчера
 ├── src-tauri/              Rust-ядро (Tauri 2: окно, webview, COM-перехват; bridge.rs — IPC-контракт; tabs/ — менеджер вкладок + внутренние страницы duopulse://; omnibox.rs — разбор ввода; history/ — SQLite-хранилище истории/закладок + FTS5)
-├── src/                    UI (TypeScript + Vite; main.ts — роутер webview, chrome.ts — хром, chrome/ — таб-бар и omnibox, pages/ — внутренние страницы (history.ts), bridge/ — типизированный IPC-клиент)
+├── src/                    UI (TypeScript + Vite; main.ts — роутер webview, chrome.ts — хром, chrome/ — таб-бар, omnibox и главное меню, pages/ — внутренние страницы (history.ts, newtab.ts), theme/ — токены фирменного стиля и шрифты, bridge/ — типизированный IPC-клиент)
 ├── content/                content-скрипты, инжектируемые в страницы (messaging/ — словарь событий, chrome-hotkeys.js — хоткеи таб-бара)
 ├── bridge/                 IPC-контракт: contract.json (генерится из Rust-типов)
 ├── scripts/                gen-bridge.mjs — генерация TS-типов контракта
-├── e2e/                    стенды приёмки: m0-results/ (протокол M0), proxy-a/, bridge/, tabs/
+├── e2e/                    стенды приёмки: m0-results/ (протокол M0), proxy-a/, bridge/, tabs/, omnibox/, style/ (сверка гайда 06)
 ├── docs/
 │   ├── 01-concept.md       концепция, требования, сценарии
 │   ├── 02-architecture.md  архитектура и выбор стека

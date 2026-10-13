@@ -9,18 +9,19 @@
     <div id="app">
       <div id="tabbar">
         <div id="tabs" role="tablist" aria-label="Вкладки браузера"></div>
-        <button id="newtab" title="Новая вкладка">&#65291;</button>
+        <button id="newtab" title="Новая вкладка"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
       </div>
       <div id="navbar">
         <div class="logo">Duo<span>Pulse</span></div>
-        <button id="back" title="Назад">&#8592;</button>
-        <button id="fwd" title="Вперёд">&#8594;</button>
-        <button id="reload" title="Обновить">&#10227;</button>
-        <button id="libBtn" title="История и закладки"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></button>
+        <button id="back" class="icon-btn" title="Назад"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5 5 8l4.5 4.5M5 8h8.5"/></svg></button>
+        <button id="fwd" class="icon-btn" title="Вперёд"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5 11 8l-4.5 4.5M11 8H2.5"/></svg></button>
+        <button id="reload" class="icon-btn" title="Обновить"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.7-3.75"/><path d="M13 2.8v2.7h-2.7"/></svg></button>
         <input id="omnibox" type="text" placeholder="Введите адрес или поисковый запрос" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest" />
         <div id="suggest" class="suggest" hidden role="listbox" aria-label="Подсказки адресной строки"></div>
         <button id="go" class="go">Перейти</button>
-        <button id="proxyBtn" title="Прокси (VPN-инкремент A)">&#9874;</button>
+        <button id="libBtn" class="icon-btn" title="История и закладки"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></button>
+        <button id="proxyBtn" class="icon-btn" title="Прокси (VPN-инкремент A)"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l5.2 2v3.5c0 3.2-2.2 5.5-5.2 7-3-1.5-5.2-3.8-5.2-7V3.8z"/></svg></button>
+        <button id="mainBtn" class="icon-btn" title="Меню браузера"><svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><circle cx="8" cy="3.4" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="8" cy="12.6" r="1.3"/></svg></button>
       </div>
       <div id="proxyMenu" class="proxy-menu" hidden>
         <div class="proxy-row proxy-head">
@@ -62,7 +63,7 @@
         </div>
         <div class="proxy-error" id="proxyError" hidden></div>
         <div class="proxy-actions">
-          <button id="proxyCheck" class="ghost" title="Проверить достижимость прокси">Проверить</button>
+          <button id="proxyCheck" class="ghost">Проверить</button>
           <button id="proxySave" class="primary">Сохранить</button>
         </div>
         <div class="proxy-restart" id="proxyRestartBlock" hidden>
@@ -82,6 +83,13 @@
         <button type="button" data-act="close">Закрыть вкладку</button>
         <button type="button" data-act="closeOthers">Закрыть другие вкладки</button>
         <button type="button" data-act="reopen">Переоткрыть закрытую <span class="kbd">Ctrl+Shift+T</span></button>
+      </div>
+      <div id="mainMenu" class="main-menu" hidden>
+        <button type="button" data-act="newtab">Новая вкладка</button>
+        <button type="button" data-act="reopen">Переоткрыть закрытую <span class="kbd">Ctrl+Shift+T</span></button>
+        <button type="button" data-act="history">История и закладки</button>
+        <div class="menu-sep" role="separator"></div>
+        <button type="button" data-act="proxy">Прокси&hellip;</button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

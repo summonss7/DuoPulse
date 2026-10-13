@@ -117,7 +117,15 @@ async function save(secret: string | null): Promise<boolean> {
 
 btn.addEventListener("click", async (e) => {
   e.stopPropagation();
-  menu.hidden = !menu.hidden;
+  const open = menu.hidden;
+  if (open) {
+    // прочие панели хрома закрываются (единое «одно меню на экран», mainmenu.ts)
+    const mainMenu = document.getElementById("mainMenu") as HTMLElement | null;
+    const tabMenu = document.getElementById("tabMenu") as HTMLElement | null;
+    if (mainMenu) mainMenu.hidden = true;
+    if (tabMenu) tabMenu.hidden = true;
+  }
+  menu.hidden = !open;
   if (!menu.hidden) {
     showError(null);
     try {

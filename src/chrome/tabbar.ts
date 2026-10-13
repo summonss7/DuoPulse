@@ -59,7 +59,9 @@ function render(): void {
       close.className = "tab-close";
       close.type = "button";
       close.title = "Закрыть вкладку";
-      close.textContent = "\u00d7";
+      // линейная иконка 1.5px — как остальные иконки хрома (гайд 06 §5)
+      close.innerHTML =
+        '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
       el.append(title, close);
       return el;
     })

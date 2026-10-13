@@ -39,10 +39,10 @@ pub(crate) const CHROME_HEIGHT: f64 = 84.0;
 const CLOSED_STACK_CAP: usize = 25;
 
 /// Стартовая страница: первый таб и новые вкладки (кнопка «+», tabs.open без
-/// url). DUOPULSE_START_URL переопределяет для e2e-стендов; страница
-/// «Новая вкладка» (docs/05 §1 pages/NewTab) придёт в задаче 1.5.
+/// url) — фирменная «Новая вкладка» (задача 1.5, гайд 06 §7). DUOPULSE_START_URL
+/// переопределяет для e2e-стендов.
 fn default_tab_url() -> String {
-    std::env::var("DUOPULSE_START_URL").unwrap_or_else(|_| "https://www.youtube.com/".into())
+    std::env::var("DUOPULSE_START_URL").unwrap_or_else(|_| "duopulse://newtab".into())
 }
 
 /// Размер дочернего webview вкладки под полосой хрома.
@@ -442,6 +442,7 @@ impl TabManager {
 fn internal_page_name(url: &Url) -> Option<&'static str> {
     match url.host_str()? {
         "history" => Some("history"),
+        "newtab" => Some("newtab"), // «Новая вкладка», задача 1.5 (гайд 06 §7)
         _ => None,
     }
 }
@@ -516,4 +517,35 @@ fn build_page_webview(id: &str) -> WebviewBuilder<tauri::Wry> {
             let app = wv.app_handle().clone();
             app.state::<TabManager>().on_title(&app, &label, title);
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Реестр внутренних страниц (задача 1.5: добавлена «Новая вкладка»):
+    /// duopulse:// распознаётся по хосту, внешние адреса — не внутренние.
+    #[test]
+    fn internal_pages_registry() {
+        assert_eq!(
+            internal_page_name(&Url::parse("duopulse://newtab").unwrap()),
+            Some("newtab")
+        );
+        assert_eq!(
+            internal_page_name(&Url::parse("duopulse://newtab/").unwrap()),
+            Some("newtab")
+        );
+        assert_eq!(
+            internal_page_name(&Url::parse("duopulse://history").unwrap()),
+            Some("history")
+        );
+        assert_eq!(
+            internal_page_name(&Url::parse("https://www.youtube.com/").unwrap()),
+            None
+        );
+        assert_eq!(
+            internal_page_name(&Url::parse("duopulse://settings").unwrap()),
+            None
+        );
+    }
 }
