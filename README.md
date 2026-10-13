@@ -40,11 +40,17 @@ DuoPulse — настольный браузер (Windows-first) для повс
 [e2e/tabs/CHECKLIST.md](e2e/tabs/CHECKLIST.md). Готова **адресная строка
 omnibox** (задача 1.3, карточка duopulse-013): разбор ввода «URL (догадка
 схемы) или поиск» в Core (`src-tauri/src/omnibox.rs`), подсказки при вводе —
-полнотекстовый поиск FTS5 по истории и закладкам (пока на временных данных,
-живые визиты — задача 1.4): строка-действие «Поиск в YouTube»/«Перейти по
-адресу» + совпадения, навигация стрелками, Enter — переход, Esc — фокус
-странице; приёмка — [e2e/omnibox/run.mjs](e2e/omnibox/run.mjs) (поиск по 10k
-записей < 50 мс — cargo-тест). План — в
+полнотекстовый поиск FTS5 по истории и закладкам: строка-действие «Поиск в
+YouTube»/«Перейти по адресу» + совпадения, навигация стрелками, Enter — переход,
+Esc — фокус странице; приёмка — [e2e/omnibox/run.mjs](e2e/omnibox/run.mjs)
+(поиск по 10k записей < 50 мс — cargo-тест). 13.10.2026 готовы **история и
+закладки** (задача 1.4, карточка duopulse-014): SQLite-хранилище `duopulse.db`
+в профиле (`src-tauri/src/history/`, визиты/закладки + FTS5-индекс), живая
+запись визитов из навигации вкладок, удаление записей и диапазонов,
+omnibox-подсказки — на реальных данных; страница управления
+**duopulse://history** (внутренняя страница-вкладка, `src/pages/history.ts`:
+история с поиском и группировкой по дням, закладки с правкой/удалением; вход —
+кнопка-часы в навбаре). План — в
 [ROADMAP.md](ROADMAP.md).
 
 ### Запуск спайка M0
@@ -60,7 +66,8 @@ node e2e/proxy-a/run.mjs
 node e2e/bridge/run.mjs
 # e2e-прогон таб-бара (вкладки, Ctrl+Tab, Ctrl+Shift+T, контекст-меню):
 node e2e/tabs/run.mjs
-# e2e-прогон omnibox (URL/поиск, подсказки FTS5, Enter/Esc/клик):
+# e2e-прогон omnibox + история/закладки (URL/поиск, подсказки FTS5, страница
+# duopulse://history: запись/удаление/закладки):
 node e2e/omnibox/run.mjs
 # перегенерация TS-типов контракта bridge после правки Rust-типов:
 npm run gen:bridge
@@ -101,8 +108,8 @@ DuoPulse/
 ├── backup.bat              резервная копия проекта (перед серьёзными изменениями)
 ├── promt.txt               замороженный архив отчётов (новые — в CHANGELOG.md)
 ├── CARDS/                  карточки задач диспетчера
-├── src-tauri/              Rust-ядро (Tauri 2: окно, webview, COM-перехват; bridge.rs — IPC-контракт; tabs/ — менеджер вкладок; omnibox.rs — разбор ввода; history/ — FTS5-подсказки)
-├── src/                    UI-полоса (TypeScript + Vite; chrome/ — таб-бар и omnibox, bridge/ — типизированный IPC-клиент)
+├── src-tauri/              Rust-ядро (Tauri 2: окно, webview, COM-перехват; bridge.rs — IPC-контракт; tabs/ — менеджер вкладок + внутренние страницы duopulse://; omnibox.rs — разбор ввода; history/ — SQLite-хранилище истории/закладок + FTS5)
+├── src/                    UI (TypeScript + Vite; main.ts — роутер webview, chrome.ts — хром, chrome/ — таб-бар и omnibox, pages/ — внутренние страницы (history.ts), bridge/ — типизированный IPC-клиент)
 ├── content/                content-скрипты, инжектируемые в страницы (messaging/ — словарь событий, chrome-hotkeys.js — хоткеи таб-бара)
 ├── bridge/                 IPC-контракт: contract.json (генерится из Rust-типов)
 ├── scripts/                gen-bridge.mjs — генерация TS-типов контракта

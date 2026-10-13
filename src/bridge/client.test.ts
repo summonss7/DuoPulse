@@ -33,6 +33,29 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "nav.resolve_omnibox": { path: ["nav", "resolveOmnibox"], params: { input: "rust lang" } },
   "nav.focus_page": { path: ["nav", "focusPage"] },
   "history.search": { path: ["history", "search"], params: { query: "youtube", limit: 8 } },
+  "history.visit": { path: ["history", "visit"], params: { url: "https://example.com/", title: "" } },
+  "history.list": { path: ["history", "list"], params: { query: null, offset: 0, limit: 100 } },
+  "history.delete_urls": {
+    path: ["history", "deleteUrls"],
+    params: { urls: ["https://example.com/"] },
+  },
+  "history.delete_range": { path: ["history", "deleteRange"], params: { fromMs: 0, toMs: 123 } },
+  "history.bookmark_add": {
+    path: ["history", "bookmarkAdd"],
+    params: { url: "https://example.com/", title: "Example" },
+  },
+  "history.bookmark_remove": {
+    path: ["history", "bookmarkRemove"],
+    params: { url: "https://example.com/" },
+  },
+  "history.bookmark_update": {
+    path: ["history", "bookmarkUpdate"],
+    params: { url: "https://example.com/", title: "Новое имя" },
+  },
+  "history.bookmark_list": {
+    path: ["history", "bookmarkList"],
+    params: { query: null, offset: 0, limit: 200 },
+  },
   "nav.go_back": { path: ["nav", "goBack"] },
   "nav.go_forward": { path: ["nav", "goForward"] },
   "nav.reload": { path: ["nav", "reload"] },

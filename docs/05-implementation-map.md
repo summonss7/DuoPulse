@@ -70,7 +70,8 @@ DuoPulse/
 Команды (UI|Content → Core):
   tabs.{open, close, activate, reopen, list, sleep, wake, restore_session}
   nav.{go_back, go_forward, reload, resolve_omnibox}
-  history.{visit, search, bookmark_add, bookmark_remove}
+  history.{visit, search, list, delete_urls, delete_range,
+           bookmark_add, bookmark_remove, bookmark_update, bookmark_list}
   adblock.{set_enabled(site), status, update_lists}
   vpn.{set_enabled(on), set_mode(off|global|split), status, test_connection,
        import_profile(file), remove_profile(id), list_profiles,
@@ -94,7 +95,7 @@ DuoPulse/
 при миграции на bridge они ложатся на `vpn.{set_enabled, status, test_connection}`
 и `settings.{get, set}`.
 
-**Статус (12.10.2026, задачи 1.1–1.3 выполнены — карточки duopulse-011/012/013).**
+**Статус (13.10.2026, задачи 1.1–1.4 выполнены — карточки duopulse-011/012/013/014).**
 `bridge` реализован: единственный источник контракта — Rust-типы
 `src-tauri/src/bridge.rs` (schemars); из них генерируется `bridge/contract.json`
 (JSON Schema draft-07, версионируется в git, версия контракта — поле `version`),
@@ -106,20 +107,30 @@ vitest `src/bridge/client.test.ts` — команды и события). Сло
 `src-tauri/src/tabs/`), `nav.{navigate, go_back, go_forward, reload}` (действуют
 на активную вкладку), `nav.{resolve_omnibox, focus_page}` + `history.search`
 (задача 1.3: разбор ввода omnibox — `src-tauri/src/omnibox.rs`, подсказки —
-FTS5-индекс `src-tauri/src/history/`, пока на временных данных — живые визиты
-и файл в профиле подключит задача 1.4), `settings.{get, set}`,
-`vpn.{set_enabled, status, test_connection}`, `app.restart`; событие `tabs:updated`
-(снапшот списка вкладок после любого изменения — им перерисовывается таб-бар
-`src/chrome/tabbar.ts`, omnibox-подсказки — `src/chrome/omnibox.ts`) и
-события-каркас `page:loaded`, `page:video_detected` (эмит — M3),
-`vpn:state_changed` (M6). Имена событий — через `:` (словарь `домен:событие`):
-tauri 2 разрешает в именах событий только alnum/`-`/`/`/`:`/`_`, точечные имена
-не доставлялись (переименование — bump контракта v1→v2 в задаче 1.2; имена
-команд с точками не затронуты — в tauri идёт snake_case-хендлер из поля
-"handler"). Прокси-инкремент A мигрирован: `proxy_*` → `settings.{get, set}` +
-`vpn.{set_enabled, status, test_connection}` + `app.restart`; состояние vpn —
-`off/on/error`, при WireGuard (M6) расширится до словаря выше с bump версии.
-Типы событий для Content-слоя — `content/messaging/events.ts`. Сквозные e2e —
+FTS5-индекс `src-tauri/src/history/`), `history.{visit, list, delete_urls,
+delete_range, bookmark_add, bookmark_remove, bookmark_update, bookmark_list}`
+(задача 1.4: SQLite-хранилище `duopulse.db` в профиле — docs/02 §8; визиты
+пишет Core из on_page_load вкладок, дедуп 60 с, заголовок подтягивается из
+on_title; list — агрегат по URL для страницы управления),
+`settings.{get, set}`, `vpn.{set_enabled, status, test_connection}`,
+`app.restart`; событие `tabs:updated` (снапшот списка вкладок после любого
+изменения — им перерисовывается таб-бар `src/chrome/tabbar.ts`,
+omnibox-подсказки — `src/chrome/omnibox.ts`) и события-каркас `page:loaded`,
+`page:video_detected` (эмит — M3), `vpn:state_changed` (M6). Имена событий —
+через `:` (словарь `домен:событие`): tauri 2 разрешает в именах событий только
+alnum/`-`/`/`/`:`/`_`, точечные имена не доставлялись (переименование — bump
+контракта v1→v2 в задаче 1.2; имена команд с точками не затронуты — в tauri
+идёт snake_case-хендлер из поля "handler"). Прокси-инкремент A мигрирован:
+`proxy_*` → `settings.{get, set}` + `vpn.{set_enabled, status, test_connection}`
++ `app.restart`; состояние vpn — `off/on/error`, при WireGuard (M6) расширится
+до словаря выше с bump версии. Типы событий для Content-слоя —
+`content/messaging/events.ts`. Внутренние страницы (задача 1.4): адрес
+`duopulse://<имя>` открывается вкладкой с webview UI-бандла
+(метка `page-<имя>-N`, `WebviewUrl::App`; IPC — capability `page-*`,
+контентные вкладки `tab-*` его не имеют; канонический адрес в таб-баре
+держится, пока webview в app-origin). Реестр страниц — `internal_page_name`
+(Core) + роутер `src/main.ts` (UI): сейчас `duopulse://history` —
+`src/pages/history.ts`. Сквозные e2e —
 [e2e/bridge/run.mjs](../e2e/bridge/run.mjs), [e2e/tabs/run.mjs](../e2e/tabs/run.mjs),
 [e2e/omnibox/run.mjs](../e2e/omnibox/run.mjs)
 (чек-лист приёмки таб-бара — [e2e/tabs/CHECKLIST.md](../e2e/tabs/CHECKLIST.md)).
@@ -149,7 +160,7 @@ Gate-проверки этапов включены в последние кар
 | 1.1 | **✅ выполнено 12.10.2026 (карточка duopulse-011)** IPC-контракт bridge + кодогенерация типов | команда `tabs.list` проходит сквозной тест |
 | 1.2 | **✅ выполнено 12.10.2026 (карточка duopulse-012)** Таб-бар: вкладки, закрытие, Ctrl+Tab, восстановление закрытой | ручной чек-лист проходит ([e2e/tabs/CHECKLIST.md](../e2e/tabs/CHECKLIST.md)) |
 | 1.3 | **✅ выполнено 12.10.2026 (карточка duopulse-013)** Omnibox: URL/поиск, подсказки (история+закладки, FTS5) | поиск по 10k записей истории < 50 мс |
-| 1.4 | История и закладки (SQLite + страница управления) | запись/поиск/удаление работают |
+| 1.4 | **✅ выполнено 13.10.2026 (карточка duopulse-014)** История и закладки (SQLite + страница управления) | запись/поиск/удаление работают |
 | 1.5 | Фирменный тёмный UI-хром по гайду 06 | сверка с гайдом по чек-листу |
 | 1.6 | Восстановление сессии (ленивое) | 10 вкладок восстанавливаются, старт не деградирует > 10% |
 | 1.7 | Спайк многоканального звука 5.1/7.1 (карточка duopulse-006): поканальные тесты + YouTube 5.1 на реальной системе 5.1/7.1 | протокол e2e заполнен; все каналы звучат из правильных динамиков не хуже Chrome/Edge; при провале — карточка-решение и запись в ROADMAP |

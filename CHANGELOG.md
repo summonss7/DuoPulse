@@ -597,3 +597,89 @@
 - Коммит: «feat: omnibox — разбор URL/поиск (nav.resolve_omnibox) и подсказки
   FTS5 по истории/закладкам (history.search), дропдаун Enter/Esc/стрелки —
   задача 1.3 (duopulse-013)» (+ пуш в summonss7/DuoPulse, main)
+
+## 2026-10-13 · Задача 1.4 — История и закладки: SQLite + страница управления (карточка duopulse-014)
+
+- Начало: 13.10.2026, 15:52. Окончание: 13.10.2026, 16:25.
+- backup.bat перед изменениями: backup_2026-10-13_15-54-49.
+- Core, хранилище `src-tauri/src/history/mod.rs` (переписан с временного
+  in-memory сида задачи 1.3): файл SQLite `duopulse.db` в профиле
+  `%APPDATA%\DuoPulse\profile\` (docs/02 §8; WAL, busy_timeout). Схема:
+  `visits` (визиты) + `bookmarks` (url — ключ) + FTS5-индекс `search`
+  (title, url, source, ref=id строки); таблицы и индекс меняются в одной
+  транзакции. API: visit (дедуп 60 с — повторный заход на тот же URL
+  обновляет время/заголовок, а не плодит строки), note_title (заголовок
+  страницы приходит после Finished — on_title), search (подсказки omnibox,
+  прежняя семантика: префиксные токены FTS5/bm25, пустой запрос — закладки),
+  list (агрегат по URL: lastVisitedAt/visitCount/total, пагинация),
+  delete_urls, delete_range, bookmark_{add,remove,update,list}. Тесты
+  переписаны под реальную схему: 16 cargo-тестов модуля (дедуп, заголовки,
+  агрегация/пагинация/FTS-фильтр списков, удаления, закладки-апсерт/
+  правка/идемпотентное удаление, независимость закладки от истории её URL,
+  персистентность файла, замер). DoD «повторный замер omnibox на 10k —
+  < 50 мс»: тест search_10k_under_50ms переведён с in-memory на файловую БД
+  (5 запросов подряд, прогрев включён) — зелёный.
+- Живая запись визитов: `src-tauri/src/tabs/mod.rs` on_page_load(Finished)
+  внешних http/https документов зовёт HistoryStore::visit (с ошибками — в
+  stderr, не роняя навигацию), on_title — note_title; внутренние страницы
+  duopulse:// и app-origin не записываются.
+- Внутренние страницы (новый механизм, задача 1.4): вкладка с адресом
+  `duopulse://<имя>` создаёт webview UI-бандла (WebviewUrl::App, метка
+  `page-<имя>-N`) — как chrome://history. Канонический адрес `duopulse://…`
+  держится в таб-баре, пока webview в app-origin (сверка по origin главного
+  webview); уход по внешнему адресу превращает вкладку в обычную. IPC —
+  новая capability `page-*` (src-tauri/capabilities/pages.json);
+  контентные вкладки (tab-*) доступа не имеют. Реестр страниц —
+  internal_page_name (Core) + роутер src/main.ts (UI). Найдено и устранено:
+  webview внутренней страницы обязан передавать те же additional_browser_args,
+  что UI-окно и вкладки — WebView2 не смешивает environment с разными
+  аргументами на одну папку данных (создание падало 0x8007139F).
+- Контракт bridge (совместимое расширение, версия осталась v2): +8 команд
+  `history.{visit, list, delete_urls, delete_range, bookmark_add,
+  bookmark_remove, bookmark_update, bookmark_list}` (типы HistoryVisit/
+  List/DeleteUrls/DeleteRange/Bookmark* — camelCase, ts-unix-ms); типы
+  HistorySource/HistorySearch без изменений; перегенерация bridge/
+  contract.json → src/bridge/gen/types.ts (37 типов, npm run gen:bridge);
+  TS-клиент (history.visit/list/deleteUrls/deleteRange/bookmarkAdd/
+  bookmarkRemove/bookmarkUpdate/bookmarkList) + cases в client.test.ts.
+- UI: `src/main.ts` стал роутером точек входа (webview «main» → хром
+  `src/chrome.ts` — бывшее содержимое main.ts; webview `page-*` →
+  `src/pages/history.ts`); импорты динамические — слушатели хрома не живут
+  в странице. Кнопка-часы в навбаре (#libBtn) открывает duopulse://history.
+- Страница управления `src/pages/history.ts` + стиль (гайд 06: фон --bg-base,
+  неон — кромка активной секции/фокус/звезда, тёплые hover, адреса и время —
+  моноширинные, панели 12px): секции История (агрегат по URL, группы
+  «Сегодня/Вчера/дата», поиск FTS с дебаунсом, ★ в закладки/убрать, ✕ удалить
+  запись, «Очистить историю ▾» — за час/сутки/всё через delete_range,
+  «Показать ещё») и Закладки (правка заголовка инлайн — Enter/blur/Esc,
+  удаление, дата добавления); клик по записи — переход в этой вкладке,
+  Ctrl/средняя кнопка — новая вкладка (tabs.open); document.title —
+  «История и закладки — DuoPulse» (заголовок вкладки).
+- E2E `e2e/omnibox/run.mjs` переписан под реальное хранилище: сид 23 записей
+  командами контракта (вместо сида в Core), стенду добавлен <title>;
+  +12 проверок задачи 1.4: живая запись визитов и заголовков (стартовая
+  страница и /typed в history.list), delete_urls/delete_range, закладки
+  add/update/remove c FTS-контролем, страница duopulse://history (открытие
+  вкладкой, рендер ≥5 записей, omnibox показывает duopulse://history,
+  заголовок вкладки, фильтр поиска, ★/✕/правка со страницы), скриншот
+  e2e/omnibox/manager.png; добавлено ожидание инициализации хрома
+  (динамический импорт — слушатели встают чуть позже dev-хука, дропдаун
+  проверяем после первого рендера таб-бара).
+- Как проверено:
+  - cargo fmt --check / clippy --all-targets -D warnings / test — чисто,
+    34 passed (+1 ignored-генератор), из них 16 — новые тесты хранилища;
+    tsc --noEmit — чисто; vitest — 4/4; vite build — ок (чанки chrome/pages
+    разделились).
+  - E2E `node e2e/omnibox/run.mjs` — 36/36 PASS (включая все проверки 1.4;
+    скриншот страницы сверен с гайдом 06 — тёмный фон, неон-акценты,
+    дефектов нет).
+  - Регресс: `node e2e/bridge/run.mjs` — 14/14; `node e2e/tabs/run.mjs` —
+    17/17; `node e2e/proxy-a/run.mjs` — 16/16.
+- Документация: docs/05 §2 — словарь пополнен history.* (1.4), описание
+  механизма внутренних страниц duopulse://, §3 — задача 1.4 отмечена
+  выполненной; README — статус, e2e-команда, структура репозитория;
+  ROADMAP — «Следующая работа» → карточка 015 (задача 1.5).
+- Коммит: «feat: история и закладки — SQLite duopulse.db в профиле, живая
+  запись визитов, удаления/диапазоны, закладки; страница управления
+  duopulse://history (внутренние страницы-вкладки) — задача 1.4 (duopulse-014)»
+  (+ пуш в summonss7/DuoPulse, main)

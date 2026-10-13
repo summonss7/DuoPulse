@@ -334,6 +334,14 @@ button:hover {
   font-size: 15px;
   line-height: 1;
 }
+#libBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#libBtn svg {
+  display: block;
+}
 
 /* --- Меню «Прокси» (гайд 06: панель 12px, контролы 8px, неон — акцентом) --- */
 .proxy-menu {
@@ -540,4 +548,282 @@ button:hover {
   transform: translateX(18px);
   background: var(--accent);
   box-shadow: 0 0 8px rgba(189, 254, 79, 0.45);
+}
+
+/* --- Внутренняя страница «История и закладки» (задача 1.4, duopulse://history) ---
+   Гайд 06: фон из сине-чёрной группы (--bg), всплывающие панели --elevated 12px,
+   неон — только акценты (кромка секции, фокус, звезда), текст 13px, адреса и
+   метки времени — моноширинные, hover нейтральный тёплый без свечения. */
+body.internal-page {
+  overflow: hidden;
+}
+.mgr {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px; /* UI-текст 13–14px, §4 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.mgr button {
+  /* глобальные button-стили хрома (30×30, рамка) странице не нужны */
+  width: auto;
+  height: auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.mgr-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px 10px;
+}
+.mgr-logo {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.4px;
+}
+.mgr-logo span {
+  color: var(--accent);
+  text-shadow: 0 0 8px rgba(189, 254, 79, 0.45);
+}
+.mgr-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.mgr-search {
+  margin-left: auto;
+  width: min(420px, 40vw);
+  height: 32px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: #0d1622;
+  color: var(--text);
+  padding: 0 14px;
+  font-size: 13px;
+  outline: none;
+}
+.mgr-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(189, 254, 79, 0.15); /* фокус ввода — неон, §3 */
+}
+.mgr-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--line);
+}
+.mgr-tab {
+  position: relative;
+  padding: 9px 14px;
+  border-radius: 8px 8px 0 0; /* контролы 8px, §5 */
+  color: var(--muted);
+}
+.mgr-tab:hover {
+  background: color-mix(in srgb, var(--warm-2) 45%, transparent);
+  color: var(--text);
+}
+.mgr-tab.active {
+  color: var(--text);
+}
+.mgr-tab.active::before {
+  /* активная секция — неоновая кромка 2px по верху, как вкладка таб-бара, §3 */
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 8px 8px 0 0;
+  background: var(--accent);
+}
+.mgr-actions {
+  position: relative;
+  display: flex;
+  margin-left: auto;
+}
+.mgr-actions[hidden] {
+  display: none;
+}
+.mgr-clear {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0d1622;
+  color: var(--text);
+  font-size: 12px;
+}
+.mgr-clear:hover {
+  border-color: var(--err); /* очистка истории — деструктивное действие */
+  color: var(--err);
+}
+.mgr-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 210px;
+  padding: 6px;
+  border-radius: 12px; /* панели/меню 12px, §5 */
+  background: var(--elevated);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.mgr-menu[hidden] {
+  display: none;
+}
+.mgr-menu button {
+  padding: 7px 10px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--text);
+}
+.mgr-menu button:hover {
+  background: color-mix(in srgb, var(--warm-2) 45%, transparent);
+}
+.mgr-error {
+  margin: 8px 22px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 93, 93, 0.12);
+  border: 1px solid var(--err);
+  color: var(--err);
+  font-size: 12px;
+}
+.mgr-error[hidden] {
+  display: none;
+}
+.mgr-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 14px 20px;
+}
+.mgr-group {
+  padding: 14px 8px 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.mgr-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: default;
+}
+.mgr-entry:hover {
+  background: color-mix(in srgb, var(--bg2) 80%, transparent);
+}
+.mgr-entry .ico {
+  flex: none;
+  display: flex;
+  width: 16px;
+  height: 16px;
+  color: var(--muted); /* иконки: muted, активно — неон, §5 */
+}
+.mgr-entry.marked .ico {
+  color: var(--accent);
+}
+.entry-main {
+  flex: 1;
+  min-width: 0;
+}
+.entry-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entry-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace; /* адреса — моно, §4 */
+}
+.entry-time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.mgr-entry .act {
+  flex: none;
+  display: none; /* действия строки — на hover */
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.mgr-entry:hover .act,
+.mgr-entry .act:focus-visible {
+  display: flex;
+}
+.mgr-entry .act:hover {
+  background: var(--warm-2);
+  color: var(--text);
+}
+.mgr-entry .act.on {
+  color: var(--accent);
+}
+.mgr-entry .act-del:hover {
+  color: var(--err); /* удаление — деструктивное действие */
+}
+.entry-edit {
+  width: 100%;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--bg);
+  color: var(--text);
+  padding: 0 8px;
+  font-size: 13px;
+  outline: none;
+}
+.mgr-empty {
+  padding: 60px 0;
+  text-align: center;
+  color: var(--muted);
+}
+.mgr-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 0 16px;
+  border-top: 1px solid var(--line);
+}
+.mgr-more[hidden] {
+  display: none;
+}
+.mgr-more button {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0d1622;
+  color: var(--text);
+  font-size: 12px;
+}
+.mgr-more button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mgr-total {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace;
 }

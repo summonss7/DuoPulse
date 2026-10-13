@@ -20,10 +20,22 @@ export type ProxyState = "off" | "on" | "error";
  */
 export interface DuoPulseBridgeContract {
   BridgeVersionResult: BridgeVersionResult;
+  HistoryBookmarkAddParams: HistoryBookmarkAddParams;
+  HistoryBookmarkListParams: HistoryBookmarkListParams;
+  HistoryBookmarkListResult: HistoryBookmarkListResult;
+  HistoryBookmark: HistoryBookmark;
+  HistoryBookmarkRemoveParams: HistoryBookmarkRemoveParams;
+  HistoryBookmarkUpdateParams: HistoryBookmarkUpdateParams;
+  HistoryDeleteRangeParams: HistoryDeleteRangeParams;
+  HistoryDeleteUrlsParams: HistoryDeleteUrlsParams;
+  HistoryListParams: HistoryListParams;
+  HistoryListResult: HistoryListResult;
+  HistoryEntry: HistoryEntry;
   HistorySearchParams: HistorySearchParams;
   HistorySearchResult: HistorySearchResult;
   HistoryHit: HistoryHit;
   HistorySource: HistorySource;
+  HistoryVisitParams: HistoryVisitParams;
   NavNavigateParams: NavNavigateParams;
   NavResolveOmniboxParams: NavResolveOmniboxParams;
   NavResolveOmniboxResult: NavResolveOmniboxResult;
@@ -52,7 +64,93 @@ export interface BridgeVersionResult {
   version: number;
 }
 /**
- * history.search: подсказки omnibox — полнотекстовый поиск по истории и закладкам (FTS5, задача 1.3; хранилище — src/history/, пока временные данные, полная интеграция — задача 1.4).
+ * history.bookmark_add: добавить закладку (url — ключ; повторное добавление обновляет заголовок, пустой заголовок сохраняет прежний).
+ */
+export interface HistoryBookmarkAddParams {
+  title?: string;
+  url: string;
+}
+/**
+ * history.bookmark_list: закладки для страницы управления.
+ */
+export interface HistoryBookmarkListParams {
+  limit?: number;
+  offset?: number;
+  query?: string | null;
+}
+export interface HistoryBookmarkListResult {
+  bookmarks: HistoryBookmark[];
+  total: number;
+}
+export interface HistoryBookmark {
+  /**
+   * Добавлена, unix-ms.
+   */
+  addedAt: number;
+  title: string;
+  url: string;
+}
+/**
+ * history.bookmark_remove: удалить закладку (идемпотентна).
+ */
+export interface HistoryBookmarkRemoveParams {
+  url: string;
+}
+/**
+ * history.bookmark_update: переименовать закладку (правка на странице управления); несуществующая — ошибка.
+ */
+export interface HistoryBookmarkUpdateParams {
+  title: string;
+  url: string;
+}
+/**
+ * history.delete_range: удалить визиты за [fromMs..=toMs] (unix-ms); fromMs=0, toMs=«будущее» — вся история (закладки не трогаются).
+ */
+export interface HistoryDeleteRangeParams {
+  fromMs: number;
+  toMs: number;
+}
+/**
+ * history.delete_urls: удалить из истории все визиты перечисленных адресов.
+ */
+export interface HistoryDeleteUrlsParams {
+  urls: string[];
+}
+/**
+ * history.list: история для страницы управления — агрегат по URL.
+ */
+export interface HistoryListParams {
+  /**
+   * Страница выдачи (по умолчанию 100, максимум 500).
+   */
+  limit?: number;
+  offset?: number;
+  /**
+   * FTS-фильтр по заголовку/адресу (префиксные токены); пустой — всё.
+   */
+  query?: string | null;
+}
+export interface HistoryListResult {
+  entries: HistoryEntry[];
+  /**
+   * Всего URL, подходящих под фильтр (пагинация).
+   */
+  total: number;
+}
+export interface HistoryEntry {
+  /**
+   * Последнее посещение, unix-ms.
+   */
+  lastVisitedAt: number;
+  /**
+   * Заголовок последнего визита (может быть пуст до on_title).
+   */
+  title: string;
+  url: string;
+  visitCount: number;
+}
+/**
+ * history.search: подсказки omnibox — полнотекстовый поиск по истории и закладкам (FTS5, задача 1.3; хранилище — src/history/, SQLite в профиле — задача 1.4).
  */
 export interface HistorySearchParams {
   /**
@@ -70,6 +168,13 @@ export interface HistorySearchResult {
 export interface HistoryHit {
   source: HistorySource;
   title: string;
+  url: string;
+}
+/**
+ * history.visit: записать посещение. Core записывает визиты сам (on_page_load вкладок, только http/https); команда в словаре — для e2e-стендов и будущих источников (docs/05 §2).
+ */
+export interface HistoryVisitParams {
+  title?: string;
   url: string;
 }
 /**

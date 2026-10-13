@@ -105,8 +105,8 @@ pub struct NavResolveOmniboxResult {
 }
 
 /// history.search: подсказки omnibox — полнотекстовый поиск по истории и
-/// закладкам (FTS5, задача 1.3; хранилище — src/history/, пока временные
-/// данные, полная интеграция — задача 1.4).
+/// закладкам (FTS5, задача 1.3; хранилище — src/history/, SQLite в профиле —
+/// задача 1.4).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct HistorySearchParams {
     pub query: String,
@@ -133,14 +133,6 @@ pub enum HistorySource {
 }
 
 impl HistorySource {
-    /// Строка в UNINDEXED-колонке FTS5 (хранение — только текст).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::History => "history",
-            Self::Bookmark => "bookmark",
-        }
-    }
-
     /// Обратное преобразование (не-«bookmark» считается историей).
     pub fn from_db(s: &str) -> Self {
         if s == "bookmark" {
@@ -157,6 +149,125 @@ pub struct HistoryHit {
     pub source: HistorySource,
     pub url: String,
     pub title: String,
+}
+
+// --- задача 1.4: история и закладки (SQLite в профиле, src/history/) --------
+
+/// history.visit: записать посещение. Core записывает визиты сам (on_page_load
+/// вкладок, только http/https); команда в словаре — для e2e-стендов и будущих
+/// источников (docs/05 §2).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistoryVisitParams {
+    pub url: String,
+    #[serde(default)]
+    pub title: String,
+}
+
+/// history.list: история для страницы управления — агрегат по URL.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryListParams {
+    /// FTS-фильтр по заголовку/адресу (префиксные токены); пустой — всё.
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub offset: u32,
+    /// Страница выдачи (по умолчанию 100, максимум 500).
+    #[serde(default = "default_list_limit")]
+    pub limit: u32,
+}
+
+fn default_list_limit() -> u32 {
+    100
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryListResult {
+    pub entries: Vec<HistoryEntry>,
+    /// Всего URL, подходящих под фильтр (пагинация).
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    pub url: String,
+    /// Заголовок последнего визита (может быть пуст до on_title).
+    pub title: String,
+    /// Последнее посещение, unix-ms.
+    pub last_visited_at: i64,
+    pub visit_count: u32,
+}
+
+/// history.delete_urls: удалить из истории все визиты перечисленных адресов.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistoryDeleteUrlsParams {
+    pub urls: Vec<String>,
+}
+
+/// history.delete_range: удалить визиты за [fromMs..=toMs] (unix-ms);
+/// fromMs=0, toMs=«будущее» — вся история (закладки не трогаются).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryDeleteRangeParams {
+    pub from_ms: i64,
+    pub to_ms: i64,
+}
+
+/// history.bookmark_add: добавить закладку (url — ключ; повторное добавление
+/// обновляет заголовок, пустой заголовок сохраняет прежний).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistoryBookmarkAddParams {
+    pub url: String,
+    #[serde(default)]
+    pub title: String,
+}
+
+/// history.bookmark_remove: удалить закладку (идемпотентна).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistoryBookmarkRemoveParams {
+    pub url: String,
+}
+
+/// history.bookmark_update: переименовать закладку (правка на странице
+/// управления); несуществующая — ошибка.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistoryBookmarkUpdateParams {
+    pub url: String,
+    pub title: String,
+}
+
+/// history.bookmark_list: закладки для страницы управления.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryBookmarkListParams {
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub offset: u32,
+    #[serde(default = "default_bookmark_limit")]
+    pub limit: u32,
+}
+
+fn default_bookmark_limit() -> u32 {
+    200
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryBookmarkListResult {
+    pub bookmarks: Vec<HistoryBookmark>,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryBookmark {
+    pub url: String,
+    pub title: String,
+    /// Добавлена, unix-ms.
+    pub added_at: i64,
 }
 
 /// settings.get: ключ, значение которого читаем.
@@ -330,6 +441,28 @@ pub fn contract_json() -> serde_json::Value {
             "nav.reload": { "handler": "nav_reload", "params": null, "result": null },
             "history.search": { "handler": "history_search", "params": schema!(HistorySearchParams),
                                 "result": schema!(HistorySearchResult) },
+            "history.visit": { "handler": "history_visit", "params": schema!(HistoryVisitParams),
+                               "result": null },
+            "history.list": { "handler": "history_list", "params": schema!(HistoryListParams),
+                              "result": schema!(HistoryListResult) },
+            "history.delete_urls": { "handler": "history_delete_urls",
+                                     "params": schema!(HistoryDeleteUrlsParams),
+                                     "result": null },
+            "history.delete_range": { "handler": "history_delete_range",
+                                      "params": schema!(HistoryDeleteRangeParams),
+                                      "result": null },
+            "history.bookmark_add": { "handler": "history_bookmark_add",
+                                      "params": schema!(HistoryBookmarkAddParams),
+                                      "result": null },
+            "history.bookmark_remove": { "handler": "history_bookmark_remove",
+                                         "params": schema!(HistoryBookmarkRemoveParams),
+                                         "result": null },
+            "history.bookmark_update": { "handler": "history_bookmark_update",
+                                         "params": schema!(HistoryBookmarkUpdateParams),
+                                         "result": null },
+            "history.bookmark_list": { "handler": "history_bookmark_list",
+                                       "params": schema!(HistoryBookmarkListParams),
+                                       "result": schema!(HistoryBookmarkListResult) },
             "settings.get": { "handler": "settings_get", "params": schema!(SettingsGetParams),
                               "result": schema!(ProxySettings) },
             "settings.set": { "handler": "settings_set", "params": schema!(SettingsSetParams),
@@ -524,10 +657,93 @@ fn nav_focus_page(
 fn history_search(
     history: tauri::State<'_, crate::history::HistoryStore>,
     params: HistorySearchParams,
-) -> HistorySearchResult {
-    HistorySearchResult {
-        hits: history.search(&params.query, params.limit),
-    }
+) -> Result<HistorySearchResult, String> {
+    Ok(HistorySearchResult {
+        hits: history.search(&params.query, params.limit)?,
+    })
+}
+
+/// history.visit: запись посещения (см. HistoryVisitParams — Core и сам
+/// пишет визиты из on_page_load вкладок).
+#[tauri::command]
+fn history_visit(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryVisitParams,
+) -> Result<(), String> {
+    history.visit(&params.url, &params.title)
+}
+
+/// history.list: история для страницы управления (агрегат по URL).
+#[tauri::command]
+fn history_list(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryListParams,
+) -> Result<HistoryListResult, String> {
+    let (entries, total) = history.list(
+        params.query.as_deref().unwrap_or(""),
+        params.offset,
+        params.limit,
+    )?;
+    Ok(HistoryListResult { entries, total })
+}
+
+/// history.delete_urls: удалить записи истории по адресам.
+#[tauri::command]
+fn history_delete_urls(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryDeleteUrlsParams,
+) -> Result<(), String> {
+    history.delete_urls(&params.urls)
+}
+
+/// history.delete_range: удалить историю за диапазон времени.
+#[tauri::command]
+fn history_delete_range(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryDeleteRangeParams,
+) -> Result<(), String> {
+    history.delete_range(params.from_ms, params.to_ms)
+}
+
+/// history.bookmark_add: добавить закладку (upsert по url).
+#[tauri::command]
+fn history_bookmark_add(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryBookmarkAddParams,
+) -> Result<(), String> {
+    history.bookmark_add(&params.url, &params.title)
+}
+
+/// history.bookmark_remove: удалить закладку.
+#[tauri::command]
+fn history_bookmark_remove(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryBookmarkRemoveParams,
+) -> Result<(), String> {
+    history.bookmark_remove(&params.url)
+}
+
+/// history.bookmark_update: переименовать закладку.
+#[tauri::command]
+fn history_bookmark_update(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryBookmarkUpdateParams,
+) -> Result<(), String> {
+    history.bookmark_update(&params.url, &params.title)
+}
+
+/// history.bookmark_list: закладки для страницы управления.
+#[tauri::command]
+fn history_bookmark_list(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryBookmarkListParams,
+) -> Result<HistoryBookmarkListResult, String> {
+    let (bookmarks, total) = history.bookmark_list(
+        params.query.as_deref().unwrap_or(""),
+        params.offset,
+        params.limit,
+    )?;
+    Ok(HistoryBookmarkListResult { bookmarks, total })
 }
 
 #[tauri::command]
@@ -660,6 +876,14 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         nav_go_forward,
         nav_reload,
         history_search,
+        history_visit,
+        history_list,
+        history_delete_urls,
+        history_delete_range,
+        history_bookmark_add,
+        history_bookmark_remove,
+        history_bookmark_update,
+        history_bookmark_list,
         settings_get,
         settings_set,
         vpn_set_enabled,

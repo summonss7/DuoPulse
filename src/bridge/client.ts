@@ -6,8 +6,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   BridgeVersionResult,
+  HistoryBookmarkAddParams,
+  HistoryBookmarkListParams,
+  HistoryBookmarkListResult,
+  HistoryBookmarkRemoveParams,
+  HistoryBookmarkUpdateParams,
+  HistoryDeleteRangeParams,
+  HistoryDeleteUrlsParams,
+  HistoryListParams,
+  HistoryListResult,
   HistorySearchParams,
   HistorySearchResult,
+  HistoryVisitParams,
   NavNavigateParams,
   NavResolveOmniboxParams,
   NavResolveOmniboxResult,
@@ -54,6 +64,22 @@ export const bridge = {
   history: {
     /** history.search: подсказки omnibox — FTS-поиск по истории и закладкам. */
     search: (params: HistorySearchParams) => invoke<HistorySearchResult>("history_search", { params }),
+    /** history.visit: записать посещение (Core пишет визиты и сам). */
+    visit: (params: HistoryVisitParams) => invoke<void>("history_visit", { params }),
+    /** history.list: история для страницы управления (агрегат по URL). */
+    list: (params: HistoryListParams) => invoke<HistoryListResult>("history_list", { params }),
+    /** history.delete_urls: удалить записи истории по адресам. */
+    deleteUrls: (params: HistoryDeleteUrlsParams) => invoke<void>("history_delete_urls", { params }),
+    /** history.delete_range: удалить историю за диапазон времени (unix-ms). */
+    deleteRange: (params: HistoryDeleteRangeParams) => invoke<void>("history_delete_range", { params }),
+    /** history.bookmark_add: добавить закладку (upsert по url). */
+    bookmarkAdd: (params: HistoryBookmarkAddParams) => invoke<void>("history_bookmark_add", { params }),
+    /** history.bookmark_remove: удалить закладку (идемпотентна). */
+    bookmarkRemove: (params: HistoryBookmarkRemoveParams) => invoke<void>("history_bookmark_remove", { params }),
+    /** history.bookmark_update: переименовать закладку. */
+    bookmarkUpdate: (params: HistoryBookmarkUpdateParams) => invoke<void>("history_bookmark_update", { params }),
+    /** history.bookmark_list: закладки для страницы управления. */
+    bookmarkList: (params: HistoryBookmarkListParams) => invoke<HistoryBookmarkListResult>("history_bookmark_list", { params }),
   },
   settings: {
     /** settings.get: значение ключа профиля. */

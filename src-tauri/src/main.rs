@@ -194,11 +194,13 @@ pub(crate) unsafe fn install_content_handlers(
 fn main() {
     // IPC-контракт bridge (задача 1.1): все команды/события — src/bridge.rs.
     // Менеджер вкладок (задача 1.2) — состояние Core для tabs.* и nav.*.
-    // Подсказки omnibox (задача 1.3) — FTS5-индекс истории/закладок
-    // (временные данные; полное хранилище — задача 1.4).
+    // История и закладки (задача 1.4) — SQLite в профиле (docs/02 §8):
+    // duopulse.db, запись визитов — из on_page_load вкладок (src/tabs/).
+    let history_store = history::HistoryStore::open(&proxy::profile_dir())
+        .expect("открыть/создать duopulse.db в профиле (docs/02 §8)");
     bridge::register(tauri::Builder::default())
         .manage(tabs::TabManager::new())
-        .manage(history::HistoryStore::seeded())
+        .manage(history_store)
         .setup(|app| {
             // Прокси задаётся аргументами окружения WebView2 только на старте
             // (docs/02 §6.1) — конфиг читаем ДО создания webview; аргументы

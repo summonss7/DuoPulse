@@ -1,0 +1,6 @@
+{
+  "identifier": "pages",
+  "description": "Внутренние страницы duopulse:// (задача 1.4, например duopulse://history) — webview с UI-бандлом, метка page-<имя>-N. Контентные вкладки удалённых сайтов (tab-*) под шаблон не попадают и доступа к IPC не имеют.",
+  "windows": ["page-*"],
+  "permissions": ["core:default"]
+}

@@ -1,27 +1,17 @@
-// DuoPulse — UI-хром: таб-бар (задача 1.2) + адресная строка omnibox (1.3).
-// Ввод разбирает Core (nav.resolve_omnibox: URL с догадкой схемы или поиск),
-// подсказки — history.search (FTS5 по истории и закладкам); Enter — nav.navigate
-// активной вкладки. Список вкладок и их URL приходят событием tabs.updated —
-// omnibox показывает URL активной вкладки (когда не в фокусе).
-import { bridge } from "./bridge";
-import "./bridge/dev-probe";
-import { initTabBar, onTabsChanged } from "./chrome/tabbar";
-import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
-import "./proxy-menu";
+// DuoPulse — роутер точек входа UI-бандла (задача 1.4).
+// Один бандл грузится в два вида webview: хром браузера (метка "main") и
+// внутренние страницы duopulse:// (метки page-<имя>-N, создаются в
+// src-tauri/src/tabs/). Ветка определяется меткой webview; импорты
+// динамические, чтобы слушатели хрома не жили в странице (и наоборот).
+// Новые внутренние страницы: имя в internal_page_name (Core) + ветка тут.
 import "./style.css";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+// dev-хук window.__duopulse нужен и хрому, и внутренним страницам (e2e).
+import "./bridge/dev-probe";
 
-// Таб-бар (задача 1.2): рендер вкладок, хоткеи, контекст-меню.
-initTabBar();
-// Omnibox (задача 1.3): подсказки, Enter/Esc/стрелки, кнопки навигации.
-initOmnibox();
-
-// URL активной вкладки — в адресную строку (кроме моментов ввода).
-onTabsChanged((tabs) => {
-  const active = tabs.find((t) => t.active);
-  setActiveUrl(active?.url ?? "");
-});
-
-// Кнопки навигации (nav.* контракта действуют на активную вкладку).
-document.getElementById("back")?.addEventListener("click", () => void bridge.nav.goBack().catch(console.error));
-document.getElementById("fwd")?.addEventListener("click", () => void bridge.nav.goForward().catch(console.error));
-document.getElementById("reload")?.addEventListener("click", () => void bridge.nav.reload().catch(console.error));
+const page = getCurrentWebview().label.match(/^page-([a-z]+)-\d+$/)?.[1];
+if (page === "history") {
+  void import("./pages/history");
+} else {
+  void import("./chrome");
+}

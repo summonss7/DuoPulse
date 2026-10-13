@@ -8,6 +8,18 @@
 //! хендлеры-обёртки — src/bridge.rs. URL/заголовок вкладки отслеживаются
 //! событиями webview (on_page_load / on_document_title_changed) и хранятся
 //! в менеджере — tabs.list читает их из состояния, не опрашивая webview.
+//!
+//! Внутренние страницы (задача 1.4): вкладка с url `duopulse://<имя>` грузит
+//! UI-бандл (WebviewUrl::App) в webview с меткой `page-<имя>-N` — как
+//! chrome://history в браузерах. Канонический адрес вкладки остаётся
+//! `duopulse://<имя>`, пока webview живёт в app-origin (уход по внешнему
+//! адресу — превращает вкладку в обычную). IPC доступен внутренним страницам
+//! через capability `page-*` (src-tauri/capabilities/pages.json), контентные
+//! вкладки (tab-*) его не имеют.
+//!
+//! Визиты истории (задача 1.4): on_page_load(Finished) внешних http/https
+//! страниц пишет HistoryStore.visit; заголовок страницы (on_title)
+//! подтягивает note_title.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -69,6 +81,8 @@ struct TabEntry {
     title: Option<String>,
     /// Идёт загрузка документа (пульс-индикатор на вкладке, гайд 06 §3).
     loading: bool,
+    /// Внутренняя страница duopulse:// (см. модульный комментарий).
+    internal: bool,
 }
 
 impl TabEntry {
@@ -259,6 +273,7 @@ impl TabManager {
     }
 
     /// Создание webview вкладки; position — индекс вставки в бар (None — конец).
+    /// `duopulse://<имя>` — внутренняя страница (webview с UI-бандлом).
     fn spawn_tab(
         &self,
         app: &AppHandle,
@@ -270,29 +285,44 @@ impl TabManager {
             .ok_or_else(|| "окно main не найдено".to_string())?;
         let parsed =
             Url::parse(&url).map_err(|e| format!("некорректный URL вкладки «{url}»: {e}"))?;
+        let internal = internal_page_name(&parsed);
 
-        let id = {
+        let builder = {
             let mut st = self.state.lock().expect("tabs: лок не отравлен");
             st.next_seq += 1;
-            let id = format!("tab-{}", st.next_seq);
+            let seq = st.next_seq;
+            let (id, builder) = if let Some(name) = internal {
+                (
+                    format!("page-{name}-{seq}"),
+                    build_page_webview(&format!("page-{name}-{seq}")),
+                )
+            } else {
+                (
+                    format!("tab-{seq}"),
+                    build_tab_webview(app, &format!("tab-{seq}"), &parsed),
+                )
+            };
             let index = position.unwrap_or(st.tabs.len()).min(st.tabs.len());
             st.tabs.insert(
                 index,
                 TabEntry {
-                    id: id.clone(),
+                    id,
+                    // канонический адрес: для внутренних страниц Url сериализует
+                    // «duopulse://history» как «duopulse://history/»
                     url: parsed.to_string(),
                     title: None,
                     loading: false,
+                    internal: internal.is_some(),
                 },
             );
             st.active = Some(index);
-            id
+            builder
         };
 
         let webview = {
             let (pos, size) = content_rect(&window);
             window
-                .add_child(build_tab_webview(app, &id, &parsed), pos, size)
+                .add_child(builder, pos, size)
                 .map_err(|e| format!("создание webview вкладки: {e}"))?
         };
 
@@ -333,20 +363,51 @@ impl TabManager {
     }
 
     /// on_page_load: URL актуализируется на каждом переходе (в т.ч. клики по
-    /// ссылкам), loading — индикатор пульса на вкладке (гайд 06 §3).
+    /// ссылкам), loading — индикатор пульса на вкладке (гайд 06 §3). Для
+    /// внешних http/https документов Finished записывает визит истории
+    /// (задача 1.4). Внутренняя страница держит канонический duopulse://…,
+    /// пока webview в app-origin: уход по внешнему адресу превращает вкладку
+    /// в обычную.
     pub(crate) fn on_page_load(&self, app: &AppHandle, id: &str, event: PageLoadEvent, url: &Url) {
         let mut st = self.state.lock().expect("tabs: лок не отравлен");
         let Some(entry) = st.tabs.iter_mut().find(|t| t.id == id) else {
             return;
         };
+        let record_visit = matches!(event, PageLoadEvent::Finished)
+            && matches!(url.scheme(), "http" | "https")
+            && !(entry.internal && is_app_origin(app, url));
+        if entry.internal && is_app_origin(app, url) {
+            entry.loading = matches!(event, PageLoadEvent::Started);
+            drop(st);
+            let snapshot = self.snapshot();
+            emit::<TabsUpdated>(app, &snapshot).ok();
+            return;
+        }
+        if entry.internal {
+            entry.internal = false; // webview ушёл с внутренней страницы
+        }
         entry.url = url.to_string();
         entry.loading = matches!(event, PageLoadEvent::Started);
+        let (visit_url, visit_title) = if record_visit {
+            (url.to_string(), entry.title.clone().unwrap_or_default())
+        } else {
+            (String::new(), String::new())
+        };
         drop(st);
+        if record_visit {
+            if let Err(e) = app
+                .state::<crate::history::HistoryStore>()
+                .visit(&visit_url, &visit_title)
+            {
+                eprintln!("history: визит не записан ({visit_url}): {e}");
+            }
+        }
         let snapshot = self.snapshot();
         emit::<TabsUpdated>(app, &snapshot).ok();
     }
 
-    /// on_document_title_changed: заголовок вкладки для таб-бара.
+    /// on_document_title_changed: заголовок вкладки для таб-бара и последнего
+    /// визита истории (приходит после Finished — history.note_title).
     pub(crate) fn on_title(&self, app: &AppHandle, id: &str, title: String) {
         let mut st = self.state.lock().expect("tabs: лок не отравлен");
         let Some(entry) = st.tabs.iter_mut().find(|t| t.id == id) else {
@@ -355,15 +416,49 @@ impl TabManager {
         if entry.title.as_deref() == Some(title.as_str()) {
             return;
         }
-        entry.title = Some(title);
+        entry.title = Some(title.clone());
+        let note = if entry.internal {
+            None
+        } else {
+            Some(entry.url.clone())
+        };
         drop(st);
+        if let Some(url) = note {
+            if let Err(e) = app
+                .state::<crate::history::HistoryStore>()
+                .note_title(&url, &title)
+            {
+                eprintln!("history: заголовок не обновлён ({url}): {e}");
+            }
+        }
         let snapshot = self.snapshot();
         emit::<TabsUpdated>(app, &snapshot).ok();
     }
 }
 
-/// Сборка webview вкладки: стартовый URL, content-скрипты (монитор M0 +
-/// горячие клавиши таб-бара), аргументы окружения старта, трекинг URL/заголовка.
+/// Внутренние страницы duopulse:// (задача 1.4): адрес → имя страницы.
+/// Новые страницы (настройки, диагностика) добавляются сюда + в роутер
+/// src/main.ts.
+fn internal_page_name(url: &Url) -> Option<&'static str> {
+    match url.host_str()? {
+        "history" => Some("history"),
+        _ => None,
+    }
+}
+
+/// True, если URL принадлежит app-origin (тот же origin, что у UI-webview
+/// «main») — так внутренняя страница отличает свои загрузки от ухода
+/// по внешнему адресу (dev: vite-сервер, прод: tauri-протокол).
+fn is_app_origin(app: &AppHandle, url: &Url) -> bool {
+    app.get_webview("main")
+        .and_then(|wv| wv.url().ok())
+        .map(|main| main.origin() == url.origin())
+        .unwrap_or(false)
+}
+
+/// Сборка webview контентной вкладки: стартовый URL, content-скрипты (монитор
+/// M0 + горячие клавиши таб-бара), аргументы окружения старта, трекинг
+/// URL/заголовка.
 fn build_tab_webview(app: &AppHandle, id: &str, url: &Url) -> WebviewBuilder<tauri::Wry> {
     let app_for_load = app.clone();
     let app_for_title = app.clone();
@@ -393,5 +488,32 @@ fn build_tab_webview(app: &AppHandle, id: &str, url: &Url) -> WebviewBuilder<tau
             app_for_title
                 .state::<TabManager>()
                 .on_title(&app_for_title, &label, title);
+        })
+}
+
+/// Сборка webview внутренней страницы duopulse:// (задача 1.4): UI-бандл
+/// (WebviewUrl::App), горячие клавиши таб-бара работают и на странице,
+/// трекинг URL/заголовка тот же (модульный комментарий TabManager).
+/// Метка webview задаётся при создании (page-<имя>-N) — SPA определяет по
+/// ней страницу (src/main.ts).
+fn build_page_webview(id: &str) -> WebviewBuilder<tauri::Wry> {
+    let id_for_load = id.to_string();
+    let id_for_title = id.to_string();
+    WebviewBuilder::new(id, WebviewUrl::App("index.html".into()))
+        .initialization_script(crate::CONTENT_INIT_SCRIPT_HOTKEYS)
+        // Те же аргументы окружения, что у UI-webview и вкладок: WebView2 не
+        // даёт смешивать environment с разными аргументами на одну папку
+        // данных — контроллер не создаётся (0x8007139F).
+        .additional_browser_args(crate::startup_proxy_args())
+        .on_page_load(move |wv, payload| {
+            let label = id_for_load.clone();
+            let app = wv.app_handle().clone();
+            app.state::<TabManager>()
+                .on_page_load(&app, &label, payload.event(), payload.url());
+        })
+        .on_document_title_changed(move |wv, title| {
+            let label = id_for_title.clone();
+            let app = wv.app_handle().clone();
+            app.state::<TabManager>().on_title(&app, &label, title);
         })
 }

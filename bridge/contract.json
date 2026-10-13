@@ -25,11 +25,278 @@
         "type": "object"
       }
     },
+    "history.bookmark_add": {
+      "handler": "history_bookmark_add",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.bookmark_add: добавить закладку (url — ключ; повторное добавление обновляет заголовок, пустой заголовок сохраняет прежний).",
+        "properties": {
+          "title": {
+            "default": "",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "HistoryBookmarkAddParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.bookmark_list": {
+      "handler": "history_bookmark_list",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.bookmark_list: закладки для страницы управления.",
+        "properties": {
+          "limit": {
+            "default": 200,
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "query": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "HistoryBookmarkListParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "HistoryBookmark": {
+            "properties": {
+              "addedAt": {
+                "description": "Добавлена, unix-ms.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "addedAt",
+              "title",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "bookmarks": {
+            "items": {
+              "$ref": "#/definitions/HistoryBookmark"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bookmarks",
+          "total"
+        ],
+        "title": "HistoryBookmarkListResult",
+        "type": "object"
+      }
+    },
+    "history.bookmark_remove": {
+      "handler": "history_bookmark_remove",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.bookmark_remove: удалить закладку (идемпотентна).",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "HistoryBookmarkRemoveParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.bookmark_update": {
+      "handler": "history_bookmark_update",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.bookmark_update: переименовать закладку (правка на странице управления); несуществующая — ошибка.",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "HistoryBookmarkUpdateParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.delete_range": {
+      "handler": "history_delete_range",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.delete_range: удалить визиты за [fromMs..=toMs] (unix-ms); fromMs=0, toMs=«будущее» — вся история (закладки не трогаются).",
+        "properties": {
+          "fromMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "toMs": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fromMs",
+          "toMs"
+        ],
+        "title": "HistoryDeleteRangeParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.delete_urls": {
+      "handler": "history_delete_urls",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.delete_urls: удалить из истории все визиты перечисленных адресов.",
+        "properties": {
+          "urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "title": "HistoryDeleteUrlsParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.list": {
+      "handler": "history_list",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.list: история для страницы управления — агрегат по URL.",
+        "properties": {
+          "limit": {
+            "default": 100,
+            "description": "Страница выдачи (по умолчанию 100, максимум 500).",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "query": {
+            "default": null,
+            "description": "FTS-фильтр по заголовку/адресу (префиксные токены); пустой — всё.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "HistoryListParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "HistoryEntry": {
+            "properties": {
+              "lastVisitedAt": {
+                "description": "Последнее посещение, unix-ms.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "title": {
+                "description": "Заголовок последнего визита (может быть пуст до on_title).",
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "visitCount": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "lastVisitedAt",
+              "title",
+              "url",
+              "visitCount"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/definitions/HistoryEntry"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Всего URL, подходящих под фильтр (пагинация).",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entries",
+          "total"
+        ],
+        "title": "HistoryListResult",
+        "type": "object"
+      }
+    },
     "history.search": {
       "handler": "history_search",
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "history.search: подсказки omnibox — полнотекстовый поиск по истории и закладкам (FTS5, задача 1.3; хранилище — src/history/, пока временные данные, полная интеграция — задача 1.4).",
+        "description": "history.search: подсказки omnibox — полнотекстовый поиск по истории и закладкам (FTS5, задача 1.3; хранилище — src/history/, SQLite в профиле — задача 1.4).",
         "properties": {
           "limit": {
             "default": 8,
@@ -94,6 +361,28 @@
         "title": "HistorySearchResult",
         "type": "object"
       }
+    },
+    "history.visit": {
+      "handler": "history_visit",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.visit: записать посещение. Core записывает визиты сам (on_page_load вкладок, только http/https); команда в словаре — для e2e-стендов и будущих источников (docs/05 §2).",
+        "properties": {
+          "title": {
+            "default": "",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "HistoryVisitParams",
+        "type": "object"
+      },
+      "result": null
     },
     "nav.focus_page": {
       "handler": "nav_focus_page",
