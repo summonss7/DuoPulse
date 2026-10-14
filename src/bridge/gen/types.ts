@@ -54,6 +54,8 @@ export interface DuoPulseBridgeContract {
   TabInfo: TabInfo;
   TabsCloseParams: TabsCloseParams;
   TabsOpenParams: TabsOpenParams;
+  TabsSleepParams: TabsSleepParams;
+  TabsWakeParams: TabsWakeParams;
   VpnSetEnabledParams: VpnSetEnabledParams;
   VpnStatusResult: VpnStatusResult;
   ProxyState: ProxyState;
@@ -324,6 +326,10 @@ export interface TabInfo {
    */
   loading: boolean;
   /**
+   * Спит ли вкладка (приостановлена WebView2; задача 2.3): JS/таймеры заморожены, состояние страницы сохранено, активация будит.
+   */
+  sleeping: boolean;
+  /**
    * Заголовок страницы (пусто — до первого on_document_title_changed).
    */
   title?: string | null;
@@ -343,6 +349,18 @@ export interface TabsCloseParams {
  */
 export interface TabsOpenParams {
   url?: string | null;
+}
+/**
+ * tabs.sleep: усыпить вкладку вручную (задача 2.3; авто-усыпление долгих простоёв — фоновая нить Core). Активная вкладка и вкладка с играющим звуком/видео не усыпляются — ошибка.
+ */
+export interface TabsSleepParams {
+  id: string;
+}
+/**
+ * tabs.wake: разбудить вкладку (задача 2.3; активация и так будит — команда для диагностики/e2e). Не спящая вкладка — no-op.
+ */
+export interface TabsWakeParams {
+  id: string;
 }
 /**
  * vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется.

@@ -49,9 +49,18 @@ function render(): void {
       el.className = tab.active ? "tab active" : "tab";
       el.dataset.id = tab.id;
       el.dataset.loading = String(tab.loading);
+      el.dataset.sleeping = String(tab.sleeping);
       el.setAttribute("role", "tab");
       el.setAttribute("aria-selected", String(tab.active));
-      el.title = tab.url;
+      el.title = tab.sleeping ? `${tab.url} — спящая вкладка (активируйте, чтобы разбудить)` : tab.url;
+      if (tab.sleeping) {
+        // спящая вкладка (задача 2.3): луна + приглушённый заголовок
+        const moon = document.createElement("span");
+        moon.className = "tab-sleep";
+        moon.innerHTML =
+          '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.5A6 6 0 1 1 6.5 2.5a4.7 4.7 0 0 0 7 7z"/></svg>';
+        el.append(moon);
+      }
       const title = document.createElement("span");
       title.className = "tab-title";
       title.textContent = titleOf(tab);
@@ -141,6 +150,11 @@ function openMenu(id: string, x: number, y: number): void {
     // «Закрыть другие» безсмысленна для единственной вкладки
     (menuEl.querySelector('[data-act="closeOthers"]') as HTMLButtonElement).disabled = true;
   }
+  // «Усыпить» доступно фоновой неспящей вкладке (активная и спящая — нет)
+  const sleepBtn = menuEl.querySelector('[data-act="sleep"]') as HTMLButtonElement | null;
+  if (sleepBtn) {
+    sleepBtn.disabled = !tab || tab.active || tab.sleeping;
+  }
   menuEl.hidden = false;
   const appRect = tabsEl.offsetParent?.getBoundingClientRect();
   const left = Math.min(
@@ -178,6 +192,10 @@ menuEl.addEventListener("click", (e) => {
       break;
     case "reopen":
       void bridge.tabs.reopen().then(apply, err);
+      break;
+    case "sleep":
+      // ручное усыпление (задача 2.3); фон сна подтверждает tabs:updated
+      void bridge.tabs.sleep({ id }).then(apply, err);
       break;
   }
 });

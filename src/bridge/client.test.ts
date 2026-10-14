@@ -29,6 +29,8 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "tabs.close": { path: ["tabs", "close"], params: { id: "tab-1" } },
   "tabs.reopen": { path: ["tabs", "reopen"] },
   "tabs.activate": { path: ["tabs", "activate"], params: { id: "tab-1" } },
+  "tabs.sleep": { path: ["tabs", "sleep"], params: { id: "tab-1" } },
+  "tabs.wake": { path: ["tabs", "wake"], params: { id: "tab-1" } },
   "nav.navigate": { path: ["nav", "navigate"], params: { url: "https://example.com/" } },
   "nav.resolve_omnibox": { path: ["nav", "resolveOmnibox"], params: { input: "rust lang" } },
   "nav.focus_page": { path: ["nav", "focusPage"] },

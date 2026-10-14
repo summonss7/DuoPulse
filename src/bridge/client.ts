@@ -31,6 +31,8 @@ import type {
   TabsCloseParams,
   TabsListResult,
   TabsOpenParams,
+  TabsSleepParams,
+  TabsWakeParams,
   VpnSetEnabledParams,
   VpnStatusResult,
 } from "./gen/types";
@@ -51,6 +53,10 @@ export const bridge = {
     reopen: () => invoke<TabsListResult>("tabs_reopen"),
     /** tabs.activate: сделать вкладку активной (клик по вкладке). */
     activate: (params: TabsActivateParams) => invoke<TabsListResult>("tabs_activate", { params }),
+    /** tabs.sleep: усыпить вкладку (авто-усыпление простаивающих — Core). */
+    sleep: (params: TabsSleepParams) => invoke<TabsListResult>("tabs_sleep", { params }),
+    /** tabs.wake: разбудить вкладку (активация и так будит — диагностика). */
+    wake: (params: TabsWakeParams) => invoke<TabsListResult>("tabs_wake", { params }),
   },
   nav: {
     /** nav.navigate: переход активной вкладки по URL. */

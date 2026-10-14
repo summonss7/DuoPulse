@@ -1201,11 +1201,20 @@ mod tests {
             "127.0.0.1##.e2e-site-ad",
             "127.0.0.1#@#.e2e-exempt-ad",
         ]));
-        let classes: Vec<String> = ["content", "e2e-complex", "e2e-generic-class", "e2e-misc", "e2e-site-ad"]
+        let classes: Vec<String> = [
+            "content",
+            "e2e-complex",
+            "e2e-generic-class",
+            "e2e-misc",
+            "e2e-site-ad",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let ids: Vec<String> = ["e2e-generic-id", "result"]
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let ids: Vec<String> = ["e2e-generic-id", "result"].iter().map(|s| s.to_string()).collect();
         let sel = s.cosmetic_generic_selectors("http://127.0.0.1:8895/", &classes, &ids);
         assert_eq!(
             sel,

@@ -44,10 +44,12 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2
 const BLOCK_TEST_PATH: &str = "/duopulse_block_test_probe";
 
 /// Content-скрипты каждой вкладки (docs/02 §4): монитор M0 + горячие клавиши
-/// таб-бара (задача 1.2) + косметика блокировщика (задача 2.2).
+/// таб-бара (задача 1.2) + монитор медиа для спящего режима (задача 2.3) +
+/// косметика блокировщика (задача 2.2).
 pub(crate) const CONTENT_INIT_SCRIPT_M0: &str = include_str!("../../content/m0-spike.js");
 pub(crate) const CONTENT_INIT_SCRIPT_HOTKEYS: &str =
     include_str!("../../content/chrome-hotkeys.js");
+pub(crate) const CONTENT_INIT_SCRIPT_MEDIA: &str = include_str!("../../content/media-watch.js");
 pub(crate) const CONTENT_INIT_SCRIPT_COSMETIC: &str = include_str!("../../content/cosmetic.js");
 
 /// Аргументы окружения WebView2, зафиксированные на старте приложения:
@@ -232,17 +234,21 @@ unsafe fn referer_of(
 /// Сообщения content-слоя вкладки (window.chrome.webview.postMessage):
 /// - «hotkey» — горячие клавиши таб-бара (content/chrome-hotkeys.js →
 ///   tabs::handle_hotkey, задача 1.2);
+/// - «media» — состояние медиа документа (content/media-watch.js, задача
+///   2.3: играет звук/видео → вкладка не усыпляется); вкладка-отправитель —
+///   tab_id (обработчик ставится на каждый webview отдельно);
 /// - «cosmetic»/«cosmetic-generic» — запросы косметических ресурсов документа
 ///   (content/cosmetic.js, задача 2.2): селекторы скрытия из adblock-rs
 ///   возвращаются тому же webview PostWebMessageAsString (доставляется только
 ///   top-level документу — скрипт во фреймах запросы не шлёт);
 /// - прочие (IPC tauri обрабатывает свои параллельно) игнорируются.
 #[cfg(windows)]
-unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle) {
+unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
     use webview2_com::WebMessageReceivedEventHandler;
     use windows_core::PWSTR;
 
     let app = app.clone();
+    let tab_id = tab_id.to_string();
     core.add_WebMessageReceived(
         &WebMessageReceivedEventHandler::create(Box::new(move |sender, args| {
             let Some(args) = args else {
@@ -259,6 +265,11 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle) {
             if parsed["duopulse"] == "hotkey" {
                 if let Some(key) = parsed["key"].as_str() {
                     app.state::<tabs::TabManager>().handle_hotkey(&app, key);
+                }
+            } else if parsed["duopulse"] == "media" {
+                if let Some(playing) = parsed["playing"].as_bool() {
+                    app.state::<tabs::TabManager>()
+                        .on_media(&app, &tab_id, playing);
                 }
             } else if parsed["duopulse"] == "cosmetic" {
                 if let Some(url) = parsed["url"].as_str() {
@@ -342,7 +353,7 @@ pub(crate) unsafe fn install_content_handlers(
     let env: ICoreWebView2Environment = wv.environment();
     install_request_blocker(&core, &env, app, tab_id);
     install_proxy_auth(&core);
-    install_content_messaging(&core, app);
+    install_content_messaging(&core, app, tab_id);
 }
 
 /// Нешиндовс-фолбэк: без COM (сборка проекта — только Windows, см. Cargo.toml).
@@ -373,6 +384,9 @@ fn main() {
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и
             // батчинг счётчика adblock:blocked_count (задача 2.1).
             adblock_for_setup.start(app.handle());
+            // Спящий режим вкладок (задача 2.3): нить авто-усыпления
+            // долгих простоев (DUOPULSE_SLEEP_AFTER_SECS=0 — выключена).
+            tabs::start_sleeper(app.handle().clone());
             // Прокси задаётся аргументами окружения WebView2 только на старте
             // (docs/02 §6.1) — конфиг читаем ДО создания webview; аргументы
             // фиксируем для всех будущих вкладок (STARTUP_PROXY_ARGS).

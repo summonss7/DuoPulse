@@ -124,6 +124,22 @@ body {
     width: 20%;
   }
 }
+.tab[data-sleeping="true"] {
+  /* спящая вкладка (задача 2.3): приглушённая, луна; будится кликом */
+  color: color-mix(in srgb, var(--text-muted) 70%, var(--bg-surface));
+}
+.tab[data-sleeping="true"] .tab-title {
+  opacity: 0.65;
+}
+.tab-sleep {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.tab[data-sleeping="true"]:hover:not(.active) {
+  color: var(--text-primary);
+}
 .tab-title {
   flex: 1;
   min-width: 0;

@@ -60,6 +60,9 @@ pub struct TabInfo {
     pub active: bool,
     /// Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).
     pub loading: bool,
+    /// Спит ли вкладка (приостановлена WebView2; задача 2.3): JS/таймеры
+    /// заморожены, состояние страницы сохранено, активация будит.
+    pub sleeping: bool,
 }
 
 /// tabs.open: открыть вкладку; без url — стартовая страница (до страницы
@@ -79,6 +82,21 @@ pub struct TabsCloseParams {
 /// tabs.activate: сделать вкладку активной (клик по вкладке таб-бара).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TabsActivateParams {
+    pub id: String,
+}
+
+/// tabs.sleep: усыпить вкладку вручную (задача 2.3; авто-усыпление долгих
+/// простоёв — фоновая нить Core). Активная вкладка и вкладка с играющим
+/// звуком/видео не усыпляются — ошибка.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TabsSleepParams {
+    pub id: String,
+}
+
+/// tabs.wake: разбудить вкладку (задача 2.3; активация и так будит — команда
+/// для диагностики/e2e). Не спящая вкладка — no-op.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TabsWakeParams {
     pub id: String,
 }
 
@@ -521,6 +539,10 @@ pub fn contract_json() -> serde_json::Value {
                              "result": schema!(TabsListResult) },
             "tabs.activate": { "handler": "tabs_activate", "params": schema!(TabsActivateParams),
                                "result": schema!(TabsListResult) },
+            "tabs.sleep": { "handler": "tabs_sleep", "params": schema!(TabsSleepParams),
+                            "result": schema!(TabsListResult) },
+            "tabs.wake": { "handler": "tabs_wake", "params": schema!(TabsWakeParams),
+                           "result": schema!(TabsListResult) },
             "nav.navigate": { "handler": "nav_navigate", "params": schema!(NavNavigateParams),
                               "result": null },
             "nav.resolve_omnibox": { "handler": "nav_resolve_omnibox",
@@ -724,6 +746,28 @@ async fn tabs_activate(
         }
     });
     Ok(snapshot)
+}
+
+/// tabs.sleep: усыпить вкладку (задача 2.3). Сам TrySuspend асинхронен —
+/// команда отвечает снапшотом сразу, факт сна подтверждает tabs:updated.
+#[tauri::command]
+fn tabs_sleep(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: TabsSleepParams,
+) -> Result<TabsListResult, String> {
+    manager.sleep_by_id(&app, &params.id)
+}
+
+/// tabs.wake: разбудить вкладку (задача 2.3; активация будит сама —
+/// команда для диагностики/e2e).
+#[tauri::command]
+fn tabs_wake(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: TabsWakeParams,
+) -> Result<TabsListResult, String> {
+    manager.wake_by_id(&app, &params.id)
 }
 
 /// nav.navigate: async — переход в ленивой вкладке сессии (задача 1.6)
@@ -1027,6 +1071,8 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         tabs_close,
         tabs_reopen,
         tabs_activate,
+        tabs_sleep,
+        tabs_wake,
         nav_navigate,
         nav_resolve_omnibox,
         nav_focus_page,

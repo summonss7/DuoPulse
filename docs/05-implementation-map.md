@@ -95,7 +95,8 @@ DuoPulse/
 при миграции на bridge они ложатся на `vpn.{set_enabled, status, test_connection}`
 и `settings.{get, set}`.
 
-**Статус (13.10.2026, задачи 1.1–1.4 выполнены — карточки duopulse-011/012/013/014).**
+**Статус (14.10.2026, задачи 1.1–1.4, 2.1–2.3 выполнены — карточки
+duopulse-011/012/013/014/017/018/019).**
 `bridge` реализован: единственный источник контракта — Rust-типы
 `src-tauri/src/bridge.rs` (schemars); из них генерируется `bridge/contract.json`
 (JSON Schema draft-07, версионируется в git, версия контракта — поле `version`),
@@ -104,7 +105,10 @@ DuoPulse/
 vitest `src/bridge/client.test.ts` — команды и события). Словарь v2:
 команды `bridge.version`,
 `tabs.{list, open, close, reopen, activate}` (менеджер вкладок — задача 1.2,
-`src-tauri/src/tabs/`), `nav.{navigate, go_back, go_forward, reload}` (действуют
+`src-tauri/src/tabs/`), `tabs.{sleep, wake}` (спящий режим — задача 2.3:
+`src-tauri/src/tabs/sleep.rs` — TrySuspend/Resume WebView2 по таймауту
+простоя 5 мин, `TabInfo.sleeping` в снапшотах; исключение «играет звук/видео»
+определяет content/media-watch.js), `nav.{navigate, go_back, go_forward, reload}` (действуют
 на активную вкладку), `nav.{resolve_omnibox, focus_page}` + `history.search`
 (задача 1.3: разбор ввода omnibox — `src-tauri/src/omnibox.rs`, подсказки —
 FTS5-индекс `src-tauri/src/history/`), `history.{visit, list, delete_urls,
@@ -184,7 +188,7 @@ Gate-проверки этапов включены в последние кар
 |---|---|---|
 | 2.1 | **✅ выполнено 14.10.2026 (карточка duopulse-017)** adblock-rs: сетевая фильтрация + списки EasyList/uBO + обновление | метрика P-07 достигнута — **не достигнута сетевым слоем** (замер e2e/adblock/p07.mjs: 246→229 запросов до первого кадра, 93%; в сеть 246→213, 87% при цели ≤60%): EasyList+uBO режут ~15 внешних ad/telemetry-запросов, путь до первого кадра YouTube — first-party трафик плеера; YouTube-преролл сетевые списки не подавляют (реклама показана во всех прогонах обоих режимов) — это косметика/скриптлеты задачи 2.2 (замер P-07 повторяется на gate M2, карточка 021). Решение о критерии — вопрос автору (Aila, id duopulse_017_p07_20261014) |
 | 2.2 | **✅ выполнено 14.10.2026 (карточка duopulse-018)** Косметическая фильтрация в content-скрипте | главная YouTube без рекламных блоков-заглушек — **достигнуто** (e2e/adblock/cosmetic-youtube.mjs 11/11: видимых заглушек на главной и watch нет, сетка/вёрстка целы; скриншоты до/после — e2e/adblock/shots-2.2/). Механика: content/cosmetic.js (initialization_script каждой вкладки) запрашивает у Core селекторы скрытия для URL (WebMessage → adblock-rs `url_cosmetic_resources` → PostWebMessageAsString) — host-специфичные + misc-generic сразу, generic class/id — по классам/идам из DOM (первичный проход + MutationObserver-дельта); CSS-скрытие живое (SPA/поздние узлы). Ограничения: top-level документ; скриптлеты `##+js` не поддержаны (нужен ресурсный набор uBO — карточка-idea duopulse-043); YouTube-преролл — видео-поток, косметикой не режется (вывод 2.1, вопрос P-07 у автора) |
-| 2.3 | Спящие вкладки + исключения (звук/видео) | метрика P-04 ≈ 0% |
+| 2.3 | **✅ выполнено 14.10.2026 (карточка duopulse-019)** Спящие вкладки + исключения (звук/видео) | метрика P-04 ≈ 0% — **достигнуто** (e2e/sleep/p04.mjs: 67,6%→0,54% ядра при «шумовой» фоновой вкладке; воркер во сне заморожен, пробуждение без потери состояния). Механика: `src-tauri/src/tabs/sleep.rs` — TrySuspend/Resume (WebView2) по таймауту простоя 5 мин (`DUOPULSE_SLEEP_AFTER_SECS`, 0=выкл; скан-нить), IPC `tabs.{sleep, wake}`, `TabInfo.sleeping` в контракте; исключение «играет звук/видео» — content/media-watch.js (WebMessage → on_media), активная не спит; пробуждение — активацией/tabs.wake. Функциональный стенд e2e/sleep/run.mjs — 15/15 (замечено: подключённый CDP-отладчик контентной вкладки отменяет приостановку — состояние страниц стенд читает через document.title) |
 | 2.4 | Тёплый старт + преждекватная настройка кэшей | метрики P-01..P-03 в бюджете docs/04 §2 |
 | 2.5 | Страница «Диагностика»: съём и история метрик | график последних прогонов |
 

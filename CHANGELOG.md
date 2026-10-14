@@ -955,3 +955,63 @@
     PostWebMessage только top-level).
 - backup.bat — 14.10 03:45 (backups/backup_2026-10-14_03-45-21).
 - Коммит: см. git log (duopulse-018, пуш в summonss7/DuoPulse main).
+
+## 14.10.2026 — M2 · задача 2.3: спящие вкладки + исключения звук/видео (карточка duopulse-019)
+- Начало: 14.10.2026 04:23 (диспетчер) / правки с 04:29. Окончание: 14.10.2026 04:58.
+- Что изменено:
+  - src-tauri/src/tabs/sleep.rs — новый модуль спящего режима (docs/04 §1.3
+    «не работать, когда не просят»): приостановка WebView2 `ICoreWebView2_3::
+    TrySuspend` (JS/таймеры/воркеры/сеть страницы заморожены, состояние
+    сохранено), пробуждение `Resume` (+авто-resume при показе); таймаут простоя
+    5 мин (`DUOPULSE_SLEEP_AFTER_SECS`, 0 — выключено; скан-нить раз в
+    clamp(N/4; 1..30) с, стартует из setup main.rs); флаг `sleeping` ставится
+    в момент вызова и откатывается колбэком TrySuspend при неудаче; исключения:
+    активная не спит, вкладка с играющим медиа — не усыпляется (стоп медиа
+    перезапускает отсчёт; старт медиа у спящей — защитное пробуждение);
+    `sleep_candidates`/`sleep_by_id`/`wake_by_id`/`on_media`/`set_sleeping`.
+  - src-tauri/src/tabs/mod.rs — TabEntry {sleeping, media_playing,
+    last_active_ms}; активация пробуждает спящую вкладку и сбрасывает отсчёт
+    простоя; `sleeping` в TabInfo; модульный комментарий.
+  - content/media-watch.js — четвёртый initialization_script контентной
+    вкладки: события play/pause/ended/emptied (захват, медиа не всплывают) +
+    опрос 2 с → WebMessage {"duopulse":"media","playing":bool} в Core.
+  - src-tauri/src/main.rs — CONTENT_INIT_SCRIPT_MEDIA в build_tab_webview;
+    install_content_messaging получил tab_id (сообщения «media» адресуются
+    вкладке); старт нити усыпления в setup.
+  - src-tauri/src/bridge.rs — контракт (без bump, расширение совместимое):
+    `tabs.{sleep, wake}` (params id, результат TabsListResult), TabInfo.sleeping;
+    хендлеры tabs_sleep/tabs_wake; перегенерированы bridge/contract.json и
+    src/bridge/gen/types.ts (45 типов).
+  - UI: src/chrome/tabbar.ts + src/style.css + index.html — спящая вкладка
+    приглушена с иконкой-луной (tooltip «спящая вкладка»), пункт
+    «Усыпить вкладку» в контекстном меню (заблокирован для активной/спящей);
+    src/bridge/client.ts — sleep/wake.
+  - e2e/sleep/run.mjs — функциональный стенд 15/15 (заморозка счётчиков во
+    сне, пробуждение активацией/tabs.wake без потери состояния страницы —
+    маркер/поле ввода/счётчики, исключение звук/видео на <audio autoplay>,
+    отказы tabs.sleep для активной/играющей, контекст-меню, скриншот
+    таб-бара); e2e/sleep/p04.mjs — замер P-04 + отчёт p04-result.md.
+  - Документация: docs/05 §2 (словарь: tabs.sleep/wake, sleeping), §3 (2.3 —
+    выполнено, результат), docs/04 §1.3 (уточнение механизма), README (статус,
+    e2e-команды, таблица возможностей).
+- Как проверено:
+  - cargo fmt / clippy --all-targets -D warnings — чисто; cargo test —
+    **57 passed** (+1 sleep_timing).
+  - tsc --noEmit — чисто; vitest 4/4 (client.test.ts дополнен tabs.sleep/wake);
+    npm run gen:bridge — контракт синхронен.
+  - node e2e/sleep/run.mjs — **15/15 PASS**. Методическая находка: подключённая
+    CDP-сессия контентной вкладки отменяет приостановку (отладчик не даёт
+    Chromium заморозить страницу — в первом прогоне воркер продолжал считать
+    при sleeping=true); состояние страниц стенд читает через document.title →
+    tabs.list, CDP подключён только к UI-webview.
+  - node e2e/sleep/p04.mjs — **P-04 ≈ 0% достигнут**: «шумовая» фоновая
+    вкладка (Web Worker с вычислительной петлёй — таймеры скрытых страниц
+    троттлит, воркер нет), медиана 2 прогонов/режим: до (сон выключен)
+    **67,58% ядра / 4,22% машины**, воркер 3,47 млн итераций/с; после (вкладка
+    спит) **0,54% ядра / 0,03% машины** на всё дерево WebView2, воркер
+    заморожен (прирост 0), после пробуждения работа возобновляется. Отчёт —
+    e2e/sleep/p04-result.md.
+  - Регрессия: e2e/tabs/run.mjs 17/17 (трогал tabbar.ts/index.html и общий
+    WebMessage-обработчик).
+- backup.bat — 14.10 04:29 (backups/backup_2026-10-14_04-29-45).
+- Коммит: см. git log (duopulse-019, пуш в summonss7/DuoPulse main).

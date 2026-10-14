@@ -1,7 +1,11 @@
 //! Менеджер вкладок Core (задача 1.2, docs/02 §3, docs/05 §1–2): жизненный
 //! цикл WebView2-инстансов «одна вкладка = один дочерний webview» под полосой
 //! хрома, порядок/активная вкладка/стек закрытых для восстановления.
-//! Спящий режим (M2) добавится сюда же.
+//!
+//! Спящий режим (задача 2.3, docs/04 §1.3) — модуль `sleep`: долгонеактивные
+//! вкладки приостанавливаются (WebView2 TrySuspend, состояние сохраняется),
+//! будятся при активации; вкладки с играющим звуком/видео не усыпляются
+//! (состояние сообщает content/media-watch.js).
 //!
 //! Восстановление сессии (задача 1.6, docs/04 §1.3 «отложенная активация»):
 //! список вкладок сохраняется в профиль при каждом изменении и при выходе
@@ -30,6 +34,9 @@
 //! подтягивает note_title.
 
 mod session;
+mod sleep;
+
+pub(crate) use sleep::start_sleeper;
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -98,6 +105,16 @@ struct TabEntry {
     /// сохранённым URL/заголовком, webview ещё не создан — появится при
     /// первом обращении (materialize).
     lazy: bool,
+    /// Спит (задача 2.3): webview приостановлен WebView2 TrySuspend —
+    /// рендер-процессы заморожены, состояние страницы сохранено; будится
+    /// при активации.
+    sleeping: bool,
+    /// Играет звук/видео (content/media-watch.js, задача 2.3): исключение
+    /// спящего режима.
+    media_playing: bool,
+    /// unix-ms последней активности (активация/открытие/стоп медиа) — отсчёт
+    /// таймаута спящего режима (задача 2.3).
+    last_active_ms: i64,
 }
 
 impl TabEntry {
@@ -108,6 +125,7 @@ impl TabEntry {
             title: self.title.clone(),
             active,
             loading: self.loading,
+            sleeping: self.sleeping,
         }
     }
 }
@@ -223,6 +241,9 @@ impl TabManager {
                 loading: false,
                 internal: internal.is_some(),
                 lazy: true,
+                sleeping: false,
+                media_playing: false,
+                last_active_ms: now_ms(),
             });
         }
         // session::load зажимает active в границы; None там не бывает
@@ -360,12 +381,13 @@ impl TabManager {
     }
 
     /// tabs.activate / клик по вкладке: показать webview активной, скрыть
-    /// остальные, фокус — в контент. Ленивая вкладка сессии (задача 1.6)
-    /// становится активной сразу (бар переключается), её webview создаёт
+    /// остальные, фокус — в контент. Спящая вкладка (задача 2.3) просыпается:
+    /// явный Resume + сброс отсчёта простоя. Ленивая вкладка сессии (задача
+    /// 1.6) становится активной сразу (бар переключается), её webview создаёт
     /// вызывающая async-команда (materialize) — webview-создание нельзя
     /// делать на потоке цикла событий.
     pub fn activate(&self, app: &AppHandle, id: &str) -> Result<TabsListResult, String> {
-        {
+        let wake = {
             let mut st = self.state.lock().expect("tabs: лок не отравлен");
             let index = st
                 .tabs
@@ -373,6 +395,12 @@ impl TabManager {
                 .position(|t| t.id == id)
                 .ok_or_else(|| format!("вкладка {id} не найдена"))?;
             st.active = Some(index);
+            let entry = &mut st.tabs[index];
+            entry.last_active_ms = now_ms();
+            std::mem::replace(&mut entry.sleeping, false)
+        };
+        if wake {
+            self.resume_webview(app, id);
         }
         self.apply_visibility(app);
         if let Some(wv) = self.active_webview(app) {
@@ -486,6 +514,9 @@ impl TabManager {
                     loading: false,
                     internal: internal.is_some(),
                     lazy: false,
+                    sleeping: false,
+                    media_playing: false,
+                    last_active_ms: now_ms(),
                 },
             );
             st.active = Some(index);
@@ -666,8 +697,8 @@ impl TabManager {
     }
 }
 
-/// Текущее время, unix-ms (метка сохранения сессии, задача 1.6).
-fn now_ms() -> i64 {
+/// Текущее время, unix-ms (метка сохранения сессии, отсчёт простоя вкладок).
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -708,6 +739,9 @@ fn build_tab_webview(app: &AppHandle, id: &str, url: &Url) -> WebviewBuilder<tau
         // Горячие клавиши таб-бара в контенте (задача 1.2) — до скриптов
         // страницы, чтобы перехват нельзя было снять.
         .initialization_script(crate::CONTENT_INIT_SCRIPT_HOTKEYS)
+        // Монитор медиа для спящего режима (задача 2.3): играет звук/видео —
+        // вкладка не усыпляется (сообщение → TabManager::on_media).
+        .initialization_script(crate::CONTENT_INIT_SCRIPT_MEDIA)
         // Косметика блокировщика (задача 2.2): селекторы скрытия до отрисовки
         // страницы — ресурс запрашивается у Core сразу после создания
         // документа (content/cosmetic.js → main.rs → PostWebMessage).
