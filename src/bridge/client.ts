@@ -5,6 +5,9 @@
 // (./gen/types.ts), соответствие клиент ↔ контракт проверяет vitest.
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AdblockSetEnabledParams,
+  AdblockStatusResult,
+  AdblockUpdateListsParams,
   BridgeVersionResult,
   HistoryBookmarkAddParams,
   HistoryBookmarkListParams,
@@ -95,6 +98,16 @@ export const bridge = {
     /** vpn.test_connection: явная проверка соединения (кнопка «Проверить»). */
     testConnection: () => invoke<VpnStatusResult>("vpn_test_connection"),
   },
+  adblock: {
+    /** adblock.set_enabled: глобальный тумблер (site=null) или исключение сайта. */
+    setEnabled: (params: AdblockSetEnabledParams) =>
+      invoke<AdblockStatusResult>("adblock_set_enabled", { params }),
+    /** adblock.status: снапшот состояния блокировщика (счётчик, списки). */
+    status: () => invoke<AdblockStatusResult>("adblock_status"),
+    /** adblock.update_lists: фоновое обновление списков (force — даже свежих). */
+    updateLists: (params: AdblockUpdateListsParams) =>
+      invoke<AdblockStatusResult>("adblock_update_lists", { params }),
+  },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */
     restart: () => invoke<void>("app_restart"),
@@ -109,5 +122,9 @@ export const bridge = {
     pageVideoDetected: "page:video_detected",
     /** vpn.state_changed: состояние маршрутизации изменилось (M6; каркас). */
     vpnStateChanged: "vpn:state_changed",
+    /** adblock.blocked_count: прирост блокировок (батчинг ~400 мс, задача 2.1). */
+    adblockBlockedCount: "adblock:blocked_count",
+    /** adblock.site_exception_changed: исключение сайта включено/снято (2.1). */
+    adblockSiteExceptionChanged: "adblock:site_exception_changed",
   } as const,
 };

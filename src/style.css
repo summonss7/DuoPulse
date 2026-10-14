@@ -229,6 +229,22 @@ body {
   margin: 6px 8px;
   background: var(--line-soft);
 }
+/* Строка-не-кнопка в главном меню: тумблер блокировщика + счётчик (2.1) */
+.main-menu .menu-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+.main-menu .menu-row-meta {
+  justify-content: flex-start;
+  padding-top: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
 
 /* --- Навбар (тулбар) --- */
 #navbar {

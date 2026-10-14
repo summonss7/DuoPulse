@@ -70,6 +70,9 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "vpn.set_enabled": { path: ["vpn", "setEnabled"], params: { on: true } },
   "vpn.status": { path: ["vpn", "status"] },
   "vpn.test_connection": { path: ["vpn", "testConnection"] },
+  "adblock.set_enabled": { path: ["adblock", "setEnabled"], params: { site: null, on: true } },
+  "adblock.status": { path: ["adblock", "status"] },
+  "adblock.update_lists": { path: ["adblock", "updateLists"], params: { force: true } },
   "app.restart": { path: ["app", "restart"] },
 };
 

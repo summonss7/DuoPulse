@@ -326,6 +326,59 @@ pub struct VpnStatusResult {
     pub detail: String,
 }
 
+// --- задача 2.1: блокировщик рекламы (src/adblock/) ------------------------
+
+/// adblock.set_enabled: site=None — глобальный тумблер; Some — исключение
+/// сайта (white-list, docs/04 §1.2). on=true снимает исключение.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockSetEnabledParams {
+    pub site: Option<String>,
+    pub on: bool,
+}
+
+/// adblock.update_lists: обновить списки блокировщика.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockUpdateListsParams {
+    /// true — качать даже непротухшие (кнопка «Обновить списки»).
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// adblock.status (и результат set_enabled/update_lists): снапшот состояния
+/// блокировщика для меню и e2e.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockStatusResult {
+    /// Глобальный тумблер.
+    pub enabled: bool,
+    /// Движок построен (списки загружены/из кэша) — фильтрация активна.
+    pub ready: bool,
+    /// Заблокировано запросов за сеанс.
+    pub blocked_total: u64,
+    /// Всех http(s)-запросов через перехватчик (диагностика P-07).
+    pub seen_total: u64,
+    pub lists: Vec<AdblockListInfo>,
+    /// Сайты-исключения (хосты).
+    pub site_exceptions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockListInfo {
+    pub name: String,
+    /// http(s)-адрес или путь файла-источника.
+    pub source: String,
+    /// Число правил в последней загруженной версии.
+    pub rules: u32,
+    /// Успешная загрузка, unix-ms (0 — списка ещё не было).
+    pub updated_at: i64,
+    /// Последняя ошибка загрузки (None — ошибок нет).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // События Core → UI|Content
 // ---------------------------------------------------------------------------
@@ -379,6 +432,44 @@ pub struct VpnStateChanged {
 impl BridgeEvent for VpnStateChanged {
     const NAME: &'static str = "vpn:state_changed";
     type Payload = Self;
+}
+
+/// adblock:blocked_count: прирост блокировок (батчинг ~400 мс в Core,
+/// задача 2.1) — счётчик в главном меню.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockBlockedCount {
+    /// Прирост с прошлого события.
+    pub delta: u64,
+    /// Всего за сеанс.
+    pub total: u64,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct AdblockBlockedCountEvent;
+
+impl BridgeEvent for AdblockBlockedCountEvent {
+    const NAME: &'static str = "adblock:blocked_count";
+    type Payload = AdblockBlockedCount;
+}
+
+/// adblock:site_exception_changed: включено/снято исключение сайта
+/// (payload события; on=false — сайт добавлен в white-list).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockSiteException {
+    pub site: String,
+    pub on: bool,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct AdblockSiteExceptionChangedEvent;
+
+impl BridgeEvent for AdblockSiteExceptionChangedEvent {
+    const NAME: &'static str = "adblock:site_exception_changed";
+    type Payload = AdblockSiteException;
 }
 
 /// tabs:updated: снапшот списка вкладок после любого изменения (открытие/
@@ -473,6 +564,14 @@ pub fn contract_json() -> serde_json::Value {
                             "result": schema!(VpnStatusResult) },
             "vpn.test_connection": { "handler": "vpn_test_connection", "params": null,
                                      "result": schema!(VpnStatusResult) },
+            "adblock.set_enabled": { "handler": "adblock_set_enabled",
+                                      "params": schema!(AdblockSetEnabledParams),
+                                      "result": schema!(AdblockStatusResult) },
+            "adblock.status": { "handler": "adblock_status", "params": null,
+                                 "result": schema!(AdblockStatusResult) },
+            "adblock.update_lists": { "handler": "adblock_update_lists",
+                                       "params": schema!(AdblockUpdateListsParams),
+                                       "result": schema!(AdblockStatusResult) },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -480,6 +579,8 @@ pub fn contract_json() -> serde_json::Value {
             "page:loaded": { "payload": schema!(PageLoaded) },
             "page:video_detected": { "payload": schema!(PageVideoDetected) },
             "vpn:state_changed": { "payload": schema!(VpnStateChanged) },
+            "adblock:blocked_count": { "payload": schema!(AdblockBlockedCount) },
+            "adblock:site_exception_changed": { "payload": schema!(AdblockSiteException) },
         },
     })
 }
@@ -533,6 +634,14 @@ fn event_names_match_registry() {
                 schema!(VpnStateChanged),
             ),
             (<TabsUpdated as BridgeEvent>::NAME, schema!(TabsListResult)),
+            (
+                <AdblockBlockedCountEvent as BridgeEvent>::NAME,
+                schema!(AdblockBlockedCount),
+            ),
+            (
+                <AdblockSiteExceptionChangedEvent as BridgeEvent>::NAME,
+                schema!(AdblockSiteException),
+            ),
         ]
         .into_iter()
         .map(|(n, s)| (n, s["title"].as_str().expect("title у схемы").to_string()))
@@ -855,6 +964,34 @@ fn app_restart(app: AppHandle) {
     app.restart();
 }
 
+/// adblock.set_enabled: глобальный тумблер или исключение сайта (задача 2.1).
+#[tauri::command]
+fn adblock_set_enabled(
+    app: AppHandle,
+    adblock: tauri::State<'_, std::sync::Arc<crate::adblock::AdblockService>>,
+    params: AdblockSetEnabledParams,
+) -> Result<AdblockStatusResult, String> {
+    adblock.set_enabled(&app, params.site.as_deref(), params.on)
+}
+
+/// adblock.status: снапшот состояния блокировщика (меню, e2e, P-07).
+#[tauri::command]
+fn adblock_status(
+    adblock: tauri::State<'_, std::sync::Arc<crate::adblock::AdblockService>>,
+) -> AdblockStatusResult {
+    adblock.status()
+}
+
+/// adblock.update_lists: фоновое обновление списков; force — даже свежих.
+/// Команда отвечает сразу (текущий статус), загрузка продолжается в фоне.
+#[tauri::command]
+fn adblock_update_lists(
+    adblock: tauri::State<'_, std::sync::Arc<crate::adblock::AdblockService>>,
+    params: AdblockUpdateListsParams,
+) -> AdblockStatusResult {
+    adblock.update_lists(params.force)
+}
+
 fn proxy_settings(cfg: &proxy::ProxyConfig, dir: &std::path::Path) -> ProxySettings {
     ProxySettings {
         enabled: cfg.enabled,
@@ -910,6 +1047,9 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         vpn_set_enabled,
         vpn_status,
         vpn_test_connection,
+        adblock_set_enabled,
+        adblock_status,
+        adblock_update_lists,
         app_restart
     ])
 }

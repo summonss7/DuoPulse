@@ -146,6 +146,14 @@ impl TabManager {
         app.get_webview(&id)
     }
 
+    /// Текущий URL вкладки по id — для сетевого перехватчика (задача 2.1:
+    /// запасной источник запроса движка adblock). Вызывается из COM-колбэка
+    /// WebView2 — лок берётся с падением в None, паника туда невозможна.
+    pub fn url_of(&self, id: &str) -> Option<String> {
+        let st = self.state.lock().ok()?;
+        st.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone())
+    }
+
     /// Первая вкладка приложения (вызывается из setup окна): восстановление
     /// сессии из профиля (задача 1.6) либо стартовая страница. DUOPULSE_START_URL
     /// (e2e-стенды) сессию игнорирует — старт детерминирован.
@@ -514,12 +522,14 @@ impl TabManager {
                 .map_err(|e| format!("создание webview вкладки: {e}"))?
         };
 
-        // COM-обработчики WebView2: сетевой перехват M0, аутентификация прокси,
-        // приём сообщений content (горячие клавиши) — см. main.rs.
+        // COM-обработчики WebView2: сетевой перехват M0 + блокировщик (2.1),
+        // аутентификация прокси, приём сообщений content (горячие клавиши) —
+        // см. main.rs (вкладка передаётся по id: её URL — источник запросов).
         let app_for_handlers = app.clone();
+        let id_for_handlers = id.to_string();
         webview
             .with_webview(move |wv| unsafe {
-                crate::install_content_handlers(wv, &app_for_handlers)
+                crate::install_content_handlers(wv, &app_for_handlers, &id_for_handlers)
             })
             .map_err(|e| format!("установка обработчиков вкладки: {e}"))?;
         Ok(())

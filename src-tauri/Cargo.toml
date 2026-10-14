@@ -27,6 +27,23 @@ windows = { version = "0.62", features = ["Win32_Security_Cryptography", "Win32_
 # bundled — SQLite собирается из исходников вместе с FTS5, без системных
 # зависимостей.
 rusqlite = { version = "0.31", features = ["bundled"] }
+# Блокировщик рекламы (задача 2.1, docs/02 §3): движок Brave, синтаксис
+# EasyList/uBO; сетевая фильтрация — из COM-перехватчика WebView2.
+# default-features = false: дефолтные object-pooling/unsync-regex-caching
+# делают Engine !Send/!Sync (Brave держит движок на каждый поток), а DuoPulse
+# использует ОДИН движок для всех вкладок из COM-колбэков; embedded-domain-
+# resolver и full-regex-handling сохранены (рекомендация апстрима).
+adblock = { version = "0.9", default-features = false, features = [
+    "embedded-domain-resolver",
+    "full-regex-handling",
+] }
+# Пин транзитивной зависимости adblock (rmp-serde 0.15): rmp 0.8.15 убрал
+# read_data_* и сломал сборку — держим последнюю совместимую.
+rmp = "=0.8.14"
+# Загрузка блок-листов по HTTPS (задача 2.1): блокирующий клиент без async-
+# рантайма — обновление списков идёт в фоновой нити. tls — rustls с корнями
+# webpki-roots (системное хранилище не требуется).
+ureq = { version = "2", features = ["tls"], default-features = false }
 
 [profile.release]
 panic = "abort"

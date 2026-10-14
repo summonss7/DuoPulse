@@ -108,6 +108,7 @@ const appEnv = {
   ...process.env,
   APPDATA: tmp, // профиль settings.json — во временный каталог
   DUOPULSE_START_URL: `http://127.0.0.1:${HTTP_PORT}/start`,
+  DUOPULSE_ADBLOCK_LISTS: "", // без списков: стенду не нужна сеть (задача 2.1)
   WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, "webview2-data"), // изоляция WebView2
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
 };

@@ -1,5 +1,309 @@
 {
   "commands": {
+    "adblock.set_enabled": {
+      "handler": "adblock_set_enabled",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "adblock.set_enabled: site=None — глобальный тумблер; Some — исключение сайта (white-list, docs/04 §1.2). on=true снимает исключение.",
+        "properties": {
+          "on": {
+            "type": "boolean"
+          },
+          "site": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "on"
+        ],
+        "title": "AdblockSetEnabledParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "AdblockListInfo": {
+            "properties": {
+              "error": {
+                "description": "Последняя ошибка загрузки (None — ошибок нет).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "rules": {
+                "description": "Число правил в последней загруженной версии.",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "source": {
+                "description": "http(s)-адрес или путь файла-источника.",
+                "type": "string"
+              },
+              "updatedAt": {
+                "description": "Успешная загрузка, unix-ms (0 — списка ещё не было).",
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "rules",
+              "source",
+              "updatedAt"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "adblock.status (и результат set_enabled/update_lists): снапшот состояния блокировщика для меню и e2e.",
+        "properties": {
+          "blockedTotal": {
+            "description": "Заблокировано запросов за сеанс.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "Глобальный тумблер.",
+            "type": "boolean"
+          },
+          "lists": {
+            "items": {
+              "$ref": "#/definitions/AdblockListInfo"
+            },
+            "type": "array"
+          },
+          "ready": {
+            "description": "Движок построен (списки загружены/из кэша) — фильтрация активна.",
+            "type": "boolean"
+          },
+          "seenTotal": {
+            "description": "Всех http(s)-запросов через перехватчик (диагностика P-07).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "siteExceptions": {
+            "description": "Сайты-исключения (хосты).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "blockedTotal",
+          "enabled",
+          "lists",
+          "ready",
+          "seenTotal",
+          "siteExceptions"
+        ],
+        "title": "AdblockStatusResult",
+        "type": "object"
+      }
+    },
+    "adblock.status": {
+      "handler": "adblock_status",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "AdblockListInfo": {
+            "properties": {
+              "error": {
+                "description": "Последняя ошибка загрузки (None — ошибок нет).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "rules": {
+                "description": "Число правил в последней загруженной версии.",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "source": {
+                "description": "http(s)-адрес или путь файла-источника.",
+                "type": "string"
+              },
+              "updatedAt": {
+                "description": "Успешная загрузка, unix-ms (0 — списка ещё не было).",
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "rules",
+              "source",
+              "updatedAt"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "adblock.status (и результат set_enabled/update_lists): снапшот состояния блокировщика для меню и e2e.",
+        "properties": {
+          "blockedTotal": {
+            "description": "Заблокировано запросов за сеанс.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "Глобальный тумблер.",
+            "type": "boolean"
+          },
+          "lists": {
+            "items": {
+              "$ref": "#/definitions/AdblockListInfo"
+            },
+            "type": "array"
+          },
+          "ready": {
+            "description": "Движок построен (списки загружены/из кэша) — фильтрация активна.",
+            "type": "boolean"
+          },
+          "seenTotal": {
+            "description": "Всех http(s)-запросов через перехватчик (диагностика P-07).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "siteExceptions": {
+            "description": "Сайты-исключения (хосты).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "blockedTotal",
+          "enabled",
+          "lists",
+          "ready",
+          "seenTotal",
+          "siteExceptions"
+        ],
+        "title": "AdblockStatusResult",
+        "type": "object"
+      }
+    },
+    "adblock.update_lists": {
+      "handler": "adblock_update_lists",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "adblock.update_lists: обновить списки блокировщика.",
+        "properties": {
+          "force": {
+            "default": false,
+            "description": "true — качать даже непротухшие (кнопка «Обновить списки»).",
+            "type": "boolean"
+          }
+        },
+        "title": "AdblockUpdateListsParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "AdblockListInfo": {
+            "properties": {
+              "error": {
+                "description": "Последняя ошибка загрузки (None — ошибок нет).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "rules": {
+                "description": "Число правил в последней загруженной версии.",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "source": {
+                "description": "http(s)-адрес или путь файла-источника.",
+                "type": "string"
+              },
+              "updatedAt": {
+                "description": "Успешная загрузка, unix-ms (0 — списка ещё не было).",
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name",
+              "rules",
+              "source",
+              "updatedAt"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "adblock.status (и результат set_enabled/update_lists): снапшот состояния блокировщика для меню и e2e.",
+        "properties": {
+          "blockedTotal": {
+            "description": "Заблокировано запросов за сеанс.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "Глобальный тумблер.",
+            "type": "boolean"
+          },
+          "lists": {
+            "items": {
+              "$ref": "#/definitions/AdblockListInfo"
+            },
+            "type": "array"
+          },
+          "ready": {
+            "description": "Движок построен (списки загружены/из кэша) — фильтрация активна.",
+            "type": "boolean"
+          },
+          "seenTotal": {
+            "description": "Всех http(s)-запросов через перехватчик (диагностика P-07).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "siteExceptions": {
+            "description": "Сайты-исключения (хосты).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "blockedTotal",
+          "enabled",
+          "lists",
+          "ready",
+          "seenTotal",
+          "siteExceptions"
+        ],
+        "title": "AdblockStatusResult",
+        "type": "object"
+      }
+    },
     "app.restart": {
       "handler": "app_restart",
       "params": null,
@@ -1058,6 +1362,52 @@
     }
   },
   "events": {
+    "adblock:blocked_count": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "adblock:blocked_count: прирост блокировок (батчинг ~400 мс в Core, задача 2.1) — счётчик в главном меню.",
+        "properties": {
+          "delta": {
+            "description": "Прирост с прошлого события.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "total": {
+            "description": "Всего за сеанс.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delta",
+          "total"
+        ],
+        "title": "AdblockBlockedCount",
+        "type": "object"
+      }
+    },
+    "adblock:site_exception_changed": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "adblock:site_exception_changed: включено/снято исключение сайта (payload события; on=false — сайт добавлен в white-list).",
+        "properties": {
+          "on": {
+            "type": "boolean"
+          },
+          "site": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "on",
+          "site"
+        ],
+        "title": "AdblockSiteException",
+        "type": "object"
+      }
+    },
     "page:loaded": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",

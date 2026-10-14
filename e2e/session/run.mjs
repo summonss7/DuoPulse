@@ -139,6 +139,7 @@ const launch = (profile, extraEnv = {}) =>
       APPDATA: profile,
       WEBVIEW2_USER_DATA_FOLDER: path.join(profile, "webview2-data"),
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
+      DUOPULSE_ADBLOCK_LISTS: "", // без списков: стенду не нужна сеть (задача 2.1)
       ...extraEnv,
     },
   });

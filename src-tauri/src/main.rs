@@ -26,6 +26,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod adblock;
 mod bridge;
 mod history;
 mod omnibox;
@@ -97,9 +98,20 @@ unsafe fn install_proxy_auth(core: &ICoreWebView2) {
 /// собственному tauri://-протоколу приложения, поэтому для внешних http/https
 /// запросов регистрируем нативный COM-обработчик:
 /// AddWebResourceRequestedFilter("*", ALL) + add_WebResourceRequested.
-/// Запросы с путём BLOCK_TEST_PATH получают 403 + заголовок X-DuoPulse-Block: 1.
+/// Задача 2.1: каждый http(s)-запрос проходит через движок блокировщика
+/// (adblock-rs, src/adblock/): решение должно быть быстрым — обработчик
+/// вызывается синхронно на UI-потоке WebView2.
+///
+/// Источник запроса для движка: Referer (для подресурсов), при его отсутствии
+/// URL вкладки tab_id; тип запроса — из ResourceContext. Запросы с путём
+/// BLOCK_TEST_PATH получают 403 + заголовок X-DuoPulse-Block: 1 (тест M0).
 #[cfg(windows)]
-unsafe fn install_request_blocker(core: &ICoreWebView2, env: &ICoreWebView2Environment) {
+unsafe fn install_request_blocker(
+    core: &ICoreWebView2,
+    env: &ICoreWebView2Environment,
+    app: &AppHandle,
+    tab_id: &str,
+) {
     use webview2_com::{
         Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
         WebResourceRequestedEventHandler,
@@ -110,13 +122,16 @@ unsafe fn install_request_blocker(core: &ICoreWebView2, env: &ICoreWebView2Envir
         .expect("AddWebResourceRequestedFilter");
 
     let env = env.clone();
+    let app = app.clone();
+    let tab_id = tab_id.to_string();
     core.add_WebResourceRequested(
         &WebResourceRequestedEventHandler::create(Box::new(move |_sender, args| {
             let Some(args) = args else {
                 return Ok(());
             };
+            let request = args.Request()?;
             let mut uri_pw = PWSTR::null();
-            args.Request()?.Uri(&mut uri_pw)?;
+            request.Uri(&mut uri_pw)?;
             let uri = webview2_com::CoTaskMemPWSTR::from(uri_pw).to_string();
             if uri.contains(BLOCK_TEST_PATH) {
                 let response = env.CreateWebResourceResponse(
@@ -126,12 +141,91 @@ unsafe fn install_request_blocker(core: &ICoreWebView2, env: &ICoreWebView2Envir
                     &HSTRING::from("X-DuoPulse-Block: 1\r\nAccess-Control-Allow-Origin: *"),
                 )?;
                 args.SetResponse(&response)?;
+                return Ok(());
+            }
+            // Блокировщик (задача 2.1): фильтруем только http(s) — app-origin
+            // (tauri://, dev-сервер vite грузится из webview без обработчика),
+            // ws/wss и прочие схемы движку не нужны.
+            let is_http = uri.starts_with("http://") || uri.starts_with("https://");
+            if !is_http {
+                return Ok(());
+            }
+            let rtype = resource_type_name(&args);
+            let referer = referer_of(&request);
+            let tab_url = app.state::<tabs::TabManager>().url_of(&tab_id);
+            let blocked = app
+                .state::<std::sync::Arc<adblock::AdblockService>>()
+                .should_block(tab_url.as_deref(), &uri, rtype, referer.as_deref());
+            if blocked {
+                let response = env.CreateWebResourceResponse(
+                    None,
+                    403,
+                    &HSTRING::from("Blocked by DuoPulse adblock"),
+                    &HSTRING::from("X-DuoPulse-Block: adblock\r\nAccess-Control-Allow-Origin: *"),
+                )?;
+                args.SetResponse(&response)?;
             }
             Ok(())
         })),
         std::ptr::null_mut(),
     )
     .expect("add_WebResourceRequested");
+}
+
+/// Тип запроса для движка adblock-rs из ResourceContext (строки — словарь
+/// Brave-движка: «document», «script», …; всё нераспознанное — «other»).
+#[cfg(windows)]
+unsafe fn resource_type_name(
+    args: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2WebResourceRequestedEventArgs,
+) -> &'static str {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_CSP_VIOLATION_REPORT,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_OTHER,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST,
+    };
+    let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_OTHER;
+    if args.ResourceContext(&mut ctx).is_err() {
+        return "other";
+    }
+    match ctx {
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT => "document",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET => "stylesheet",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT => "script",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE => "image",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT => "font",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA => "media",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST
+        | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH => "xhr",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET => "websocket",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING => "ping",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_CSP_VIOLATION_REPORT => "csp_report",
+        // manifest/web worker/service worker/event source/signed exchange/прочее
+        _ => "other",
+    }
+}
+
+/// Заголовок Referer запроса — источник подресурса для движка (кросс-доменные
+/// правила и $domain-исключения). Отсутствует/пустой — None.
+#[cfg(windows)]
+unsafe fn referer_of(
+    request: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2WebResourceRequest,
+) -> Option<String> {
+    use windows_core::{HSTRING, PWSTR};
+    let headers = request.Headers().ok()?;
+    let mut value = PWSTR::null();
+    headers
+        .GetHeader(&HSTRING::from("Referer"), &mut value)
+        .ok()?;
+    let value = webview2_com::CoTaskMemPWSTR::from(value).to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }
 
 /// Сообщения content-слоя вкладки (window.chrome.webview.postMessage, задача 1.2):
@@ -168,19 +262,22 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle) {
     .expect("add_WebMessageReceived");
 }
 
-/// Полный набор COM-обработчиков для каждой вкладки: сетевой перехват M0,
-/// аутентификация прокси (1.8), сообщения content (горячие клавиши, 1.2).
+/// Полный набор COM-обработчиков для каждой вкладки: сетевой перехват M0 +
+/// блокировщик (задача 2.1), аутентификация прокси (1.8), сообщения content
+/// (горячие клавиши, 1.2). tab_id — вкладка-владелец: её URL — запасной
+/// источник запроса для движка.
 #[cfg(windows)]
 pub(crate) unsafe fn install_content_handlers(
     wv: tauri::webview::PlatformWebview,
     app: &AppHandle,
+    tab_id: &str,
 ) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2Environment};
 
     let controller = wv.controller();
     let core: ICoreWebView2 = controller.CoreWebView2().expect("CoreWebView2 вкладки");
     let env: ICoreWebView2Environment = wv.environment();
-    install_request_blocker(&core, &env);
+    install_request_blocker(&core, &env, app, tab_id);
     install_proxy_auth(&core);
     install_content_messaging(&core, app);
 }
@@ -190,6 +287,7 @@ pub(crate) unsafe fn install_content_handlers(
 pub(crate) unsafe fn install_content_handlers(
     _wv: tauri::webview::PlatformWebview,
     _app: &AppHandle,
+    _tab_id: &str,
 ) {
 }
 
@@ -198,12 +296,20 @@ fn main() {
     // Менеджер вкладок (задача 1.2) — состояние Core для tabs.* и nav.*.
     // История и закладки (задача 1.4) — SQLite в профиле (docs/02 §8):
     // duopulse.db, запись визитов — из on_page_load вкладок (src/tabs/).
+    // Блокировщик (задача 2.1) — src/adblock/: движок adblock-rs + списки;
+    // нити обновления/слива счётчика стартуют в setup (нужен AppHandle).
+    let adblock_service = std::sync::Arc::new(adblock::AdblockService::new(&proxy::profile_dir()));
     let history_store = history::HistoryStore::open(&proxy::profile_dir())
         .expect("открыть/создать duopulse.db в профиле (docs/02 §8)");
+    let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
         .manage(tabs::TabManager::new())
         .manage(history_store)
-        .setup(|app| {
+        .manage(adblock_service)
+        .setup(move |app| {
+            // Фон блокировщика: обновление списков (кэш → движок → сеть) и
+            // батчинг счётчика adblock:blocked_count (задача 2.1).
+            adblock_for_setup.start(app.handle());
             // Прокси задаётся аргументами окружения WebView2 только на старте
             // (docs/02 §6.1) — конфиг читаем ДО создания webview; аргументы
             // фиксируем для всех будущих вкладок (STARTUP_PROXY_ARGS).

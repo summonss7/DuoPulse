@@ -23,3 +23,6 @@ builds/
 Thumbs.db
 .env
 .env.*
+
+# Рантайм-артефакт замера P-07 (e2e/adblock/p07.mjs)
+e2e/adblock/p07-last-run.txt

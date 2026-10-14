@@ -89,6 +89,17 @@
         <button type="button" data-act="reopen">Переоткрыть закрытую <span class="kbd">Ctrl+Shift+T</span></button>
         <button type="button" data-act="history">История и закладки</button>
         <div class="menu-sep" role="separator"></div>
+        <div class="menu-row">
+          <span class="menu-row-title">Блокировщик</span>
+          <label class="switch" title="Вкл/выкл блокировщик рекламы">
+            <input type="checkbox" id="adblockEnabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="menu-row menu-row-meta" id="adblockMeta">Заблокировано: 0</div>
+        <button type="button" id="adblockSite" hidden>Отключить на этом сайте</button>
+        <button type="button" id="adblockUpdate">Обновить списки</button>
+        <div class="menu-sep" role="separator"></div>
         <button type="button" data-act="proxy">Прокси&hellip;</button>
       </div>
     </div>

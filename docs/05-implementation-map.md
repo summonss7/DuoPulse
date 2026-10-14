@@ -113,10 +113,17 @@ delete_range, bookmark_add, bookmark_remove, bookmark_update, bookmark_list}`
 пишет Core из on_page_load вкладок, дедуп 60 с, заголовок подтягивается из
 on_title; list — агрегат по URL для страницы управления),
 `settings.{get, set}`, `vpn.{set_enabled, status, test_connection}`,
-`app.restart`; событие `tabs:updated` (снапшот списка вкладок после любого
-изменения — им перерисовывается таб-бар `src/chrome/tabbar.ts`,
-omnibox-подсказки — `src/chrome/omnibox.ts`) и события-каркас `page:loaded`,
-`page:video_detected` (эмит — M3), `vpn:state_changed` (M6). Имена событий —
+`adblock.{set_enabled, status, update_lists}` (задача 2.1: обёртка adblock-rs
+в `src-tauri/src/adblock/` — сетевая фильтрация из COM-перехватчика
+WebResourceRequested, списки EasyList+uBO с суточным обновлением и
+compiled-кэшем `engine.bin` в `profile/filters/`; set_enabled site —
+white-list per-site), `app.restart`; событие `tabs:updated` (снапшот списка
+вкладок после любого изменения — им перерисовывается таб-бар
+`src/chrome/tabbar.ts`, omnibox-подсказки — `src/chrome/omnibox.ts`),
+события `adblock:blocked_count` (прирост блокировок, батчинг ~400 мс —
+счётчик в главном меню) и `adblock:site_exception_changed`, а также
+события-каркас `page:loaded`, `page:video_detected` (эмит — M3),
+`vpn:state_changed` (M6). Имена событий —
 через `:` (словарь `домен:событие`): tauri 2 разрешает в именах событий только
 alnum/`-`/`/`/`:`/`_`, точечные имена не доставлялись (переименование — bump
 контракта v1→v2 в задаче 1.2; имена команд с точками не затронуты — в tauri
@@ -135,7 +142,11 @@ alnum/`-`/`/`/`:`/`_`, точечные имена не доставлялись
 гайд 06 §7; токены стиля — `src/theme/`). Сквозные e2e —
 [e2e/bridge/run.mjs](../e2e/bridge/run.mjs), [e2e/tabs/run.mjs](../e2e/tabs/run.mjs),
 [e2e/omnibox/run.mjs](../e2e/omnibox/run.mjs)
-(чек-лист приёмки таб-бара — [e2e/tabs/CHECKLIST.md](../e2e/tabs/CHECKLIST.md)).
+(чек-лист приёмки таб-бара — [e2e/tabs/CHECKLIST.md](../e2e/tabs/CHECKLIST.md));
+блокировщик (задача 2.1) — [e2e/adblock/run.mjs](../e2e/adblock/run.mjs)
+(фильтрация/счётчик/исключения/обновление списков, локальный тест-лист без
+сети) и [e2e/adblock/p07.mjs](../e2e/adblock/p07.mjs) (замер метрики P-07
+на YouTube).
 
 ## 3. Эпики → карточки (порядок работ)
 
@@ -171,7 +182,7 @@ Gate-проверки этапов включены в последние кар
 ### M2 — скорость
 | # | Задача | DoD |
 |---|---|---|
-| 2.1 | adblock-rs: сетевая фильтрация + списки EasyList/uBO + обновление | метрика P-07 достигнута |
+| 2.1 | **✅ выполнено 14.10.2026 (карточка duopulse-017)** adblock-rs: сетевая фильтрация + списки EasyList/uBO + обновление | метрика P-07 достигнута — **не достигнута сетевым слоем** (замер e2e/adblock/p07.mjs: 246→229 запросов до первого кадра, 93%; в сеть 246→213, 87% при цели ≤60%): EasyList+uBO режут ~15 внешних ad/telemetry-запросов, путь до первого кадра YouTube — first-party трафик плеера; YouTube-преролл сетевые списки не подавляют (реклама показана во всех прогонах обоих режимов) — это косметика/скриптлеты задачи 2.2 (замер P-07 повторяется на gate M2, карточка 021). Решение о критерии — вопрос автору (Aila, id duopulse_017_p07_20261014) |
 | 2.2 | Косметическая фильтрация в content-скрипте | главная YouTube без рекламных блоков-заглушек |
 | 2.3 | Спящие вкладки + исключения (звук/видео) | метрика P-04 ≈ 0% |
 | 2.4 | Тёплый старт + преждекватная настройка кэшей | метрики P-01..P-03 в бюджете docs/04 §2 |

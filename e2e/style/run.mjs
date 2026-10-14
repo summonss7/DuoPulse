@@ -79,6 +79,7 @@ const appEnv = {
   APPDATA: tmp,
   WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, "webview2-data"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
+  DUOPULSE_ADBLOCK_LISTS: "", // без списков: стенду не нужна сеть (задача 2.1)
 };
 const app = spawn(EXE, [], { stdio: "ignore", env: appEnv });
 

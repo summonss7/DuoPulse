@@ -19,6 +19,10 @@ export type ProxyState = "off" | "on" | "error";
  * Реестр типов IPC-контракта bridge (все поля — ссылки на типы).
  */
 export interface DuoPulseBridgeContract {
+  AdblockSetEnabledParams: AdblockSetEnabledParams;
+  AdblockStatusResult: AdblockStatusResult;
+  AdblockListInfo: AdblockListInfo;
+  AdblockUpdateListsParams: AdblockUpdateListsParams;
   BridgeVersionResult: BridgeVersionResult;
   HistoryBookmarkAddParams: HistoryBookmarkAddParams;
   HistoryBookmarkListParams: HistoryBookmarkListParams;
@@ -53,9 +57,72 @@ export interface DuoPulseBridgeContract {
   VpnSetEnabledParams: VpnSetEnabledParams;
   VpnStatusResult: VpnStatusResult;
   ProxyState: ProxyState;
+  AdblockBlockedCount: AdblockBlockedCount;
+  AdblockSiteException: AdblockSiteException;
   PageLoaded: PageLoaded;
   PageVideoDetected: PageVideoDetected;
   VpnStateChanged: VpnStateChanged;
+}
+/**
+ * adblock.set_enabled: site=None — глобальный тумблер; Some — исключение сайта (white-list, docs/04 §1.2). on=true снимает исключение.
+ */
+export interface AdblockSetEnabledParams {
+  on: boolean;
+  site?: string | null;
+}
+/**
+ * adblock.status (и результат set_enabled/update_lists): снапшот состояния блокировщика для меню и e2e.
+ */
+export interface AdblockStatusResult {
+  /**
+   * Заблокировано запросов за сеанс.
+   */
+  blockedTotal: number;
+  /**
+   * Глобальный тумблер.
+   */
+  enabled: boolean;
+  lists: AdblockListInfo[];
+  /**
+   * Движок построен (списки загружены/из кэша) — фильтрация активна.
+   */
+  ready: boolean;
+  /**
+   * Всех http(s)-запросов через перехватчик (диагностика P-07).
+   */
+  seenTotal: number;
+  /**
+   * Сайты-исключения (хосты).
+   */
+  siteExceptions: string[];
+}
+export interface AdblockListInfo {
+  /**
+   * Последняя ошибка загрузки (None — ошибок нет).
+   */
+  error?: string | null;
+  name: string;
+  /**
+   * Число правил в последней загруженной версии.
+   */
+  rules: number;
+  /**
+   * http(s)-адрес или путь файла-источника.
+   */
+  source: string;
+  /**
+   * Успешная загрузка, unix-ms (0 — списка ещё не было).
+   */
+  updatedAt: number;
+}
+/**
+ * adblock.update_lists: обновить списки блокировщика.
+ */
+export interface AdblockUpdateListsParams {
+  /**
+   * true — качать даже непротухшие (кнопка «Обновить списки»).
+   */
+  force?: boolean;
 }
 /**
  * bridge.version: версия контракта живого приложения (диагностика, e2e).
@@ -289,6 +356,26 @@ export interface VpnSetEnabledParams {
 export interface VpnStatusResult {
   detail: string;
   state: ProxyState;
+}
+/**
+ * adblock:blocked_count: прирост блокировок (батчинг ~400 мс в Core, задача 2.1) — счётчик в главном меню.
+ */
+export interface AdblockBlockedCount {
+  /**
+   * Прирост с прошлого события.
+   */
+  delta: number;
+  /**
+   * Всего за сеанс.
+   */
+  total: number;
+}
+/**
+ * adblock:site_exception_changed: включено/снято исключение сайта (payload события; on=false — сайт добавлен в white-list).
+ */
+export interface AdblockSiteException {
+  on: boolean;
+  site: string;
 }
 /**
  * page:loaded: документ загружен (M3 — детектор контента; каркас с 1.1).
