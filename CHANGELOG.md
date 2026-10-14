@@ -894,3 +894,64 @@
   EasyList/uBO (загрузка/кэш/обновление), IPC adblock.*, секция в меню,
   e2e/adblock 18/18; P-07 87%/93% — вопрос хозяину (duopulse-017)»
   (+ пуш в summonss7/DuoPulse, main).
+
+## 14.10.2026 — M2 · задача 2.2: косметическая фильтрация в content-скрипте (карточка duopulse-018)
+- Начало: 14.10.2026 03:38 (диспетчер) / правки с 03:45. Окончание: 14.10.2026 04:10.
+- Что изменено:
+  - content/cosmetic.js — новый content-скрипт (третий initialization_script
+    контентной вкладки, docs/02 §4): сразу после создания документа запрашивает
+    у Core селекторы скрытия для URL, применяет их в <style> как
+    display:none!important (CSS живой — SPA/поздние узлы покрываются сами);
+    массовые generic class/id-правила — по классам/идам из DOM (первичный
+    проход + MutationObserver-дельта, потолок токенов, дебаунс 120 мс);
+    повтор запроса, пока движок строится (до 20×500 мс); фреймы пропускает
+    (ответ PostWebMessage доставляется только top-level); диагностика —
+    window.__duopulseCosmetic (счётчики, журнал обмена, styleBlocked для CSP).
+  - src-tauri/src/adblock/mod.rs — косметический API AdblockService:
+    cosmetic_resources(url) (active/ready/hide/generichide; host-специфичные +
+    misc-generic селекторы из adblock-rs url_cosmetic_resources, unhide-
+    исключения учитывает движок) и cosmetic_generic_selectors(url, classes,
+    ids) (hidden_class_id_selectors с потолком 5000 входов). +6 юнит-тестов
+    (host-специфика/misc/generic complex/unhide/$generichide/тумблеры и
+    сайт-исключения/движок-не-готов/полная e2e-фикстура).
+  - src-tauri/src/main.rs — WebMessageReceived вкладки отвечает на запросы
+    «cosmetic»/«cosmetic-generic» (PostWebMessageAsString в тот же webview);
+    протокол вне bridge-контракта, как у hotkey (контентный канал).
+  - src-tauri/src/tabs/mod.rs — build_tab_webview подключает CONTENT_INIT_SCRIPT_COSMETIC.
+  - e2e/adblock/cosmetic-fixture.txt + cosmetic.mjs — стенд приёмки 13/13:
+    все классы cosmetic-правил, unhide-исключение, поздний узел (observer),
+    сайт-исключение/глобальный тумблер, CSP-статус style.
+  - e2e/adblock/cosmetic-youtube.mjs + shots-2.2/ — DoD-прогон на живых
+    списках EasyList+uBO (сеть): YouTube главная и watch без видимых рекламных
+    заглушек, сетка/вёрстка целы, скриншоты до/после и 4 эталонных сайтов
+    (habr/wikipedia/github/stackoverflow) с включённым блокировщиком.
+  - Документация: docs/05 §3 (2.2 — выполнено, результат), docs/02 §4
+    (компонент adblock/cosmetic), README (статус, e2e-команды, структура,
+    таблица возможностей). Новая карточка-idea CARDS/043 — scriptlet-ресурсы
+    uBO (##+js): вне периметра 2.2, канал доставки готов.
+- Как проверено:
+  - cargo fmt / clippy --all-targets -D warnings — чисто; cargo test —
+    **56 passed** (+6 cosmetic; ранее 50).
+  - tsc --noEmit — чисто; vitest 4/4 (слой content/ — plain JS вне tsc;
+    контракт bridge не менялся, gen:bridge не требуется — cargo-тест
+    contract_file_is_up_to_date зелёный).
+  - node e2e/adblock/cosmetic.mjs — **13/13 PASS** (после исправления двух
+    дефектов стенда: кавычки в querySelector-пробе; неверный целевой селектор
+    complex-правила) и находки в cosmetic.js: фильтр «опасных символов»
+    выбрасывал легитимные селекторы с комбинатором «>» (движок их возвращал,
+    стиль не применял) — сузил до фигурных скобок.
+  - Регрессия: e2e/adblock/run.mjs 18/18, e2e/tabs/run.mjs 17/17 (трогал
+    build_tab_webview и общий WebMessage-обработчик).
+  - DoD на живых списках: node e2e/adblock/cosmetic-youtube.mjs — **11/11
+    PASS**: списки скачаны/движок готов; косметика активна (17 host-селекторов
+    YouTube применено); видимых рекламных заглушек на главной и watch нет;
+    видео-сетка не пострадала; эталонные сайты — контент на месте, косметика
+    активна, CSP style не блокирует; habr readyState=interactive и без
+    блокера (сам сайт). Визуальная сверка скриншотов (до/после главной, watch,
+    4 эталонных) — вёрстка целая, рекламных блоков нет.
+  - Ограничения зафиксированы: YouTube-преролл — видео-поток, косметикой не
+    режется (вывод 2.1, вопрос P-07 у автора, id duopulse_017_p07_20261014);
+    скриптлеты ##+js — карточка-idea 043; фреймы без косметики (ответ
+    PostWebMessage только top-level).
+- backup.bat — 14.10 03:45 (backups/backup_2026-10-14_03-45-21).
+- Коммит: см. git log (duopulse-018, пуш в summonss7/DuoPulse main).

@@ -71,6 +71,9 @@ UI и Content общаются с Core только через типизиро�
 скриптов. Внутри — компактный рантайм без зависимостей (сборка в один IIFE-бандл):
 
 - `detector` — MutationObserver + `document.querySelectorAll('video')`;
+- `adblock/cosmetic` — косметика блокировщика (M2, задача 2.2): селекторы
+  скрытия из Core (adblock-rs) до отрисовки — `<style>` с `display:none`,
+  generic class/id-правила по факту классов/идов в DOM (MutationObserver-дельта);
 - `adapters/` — платформенные стратегии получения дорожек (см. 03-dual-subtitles);
 - `engine/` — cue-таймлайн, синхронизация с `video.currentTime`;
 - `overlay/` — рендер строк субтитров набора, 1–3 одновременно (DOM поверх видео, `pointer-events:none`);

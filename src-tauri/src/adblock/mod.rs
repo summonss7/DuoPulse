@@ -1,10 +1,13 @@
-//! Блокировщик рекламы — задача 2.1 (docs/04 §1.2, docs/02 §3 «adblock»).
+//! Блокировщик рекламы — задачи 2.1–2.2 (docs/04 §1.2, docs/02 §3 «adblock»).
 //!
 //! Обёртка adblock-rs (движок Brave, синтаксис EasyList/uBO): сетевая
 //! фильтрация **до** загрузки ресурса — решение принимает COM-перехватчик
-//! WebView2 WebResourceRequested (main.rs → [`AdblockService::should_block`]).
-//! Косметическая фильтрация (скрытие рекламных DOM-узлов инжектируемым
-//! скриптом) — задача 2.2, через этот же движок.
+//! WebView2 WebResourceRequested (main.rs → [`AdblockService::should_block`]);
+//! косметическая фильтрация (скрытие рекламных DOM-узлов) — задача 2.2:
+//! инжектируемый скрипт content/cosmetic.js запрашивает селекторы скрытия для
+//! документа ([`AdblockService::cosmetic_resources`],
+//! [`AdblockService::cosmetic_generic_selectors`]) — main.rs отвечает
+//! PostWebMessageAsString.
 //!
 //! Списки: EasyList + uBO filters (ads) по умолчанию; загрузка по HTTPS,
 //! кэш текстов в `profile/filters/<имя>.txt` (docs/02 §8), скомпилированный
@@ -382,6 +385,88 @@ impl AdblockService {
         self.status()
     }
 
+    // --- косметическая фильтрация (задача 2.2) ------------------------------
+
+    /// Селекторы скрытия для документа (задача 2.2): host-специфичные правила
+    /// (`example.com##…`) и misc-generic (`##div[class^="ad"]…` — всё, что не
+    /// keyed class/id), минус unhide-исключения хоста. Массовые generic
+    /// class/id-правила движок отдаёт отдельно по классам/идам страницы —
+    /// [`Self::cosmetic_generic_selectors`]. Скриптлеты (`##+js`) движок без
+    /// ресурсного набора uBO не собирает — `injected_script` не используется.
+    ///
+    /// Вызывается из WebMessageReceived при создании каждого документа: только
+    /// короткий лок + клон `Arc<Engine>`, расчёт в памяти (кэш по хостам).
+    pub fn cosmetic_resources(&self, url: &str) -> CosmeticResources {
+        let guard = self.inner.lock().expect("adblock: лок не отравлен");
+        if !guard.enabled {
+            return CosmeticResources {
+                active: false,
+                ready: guard.engine.is_some(),
+                hide: vec![],
+                generichide: false,
+            };
+        }
+        let Some(engine) = guard.engine.clone() else {
+            // списки ещё грузятся — скрипту стоит повторить запрос (ready=false)
+            return CosmeticResources {
+                active: true,
+                ready: false,
+                hide: vec![],
+                generichide: false,
+            };
+        };
+        if source_host_exempted(&guard.site_exceptions, url) {
+            return CosmeticResources {
+                active: false,
+                ready: true,
+                hide: vec![],
+                generichide: false,
+            };
+        }
+        drop(guard);
+        let res = engine.url_cosmetic_resources(url);
+        let mut hide: Vec<String> = res.hide_selectors.into_iter().collect();
+        hide.sort_unstable();
+        CosmeticResources {
+            active: true,
+            ready: true,
+            hide,
+            generichide: res.generichide,
+        }
+    }
+
+    /// Generic class/id-селекторы скрытия (задача 2.2): движок матчит классы и
+    /// иды, реально присутствующие в DOM страницы, против generic-правил
+    /// (`##.ad`, `###banner`, `##.k > .x`) с учётом unhide-исключений хоста
+    /// (и `$generichide` — скрипт при нём generic-запросы не шлёт). Потолок
+    /// входов — защита от гигантских страниц.
+    pub fn cosmetic_generic_selectors(
+        &self,
+        url: &str,
+        classes: &[String],
+        ids: &[String],
+    ) -> Vec<String> {
+        /// Максимум классов/идов за запрос (страница шлёт дельты с своим
+        /// потолком; здесь — граница доверия).
+        const MAX_TOKENS: usize = 5000;
+        let guard = self.inner.lock().expect("adblock: лок не отравлен");
+        if !guard.enabled || source_host_exempted(&guard.site_exceptions, url) {
+            return vec![];
+        }
+        let Some(engine) = guard.engine.clone() else {
+            return vec![];
+        };
+        drop(guard);
+        let classes = &classes[..classes.len().min(MAX_TOKENS)];
+        let ids = &ids[..ids.len().min(MAX_TOKENS)];
+        let exceptions = engine.url_cosmetic_resources(url).exceptions;
+        let mut selectors =
+            engine.hidden_class_id_selectors(classes.iter(), ids.iter(), &exceptions);
+        selectors.sort_unstable();
+        selectors.dedup();
+        selectors
+    }
+
     // --- нить обновления ----------------------------------------------------
 
     fn updater_loop(self: Arc<Self>) {
@@ -545,6 +630,22 @@ impl AdblockService {
 // ---------------------------------------------------------------------------
 // Вспомогательные
 // ---------------------------------------------------------------------------
+
+/// Ответ content-скрипту на запрос косметических ресурсов документа (задача
+/// 2.2; транспорт — main.rs, WebMessage → PostWebMessageAsString).
+#[derive(Debug, Clone, Serialize)]
+pub struct CosmeticResources {
+    /// Фильтрация для этого URL действует (движок включён, сайт не в
+    /// исключениях). false — скрываться нечему, повторять запрос не надо.
+    pub active: bool,
+    /// Движок построен; false при active=true — списки ещё грузятся, скрипт
+    /// повторяет запрос.
+    pub ready: bool,
+    /// CSS-селекторы скрытия (`display:none!important`).
+    pub hide: Vec<String>,
+    /// `$generichide`: generic class/id-запросы для хоста не нужны.
+    pub generichide: bool,
+}
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -1024,5 +1125,157 @@ mod tests {
     #[test]
     fn count_rules_ignores_comments_and_blanks() {
         assert_eq!(count_rules("! c\n\n  \n[AdGuard]\na=b\nc\n# meta\n"), 3);
+    }
+
+    // --- задача 2.2: косметическая фильтрация --------------------------------
+
+    #[test]
+    fn cosmetic_hostname_specific_and_misc_generic() {
+        let s = service();
+        s.set_engine(engine(&[
+            "example.com##.site-ad",
+            "other.test##.wrong-host",
+            "##.generic-ad",
+            "###generic-ad-id",
+            "##div.misc-ad",
+        ]));
+        let res = s.cosmetic_resources("https://example.com/page");
+        assert!(res.active && res.ready && !res.generichide);
+        assert!(res.hide.contains(&".site-ad".to_string()));
+        assert!(
+            res.hide.contains(&"div.misc-ad".to_string()),
+            "misc-generic селекторы приходят сразу (не keyed class/id): {:?}",
+            res.hide
+        );
+        assert!(
+            !res.hide.contains(&".wrong-host".to_string()),
+            "чужой хост не действует"
+        );
+        assert!(
+            !res.hide
+                .iter()
+                .any(|h| h.starts_with(".generic-ad") || h.starts_with("#generic")),
+            "простые generic class/id — отдельным запросом по DOM, не здесь: {:?}",
+            res.hide
+        );
+
+        // generic по классам/идам, реально присутствующим на странице
+        let sel = s.cosmetic_generic_selectors(
+            "https://example.com/page",
+            &["generic-ad".into(), "clean".into()],
+            &["generic-ad-id".into()],
+        );
+        assert_eq!(
+            sel,
+            vec!["#generic-ad-id".to_string(), ".generic-ad".to_string()],
+            "чистые классы/иды не матчатся"
+        );
+    }
+
+    #[test]
+    fn cosmetic_complex_generic_keyed_by_class() {
+        let s = service();
+        s.set_engine(engine(&["##.e2e-complex > span"]));
+        // комплексное generic-правило всплывает, только когда класс есть в DOM
+        assert!(s
+            .cosmetic_generic_selectors("https://a.test/", &[], &[])
+            .is_empty());
+        assert_eq!(
+            s.cosmetic_generic_selectors("https://a.test/", &["e2e-complex".into()], &[]),
+            vec![".e2e-complex > span".to_string()]
+        );
+    }
+
+    #[test]
+    fn cosmetic_e2e_fixture_full_set() {
+        // Полный набор e2e/adblock/cosmetic-fixture.txt + все классы/иды стенда:
+        // regression на взаимодействие правил внутри одного движка.
+        let s = service();
+        s.set_engine(engine(&[
+            "##.e2e-generic-class",
+            "###e2e-generic-id",
+            "##.e2e-complex > span",
+            "##div[class=\"e2e-misc\"]",
+            "##.e2e-exempt-ad",
+            "##.e2e-late-ad",
+            "127.0.0.1##.e2e-site-ad",
+            "127.0.0.1#@#.e2e-exempt-ad",
+        ]));
+        let classes: Vec<String> = ["content", "e2e-complex", "e2e-generic-class", "e2e-misc", "e2e-site-ad"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let ids: Vec<String> = ["e2e-generic-id", "result"].iter().map(|s| s.to_string()).collect();
+        let sel = s.cosmetic_generic_selectors("http://127.0.0.1:8895/", &classes, &ids);
+        assert_eq!(
+            sel,
+            vec![
+                "#e2e-generic-id".to_string(),
+                ".e2e-complex > span".to_string(),
+                ".e2e-generic-class".to_string(),
+            ],
+            "unhide-исключение гасит .e2e-exempt-ad; misc — не class/id-keyed"
+        );
+    }
+
+    #[test]
+    fn cosmetic_unhide_exception_blocks_generic() {
+        let s = service();
+        s.set_engine(engine(&["##.generic-ad", "example.com#@#.generic-ad"]));
+        // на хосте с unhide-исключением generic-правило не действует…
+        assert!(s
+            .cosmetic_generic_selectors("https://example.com/", &["generic-ad".into()], &[])
+            .is_empty());
+        // …на остальных — действует
+        assert_eq!(
+            s.cosmetic_generic_selectors("https://other.test/", &["generic-ad".into()], &[]),
+            vec![".generic-ad".to_string()]
+        );
+    }
+
+    #[test]
+    fn cosmetic_generichide_suppresses_generic() {
+        let s = service();
+        s.set_engine(engine(&[
+            "@@||example.com^$generichide",
+            "##div.misc-ad",
+            "example.com##.site-ad",
+        ]));
+        let res = s.cosmetic_resources("https://example.com/");
+        assert!(res.generichide, "$generichide-исключение распознано");
+        assert!(
+            res.hide.contains(&".site-ad".to_string()),
+            "host-специфичные действуют и при $generichide"
+        );
+        assert!(
+            !res.hide.contains(&"div.misc-ad".to_string()),
+            "misc-generic подавлен $generichide"
+        );
+    }
+
+    #[test]
+    fn cosmetic_disabled_site_exception_and_not_ready() {
+        let s = service(); // движка ещё нет
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(res.active && !res.ready && res.hide.is_empty());
+
+        s.set_engine(engine(&["##.ad"]));
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.enabled = false;
+        }
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(!res.active, "глобальный тумблер выключен — скрывать нечего");
+
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.enabled = true;
+            g.site_exceptions.insert("a.test".into());
+        }
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(!res.active, "сайт в исключениях — косметики нет");
+        assert!(s
+            .cosmetic_generic_selectors("https://a.test/", &["ad".into()], &[])
+            .is_empty());
     }
 }

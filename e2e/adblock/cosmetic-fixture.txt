@@ -1,0 +1,12 @@
+! Cosmetic-фикстура задачи 2.2 (e2e/adblock/cosmetic.mjs).
+! Покрывает: simple generic class/id, complex generic (keyed по классу),
+! misc generic (не keyed), host-специфичное, unhide-исключение хоста,
+! поздний узел (MutationObserver).
+##.e2e-generic-class
+###e2e-generic-id
+##.e2e-complex > span
+##div[class="e2e-misc"]
+##.e2e-exempt-ad
+##.e2e-late-ad
+127.0.0.1##.e2e-site-ad
+127.0.0.1#@#.e2e-exempt-ad

@@ -708,6 +708,10 @@ fn build_tab_webview(app: &AppHandle, id: &str, url: &Url) -> WebviewBuilder<tau
         // Горячие клавиши таб-бара в контенте (задача 1.2) — до скриптов
         // страницы, чтобы перехват нельзя было снять.
         .initialization_script(crate::CONTENT_INIT_SCRIPT_HOTKEYS)
+        // Косметика блокировщика (задача 2.2): селекторы скрытия до отрисовки
+        // страницы — ресурс запрашивается у Core сразу после создания
+        // документа (content/cosmetic.js → main.rs → PostWebMessage).
+        .initialization_script(crate::CONTENT_INIT_SCRIPT_COSMETIC)
         // Аргументы те же, что у UI-webview: окружение WebView2 создаётся
         // первым webview, но дублируем для устойчивости к порядку создания.
         .additional_browser_args(crate::startup_proxy_args())

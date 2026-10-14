@@ -44,10 +44,11 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2
 const BLOCK_TEST_PATH: &str = "/duopulse_block_test_probe";
 
 /// Content-скрипты каждой вкладки (docs/02 §4): монитор M0 + горячие клавиши
-/// таб-бара (задача 1.2).
+/// таб-бара (задача 1.2) + косметика блокировщика (задача 2.2).
 pub(crate) const CONTENT_INIT_SCRIPT_M0: &str = include_str!("../../content/m0-spike.js");
 pub(crate) const CONTENT_INIT_SCRIPT_HOTKEYS: &str =
     include_str!("../../content/chrome-hotkeys.js");
+pub(crate) const CONTENT_INIT_SCRIPT_COSMETIC: &str = include_str!("../../content/cosmetic.js");
 
 /// Аргументы окружения WebView2, зафиксированные на старте приложения:
 /// каждая новая вкладка наследует их (сменить можно только перезапуском).
@@ -228,9 +229,14 @@ unsafe fn referer_of(
     }
 }
 
-/// Сообщения content-слоя вкладки (window.chrome.webview.postMessage, задача 1.2):
-/// горячие клавиши таб-бара из content/chrome-hotkeys.js → tabs::handle_hotkey.
-/// Прочие сообщения (IPC tauri обрабатывает свои параллельно) игнорируются.
+/// Сообщения content-слоя вкладки (window.chrome.webview.postMessage):
+/// - «hotkey» — горячие клавиши таб-бара (content/chrome-hotkeys.js →
+///   tabs::handle_hotkey, задача 1.2);
+/// - «cosmetic»/«cosmetic-generic» — запросы косметических ресурсов документа
+///   (content/cosmetic.js, задача 2.2): селекторы скрытия из adblock-rs
+///   возвращаются тому же webview PostWebMessageAsString (доставляется только
+///   top-level документу — скрипт во фреймах запросы не шлёт);
+/// - прочие (IPC tauri обрабатывает свои параллельно) игнорируются.
 #[cfg(windows)]
 unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle) {
     use webview2_com::WebMessageReceivedEventHandler;
@@ -238,7 +244,7 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle) {
 
     let app = app.clone();
     core.add_WebMessageReceived(
-        &WebMessageReceivedEventHandler::create(Box::new(move |_sender, args| {
+        &WebMessageReceivedEventHandler::create(Box::new(move |sender, args| {
             let Some(args) = args else {
                 return Ok(());
             };
@@ -254,12 +260,69 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle) {
                 if let Some(key) = parsed["key"].as_str() {
                     app.state::<tabs::TabManager>().handle_hotkey(&app, key);
                 }
+            } else if parsed["duopulse"] == "cosmetic" {
+                if let Some(url) = parsed["url"].as_str() {
+                    let res = app
+                        .state::<std::sync::Arc<adblock::AdblockService>>()
+                        .cosmetic_resources(url);
+                    let reply = serde_json::json!({
+                        "duopulse": "cosmetic-resources",
+                        "url": url,
+                        "active": res.active,
+                        "ready": res.ready,
+                        "hide": res.hide,
+                        "generichide": res.generichide,
+                    });
+                    post_to_page(sender.as_ref(), &reply);
+                }
+            } else if parsed["duopulse"] == "cosmetic-generic" {
+                if let Some(url) = parsed["url"].as_str() {
+                    let classes: Vec<String> = parsed["classes"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let ids: Vec<String> = parsed["ids"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let selectors = app
+                        .state::<std::sync::Arc<adblock::AdblockService>>()
+                        .cosmetic_generic_selectors(url, &classes, &ids);
+                    let reply = serde_json::json!({
+                        "duopulse": "cosmetic-generic-selectors",
+                        "url": url,
+                        "selectors": selectors,
+                    });
+                    post_to_page(sender.as_ref(), &reply);
+                }
             }
             Ok(())
         })),
         std::ptr::null_mut(),
     )
     .expect("add_WebMessageReceived");
+}
+
+/// Ответ документу вкладки (WebMessage-канал задачи 2.2): PostWebMessageAsString
+/// доставляет строку в window.chrome.webview «message» top-level документа.
+#[cfg(windows)]
+fn post_to_page(
+    sender: Option<&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2>,
+    value: &serde_json::Value,
+) {
+    if let Some(core) = sender {
+        // Доставка Best-effort: страница могла уже уйти навигацией — ошибка не критична.
+        let _ =
+            unsafe { core.PostWebMessageAsString(&windows_core::HSTRING::from(value.to_string())) };
+    }
 }
 
 /// Полный набор COM-обработчиков для каждой вкладки: сетевой перехват M0 +
