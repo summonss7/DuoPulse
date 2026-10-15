@@ -240,7 +240,8 @@ unsafe fn referer_of(
 /// - «cosmetic»/«cosmetic-generic» — запросы косметических ресурсов документа
 ///   (content/cosmetic.js, задача 2.2): селекторы скрытия из adblock-rs
 ///   возвращаются тому же webview PostWebMessageAsString (доставляется только
-///   top-level документу — скрипт во фреймах запросы не шлёт);
+///   top-level документу — скрипт во фреймах запросы не шлёт); в том же
+///   ответе — код скриптлетов `##+js` (injectedScript, карточка duopulse-043);
 /// - прочие (IPC tauri обрабатывает свои параллельно) игнорируются.
 #[cfg(windows)]
 unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
@@ -283,6 +284,7 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                         "ready": res.ready,
                         "hide": res.hide,
                         "generichide": res.generichide,
+                        "injectedScript": res.injected_script,
                     });
                     post_to_page(sender.as_ref(), &reply);
                 }

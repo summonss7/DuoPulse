@@ -1,0 +1,6 @@
+! DuoPulse e2e тест-лист скриптлетов (карточка duopulse-043, e2e/adblock/scriptlets.mjs).
+! Правила ##+js на локальный стенд: короткая (aopr) и полная (set-constant)
+! формы имён; значения — из магического словаря AdGuard ("yes"/"no").
+127.0.0.1##+js(set-constant, __dpE2eFlag, yes)
+127.0.0.1##+js(aopr, __dpE2ePoison)
+127.0.0.1##+js(set-constant, __dpE2eOwn, no)

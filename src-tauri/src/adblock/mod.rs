@@ -7,7 +7,19 @@
 //! инжектируемый скрипт content/cosmetic.js запрашивает селекторы скрытия для
 //! документа ([`AdblockService::cosmetic_resources`],
 //! [`AdblockService::cosmetic_generic_selectors`]) — main.rs отвечает
-//! PostWebMessageAsString.
+//! PostWebMessageAsString. Скриптлеты (`##+js(...)`, карточка duopulse-043):
+//! движок собирает их в `injected_script`, content/cosmetic.js исполняет код
+//! в мире страницы (<script>-элемент) — тот же тумблер/white-list, что и вся
+//! косметика.
+//!
+//! Ресурсный набор скриптлетов (библиотека uBO-совместимых функций) — не
+//! сетевой источник: родной uBO resources.txt апстрим удалил, поэтому набор
+//! вкомпилирован в бинарник (scriptlets-resources.json, конвертер
+//! scripts/build-adblock-resources.mjs из npm-пакета @adguard/scriptlets;
+//! обновление набора = перегенерация + пересборка). Digest набора входит в
+//! метки engine.json — смена набора перестраивает скомпилированный кэш.
+//! `serialize_raw` ресурсы НЕ сериализует — `use_resources` вызывается и
+//! после `Engine::from_rules`, и после `deserialize`.
 //!
 //! Списки: EasyList + uBO filters (ads) по умолчанию; загрузка по HTTPS,
 //! кэш текстов в `profile/filters/<имя>.txt` (docs/02 §8), скомпилированный
@@ -35,6 +47,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use adblock::lists::ParseOptions;
 use adblock::request::Request;
+use adblock::resources::Resource;
 use adblock::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -66,6 +79,25 @@ const DEFAULT_LISTS: [(&str, &str); 2] = [
         "https://ublockorigin.github.io/uAssets/filters/filters.txt",
     ),
 ];
+
+/// Ресурсный набор скриптлетов uBO (карточка duopulse-043): генерируется
+/// scripts/build-adblock-resources.mjs из @adguard/scriptlets в формат
+/// `Vec<Resource>` adblock-rs (serde). Формат function-style: движок сам
+/// генерирует вызов `Имя("arg1","arg2")` и оборачивает его в try/catch.
+const SCRIPTLETS_JSON: &str = include_str!("scriptlets-resources.json");
+
+/// Разобранный набор (один раз на процесс; ошибка формата — печатаем и
+/// работаем без скриптлетов, как до карточки 043).
+fn scriptlet_resources() -> &'static [Resource] {
+    static RES: std::sync::OnceLock<Vec<Resource>> = std::sync::OnceLock::new();
+    RES.get_or_init(|| match serde_json::from_str(SCRIPTLETS_JSON) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("adblock: ресурсный набор скриптлетов не разобран: {e}");
+            vec![]
+        }
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Источники списков
@@ -391,8 +423,10 @@ impl AdblockService {
     /// (`example.com##…`) и misc-generic (`##div[class^="ad"]…` — всё, что не
     /// keyed class/id), минус unhide-исключения хоста. Массовые generic
     /// class/id-правила движок отдаёт отдельно по классам/идам страницы —
-    /// [`Self::cosmetic_generic_selectors`]. Скриптлеты (`##+js`) движок без
-    /// ресурсного набора uBO не собирает — `injected_script` не используется.
+    /// [`Self::cosmetic_generic_selectors`]. Скриптлеты (`##+js`, карточка
+    /// duopulse-043): движок собирает код по ресурсному набору uBO в
+    /// `injected_script` (function-style вызовы в try/catch) — content-скрипт
+    /// исполняет его в мире страницы.
     ///
     /// Вызывается из WebMessageReceived при создании каждого документа: только
     /// короткий лок + клон `Arc<Engine>`, расчёт в памяти (кэш по хостам).
@@ -404,6 +438,7 @@ impl AdblockService {
                 ready: guard.engine.is_some(),
                 hide: vec![],
                 generichide: false,
+                injected_script: String::new(),
             };
         }
         let Some(engine) = guard.engine.clone() else {
@@ -413,6 +448,7 @@ impl AdblockService {
                 ready: false,
                 hide: vec![],
                 generichide: false,
+                injected_script: String::new(),
             };
         };
         if source_host_exempted(&guard.site_exceptions, url) {
@@ -421,6 +457,7 @@ impl AdblockService {
                 ready: true,
                 hide: vec![],
                 generichide: false,
+                injected_script: String::new(),
             };
         }
         drop(guard);
@@ -432,6 +469,7 @@ impl AdblockService {
             ready: true,
             hide,
             generichide: res.generichide,
+            injected_script: res.injected_script,
         }
     }
 
@@ -572,16 +610,24 @@ impl AdblockService {
             return;
         }
 
-        // Скомпилированный кэш валиден, если набор digest'ов совпал.
-        let digests: Vec<u64> = defs
+        // Скомпилированный кэш валиден, если набор digest'ов совпал; digest
+        // ресурсного набора скриптлетов — в том же наборе (смена набора при
+        // обновлении бинарника перестраивает engine.bin).
+        let mut digests: Vec<u64> = defs
             .iter()
             .map(|d| meta.lists.get(&d.name).map(|m| m.digest).unwrap_or(0))
             .collect();
+        digests.push(digest(SCRIPTLETS_JSON));
         let engine = match load_compiled(&filters_dir, &digests) {
-            Some(e) => Some(e),
+            // serialize_raw ресурсы не хранит — подключаем после deserialize
+            Some(mut e) => {
+                e.use_resources(scriptlet_resources().iter().cloned());
+                Some(e)
+            }
             None => {
                 let rules = texts.iter().flat_map(|(_, t)| t.lines());
-                let engine = Engine::from_rules(rules, ParseOptions::default());
+                let mut engine = Engine::from_rules(rules, ParseOptions::default());
+                engine.use_resources(scriptlet_resources().iter().cloned());
                 if let Ok(bin) = engine.serialize_raw() {
                     write_compiled(&filters_dir, &bin, &digests);
                 }
@@ -645,6 +691,10 @@ pub struct CosmeticResources {
     pub hide: Vec<String>,
     /// `$generichide`: generic class/id-запросы для хоста не нужны.
     pub generichide: bool,
+    /// Код скриптлетов `##+js(...)` для этого URL (карточка duopulse-043):
+    /// определения функций + вызовы с аргументами правила; пустая строка —
+    /// правил/ресурсов нет или фильтрация не действует.
+    pub injected_script: String,
 }
 
 fn now_ms() -> i64 {
@@ -1286,5 +1336,181 @@ mod tests {
         assert!(s
             .cosmetic_generic_selectors("https://a.test/", &["ad".into()], &[])
             .is_empty());
+    }
+
+    // --- карточка duopulse-043: скриптлеты ##+js --------------------------------
+
+    /// Движок с правилами и ресурсным набором (как строит refresh_lists).
+    fn scriptlet_engine(rules: &[&str]) -> Engine {
+        let mut e = Engine::from_rules(rules.iter().copied(), ParseOptions::default());
+        e.use_resources(scriptlet_resources().iter().cloned());
+        e
+    }
+
+    #[test]
+    fn scriptlet_resources_embedded_set_is_valid() {
+        let res = scriptlet_resources();
+        assert!(
+            res.len() > 90,
+            "набор из бинарника разбирается и полный: {}",
+            res.len()
+        );
+        let mut names = std::collections::BTreeSet::new();
+        let mut aliases = std::collections::BTreeSet::new();
+        for r in res {
+            assert!(
+                r.name.ends_with(".js") && !r.name.is_empty(),
+                "{:?}",
+                r.name
+            );
+            assert!(!names.contains(&r.name), "дубль имени {}", r.name);
+            names.insert(r.name.clone());
+            for a in &r.aliases {
+                assert!(!aliases.contains(a), "дубль алиаса {a}");
+                aliases.insert(a.clone());
+            }
+        }
+        // топ-скриптлеты живого uBO filters.txt (журнал карточки 043)
+        for needed in [
+            "aopr.js",
+            "acs.js",
+            "set.js",
+            "aeld.js",
+            "nostif.js",
+            "aopw.js",
+            "nowoif.js",
+            "nobab.js",
+            "json-prune.js",
+            "no-fetch-if.js",
+        ] {
+            assert!(
+                names.contains(needed) || aliases.contains(needed),
+                "нет {needed}"
+            );
+        }
+    }
+
+    #[test]
+    fn scriptlet_rule_injects_function_call_with_args() {
+        let s = service();
+        s.set_engine(scriptlet_engine(&[
+            "127.0.0.1##+js(set-constant, player.adFlag, yes)",
+            "example.com##+js(aopr, atob)",
+        ]));
+        let res = s.cosmetic_resources("http://127.0.0.1:8895/page");
+        assert!(res.active && res.ready);
+        // function-style: определение функции + вызов с аргументами правила
+        assert!(
+            res.injected_script.contains("function setConstant("),
+            "нет определения функции"
+        );
+        assert!(
+            res.injected_script
+                .contains(r#"setConstant("player.adFlag", "yes")"#),
+            "нет вызова с аргументами: {}",
+            &res.injected_script[..res.injected_script.len().min(300)]
+        );
+        // чужой хост — ничего
+        let other = s.cosmetic_resources("https://other.test/");
+        assert!(other.injected_script.is_empty());
+        // алиас-форма правила (aopr на example.com)
+        let aliased = s.cosmetic_resources("https://example.com/x");
+        assert!(aliased
+            .injected_script
+            .contains("abortOnPropertyRead(\"atob\")"));
+    }
+
+    #[test]
+    fn scriptlet_multihost_ubo_youtube_rule_injects() {
+        // дословные правила живого uBO filters.txt (мультихостовое условие +
+        // короткий алиас set + магическое значение undefined)
+        let s = service();
+        s.set_engine(scriptlet_engine(&[
+            "m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(set, ytInitialPlayerResponse.playerAds, undefined)",
+            "m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(set, ytInitialPlayerResponse.adSlots, undefined)",
+            "m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)",
+        ]));
+        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=x");
+        assert!(res.active && res.ready);
+        assert!(
+            res.injected_script.contains("function setConstant("),
+            "нет setConstant: {}",
+            &res.injected_script[..res.injected_script.len().min(200)]
+        );
+        assert!(
+            res.injected_script
+                .contains(r#"setConstant("ytInitialPlayerResponse.playerAds", "undefined")"#),
+            "нет вызова с undefined: {}",
+            &res.injected_script[..res.injected_script.len().min(300)]
+        );
+        assert!(
+            res.injected_script.contains("function jsonPrune("),
+            "нет jsonPrune"
+        );
+        // хост вне списка — ничего
+        let other = s.cosmetic_resources("https://example.com/");
+        assert!(other.injected_script.is_empty());
+    }
+
+    #[test]
+    fn scriptlet_trusted_requires_permission() {
+        let s = service();
+        s.set_engine(scriptlet_engine(&[
+            "127.0.0.1##+js(trusted-set-cookie, a, b)",
+        ]));
+        let res = s.cosmetic_resources("http://127.0.0.1:8895/");
+        // ParseOptions::default() (untrusted) — trusted-* не инъенцируется
+        assert!(
+            res.injected_script.is_empty(),
+            "trusted-скриптлет без доверия не должен попадать в инъекцию"
+        );
+    }
+
+    #[test]
+    fn scriptlets_disabled_by_toggle_and_site_exception() {
+        let s = service();
+        s.set_engine(scriptlet_engine(&["a.test##+js(set-constant, flag, yes)"]));
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.enabled = false;
+        }
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(
+            !res.active && res.injected_script.is_empty(),
+            "тумблер выключен — скриптлетов нет"
+        );
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.enabled = true;
+            g.site_exceptions.insert("a.test".into());
+        }
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(
+            !res.active && res.injected_script.is_empty(),
+            "сайт в исключениях — скриптлетов нет"
+        );
+    }
+
+    #[test]
+    fn engine_cache_rebuilds_when_resource_digest_changes() {
+        // Скомпилированный движок валиден только при совпадении ВСЕХ меток,
+        // включая digest ресурсного набора: имитируем engine.json со старым
+        // набором меток — load_compiled обязан отказаться от кэша.
+        let dir =
+            std::env::temp_dir().join(format!("duopulse-adblock-scriptlet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let filters = dir.join("filters");
+        std::fs::create_dir_all(&filters).unwrap();
+        let mut digests = vec![1u64];
+        digests.push(digest(SCRIPTLETS_JSON));
+        write_compiled(&filters, b"stale", &digests[..digests.len() - 1]);
+        assert!(
+            load_compiled(&filters, &digests).is_none(),
+            "старые метки (без digest скриптлетов) не принимаются"
+        );
+        write_compiled(&filters, b"stale", &digests);
+        // байты не движка — deserialize не пройдёт, но метки уже с digest
+        assert!(load_compiled(&filters, &digests).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

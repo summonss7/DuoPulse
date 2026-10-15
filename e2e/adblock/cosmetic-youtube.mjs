@@ -229,6 +229,24 @@ try {
     JSON.stringify(watchAfter.cosmetic),
   );
 
+  // скриптлеты (карточка duopulse-043): uBO filters содержит непривилегированные
+  // правила для youtube (`set ytInitialPlayerResponse.playerAds/adSlots,
+  // undefined`) — код должен инъенцироваться и ИСПОЛНИТЬСЯ (scriptletsRan —
+  // маркер ставит сам код; YouTube энфорсит Trusted Types + nonce/strict-dynamic
+  // CSP — проверяем, что обход работает); замеряем и тайминг доставки
+  const scriptlets = await evalIn(ytWs, `window.__duopulseCosmetic ? {
+    len: window.__duopulseCosmetic.scriptlets,
+    atMs: window.__duopulseCosmetic.scriptletsAt,
+    ranMs: window.__duopulseCosmetic.scriptletsRan,
+    playerAds: window.ytInitialPlayerResponse ? String(window.ytInitialPlayerResponse.playerAds) : 'нет-объекта',
+    adSlots: window.ytInitialPlayerResponse ? String(window.ytInitialPlayerResponse.adSlots) : 'нет-объекта',
+  } : null`);
+  check(
+    "watch: скриптлеты uBO инъенцированы и исполнены (##+js set ytInitialPlayerResponse.*, Trusted Types/CSP обойдены)",
+    scriptlets?.len > 0 && scriptlets?.ranMs > 0,
+    JSON.stringify(scriptlets),
+  );
+
   // замеры плейсхолдеров: сводка (кампании рекламы непостоянны — жёсткий
   // критерий только на ВИДИМЫЕ заглушки: после включённой косметики их 0)
   console.log("\nглавная «до»:    ", JSON.stringify(homeBefore.bySel), "видео:", homeBefore.videos);

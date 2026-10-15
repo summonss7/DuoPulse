@@ -1015,3 +1015,59 @@
     WebMessage-обработчик).
 - backup.bat — 14.10 04:29 (backups/backup_2026-10-14_04-29-45).
 - Коммит: см. git log (duopulse-019, пуш в summonss7/DuoPulse main).
+
+
+## 15.10.2026 06:07–09:20 — Скриптлеты блокировщика ##+js, ресурсный набор uBO (карточка duopulse-043)
+
+- Что сделано:
+  - Ресурсный набор uBO-скриптлетов: конвертер scripts/build-adblock-resources.mjs
+    читает npm-пакет @adguard/scriptlets (родной uBO resources.txt апстрим удалил
+    в 2020-м — вывод исследования в журнале карточки) →
+    src-tauri/src/adblock/scriptlets-resources.json: 101 функция, 318 алиасов
+    (uBO-имена + короткие формы set/aopr/prune/…), формат Vec<Resource> adblock-rs,
+    function-style шим (source, args); trusted-* помечены permission:1 — не
+    инъенцируются (списки парсятся как untrusted). Регенерация байт-в-байт
+    воспроизводима (sha256 совпал).
+  - src-tauri/src/adblock/mod.rs: набор вкомпилирован (include_str + OnceLock),
+    Engine::use_resources вызывается и после Engine::from_rules, и после
+    deserialize (serialize_raw ресурсы не хранит); digest набора добавлен в метки
+    engine.json — смена набора перестраивает compiled-кэш; CosmeticResources
+    получил injected_script; +6 юнит-тестов (валидность набора, инъекция с
+    аргументами и алиасами, мультихостовое правило uBO для youtube, trusted без
+    доверия, тумблер/сайт-исключение, digest-инвалидация кэша).
+  - src-tauri/src/main.rs: injectedScript в ответе cosmetic-resources (тот же
+    WebMessage-канал, что и селекторы скрытия — тумблер/white-list действуют
+    автоматически).
+  - content/cosmetic.js: runScriptlets() исполняет код <script>-элементом в мире
+    страницы; Trusted Types (require-trusted-types-for 'script', youtube) обходится
+    своей политикой duopulse-scriptlets (имя страницей не резервируется); в код
+    дописывается маркер исполнения scriptletsRan — отличает вставку от исполнения
+    (strict script-src + strict-dynamic мог бы заблокировать элемент; на YouTube
+    исполнение проходит).
+  - e2e: e2e/adblock/scriptlets.mjs + scriptlets-test.txt — стенд на локальном
+    тест-листе (set-constant полное имя, aopr короткая форма, перезапись свойства
+    после гонки доставки, сайт-исключение, глобальный тумблер, возврат) — 11/11;
+    cosmetic-youtube.mjs дополнен проверкой скриптлетов на watch.
+  - Документация: docs/04 §1.2 (скриптлеты в рычаге «блокировщик»), docs/05
+    (строка 2.6 карточки 043, актуализированы хвосты 2.1/2.2), README (новость,
+    таблица возможностей, e2e-команды). ROADMAP не менялся (скриптлеты — внутри
+    «Интеграции блокировщика» M2, одобрено автором «в работу в M2»).
+- Как проверено:
+  - cargo fmt / clippy --all-targets -D warnings — чисто; cargo test —
+    **63 passed** (+6 скриптлет-тестов); tsc --noEmit чисто; vitest 4/4.
+  - Поиск причины первого провала YouTube (injected 0): движок на живых списках
+    собирал 62607 символов кода для youtube (юнит-проверка) — упало исполнение в
+    странице: YouTube энфорсит require-trusted-types-for 'script'. После обёртки
+    политикой: e2e/adblock/cosmetic-youtube.mjs — **12/12**, скриптлеты исполнены
+    (len 62607, ranMs 162), playerAds/adSlots = undefined, заглушек на watch нет.
+  - **YouTube-преролл исчез**: e2e/adblock/p07.mjs — реклама не показана ни в
+    одном прогоне с блокировщиком (0/3 против 3/3 без); запросов до первого кадра
+    275→209 (медианы; в сеть 275→198, 72% при цели ≤60% — остаток first-party
+    трафик плеера без рекламной нагрузки; решение по критерию P-07 — gate M2,
+    карточка 021). Уведомление отправлено в Хаб ИИ (duopulse_043_done_20261015).
+  - Регрессии: e2e/adblock/scriptlets.mjs 11/11, run.mjs 18/18, cosmetic.mjs
+    13/13. Известное ограничение задокументировано: доставка асинхронная — самые
+    ранние инлайн-скрипты страницы могут успеть отработать до инъекции (на
+    YouTube инъекция успевает к 162 мс, преролл срезается).
+- backup.bat — 15.10 08:52 (backups/backup_2026-10-15_08-52-48).
+- Коммит: см. git log (duopulse-043, пуш в summonss7/DuoPulse main).

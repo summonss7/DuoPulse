@@ -12,13 +12,20 @@
    3) массовые generic class/id-правила (`##.ad`, `###banner`) движок отдаёт
       только по классам/идам, реально присутствующим в DOM: скрипт собирает их
       (первичный проход + MutationObserver с дебаунсом) и досылает дельту;
-   4) движок ещё строится (ready=false) — запрос повторяется (до 20 раз/500 мс).
+   4) движок ещё строится (ready=false) — запрос повторяется (до 20 раз/500 мс);
+   5) скриптлеты (`##+js(...)`, карточка duopulse-043): код (injectedScript)
+      исполняется <script>-элементом в мире страницы — тот же тумблер/white-
+      list, что и селекторы. Доставка асинхронная (WebMessage-цикл), поэтому
+      самые ранние инлайн-скрипты страницы могут успеть отработать до инъекции
+      (uBO колет синхронно в document_start) — известное ограничение.
+      Trusted Types (require-trusted-types-for 'script', youtube) обходится
+      своей политикой duopulse-scriptlets; strict script-src + strict-dynamic
+      может не пустить элемент — тогда вставка тихая, scriptletsRan = 0.
 
    Ограничения: top-level документ (ответ PostWebMessage доставляется только
    ему — во фреймах скрипт завершается сразу); выключенный блокировщик или
-   сайт-исключение → active=false, скрытий нет; скриптлеты (##+js) не
-   поддержаны — нужен ресурсный набор uBO (отдельная работа). Страницы со
-   строгим style-src CSP (без unsafe-inline) могут не применить <style> —
+   сайт-исключение → active=false, скрытий и инъекций нет; страницы со
+   строгим style-src/script-src CSP могут не применить <style>/<script> —
    фильтрация там молча не работает, вёрстку это не ломает.
 
    Без зависимостей, один IIFE — как требует docs/02 §4. */
@@ -47,6 +54,9 @@
     hiddenSelectors: 0,
     genericSelectors: 0,
     genericScans: 0,
+    scriptlets: 0, // длина исполненного кода скриптлетов (##+js)
+    scriptletsAt: 0, // performance.now() в момент вставки (диагностика тайминга)
+    scriptletsRan: 0, // performance.now() из самого кода — исполнение состоялось
     styleBlocked: false, // CSP не пустил <style> (косметика молча не работает)
     log: [], // последние события обмена с Core (диагностика)
   });
@@ -191,6 +201,63 @@
     }
   }
 
+  /* --- скриптлеты (##+js, карточка duopulse-043) --------------------------- */
+
+  /* Политика Trusted Types для страниц с require-trusted-types-for 'script'
+     (youtube и др.): присваивание строки в script.textContent без обёртки
+     бросает TypeError. Имя страницы не резервируют директивой trusted-types —
+     свою политику создать можно; если всё же запрещена — остаёмся на строке
+     (строгая страница бросит, попадёт в catch ниже). */
+  var ttPolicy = null;
+
+  function trustedScript(code) {
+    try {
+      if (typeof trustedTypes === "undefined" || !trustedTypes.createPolicy) {
+        return code;
+      }
+      if (!ttPolicy) {
+        ttPolicy = trustedTypes.createPolicy("duopulse-scriptlets", {
+          createScript: function (s) {
+            return s;
+          },
+        });
+      }
+      return ttPolicy.createScript(code);
+    } catch (e) {
+      log("scriptlets", "tt-policy: " + e);
+      return code;
+    }
+  }
+
+  /* Код приходит из движка (function-style: определения + вызовы в try/catch);
+     исполняем <script>-элементом в мире страницы. Инъекция идёт до скрытий:
+     пока CSS собирается в живой <style>, скриптлеты влияют на ранние проверки
+     страницы. Маркер исполнения дописывается в сам код: state.scriptletsRan
+     отличает «элемент вставлен» от «код исполнился» (strict script-src CSP
+     с strict-dynamic может не пустить элемент — тогда вставка тихая, а
+     scriptletsRan остаётся 0). */
+  function runScriptlets(code) {
+    if (!code) return;
+    try {
+      var el = document.createElement("script");
+      var payload =
+        code +
+        "\n;try{window.__duopulseCosmetic&&(window.__duopulseCosmetic.scriptletsRan=Math.round(performance.now()))}catch(e){}";
+      el.textContent = trustedScript(payload);
+      (document.head || document.documentElement).appendChild(el);
+      el.remove();
+      state.scriptlets = code.length;
+      try {
+        state.scriptletsAt = Math.round(performance.now());
+      } catch (e) {
+        /* диагностика — не критично */
+      }
+      log("scriptlets", code.length + " chars");
+    } catch (e) {
+      log("scriptlets", "error: " + e);
+    }
+  }
+
   /* --- цикл запроса ресурсов ---------------------------------------------- */
 
   var retries = 0;
@@ -221,9 +288,13 @@
         return;
       }
       state.active = true;
+      runScriptlets(msg.injectedScript || "");
       state.hiddenSelectors += hide(msg.hide || []);
       state.ready = true;
-      log("resources", "hide=" + (msg.hide || []).length + " generichide=" + msg.generichide);
+      log(
+        "resources",
+        "hide=" + (msg.hide || []).length + " generichide=" + msg.generichide + " js=" + (msg.injectedScript || "").length,
+      );
       if (!msg.generichide) {
         if (document.readyState === "loading") {
           document.addEventListener("DOMContentLoaded", function () {
