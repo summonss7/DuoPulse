@@ -60,6 +60,10 @@ menu.addEventListener("click", (e) => {
     case "history":
       void bridge.tabs.open({ url: "duopulse://history" }).catch(err);
       break;
+    case "diagnostics":
+      // «Диагностика» (задача 2.5): живые метрики + история прогонов
+      void bridge.tabs.open({ url: "duopulse://diagnostics" }).catch(err);
+      break;
     case "proxy":
       // переиспользуем обработчик кнопки навбара: тумблер/статус обновятся сами
       document.getElementById("proxyBtn")?.click();

@@ -148,6 +148,22 @@ duopulse-020): кэши/профиль WebView2 живут между запус
 подтверждена хозяином 16.10.2026 — Aila, duopulse_020_p03_20261016, кнопка 1).
 Этапы старта печатаются метками `[startup]` в stderr.
 
+16.10.2026 готова **страница «Диагностика»** (задача 2.5, карточка
+duopulse-021): `duopulse://diagnostics` (пункт в главном меню) — живой срез
+сеанса (старт и его фазы, переключения вкладок, RAM оболочки, счётчики
+блокировщика — события `perf:{startup_ms, tab_switch_ms}` и команда
+`perf.snapshot`) и история прогонов метрик P-01..P-08: SQLite-таблица
+perf_runs в duopulse.db, последние 10 прогонов (docs/04 §3), график-спарклайн
+по каждой метрике с бюджетом и подсветкой «вне бюджета»; «Снять срез»
+сохраняет доступные живые значения, итог эталонного прогона пишет
+[e2e/perf/save-run.mjs](e2e/perf/save-run.mjs). Gate-стенды M2:
+[e2e/perf/diagnostics.mjs](e2e/perf/diagnostics.mjs) (4/4),
+[p05.mjs](e2e/perf/p05.mjs) (дропы кадров 1080p60),
+[p06.mjs](e2e/perf/p06.mjs) (отклик UI), [p08.mjs](e2e/perf/p08.mjs)
+(первый кадр vs Chrome). Gate-прогон M2: P-01 405 мс, P-02 379 мс, P-03 48 МБ,
+P-04 0,93% ядра, P-06 без longtask; P-05/P-08 — вопросы автору и карточка
+CARDS/044 (themeRefresh-перенаправ YouTube), подробности — CHANGELOG 16.10.
+
 ### Запуск спайка M0
 
 ```bash
@@ -184,6 +200,15 @@ node e2e/sleep/p04.mjs
 # e2e-замер метрик P-01..P-03 (релизная сборка: холодный/тёплый старт,
 # RAM 5 типичных вкладок; --prefetch — проверка прогрева топ-сайтов):
 node e2e/perf/run.mjs --prefetch
+# e2e-стенд страницы «Диагностика» (duopulse://diagnostics: живой срез,
+# график истории прогонов, «Снять срез») и метрики gate M2: дропы кадров
+# 1080p60, отклик UI (печать/Ctrl+Tab), первый кадр повторного просмотра
+# против Chrome; итог прогона — в историю страницы:
+node e2e/perf/diagnostics.mjs
+node e2e/perf/p05.mjs
+node e2e/perf/p06.mjs
+node e2e/perf/p08.mjs
+node e2e/perf/save-run.mjs --label "gate" --metrics '{"p01_ms":402}'
 # DoD-прогон косметики на живых списках (YouTube до/после + эталонные сайты,
 # скриншоты в e2e/adblock/shots-2.2/) — нужна сеть:
 node e2e/adblock/cosmetic-youtube.mjs

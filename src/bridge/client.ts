@@ -24,6 +24,9 @@ import type {
   NavNavigateParams,
   NavResolveOmniboxParams,
   NavResolveOmniboxResult,
+  PerfRunListResult,
+  PerfSaveRunParams,
+  PerfSnapshotResult,
   ProxySettings,
   SettingsGetParams,
   SettingsSetParams,
@@ -114,6 +117,14 @@ export const bridge = {
     updateLists: (params: AdblockUpdateListsParams) =>
       invoke<AdblockStatusResult>("adblock_update_lists", { params }),
   },
+  perf: {
+    /** perf.snapshot: живой срез сеанса — старт, вкладки, RAM, блокировщик. */
+    snapshot: () => invoke<PerfSnapshotResult>("perf_snapshot"),
+    /** perf.save_run: сохранить прогон в историю (последние 10). */
+    saveRun: (params: PerfSaveRunParams) => invoke<void>("perf_save_run", { params }),
+    /** perf.list_runs: прогоны истории для графика, новые → старые. */
+    listRuns: () => invoke<PerfRunListResult>("perf_list_runs"),
+  },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */
     restart: () => invoke<void>("app_restart"),
@@ -132,5 +143,9 @@ export const bridge = {
     adblockBlockedCount: "adblock:blocked_count",
     /** adblock.site_exception_changed: исключение сайта включено/снято (2.1). */
     adblockSiteExceptionChanged: "adblock:site_exception_changed",
+    /** perf.startup_ms: итог старта main → Ready (задача 2.5). */
+    perfStartupMs: "perf:startup_ms",
+    /** perf.tab_switch_ms: переключение активной вкладки (задача 2.5). */
+    perfTabSwitchMs: "perf:tab_switch_ms",
   } as const,
 };

@@ -43,6 +43,15 @@ export interface DuoPulseBridgeContract {
   NavNavigateParams: NavNavigateParams;
   NavResolveOmniboxParams: NavResolveOmniboxParams;
   NavResolveOmniboxResult: NavResolveOmniboxResult;
+  PerfRunListResult: PerfRunListResult;
+  PerfRun: PerfRun;
+  PerfSaveRunParams: PerfSaveRunParams;
+  PerfSnapshotResult: PerfSnapshotResult;
+  PerfAdblock: PerfAdblock;
+  PerfPhase: PerfPhase;
+  PerfStartupInfo: PerfStartupInfo;
+  PerfTabSwitchInfo: PerfTabSwitchInfo;
+  PerfTabs: PerfTabs;
   SettingsGetParams: SettingsGetParams;
   SettingsKey: SettingsKey;
   ProxySettings: ProxySettings;
@@ -63,6 +72,8 @@ export interface DuoPulseBridgeContract {
   AdblockSiteException: AdblockSiteException;
   PageLoaded: PageLoaded;
   PageVideoDetected: PageVideoDetected;
+  PerfStartupMs: PerfStartupMs;
+  PerfTabSwitchMs: PerfTabSwitchMs;
   VpnStateChanged: VpnStateChanged;
 }
 /**
@@ -266,6 +277,98 @@ export interface NavResolveOmniboxResult {
   url: string;
 }
 /**
+ * perf.list_runs (результат): прогоны, новые → старые.
+ */
+export interface PerfRunListResult {
+  runs: PerfRun[];
+}
+/**
+ * Сохранённый прогон метрик (perf.list_runs).
+ */
+export interface PerfRun {
+  /**
+   * Время сохранения, unix-ms.
+   */
+  createdAt: number;
+  id: number;
+  label: string;
+  metrics: {
+    [k: string]: number;
+  };
+}
+/**
+ * perf.save_run (параметры): метки прогона и значения метрик по идентификаторам страницы (p01_ms, p02_ms, …).
+ */
+export interface PerfSaveRunParams {
+  label?: string;
+  metrics: {
+    [k: string]: number;
+  };
+}
+/**
+ * perf.snapshot (результат): живой срез сеанса для страницы «Диагностика».
+ */
+export interface PerfSnapshotResult {
+  adblock: PerfAdblock;
+  /**
+   * Приватная память duopulse.exe, МБ (P-03).
+   */
+  ramSelfMb: number;
+  startup?: PerfStartupInfo | null;
+  tabSwitch: PerfTabSwitchInfo;
+  tabs: PerfTabs;
+  uptimeMs: number;
+}
+/**
+ * Счётчики блокировщика сеанса (perf.snapshot): контекст P-07.
+ */
+export interface PerfAdblock {
+  blockedTotal: number;
+  enabled: boolean;
+  ready: boolean;
+  seenTotal: number;
+}
+/**
+ * Итог старта этого сеанса (perf.snapshot / payload perf:startup_ms без фаз).
+ */
+export interface PerfStartupInfo {
+  /**
+   * Профиль на старте был пуст — холодный старт (P-01), иначе тёплый (P-02).
+   */
+  cold: boolean;
+  /**
+   * Вход в main → RunEvent::Ready, мс.
+   */
+  ms: number;
+  /**
+   * Фазы «[startup]» (main, stores-open, setup, …, ready).
+   */
+  phases: PerfPhase[];
+}
+/**
+ * Одна фаза старта: имя и накопленное время от входа в main, мс.
+ */
+export interface PerfPhase {
+  ms: number;
+  stage: string;
+}
+/**
+ * Переключения вкладок сеанса (perf.snapshot).
+ */
+export interface PerfTabSwitchInfo {
+  avgMs?: number | null;
+  count: number;
+  lastMs?: number | null;
+  maxMs?: number | null;
+}
+/**
+ * Вкладки сеанса (perf.snapshot): всего и спящих (P-04 в живом сеансе).
+ */
+export interface PerfTabs {
+  sleeping: number;
+  total: number;
+}
+/**
  * settings.get: ключ, значение которого читаем.
  */
 export interface SettingsGetParams {
@@ -407,6 +510,19 @@ export interface PageLoaded {
 export interface PageVideoDetected {
   canTracks: boolean;
   videoKey: string;
+}
+/**
+ * payload события perf:startup_ms (фазы страница берёт perf.snapshot'ом).
+ */
+export interface PerfStartupMs {
+  cold: boolean;
+  ms: number;
+}
+/**
+ * payload события perf:tab_switch_ms.
+ */
+export interface PerfTabSwitchMs {
+  ms: number;
 }
 /**
  * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).

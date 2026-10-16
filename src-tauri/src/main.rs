@@ -30,6 +30,7 @@ mod adblock;
 mod bridge;
 mod history;
 mod omnibox;
+mod perf;
 mod prefetch;
 mod proxy;
 mod tabs;
@@ -41,15 +42,10 @@ use tauri::{AppHandle, Manager, Window, WindowEvent};
 #[cfg(windows)]
 use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2Environment};
 
-/// Точка отсчёта метрик старта (задача 2.4): инициализируется первым вызовом
-/// [`startup_mark`] в main; фазы печатаются в stderr — разбор P-01/P-02
-/// («что тянуть назад») по этапам, внешние замеры снимает e2e/perf/run.mjs.
-static PROCESS_START: OnceLock<std::time::Instant> = OnceLock::new();
-
-/// Метка фазы старта: «[startup] <фаза>: N мс» от входа в main.
+/// Метка фазы старта: «[startup] <фаза>: N мс» от входа в main (печать +
+/// накопление для страницы «Диагностика» — perf::record_phase, задачи 2.4/2.5).
 fn startup_mark(stage: &str) {
-    let t0 = PROCESS_START.get_or_init(std::time::Instant::now);
-    eprintln!("[startup] {stage}: {} ms", t0.elapsed().as_millis());
+    perf::record_phase(stage);
 }
 
 /// Путь-маркер для теста сетевого перехвата: такие запросы блокируются (403).
@@ -387,14 +383,21 @@ fn main() {
     // duopulse.db, запись визитов — из on_page_load вкладок (src/tabs/).
     // Блокировщик (задача 2.1) — src/adblock/: движок adblock-rs + списки;
     // нити обновления/слива счётчика стартуют в setup (нужен AppHandle).
-    let adblock_service = std::sync::Arc::new(adblock::AdblockService::new(&proxy::profile_dir()));
-    let history_store = history::HistoryStore::open(&proxy::profile_dir())
+    // Метрики (задача 2.5): профиль существовал до запуска → тёплый старт
+    // (P-02), пустой → холодный (P-01); проверка ДО открытия хранилищ.
+    let profile_dir = proxy::profile_dir();
+    perf::set_cold(!profile_dir.join("duopulse.db").exists());
+    let adblock_service = std::sync::Arc::new(adblock::AdblockService::new(&profile_dir));
+    let history_store = history::HistoryStore::open(&profile_dir)
         .expect("открыть/создать duopulse.db в профиле (docs/02 §8)");
+    let perf_store = perf::PerfStore::open(&profile_dir)
+        .expect("открыть/создать таблицу perf_runs в duopulse.db (задача 2.5)");
     startup_mark("stores-open");
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
         .manage(tabs::TabManager::new())
         .manage(history_store)
+        .manage(perf_store)
         .manage(adblock_service)
         .setup(move |app| {
             startup_mark("setup");
@@ -461,6 +464,10 @@ fn main() {
             }
             if let tauri::RunEvent::Ready = event {
                 startup_mark("ready");
+                // Метрики старта (задача 2.5): итог main → Ready уходит на
+                // страницу «Диагностика» (событие perf:startup_ms + срез
+                // perf.snapshot); фазы — в [startup]-логе stderr.
+                perf::emit_startup(app);
                 // Восстановление сессии (задача 1.6): webview активной вкладки
                 // создаётся только когда цикл событий гарантированно качает
                 // сообщения (в setup и первые его мгновения — гонка с дедлоком

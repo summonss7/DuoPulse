@@ -761,6 +761,269 @@
         "type": "object"
       }
     },
+    "perf.list_runs": {
+      "handler": "perf_list_runs",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "PerfRun": {
+            "description": "Сохранённый прогон метрик (perf.list_runs).",
+            "properties": {
+              "createdAt": {
+                "description": "Время сохранения, unix-ms.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "label": {
+                "type": "string"
+              },
+              "metrics": {
+                "additionalProperties": {
+                  "format": "double",
+                  "type": "number"
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "createdAt",
+              "id",
+              "label",
+              "metrics"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "perf.list_runs (результат): прогоны, новые → старые.",
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/definitions/PerfRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "title": "PerfRunListResult",
+        "type": "object"
+      }
+    },
+    "perf.save_run": {
+      "handler": "perf_save_run",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "perf.save_run (параметры): метки прогона и значения метрик по идентификаторам страницы (p01_ms, p02_ms, …).",
+        "properties": {
+          "label": {
+            "default": "",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "metrics"
+        ],
+        "title": "PerfSaveRunParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "perf.snapshot": {
+      "handler": "perf_snapshot",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "PerfAdblock": {
+            "description": "Счётчики блокировщика сеанса (perf.snapshot): контекст P-07.",
+            "properties": {
+              "blockedTotal": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "seenTotal": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "blockedTotal",
+              "enabled",
+              "ready",
+              "seenTotal"
+            ],
+            "type": "object"
+          },
+          "PerfPhase": {
+            "description": "Одна фаза старта: имя и накопленное время от входа в main, мс.",
+            "properties": {
+              "ms": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "stage": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ms",
+              "stage"
+            ],
+            "type": "object"
+          },
+          "PerfStartupInfo": {
+            "description": "Итог старта этого сеанса (perf.snapshot / payload perf:startup_ms без фаз).",
+            "properties": {
+              "cold": {
+                "description": "Профиль на старте был пуст — холодный старт (P-01), иначе тёплый (P-02).",
+                "type": "boolean"
+              },
+              "ms": {
+                "description": "Вход в main → RunEvent::Ready, мс.",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "phases": {
+                "description": "Фазы «[startup]» (main, stores-open, setup, …, ready).",
+                "items": {
+                  "$ref": "#/definitions/PerfPhase"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "cold",
+              "ms",
+              "phases"
+            ],
+            "type": "object"
+          },
+          "PerfTabSwitchInfo": {
+            "description": "Переключения вкладок сеанса (perf.snapshot).",
+            "properties": {
+              "avgMs": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "count": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "lastMs": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "maxMs": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "count"
+            ],
+            "type": "object"
+          },
+          "PerfTabs": {
+            "description": "Вкладки сеанса (perf.snapshot): всего и спящих (P-04 в живом сеансе).",
+            "properties": {
+              "sleeping": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "total": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "sleeping",
+              "total"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "perf.snapshot (результат): живой срез сеанса для страницы «Диагностика».",
+        "properties": {
+          "adblock": {
+            "$ref": "#/definitions/PerfAdblock"
+          },
+          "ramSelfMb": {
+            "description": "Приватная память duopulse.exe, МБ (P-03).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "startup": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/PerfStartupInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tabSwitch": {
+            "$ref": "#/definitions/PerfTabSwitchInfo"
+          },
+          "tabs": {
+            "$ref": "#/definitions/PerfTabs"
+          },
+          "uptimeMs": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "adblock",
+          "ramSelfMb",
+          "tabSwitch",
+          "tabs",
+          "uptimeMs"
+        ],
+        "title": "PerfSnapshotResult",
+        "type": "object"
+      }
+    },
     "settings.get": {
       "handler": "settings_get",
       "params": {
@@ -1616,6 +1879,46 @@
           "videoKey"
         ],
         "title": "PageVideoDetected",
+        "type": "object"
+      }
+    },
+    "perf:startup_ms": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "payload события perf:startup_ms (фазы страница берёт perf.snapshot'ом).",
+        "properties": {
+          "cold": {
+            "type": "boolean"
+          },
+          "ms": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cold",
+          "ms"
+        ],
+        "title": "PerfStartupMs",
+        "type": "object"
+      }
+    },
+    "perf:tab_switch_ms": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "payload события perf:tab_switch_ms.",
+        "properties": {
+          "ms": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ms"
+        ],
+        "title": "PerfTabSwitchMs",
         "type": "object"
       }
     },

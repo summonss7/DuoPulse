@@ -30,7 +30,7 @@
 // Запуск:  node e2e/perf/run.mjs [путь-к-duopulse.exe] [--skip-ram] [--ram-only] [--prefetch]
 //   --skip-ram — только стартовые метрики; --ram-only — только P-03;
 //   --prefetch — плюс функциональная проверка прогрева топ-сайтов.
-// Требует release-сборку: npm run build && cd src-tauri && cargo build --release.
+// Требует release-сборку: npx tauri build (cargo build --release без tauri-CLI даёт dev-режим — UI грузится с vite).
 // Сеть: YouTube-видео и списки блокировщика (первый запуск профиля качает
 // EasyList/uBO, как у реального пользователя).
 import { execFile, spawn } from "node:child_process";

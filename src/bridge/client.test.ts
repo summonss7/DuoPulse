@@ -75,6 +75,12 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "adblock.set_enabled": { path: ["adblock", "setEnabled"], params: { site: null, on: true } },
   "adblock.status": { path: ["adblock", "status"] },
   "adblock.update_lists": { path: ["adblock", "updateLists"], params: { force: true } },
+  "perf.snapshot": { path: ["perf", "snapshot"] },
+  "perf.save_run": {
+    path: ["perf", "saveRun"],
+    params: { label: "срез", metrics: { p01_ms: 402, p03_mb: 48 } },
+  },
+  "perf.list_runs": { path: ["perf", "listRuns"] },
   "app.restart": { path: ["app", "restart"] },
 };
 

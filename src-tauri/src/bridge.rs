@@ -29,6 +29,9 @@ use crate::proxy;
 /// tauri 2 разрешает в именах событий только alnum/`-`/`/`/`:`/`_` — точечные
 /// имена не проходили валидацию listen/emit. Команды не затронуты: в tauri
 /// идёт snake_case-хендлер из поля "handler", словарное имя в рантайме не звучит.
+/// v2 (задача 2.5, без bump — совместимое расширение): домен perf.* — команды
+/// perf.{snapshot, save_run, list_runs} и события perf:{startup_ms,
+/// tab_switch_ms} (страница «Диагностика», docs/04 §2, docs/05 §2).
 pub const CONTRACT_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
@@ -397,6 +400,10 @@ pub struct AdblockListInfo {
     pub error: Option<String>,
 }
 
+// --- задача 2.5: метрики производительности (src/perf/) ----------------------
+// Типы команд/событий perf.* определены в src/perf.rs рядом с их логикой;
+// здесь — реестр контракта и IPC-хендлеры (единое место IPC — этот модуль).
+
 // ---------------------------------------------------------------------------
 // События Core → UI|Content
 // ---------------------------------------------------------------------------
@@ -594,6 +601,13 @@ pub fn contract_json() -> serde_json::Value {
             "adblock.update_lists": { "handler": "adblock_update_lists",
                                        "params": schema!(AdblockUpdateListsParams),
                                        "result": schema!(AdblockStatusResult) },
+            "perf.snapshot": { "handler": "perf_snapshot", "params": null,
+                                "result": schema!(crate::perf::PerfSnapshotResult) },
+            "perf.save_run": { "handler": "perf_save_run",
+                                "params": schema!(crate::perf::PerfSaveRunParams),
+                                "result": null },
+            "perf.list_runs": { "handler": "perf_list_runs", "params": null,
+                                 "result": schema!(crate::perf::PerfRunListResult) },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -603,6 +617,8 @@ pub fn contract_json() -> serde_json::Value {
             "vpn:state_changed": { "payload": schema!(VpnStateChanged) },
             "adblock:blocked_count": { "payload": schema!(AdblockBlockedCount) },
             "adblock:site_exception_changed": { "payload": schema!(AdblockSiteException) },
+            "perf:startup_ms": { "payload": schema!(crate::perf::PerfStartupMs) },
+            "perf:tab_switch_ms": { "payload": schema!(crate::perf::PerfTabSwitchMs) },
         },
     })
 }
@@ -663,6 +679,14 @@ fn event_names_match_registry() {
             (
                 <AdblockSiteExceptionChangedEvent as BridgeEvent>::NAME,
                 schema!(AdblockSiteException),
+            ),
+            (
+                <crate::perf::PerfStartupEvent as BridgeEvent>::NAME,
+                schema!(crate::perf::PerfStartupMs),
+            ),
+            (
+                <crate::perf::PerfTabSwitchEvent as BridgeEvent>::NAME,
+                schema!(crate::perf::PerfTabSwitchMs),
             ),
         ]
         .into_iter()
@@ -1036,6 +1060,55 @@ fn adblock_update_lists(
     adblock.update_lists(params.force)
 }
 
+/// perf.snapshot: живой срез сеанса для страницы «Диагностика» (задача 2.5) —
+/// старт и его фазы, переключения вкладок, RAM оболочки, вкладки, счётчики
+/// блокировщика.
+#[tauri::command]
+fn perf_snapshot(
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    adblock: tauri::State<'_, std::sync::Arc<crate::adblock::AdblockService>>,
+) -> crate::perf::PerfSnapshotResult {
+    let tabs = manager.snapshot();
+    let ad = adblock.status();
+    crate::perf::PerfSnapshotResult {
+        startup: crate::perf::startup_info(),
+        tab_switch: crate::perf::tab_switch_info(),
+        ram_self_mb: crate::perf::ram_self_mb(),
+        uptime_ms: crate::perf::uptime_ms(),
+        tabs: crate::perf::PerfTabs {
+            total: tabs.tabs.len() as u32,
+            sleeping: tabs.tabs.iter().filter(|t| t.sleeping).count() as u32,
+        },
+        adblock: crate::perf::PerfAdblock {
+            ready: ad.ready,
+            enabled: ad.enabled,
+            blocked_total: ad.blocked_total,
+            seen_total: ad.seen_total,
+        },
+    }
+}
+
+/// perf.save_run: сохранить прогон метрик в историю (последние 10,
+/// docs/04 §3) — срез живого сеанса со страницы или итог эталонного
+/// e2e-прогона (e2e/perf/save-run.mjs).
+#[tauri::command]
+fn perf_save_run(
+    store: tauri::State<'_, crate::perf::PerfStore>,
+    params: crate::perf::PerfSaveRunParams,
+) -> Result<(), String> {
+    store.save_run(&params.label, &params.metrics)
+}
+
+/// perf.list_runs: прогоны истории для графика, новые → старые.
+#[tauri::command]
+fn perf_list_runs(
+    store: tauri::State<'_, crate::perf::PerfStore>,
+) -> Result<crate::perf::PerfRunListResult, String> {
+    Ok(crate::perf::PerfRunListResult {
+        runs: store.list_runs()?,
+    })
+}
+
 fn proxy_settings(cfg: &proxy::ProxyConfig, dir: &std::path::Path) -> ProxySettings {
     ProxySettings {
         enabled: cfg.enabled,
@@ -1096,6 +1169,9 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         adblock_set_enabled,
         adblock_status,
         adblock_update_lists,
+        perf_snapshot,
+        perf_save_run,
+        perf_list_runs,
         app_restart
     ])
 }

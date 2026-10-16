@@ -1029,3 +1029,174 @@ body.internal-page {
   white-space: nowrap;
   font-size: var(--text-sm);
 }
+
+/* --- Внутренняя страница «Диагностика» (задача 2.5, duopulse://diagnostics) ---
+   Живой срез сеанса (perf.snapshot) и история прогонов P-01..P-08: карточки
+   на --bg-surface, спарклайны — неон-линия, выход за бюджет — сигнальный
+   красный (только статусы, §2). Наследует шапку .mgr-*. */
+.diag {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 0 24px 16px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.diag h2 {
+  margin: 20px 0 10px;
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.diag-live {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--gap-2);
+}
+.diag-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-surface);
+}
+.diag-stat-label {
+  color: var(--text-muted);
+}
+.diag-stat-value {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.diag-stat-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.diag-save {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  margin-top: 12px;
+}
+.diag-save input {
+  width: 280px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+.diag-save input:focus-visible {
+  outline: none;
+  border-color: var(--accent-neon);
+  box-shadow: var(--focus-ring-soft);
+}
+.diag-save button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--accent-olive);
+  color: var(--bg-base);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.diag-save button:hover:not(:disabled) {
+  background: var(--accent-neon);
+}
+.diag-save button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.diag-save-err {
+  color: var(--err);
+  font-size: 12px;
+}
+.diag-note {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.diag-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) 1fr auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  border-radius: var(--radius-control);
+}
+.diag-row:nth-child(odd) {
+  background: color-mix(in srgb, var(--bg-surface) 55%, transparent);
+}
+.diag-row-name {
+  color: var(--text-primary);
+}
+.diag-row-budget {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.diag-row-last {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.diag-row-last.ok {
+  color: var(--ok);
+}
+.diag-row-last.over {
+  color: var(--err);
+}
+.diag-spark {
+  width: 100%;
+  max-width: 320px;
+  height: 40px;
+}
+.diag-spark-line {
+  fill: none;
+  stroke: var(--accent-neon);
+  stroke-width: 1.5;
+}
+.diag-spark-dot {
+  fill: var(--accent-neon);
+}
+.diag-spark-dot.over {
+  fill: var(--err);
+}
+.diag-spark-budget {
+  stroke: var(--warn);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.diag-empty {
+  padding: 16px 0;
+  color: var(--text-muted);
+}
+.diag-runs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-1);
+  margin-top: 16px;
+}
+.diag-run {
+  display: flex;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+}
+.diag-run-head {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.diag-run-vals {
+  font-family: var(--font-mono);
+}

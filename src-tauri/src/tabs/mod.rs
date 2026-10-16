@@ -412,17 +412,22 @@ impl TabManager {
     /// вызывающая async-команда (materialize) — webview-создание нельзя
     /// делать на потоке цикла событий.
     pub fn activate(&self, app: &AppHandle, id: &str) -> Result<TabsListResult, String> {
-        let wake = {
+        // Метрика переключения вкладок (задача 2.5, perf:tab_switch_ms):
+        // смена видимости webview + фокус; ленивая материализация — фон,
+        // в счёт не входит (переключение видно пользователю уже здесь).
+        let t0 = std::time::Instant::now();
+        let (wake, switched) = {
             let mut st = self.state.lock().expect("tabs: лок не отравлен");
             let index = st
                 .tabs
                 .iter()
                 .position(|t| t.id == id)
                 .ok_or_else(|| format!("вкладка {id} не найдена"))?;
+            let switched = st.active != Some(index);
             st.active = Some(index);
             let entry = &mut st.tabs[index];
             entry.last_active_ms = now_ms();
-            std::mem::replace(&mut entry.sleeping, false)
+            (std::mem::replace(&mut entry.sleeping, false), switched)
         };
         if wake {
             self.resume_webview(app, id);
@@ -430,6 +435,9 @@ impl TabManager {
         self.apply_visibility(app);
         if let Some(wv) = self.active_webview(app) {
             wv.set_focus().ok();
+        }
+        if switched {
+            crate::perf::note_tab_switch(app, t0.elapsed().as_millis() as u64);
         }
         Ok(self.finish(app))
     }
@@ -739,12 +747,12 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 /// Внутренние страницы duopulse:// (задача 1.4): адрес → имя страницы.
-/// Новые страницы (настройки, диагностика) добавляются сюда + в роутер
-/// src/main.ts.
+/// Новые страницы добавляются сюда + в роутер src/main.ts.
 fn internal_page_name(url: &Url) -> Option<&'static str> {
     match url.host_str()? {
         "history" => Some("history"),
         "newtab" => Some("newtab"), // «Новая вкладка», задача 1.5 (гайд 06 §7)
+        "diagnostics" => Some("diagnostics"), // «Диагностика», задача 2.5
         _ => None,
     }
 }
@@ -847,6 +855,10 @@ mod tests {
         assert_eq!(
             internal_page_name(&Url::parse("duopulse://history").unwrap()),
             Some("history")
+        );
+        assert_eq!(
+            internal_page_name(&Url::parse("duopulse://diagnostics").unwrap()),
+            Some("diagnostics")
         );
         assert_eq!(
             internal_page_name(&Url::parse("https://www.youtube.com/").unwrap()),

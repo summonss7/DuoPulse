@@ -16,6 +16,8 @@ if (page === "history") {
   void import("./pages/history");
 } else if (page === "newtab") {
   void import("./pages/newtab");
+} else if (page === "diagnostics") {
+  void import("./pages/diagnostics");
 } else {
   void import("./chrome");
 }

@@ -21,7 +21,14 @@ schemars = "0.8"
 webview2-com = "0.39"
 windows-core = "0.62"
 # DPAPI для пароля прокси (CryptProtectData; задача 1.8, docs/02 §9).
-windows = { version = "0.62", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
+# GetProcessMemoryInfo — приватная память duopulse.exe для страницы
+# «Диагностика» (задача 2.5, метрика P-03).
+windows = { version = "0.62", features = [
+    "Win32_Security_Cryptography",
+    "Win32_Foundation",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
 # SQLite + FTS5: история и закладки (задачи 1.3–1.4) — файл duopulse.db
 # в профиле (docs/02 §8), FTS5-индекс для omnibox-подсказок и поиска.
 # bundled — SQLite собирается из исходников вместе с FTS5, без системных
