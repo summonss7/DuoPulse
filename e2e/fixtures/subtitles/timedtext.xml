@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<transcript>
+  <text start="1.28" dur="2.4">Hello &amp; welcome!</text>
+  <text start="4.0" dur="2.5">Line one
+Line two</text>
+  <text start="7.2" dur="2.0">It&amp;#39;s double-encoded</text>
+  <text start="9.8" dur="1.0">&lt;font color="#CCCCCC"&gt;styled&lt;/font&gt; inside</text>
+</transcript>

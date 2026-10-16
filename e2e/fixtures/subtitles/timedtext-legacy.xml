@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<timedtext>
+  <body>
+    <p t="1000" d="2000">Legacy first</p>
+    <p t="3500" d="1500">Legacy second</p>
+  </body>
+</timedtext>

@@ -1,0 +1,6 @@
+<transcript>
+  <text start="1.0">нет dur</text>
+  <text dur="2.0">нет start</text>
+  <text start="x" dur="y">битые атрибуты</text>
+  <text start="3.0" dur="1.0">незакрытый элемент
+</transcript>

@@ -51,6 +51,10 @@ rmp = "=0.8.14"
 # рантайма — обновление списков идёт в фоновой нити. tls — rustls с корнями
 # webpki-roots (системное хранилище не требуется).
 ureq = { version = "2", features = ["tls"], default-features = false }
+# Потоковое чтение XML (задача 3.1): YouTube timedtext <transcript>/<timedtext>
+# в src/subtitles/timedtext.rs; на битых документах возвращает ошибку события,
+# а не паникует — парсер продолжает с диагностику (карточка duopulse-022).
+quick-xml = "0.36"
 
 [profile.release]
 panic = "abort"

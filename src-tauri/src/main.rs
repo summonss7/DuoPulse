@@ -33,6 +33,7 @@ mod omnibox;
 mod perf;
 mod prefetch;
 mod proxy;
+mod subtitles;
 mod tabs;
 
 use std::sync::OnceLock;

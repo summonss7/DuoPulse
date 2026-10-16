@@ -1,0 +1,22 @@
+WEBVTT - Sample title
+
+NOTE это комментарий
+многострочный
+
+STYLE
+::cue { color: lime }
+
+REGION
+id:fred width:40%
+
+intro-cue
+00:00:00.500 --> 00:00:02.000 align:start position:10%
+Hello from VTT
+with settings ignored
+
+00:04.000 --> 00:06.000
+Second cue, short timestamps
+
+vtt-3
+01:02:03.400 --> 01:02:05.000
+&lt;b&gt;escaped tags stay&lt;/b&gt; &amp; entity decoded
