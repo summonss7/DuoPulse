@@ -1341,3 +1341,76 @@
   в журнале карточки.
 - backup.bat — 17.10 00:57 (backups/backup_2026-10-17_00-57-08).
 - Коммит: см. git log (duopulse-022, пуш в summonss7/DuoPulse main).
+
+## 17.10.2026 01:20–01:47 — M3 · задача 3.2: content-слой — детектор видео + каркас движка cue-таймлайна (карточка duopulse-023)
+- Что изменено (DoD «на тест-странице overlay показывает тест-cue точно по
+  времени» — выполнен, e2e 21/21):
+  - Content-слой субтитров на TS-модулях с бандлом (docs/05 §1): вход
+    `content/duopulse-content.ts` + `content/types.ts` (Cue/Track — зеркало
+    docs/03 §6) + `content/detector/` (index.ts, videoKey.ts),
+    `content/engine/` (timeline.ts, subtitles-engine.ts),
+    `content/overlay/overlay.ts` (каркас), `content/messaging/index.ts`
+    (WebMessage-канал до Core; events.ts словаря — с 1.1). Сборка:
+    `scripts/build-content.mjs` (esbuild → IIFE `content/gen/
+    duopulse-content.js`, 15 КБ / 5 КБ gzip ≤ 80; new devDep esbuild 0.28);
+    npm-скрипты dev/build строят бандл до vite; генерат в .gitignore как
+    dist/ (cargo требует его до сборки — fresh clone: npm-шаг, как для
+    frontendDist).
+  - Детектор `<video>`: первичный скан + MutationObserver (динамические
+    видео; initialization script до разбора документа — старт по
+    DOMContentLoaded: observe(null) на пустом документе бросал TypeError,
+    поймано на стенде), ключевое видео по площади rect, опрос location.href
+    каждые 500 мс (SPA-переходы без перезагрузки), videoKey (yt:watch/shorts/
+    youtu.be/id, youtube-nocookie; прочие — url:origin+path+search[+:
+    длительность_с], уточнение по loadedmetadata — docs/03 §6), уход видео
+    из DOM — отвязка движка. Обнаружение → WebMessage {"duopulse":"video",
+    videoKey, canTracks} → main.rs (ветка «video» в install_content_
+    messaging) → bridge::emit page:video_detected (каркас с 1.1 ожил,
+    payload PageVideoDetected; canTracks=false до адаптера 3.3; метка
+    [subtitles] в stderr).
+  - Движок: `CueTimeline.build` — сортировка по start + смёрж цепочек
+    строгих перекрытий (тексты через \n; смежные [1,3]+[3,5] не сливаются;
+    вырожденные end≤start отброшены), `activeAt` — бинарный поиск по
+    полуинтервалам [start,end). `SubtitlesEngine` — часы только
+    video.currentTime, подписки timeupdate/seeked + программные скачки по
+    |Δt|>250 мс; offset ±10 c на весь набор (мгновенный пересчёт); правило
+    150 мс docs/03 §4 (cue с остатком <150 мс при скачке не показывается и
+    запоминается подавленным — не «вспыхивает» на остатке при продолжении);
+    перерисовка только по смене набора строк (docs/03 §5).
+  - Overlay-каркас (полный — 3.4): fixed-плашка по rect видео,
+    pointer-events:none, z-index max, fade 80 мс, подложка-затемнение,
+    строки набора с относительными размерами (1-я белая, 2-я лайм #BDFE4F,
+    далее приглушённые), кегль clamp по cqw от ширины видео, текст только
+    textContent. До IPC subtitles.* (3.3–3.6) движок питается тест-хуками
+    (custom-события duopulse-test-track / duopulse-test-offset — глобал
+    страницы/CDP).
+  - Инжекция: 5-й initialization_script контентных вкладок (tabs/
+    build_tab_webview, CONTENT_INIT_SCRIPT_SUBTITLES в main.rs).
+  - Стенд e2e/subtitles/: testpage.html (ролик + тест-cue: смежные,
+    перекрытие, пауза), assets/testsrc.mp4 (30 с, ffmpeg testsrc2 со
+    счётчиком кадров — визуальная сверка таймингов), run.mjs — 21 проверка
+    (бандл, дорожка, детект+ключ, эмит в Core, cue по времени: границы/
+    150 мс/смёрж/пауза, offset, призраки, живое воспроизведение по
+    timeupdate, MutationObserver удаление/добавление, SPA pushState,
+    геометрия плашки, скриншот shot-overlay.png). Отдельный порт 8897,
+    DUOPULSE_SLEEP_AFTER_SECS=0 (CDP на вкладке несовместим со сном).
+- Как проверено: vitest 38/38 (+34: timeline — смёрж/вложенность/смежность/
+  вырожденные/границы/5000 cue; движок — выбор cue, неперерисовка, порядок
+  строк, 150 мс во всех вариантах, Δt-скачки, призраки, offset ±/кламп/
+  мгновенность, detach/attach/state; videoKey — yt-форматы, url+duration,
+  live/NaN, битый URL); tsc — чисто; cargo fmt --check чисто, clippy
+  --all-targets -D warnings чисто, cargo test 92/92 (Rust-слой: +2 ветки
+  обработчика WebMessage и const, тестов не потребовал — покрыт e2e);
+  e2e/subtitles/run.mjs — ALL PASS 21/21 (debug-exe + vite dev, дважды
+  после фикса детектора). Временные файлы удалены; рантайм-артефакты
+  (content/gen/) в .gitignore.
+- Замечания: (1) cargo build печатает warning линковщика «.rsrc merge
+  failure: multiple non-default manifests» (mingw ld + tauri, диагнострика
+  rustc linker_messages) — существующее окружение, не связано с задачей,
+  exe собирается и работает; (2) в консоли контентных вкладок шум tauri-IPC
+  «JSON error: missing field cmd» на сообщения косметик-канала —
+  существующее поведение (с 2.2), не тронуто; (3) скриншот стенда
+  e2e/subtitles/shot-overlay.png коммитится как артефакт сверки (паттерн
+  e2e/adblock/shots-2.2/).
+- backup.bat — 17.10 01:20 (backups/backup_2026-10-17_01-20-24).
+- Коммит: см. git log (duopulse-023, пуш в summonss7/DuoPulse main).

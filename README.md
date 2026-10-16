@@ -171,8 +171,15 @@ CARDS/044 (themeRefresh-перенаправ YouTube), подробности �
 автосубтитров) — битые тайминги/блоки не роняют парсер, а диагностируются
 (BOM/CRLF/перекрытия — норма жизни); фикстуры
 [e2e/fixtures/subtitles/](e2e/fixtures/subtitles/) (11, включая негативные),
-cargo-тесты 92/92. Сервис-обвязка (IPC, кэш), детектор видео и оверлей —
-следующие задачи M3.
+cargo-тесты 92/92. И **каркас content-слоя субтитров** (задача 3.2, карточка
+duopulse-023): `content/{detector,engine,overlay,messaging}` (TS → esbuild
+IIFE-бандл `content/gen/`, 5 КБ gzip, инжектируется в каждую вкладку) —
+детектор `<video>` (MutationObserver + SPA-переходы, событие контракта
+`page:video_detected`), движок cue-таймлайна (часы `video.currentTime`,
+бинарный поиск, смёрж перекрытий, offset ±10 с, правило 150 мс при seek) и
+overlay-плашка; стенд [e2e/subtitles/run.mjs](e2e/subtitles/run.mjs) —
+21/21 (тест-страница с реальным роликом, скриншот плашки). Сервис-обвязка
+(IPC, кэш), YouTube-адаптер и полный оверлей — следующие задачи M3.
 
 ### Запуск спайка M0
 

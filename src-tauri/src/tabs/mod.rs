@@ -787,6 +787,10 @@ fn build_tab_webview(app: &AppHandle, id: &str, url: &Url) -> WebviewBuilder<tau
         // страницы — ресурс запрашивается у Core сразу после создания
         // документа (content/cosmetic.js → main.rs → PostWebMessage).
         .initialization_script(crate::CONTENT_INIT_SCRIPT_COSMETIC)
+        // Бандл субтитров (задача 3.2): детектор <video> + движок cue-таймлайна
+        // + оверлей; обнаруженное видео уходит в Core сообщением «video»
+        // (main.rs → событие контракта page:video_detected, docs/05 §2).
+        .initialization_script(crate::CONTENT_INIT_SCRIPT_SUBTITLES)
         // Аргументы те же, что у UI-webview: окружение WebView2 создаётся
         // первым webview, но дублируем для устойчивости к порядку создания.
         .additional_browser_args(crate::startup_proxy_args())

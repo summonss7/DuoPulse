@@ -5,11 +5,14 @@ backups/
 _tmp*
 brand_tmp.jpg
 
-# Node / фронтенд (будущие src/, content/)
+# Node / фронтенд (src/, content/)
 node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+
+# Content-бандл субтитров (генерат scripts/build-content.mjs, include_str! в cargo)
+content/gen/
 
 # Rust (будущий src-tauri/)
 target/

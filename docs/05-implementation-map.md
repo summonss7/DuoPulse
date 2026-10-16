@@ -43,15 +43,18 @@ DuoPulse/
 │   ├── bridge/                     # типизированный IPC-клиент (генерится из контракта)
 │   └── theme/                      # токены фирменного стиля (см. 06-brand-style)
 ├── content/                        # Content-слой (инжектируемый движок, TS)
-│   ├── duopulse-content.ts         # вход IIFE-бандла (≤ 80 КБ gzip)
-│   ├── detector/                   # поиск <video>, MutationObserver
+│   ├── duopulse-content.ts         # вход IIFE-бандла (≤ 80 КБ gzip; задача 3.2)
+│   ├── detector/                   # поиск <video>, MutationObserver, videoKey (3.2)
 │   ├── adapters/
-│   │   ├── types.ts                # интерфейс Adapter { listTracks(), version, paths[] }
-│   │   ├── youtube.ts              # дорожки из player-ответа (+fallback TextTrack)
-│   │   └── file.ts                 # ручные .srt/.vtt через Core
-│   ├── engine/                     # cue-таймлайн, бинарный поиск, offset
-│   ├── overlay/                    # плашка «оригинал/перевод», стили, позиция
-│   └── messaging/                  # канал до Core
+│   │   ├── types.ts                # интерфейс Adapter { listTracks(), version, paths[] } (3.3+)
+│   │   ├── youtube.ts              # дорожки из player-ответа (+fallback TextTrack) (3.3+)
+│   │   └── file.ts                 # ручные .srt/.vtt через Core (3.6+)
+│   ├── engine/                     # cue-таймлайн, бинарный поиск, offset (3.2)
+│   ├── overlay/                    # плашка «оригинал/перевод» (каркас 3.2; стили/позиция — 3.4)
+│   ├── messaging/                  # канал до Core (WebMessage; 3.2)
+│   ├── gen/                        # генерат esbuild (gitignore, include_str! в cargo)
+│   └── *.js                        # досборочные скрипты без бандла: m0-spike,
+│                                   #   chrome-hotkeys, media-watch, cosmetic
 ├── bridge/                         # IPC-контракт: contract.json (генерится из Rust-типов
 │                                   #   src-tauri/src/bridge.rs; из него — src/bridge/gen/types.ts)
 ├── e2e/                            # сценарии приёмки (по этапам)
@@ -132,8 +135,10 @@ perf_runs в duopulse.db, последние 10 — docs/04 §3; модуль
 счётчик в главном меню) и `adblock:site_exception_changed`, события
 `perf:startup_ms` / `perf:tab_switch_ms` (итог старта main → Ready и
 переключение вкладок — живой съём страницы «Диагностика», задача 2.5), а
-также события-каркас `page:loaded`, `page:video_detected` (эмит — M3),
-`vpn:state_changed` (M6). Имена событий —
+также события-каркас `page:loaded` (каркас), `page:video_detected` (эмит —
+**задача 3.2**: content-бандл субтитров шлёт WebMessage `{"duopulse":"video",
+videoKey, canTracks}`, Core эмитит событие в UI; payload `PageVideoDetected`
+— `videoKey`/`canTracks`), `vpn:state_changed` (M6). Имена событий —
 через `:` (словарь `домен:событие`): tauri 2 разрешает в именах событий только
 alnum/`-`/`/`/`:`/`_`, точечные имена не доставлялись (переименование — bump
 контракта v1→v2 в задаче 1.2; имена команд с точками не затронуты — в tauri
@@ -141,7 +146,8 @@ alnum/`-`/`/`/`:`/`_`, точечные имена не доставлялись
 `proxy_*` → `settings.{get, set}` + `vpn.{set_enabled, status, test_connection}`
 + `app.restart`; состояние vpn — `off/on/error`, при WireGuard (M6) расширится
 до словаря выше с bump версии. Типы событий для Content-слоя —
-`content/messaging/events.ts`. Внутренние страницы (задача 1.4): адрес
+`content/messaging/events.ts`; транспорт контентных вкладок (без tauri-IPC) —
+WebMessage: `content/messaging/index.ts` (задача 3.2). Внутренние страницы (задача 1.4): адрес
 `duopulse://<имя>` открывается вкладкой с webview UI-бандла
 (метка `page-<имя>-N`, `WebviewUrl::App`; IPC — capability `page-*`,
 контентные вкладки `tab-*` его не имеют; канонический адрес в таб-баре
@@ -166,7 +172,9 @@ alnum/`-`/`/`/`:`/`_`, точечные имена не доставлялись
 кадров при печати/Ctrl+Tab), [e2e/perf/p08.mjs](../e2e/perf/p08.mjs)
 (первый кадр повторного просмотра vs Chrome),
 [e2e/perf/save-run.mjs](../e2e/perf/save-run.mjs) (итог прогона — в историю
-duopulse://diagnostics).
+duopulse://diagnostics); субтитры (задача 3.2) —
+[e2e/subtitles/run.mjs](../e2e/subtitles/run.mjs) (детектор видео + движок
+cue-таймлайна + оверлей на тест-странице с реальным роликом).
 
 ## 3. Эпики → карточки (порядок работ)
 
@@ -213,7 +221,7 @@ Gate-проверки этапов включены в последние кар
 | # | Задача | DoD |
 |---|---|---|
 | 3.1 | **✅ выполнено 17.10.2026 (карточка duopulse-022)** Парсеры srt/vtt/timedtext (Rust) + фикстурные тесты | 100% фикстур проходят, границы cue корректны — **достигнуто**. Механика: `src-tauri/src/subtitles/` — единая модель `Cue` + диагностика `ParsedCues` (docs/03 §6); `mod.rs` — общая нормализация (BOM/CRLF, вырезание тегов разметки, сущности; timedtext — два прохода: YouTube экранирует дважды, `&amp;#39;` → `'`; стабильная сортировка по start; перекрытия сохраняются и диагностируются — смёржит движок показа, docs/03 §4); разбор снисходительный — битые блоки/тайминги/элементы пропускаются с предупреждением (srt/vtt — с номером строки), целиком битый файл (не-WEBVTT, битые XML/JSON) — диагностика + salvage, без паник; `srt.rs` (SubRip: номер cue опционален и не сверяется, мс через `,`/`.`, часы можно опустить), `vtt.rs` (WebVTT: NOTE/STYLE/REGION пропускаются, настройки cue игнорируются, таймстампы MM:SS.mmm, сущности; экранированный `&lt;b&gt;` — литерал), `timedtext.rs` (XML `<transcript>` start/dur в секундах + legacy `<timedtext><body><p>` t/d в мс + JSON3 с пословной склейкой `aAppend`-событий автосубтитров и пропуском служебных событий; детект формата по `{`; quick-xml); фикстуры — e2e/fixtures/subtitles/ (11, включая негативные + README); тесты cargo 92/92 (+25), fmt/clippy чисто; сервис-обвязка (IPC subtitles.*, кэш) — задачи 3.3–3.6 |
-| 3.2 | content: детектор видео + каркас движка cue-таймлайна | на тест-странице overlay показывает тест-cue точно по времени |
+| 3.2 | **✅ выполнено 17.10.2026 (карточка duopulse-023)** content: детектор видео + каркас движка cue-таймлайна | на тест-странице overlay показывает тест-cue точно по времени — **достигнуто** (e2e/subtitles/run.mjs 21/21: границы cue, правило 150 мс при seek, смёрженные перекрытия, offset, призраки, живое воспроизведение, MutationObserver, SPA). Механика: content-слой переведён на TS-модули с бандлом — `content/{detector,engine,overlay,messaging}` + вход `duopulse-content.ts` → esbuild IIFE `content/gen/` (15 КБ / 5 КБ gzip ≤ 80; `npm run build:content`, входит в `npm run dev/build`; генерат в .gitignore как dist/, cargo требует npm-шаг до сборки); инжекция 5-м initialization_script каждой вкладки. Детектор: скан + MutationObserver (видео добавляется/уходит динамически; initialization script до разбора документа — старт по DOMContentLoaded), выбор ключевого видео по площади, опрос location.href (SPA-переходы), ключ `videoKeyFor` (yt:watch/shorts/youtu.be, прочие — url:URL+duration, docs/03 §6; уточнение ключа по loadedmetadata) → WebMessage «video» → Core эмитит `page:video_detected` (каркас с 1.1 ожил). Движок: `CueTimeline` (сортировка + смёрж цепочек перекрытий — тексты через \n, смежные не сливаются; активный cue бинарным поиском за O(log n)), `SubtitlesEngine` (часы — только `video.currentTime`; подписки timeupdate/seeked + детект программных скачков по Δt>250 мс; offset ±10 c ко всему набору; правило 150 мс docs/03 §4 — cue с меньшим остатком при скачке не показывается и не «вспыхивает» на остатке при продолжении; перерисовка только по смене набора строк). Overlay-каркас: fixed-плашка по rect видео, pointer-events:none, fade 80 мс, строки набора (1-я белая, 2-я лайм #BDFE4F — относительные размеры docs/03 §5), кегль от ширины видео (cqw); полный стиль/позиция/колесо — задача 3.4. Дорожки до IPC subtitles.* (3.3–3.6) движок получает тест-хуком (custom-события duopulse-test-track/-offset). Тесты: vitest 34 новых (38/38 — выбор cue/offset/seek, смёрж/границы таймлайна, videoKey), cargo 92/92, fmt/clippy чисто; стенд e2e/subtitles/ (testpage.html + testsrc.mp4 30 с с счётчиком кадров — визуальная сверка таймингов, скриншот shot-overlay.png)
 | 3.3 | YouTube-адаптер: полный список дорожек + загрузка выбранных N (оригинал + 1–2 `tlang`-перевода или любые языки) | 10 случайных видео → наборы из 2–3 дорожек получены |
 | 3.4 | Оверлей: плашка из N строк (1–3), стили строк, позиция, колесо-размер | сверки по гайду; без миганий при коротких cue |
 | 3.5 | Синхронизация: offset-слайдер, горячие клавиши, seek-устойчивость | скачки по таймлайну не дают «призраков» cue |
@@ -263,7 +271,11 @@ Gate-проверки этапов включены в последние кар
 ## 5. Инструменты и CI
 
 - Rust: `cargo fmt` + `cargo clippy -D warnings` + `cargo test`.
-- TS/JS: `pnpm`, strict-режим `tsc`, `eslint`, `vitest` (content-движок), `playwright`
+- Content-бандл (задача 3.2): `npm run build:content` — esbuild IIFE из
+  `content/*.ts` в `content/gen/` (gitignore, как `dist/`); файл подключается
+  `include_str!`, поэтому fresh clone требует npm-шаг до cargo (делают
+  `npm run dev` / `npm run build` — команды tauri).
+- TS/JS: strict-режим `tsc`, `vitest` (включая content-движок), `playwright`
   (E2E, где драйвер позволяет).
 - CI (GitHub Actions, после настройки remote): fmt+clippy+test, сборка Windows-артефакта
   в `builds/duopulse_<версии>_<тип>` (debug/release) — правило проекта про сборки APK

@@ -54,12 +54,17 @@ const BLOCK_TEST_PATH: &str = "/duopulse_block_test_probe";
 
 /// Content-скрипты каждой вкладки (docs/02 §4): монитор M0 + горячие клавиши
 /// таб-бара (задача 1.2) + монитор медиа для спящего режима (задача 2.3) +
-/// косметика блокировщика (задача 2.2).
+/// косметика блокировщика (задача 2.2) + бандл субтитров (задача 3.2).
 pub(crate) const CONTENT_INIT_SCRIPT_M0: &str = include_str!("../../content/m0-spike.js");
 pub(crate) const CONTENT_INIT_SCRIPT_HOTKEYS: &str =
     include_str!("../../content/chrome-hotkeys.js");
 pub(crate) const CONTENT_INIT_SCRIPT_MEDIA: &str = include_str!("../../content/media-watch.js");
 pub(crate) const CONTENT_INIT_SCRIPT_COSMETIC: &str = include_str!("../../content/cosmetic.js");
+/// Субтитры (M3, задача 3.2): content/*.ts → esbuild-IIFE → content/gen/
+/// (npm run build:content, входит в npm run dev/build). Генерат в .gitignore,
+/// как dist/: cargo требует его до сборки — fresh clone собирает npm-шагом.
+pub(crate) const CONTENT_INIT_SCRIPT_SUBTITLES: &str =
+    include_str!("../../content/gen/duopulse-content.js");
 
 /// Аргументы окружения WebView2, зафиксированные на старте приложения:
 /// каждая новая вкладка наследует их (сменить можно только перезапуском).
@@ -251,6 +256,9 @@ unsafe fn referer_of(
 ///   возвращаются тому же webview PostWebMessageAsString (доставляется только
 ///   top-level документу — скрипт во фреймах запросы не шлёт); в том же
 ///   ответе — код скриптлетов `##+js` (injectedScript, карточка duopulse-043);
+/// - «video» — детектор <video> нашёл/сменял ключевое видео (content-бандл
+///   субтитров, задача 3.2): Core эмитит событие контракта page:video_detected
+///   в UI (payload PageVideoDetected — videoKey/canTracks, docs/05 §2);
 /// - прочие (IPC tauri обрабатывает свои параллельно) игнорируются.
 #[cfg(windows)]
 unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
@@ -280,6 +288,23 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 if let Some(playing) = parsed["playing"].as_bool() {
                     app.state::<tabs::TabManager>()
                         .on_media(&app, &tab_id, playing);
+                }
+            } else if parsed["duopulse"] == "video" {
+                // Детектор <video> content-бандла субтитров (задача 3.2):
+                // проброс в UI событием контракта. Детектор эмитит только по
+                // факту (новое видео/смена ключа), повторов не бывает.
+                if let (Some(video_key), Some(can_tracks)) = (
+                    parsed["videoKey"].as_str(),
+                    parsed["canTracks"].as_bool(),
+                ) {
+                    eprintln!("[subtitles] video detected: {video_key} (tab {tab_id}, canTracks={can_tracks})");
+                    let _ = bridge::emit::<bridge::PageVideoDetected>(
+                        &app,
+                        &bridge::PageVideoDetected {
+                            video_key: video_key.to_string(),
+                            can_tracks,
+                        },
+                    );
                 }
             } else if parsed["duopulse"] == "cosmetic" {
                 if let Some(url) = parsed["url"].as_str() {

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!-- DuoPulse — тест-страница задачи 3.2 (детектор видео + каркас движка
+     cue-таймлайна, карточка duopulse-023). Отдаётся сервером e2e/subtitles/
+     run.mjs на 127.0.0.1:8897.
+
+     Что здесь есть:
+     - <video> с реальным 30-секундным роликом (assets/testsrc.mp4, кадры
+       пронумерованы — визуальная сверка таймингов на скриншотах);
+     - тест-дорожка cue (window.__DUOPULSE_TEST_TRACK__ + custom-событие
+       duopulse-test-track — тест-хук content-бандла): смежные реплики,
+       перекрытие (должно смёржиться движком в одну плашку с двумя строками
+       текста), пауза, финальная реплика.
+
+     Проверки детектора (MutationObserver, SPA-переход) выполняет ранер через
+     CDP: удаляет/добавляет <video>, делает history.pushState. -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>duopulse · субтитры · тест-стенд 3.2</title>
+  <style>
+    body { background: #101418; color: #cfd8dc; font-family: "Segoe UI", system-ui, sans-serif; margin: 24px; }
+    video { width: 640px; max-width: 100%; background: #000; display: block; }
+  </style>
+</head>
+<body>
+  <h2>DuoPulse · тест-стенд субтитров (задача 3.2)</h2>
+  <p>Сверяйте плашку субтитров с таймкодом ролика (счётчик кадров testsrc).</p>
+  <video id="v" src="/assets/testsrc.mp4" muted controls preload="auto"></video>
+  <script>
+    // Тест-cue (мс): A и B смежные (не сливаются), C1/C2 перекрываются
+    // (движок смёржит в [6000, 9500] с двумя строками), после C пауза.
+    window.__DUOPULSE_TEST_TRACK__ = {
+      id: "test:ru",
+      source: "test",
+      lang: "ru",
+      role: "original",
+      cues: [
+        { startMs: 1000, endMs: 3000, text: "Первая реплика (1,0–3,0 с)" },
+        { startMs: 3000, endMs: 5000, text: "Вторая реплика (3,0–5,0 с)" },
+        { startMs: 6000, endMs: 8000, text: "Третья: начало перекрытия" },
+        { startMs: 7000, endMs: 9500, text: "…и её перекрывающий хвост" },
+        { startMs: 12000, endMs: 15000, text: "Финальная реплика (12–15 с)" }
+      ]
+    };
+    // content-бандл слушает событие (инжектируется до скриптов страницы,
+    // глобал может появиться и позже — ранер CDP задаёт так же).
+    document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+  </script>
+</body>
+</html>
