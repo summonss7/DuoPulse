@@ -176,12 +176,12 @@ impl TabManager {
     /// сессии из профиля (задача 1.6) либо стартовая страница. DUOPULSE_START_URL
     /// (e2e-стенды) сессию игнорирует — старт детерминирован.
     ///
-    /// Восстановление вставляет только записи вкладок (бар отрисовывается
-    /// сразу), webview активной создаёт задача по сигналу цикла событий
-    /// (main.rs, RunEvent::Ready): создание webview на главном потоке до
-    /// старта цикла и в первые его мгновения — гонка с дедлоком
-    /// (add_child → wait_with_pump цикла, который ещё не качает сообщения).
-    pub fn init(&self, app: &AppHandle) -> Result<(), String> {
+    /// Оба пути ставят вкладки лениво (записи в баре без webview): материализация
+    /// — задача по сигналу цикла событий (main.rs, RunEvent::Ready). Создание
+    /// webview внутри setup — блокирующий round-trip на ещё не качающий цикл:
+    /// задерживал старт цикла (и с ним первую отрисовку таб-бара) — задача 2.4
+    /// перевела сюда и свежий старт (раньше первая вкладка создавалась в setup).
+    pub fn init(&self, _app: &AppHandle) -> Result<(), String> {
         let restore = if std::env::var("DUOPULSE_START_URL").is_err() {
             session::load(&crate::proxy::profile_dir())
         } else {
@@ -189,12 +189,37 @@ impl TabManager {
         };
         match restore {
             Some(session) => self.restore_entries(session),
-            // свежий старт — путь задач 1.2–1.5 (внутри setup, им прошёл весь
-            // e2e-парк); сессии нет — гонка восстановления его не касается
-            None => {
-                self.spawn_tab(app, default_tab_url(), None)?;
-            }
+            None => self.spawn_lazy_first()?,
         }
+        Ok(())
+    }
+
+    /// Первая вкладка свежего старта (сессии нет): ленивая запись со стартовым
+    /// URL, webview создаёт spawn_restore_materialize по RunEvent::Ready —
+    /// как у восстановленных вкладок (задача 2.4, docs/04 §1.3).
+    fn spawn_lazy_first(&self) -> Result<(), String> {
+        let url = default_tab_url();
+        let parsed =
+            Url::parse(&url).map_err(|e| format!("некорректный стартовый URL «{url}»: {e}"))?;
+        let name = internal_page_name(&parsed);
+        let mut st = self.state.lock().expect("tabs: лок не отравлен");
+        st.next_seq += 1;
+        let seq = st.next_seq;
+        let id = name.map_or_else(|| format!("tab-{seq}"), |n| format!("page-{n}-{seq}"));
+        st.tabs.push(TabEntry {
+            id,
+            // канонический адрес: для внутренних страниц Url сериализует
+            // «duopulse://history» как «duopulse://history/»
+            url: parsed.to_string(),
+            title: None,
+            loading: false,
+            internal: name.is_some(),
+            lazy: true,
+            sleeping: false,
+            media_playing: false,
+            last_active_ms: now_ms(),
+        });
+        st.active = Some(0);
         Ok(())
     }
 
@@ -463,6 +488,14 @@ impl TabManager {
     pub fn active_is_lazy(&self) -> bool {
         let st = self.state.lock().expect("tabs: лок не отравлен");
         st.active.is_some_and(|i| st.tabs[i].lazy)
+    }
+
+    /// Грузится ли хоть одна вкладка (задача 2.4): признак «UI не простой»
+    /// для прогрева топ-сайтов — пока страница грузится, сетевой стек занят
+    /// её запросами и раунд прогрева пропускается.
+    pub fn any_loading(&self) -> bool {
+        let st = self.state.lock().expect("tabs: лок не отравлен");
+        st.tabs.iter().any(|t| t.loading)
     }
 
     /// Подгонка всех webview вкладок под размер окна (событие Resized):

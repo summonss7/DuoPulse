@@ -30,6 +30,7 @@ mod adblock;
 mod bridge;
 mod history;
 mod omnibox;
+mod prefetch;
 mod proxy;
 mod tabs;
 
@@ -39,6 +40,17 @@ use tauri::{AppHandle, Manager, Window, WindowEvent};
 
 #[cfg(windows)]
 use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2Environment};
+
+/// Точка отсчёта метрик старта (задача 2.4): инициализируется первым вызовом
+/// [`startup_mark`] в main; фазы печатаются в stderr — разбор P-01/P-02
+/// («что тянуть назад») по этапам, внешние замеры снимает e2e/perf/run.mjs.
+static PROCESS_START: OnceLock<std::time::Instant> = OnceLock::new();
+
+/// Метка фазы старта: «[startup] <фаза>: N мс» от входа в main.
+fn startup_mark(stage: &str) {
+    let t0 = PROCESS_START.get_or_init(std::time::Instant::now);
+    eprintln!("[startup] {stage}: {} ms", t0.elapsed().as_millis());
+}
 
 /// Путь-маркер для теста сетевого перехвата: такие запросы блокируются (403).
 const BLOCK_TEST_PATH: &str = "/duopulse_block_test_probe";
@@ -368,6 +380,7 @@ pub(crate) unsafe fn install_content_handlers(
 }
 
 fn main() {
+    startup_mark("main");
     // IPC-контракт bridge (задача 1.1): все команды/события — src/bridge.rs.
     // Менеджер вкладок (задача 1.2) — состояние Core для tabs.* и nav.*.
     // История и закладки (задача 1.4) — SQLite в профиле (docs/02 §8):
@@ -377,18 +390,23 @@ fn main() {
     let adblock_service = std::sync::Arc::new(adblock::AdblockService::new(&proxy::profile_dir()));
     let history_store = history::HistoryStore::open(&proxy::profile_dir())
         .expect("открыть/создать duopulse.db в профиле (docs/02 §8)");
+    startup_mark("stores-open");
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
         .manage(tabs::TabManager::new())
         .manage(history_store)
         .manage(adblock_service)
         .setup(move |app| {
+            startup_mark("setup");
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и
             // батчинг счётчика adblock:blocked_count (задача 2.1).
             adblock_for_setup.start(app.handle());
             // Спящий режим вкладок (задача 2.3): нить авто-усыпления
             // долгих простоев (DUOPULSE_SLEEP_AFTER_SECS=0 — выключена).
             tabs::start_sleeper(app.handle().clone());
+            // Прогрев топ-сайтов (задача 2.4, docs/04 §1.4): preconnect/
+            // dns-prefetch частых хостов истории при простое UI.
+            prefetch::start(app.handle().clone());
             // Прокси задаётся аргументами окружения WebView2 только на старте
             // (docs/02 §6.1) — конфиг читаем ДО создания webview; аргументы
             // фиксируем для всех будущих вкладок (STARTUP_PROXY_ARGS).
@@ -412,11 +430,14 @@ fn main() {
             .resizable(true)
             .additional_browser_args(&proxy_args)
             .build()?;
+            startup_mark("window-built");
             let app = app.handle().clone();
             let window: Window<tauri::Wry> =
                 app.get_window("main").expect("окно main создано выше");
-            // Первая вкладка (стартовый URL / DUOPULSE_START_URL) — задача 1.2.
+            // Первая вкладка (стартовый URL / DUOPULSE_START_URL) — задача 1.2;
+            // ленивая постановка + материализация по Ready — задача 2.4.
             app.state::<tabs::TabManager>().init(&app)?;
+            startup_mark("tab-init");
 
             // Все вкладки растягиваются при изменении размера окна (в т.ч.
             // скрытые — чтобы активация не показала старую геометрию).
@@ -439,10 +460,12 @@ fn main() {
                 app.state::<tabs::TabManager>().persist_session();
             }
             if let tauri::RunEvent::Ready = event {
+                startup_mark("ready");
                 // Восстановление сессии (задача 1.6): webview активной вкладки
                 // создаётся только когда цикл событий гарантированно качает
                 // сообщения (в setup и первые его мгновения — гонка с дедлоком
-                // создания webview, см. tabs::init).
+                // создания webview, см. tabs::init). Задача 2.4: свежий старт
+                // идёт тем же путём — первая вкладка тоже ленивая.
                 app.state::<tabs::TabManager>()
                     .spawn_restore_materialize(app);
             }

@@ -36,6 +36,36 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
+/// Локальный/петлевой хост: прогревать DNS/соединения к нему бессмысленно
+/// (фильтр top_hosts, задача 2.4). Проверка по префиксам — фильтр подсказок,
+/// не безопасность.
+fn host_is_local(host: &str) -> bool {
+    if host.is_empty()
+        || host == "localhost"
+        || host == "::1"
+        || host == "[::1]"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+    {
+        return true;
+    }
+    // IPv4-литерал: петля и приватные диапазоны RFC1918/link-local.
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() == 4
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    {
+        let o: Vec<u32> = parts.iter().map(|p| p.parse().unwrap_or(0)).collect();
+        return o[0] == 127
+            || o[0] == 10
+            || (o[0] == 192 && o[1] == 168)
+            || (o[0] == 169 && o[1] == 254)
+            || (o[0] == 172 && (16..=31).contains(&o[1]));
+    }
+    false
+}
+
 /// Хранилище истории и закладок: SQLite в профиле (потокобезопасно через
 /// Mutex; все обращения — короткие, включая транзакции).
 pub struct HistoryStore {
@@ -218,6 +248,56 @@ impl HistoryStore {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(err_sql)?;
         Ok(hits)
+    }
+
+    /// Топ-хосты истории (задача 2.4, docs/04 §1.4 — прогрев DNS/preconnect):
+    /// адреса визитов за последние `window_days` дней, сгруппированные по
+    /// хосту (http/https, «www.» снят); хосты с `min_visits` визитами и
+    /// более, частые первыми, `limit` штук. Группировка в Rust — SQL не
+    /// умеет хост из URL. Локальные адреса не греем (бесполезно), не-http(s)
+    /// схемы (duopulse://, ftp) не считаются.
+    pub fn top_hosts(&self, limit: usize, window_days: i64, min_visits: u32) -> Vec<String> {
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        let since = now_ms() - window_days * 24 * 60 * 60 * 1000;
+        let Ok(mut stmt) = conn
+            .prepare(
+                "SELECT url FROM visits WHERE visited_at >= ?1 \
+                 ORDER BY visited_at DESC LIMIT 5000",
+            )
+            .map_err(err_sql)
+        else {
+            return vec![];
+        };
+        let Ok(rows) = stmt
+            .query_map(rusqlite::params![since], |r| r.get::<_, String>(0))
+            .map_err(err_sql)
+        else {
+            return vec![];
+        };
+        let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for url in rows.flatten() {
+            let Ok(parsed) = tauri::Url::parse(&url) else {
+                continue;
+            };
+            if !matches!(parsed.scheme(), "http" | "https") {
+                continue;
+            }
+            let Some(host) = parsed.host_str() else {
+                continue;
+            };
+            let host = host.trim_start_matches("www.").to_lowercase();
+            if host_is_local(&host) {
+                continue;
+            }
+            *counts.entry(host).or_insert(0) += 1;
+        }
+        let mut top: Vec<(String, u32)> = counts
+            .into_iter()
+            .filter(|(_, c)| *c >= min_visits)
+            .collect();
+        top.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        top.truncate(limit);
+        top.into_iter().map(|(host, _)| host).collect()
     }
 
     /// История для страницы управления: агрегат по URL (последний визит,
@@ -797,6 +877,47 @@ mod tests {
     }
 
     // --- задача 1.4: файл в профиле и замер omnibox ---------------------------
+
+    /// Топ-хосты для прогрева (задача 2.4): агрегация по хосту со снятием
+    /// «www.», фильтры окна/частоты/схемы/локальности, порядок по частоте.
+    #[test]
+    fn top_hosts_aggregates_filters_and_orders() {
+        let s = HistoryStore::open_in_memory().unwrap();
+        let now = now_ms();
+        // 3 визита youtube (www снят) + отдельный хост m.youtube.com (1 — мимо)
+        for i in 0..3 {
+            s.visit_at(
+                &format!("https://www.youtube.com/watch?v={i}"),
+                "yt",
+                now - i,
+            )
+            .unwrap();
+        }
+        s.visit_at("https://m.youtube.com/x", "yt", now).unwrap();
+        // 2 визита example.com
+        for i in 0..2 {
+            s.visit_at(&format!("https://example.com/p{i}"), "e", now - i)
+                .unwrap();
+        }
+        // разовый визит — ниже MIN_VISITS; локальный/ftp/за-окном — не считаются
+        s.visit_at("https://once.test/", "o", now).unwrap();
+        s.visit_at("http://127.0.0.1:8898/a", "l", now).unwrap();
+        s.visit_at("http://10.0.0.5/x", "l", now).unwrap();
+        s.visit_at("ftp://x.test/f", "f", now).unwrap();
+        s.visit_at("https://old.test/", "o", now - 40 * 24 * 60 * 60 * 1000)
+            .unwrap();
+
+        let top = s.top_hosts(10, 30, 2);
+        assert_eq!(
+            top,
+            vec!["youtube.com".to_string(), "example.com".to_string()]
+        );
+        assert_eq!(s.top_hosts(1, 30, 2).len(), 1, "лимит");
+        assert!(
+            s.top_hosts(10, 30, 4).is_empty(),
+            "порог числа визитов режет всё"
+        );
+    }
 
     #[test]
     fn store_persists_across_reopen() {
