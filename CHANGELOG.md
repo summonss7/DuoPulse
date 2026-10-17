@@ -1685,3 +1685,40 @@
   «Свои субтитры» в панели — задача 3.7 (IPC-путь готов и покрыт).
 - backup.bat — 17.10 07:25 (backups/backup_2026-10-17_07-25-52).
 - Коммит: см. git log (duopulse-027, пуш в summonss7/DuoPulse main).
+
+## 17.10.2026 10:17 — Дистрибутив DuoPulse в хабе «Скачать» Aila (пожелание w_vhF9otj25wDTfQXA, карточка duopulse-045)
+
+- Начало работы: 17.10.2026 09:58
+- Окончание работы: 17.10.2026 10:17
+- Что сделано: пожелание папы «добавить дистрибутив в хаб пожеланий "скачать"».
+  Закладка «Скачать» Aila сканирует корень builds/ проектов (aila-086:
+  .exe/.msi/.zip, версию разбирает из имени) — у DuoPulse там лежала только
+  папка сырого релиза, которую сканер не видит. Сделано: (1) включён NSIS-бандл
+  в src-tauri/tauri.conf.json (bundle active, targets ["nsis"], языки
+  Russian/English, installMode currentUser — установка без прав админа);
+  (2) свежая релизная сборка текущего HEAD (6ce4303, задача 3.6): установщик
+  DuoPulse_0.1.0_x64-setup.exe (3,87 МиБ) + релизный exe; (3) разложено в
+  builds/ по конвенции NovaGrid: DuoPulse-0.1.0-setup-release.exe (4,06 МБ)
+  и DuoPulse-0.1.0-portable-release.zip (5,24 МБ, exe + WebView2Loader.dll),
+  папка duopulse_0.1.0_release/ обновлена свежими exe+dll.
+- Как проверено: (1) сборка npx tauri build — ок (vite 1,0 с, cargo 3м54с,
+  NSIS скачан и собран бандлером Tauri; предупреждение линтера «.rsrc merge
+  failure: multiple non-default manifests» — существующее поведение
+  gnu-линковки, не блокирует); (2) дымовой запуск релизного exe — все фазы
+  старта (main 0 → stores 22 → setup 31 → window 2287 (холодный после
+  сборки) → ready), процесс жив, корректно завершён; (3) сквозная проверка
+  установщика: тихая установка /S → файлы в %LOCALAPPDATA%\DuoPulse
+  (duopulse.exe + WebView2Loader.dll + uninstall.exe) + ярлык «Пуск»;
+  установленное приложение запускается; тихая деинсталляция /S → каталог
+  и ярлык удалены полностью; (4) сканер хаба (node, src/apps.js readApps/
+  findAppFile): проект DuoPulse виден, версия 0.1.0, установщик первым
+  (pack setup), zip вторым (pack portable), раздача обоих файлов по id
+  резолвится; (5) содержимое zip проверено (duopulse.exe 12 110 848 +
+  WebView2Loader.dll 160 880); (6) проверки проекта: cargo fmt --check —
+  чисто, tsc — чисто, vitest 119/119, cargo test 96 passed / 0 failed /
+  1 ignored. Код приложения не менялся (только конфиг сборки).
+- Замечания: полный приёмочный установщик (чистая Windows, автообновление) —
+  этап M5 по плану, эта работа его не сдвигает; NSIS-мастер при обычном
+  запуске показывает ru/en диалоги, тихий режим — флаг /S (проверено).
+- backup.bat — 17.10 10:00 (backups/backup_2026-10-17_10-00-59).
+- Коммит: см. git log (duopulse-045, пуш в summonss7/DuoPulse main).

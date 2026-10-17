@@ -272,6 +272,25 @@ node e2e/adblock/cosmetic-youtube.mjs
 npm run gen:bridge
 ```
 
+### Сборка дистрибутива
+
+```bash
+npx tauri build    # релиз: src-tauri/target/release/duopulse.exe
+                   # + NSIS-установщик bundle/nsis/DuoPulse_<версия>_x64-setup.exe
+```
+
+Установщик — per-user (без прав администратора), языки русский/английский;
+тихий режим — флаг `/S` (и у `uninstall.exe`). Готовые дистрибутивы лежат
+в корне `builds/` и видны в приложении Aila на закладке «Скачать» (сканер
+берёт файлы `.exe/.msi/.zip` из корня `builds/`, версию разбирает из имени):
+
+- `DuoPulse-<версия>-setup-release.exe` — установщик;
+- `DuoPulse-<версия>-portable-release.zip` — портативная (exe + WebView2Loader.dll,
+  распаковать и запустить);
+- `duopulse_<версия>_release/` — сырой вывод cargo (exe + dll).
+
+Полный приёмочный установщик (чистая Windows, автообновление) — этап M5.
+
 ---
 
 ## Ключевые возможности (план)
