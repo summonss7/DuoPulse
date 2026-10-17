@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   YouTubeAdapter,
+  YT_NATIVE_CAPTIONS_CLASS,
+  blankYouTubeCaptions,
   buildTranslationUrl,
   extractCaptionList,
   installTimedtextCapture,
@@ -17,6 +19,7 @@ import {
   paramsOf,
   videoIdFromHref,
   videoIdOfResponse,
+  type DocumentLike,
   type PageWindow,
   type PlayerElement,
   type YouTubeTransport,
@@ -497,5 +500,52 @@ describe("перехват timedtext-ответов (хук fetch/XHR)", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(calls).toEqual(["fetch"]);
     expect(a.all()).toHaveLength(0); // не timedtext — мимо буфера
+  });
+});
+
+describe("гашение нативных субтитров плеера (docs/03 §2)", () => {
+  function fakeDoc(): DocumentLike & { classes: string[]; css: string[] } {
+    const classes: string[] = [];
+    const css: string[] = [];
+    return {
+      classes,
+      css,
+      documentElement: {
+        classList: {
+          add: (c) => {
+            if (!classes.includes(c)) classes.push(c); // DOM add идемпотентен
+          },
+          remove: (c) => {
+            const i = classes.indexOf(c);
+            if (i >= 0) classes.splice(i, 1);
+          },
+          contains: (c) => classes.includes(c),
+        },
+        appendChild: (node) => {
+          css.push(String((node as { textContent?: string }).textContent ?? ""));
+          return node;
+        },
+      },
+      getElementById: (id) => (id === "duopulse-yt-captions-off-style" && css.length ? { id } : null),
+      createElement: () => ({ textContent: "", id: "" }),
+    };
+  }
+
+  it("blank ставит класс и инжектит правило скрытия слоя плеера", () => {
+    const doc = fakeDoc();
+    blankYouTubeCaptions(doc, true);
+    expect(doc.classes).toContain(YT_NATIVE_CAPTIONS_CLASS);
+    expect(doc.css[0]).toContain(".ytp-caption-window-container");
+    expect(doc.css[0]).toContain("display:none");
+  });
+
+  it("повторный blank не дублирует правило; restore снимает класс", () => {
+    const doc = fakeDoc();
+    blankYouTubeCaptions(doc, true);
+    blankYouTubeCaptions(doc, true);
+    expect(doc.css).toHaveLength(1);
+    blankYouTubeCaptions(doc, false);
+    expect(doc.classes).not.toContain(YT_NATIVE_CAPTIONS_CLASS);
+    expect(doc.css).toHaveLength(1); // правило остаётся, CSS не активен без класса
   });
 });

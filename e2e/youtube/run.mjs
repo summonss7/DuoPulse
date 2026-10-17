@@ -8,7 +8,9 @@
 //      — второй базовый язык), загрузка в движок (selectTracks);
 //   3) проверки: 2–3 дорожки с cue > 0, языки различные, порядок сохранён;
 //   4) overlay рисует строки набора при воспроизведении (duo-плашка);
-//   5) скриншот-пример. Итог — таблица + счётчик видео с полным набором.
+//   5) нативные субтитры плеера погашены на время показа (класс <html>,
+//      задача 3.4, docs/03 §2);
+//   6) скриншот-пример. Итог — таблица + счётчик видео с полным набором.
 //
 // Механика адаптера (октябрь 2026): прямые timedtext-URL из player-ответа
 // отдают пустое тело (PO-токен), поэтому дорожки грузит сам плеер по команде
@@ -313,6 +315,14 @@ try {
         lines.length >= Math.min(2, sel.loaded),
         JSON.stringify(lines.slice(0, 3)).slice(0, 140),
       );
+
+      // Гашение нативных субтитров плеера на время нашего показа (docs/03 §2):
+      // CSS-класс на <html> — селектор знает только адаптер (docs/03 §9).
+      const ytBlanked = await evalRetry(
+        tab,
+        `window.__duopulseContent.state().nativeBlanked === true && document.documentElement.classList.contains("duopulse-yt-captions-off")`,
+      );
+      check(`${videoId}: нативные субтитры YouTube погашены (класс <html>)`, ytBlanked === true);
 
       if (!shotDone) {
         fs.mkdirSync(OUT_DIR, { recursive: true });

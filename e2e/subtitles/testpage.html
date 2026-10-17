@@ -9,23 +9,27 @@
      - тест-дорожка cue (window.__DUOPULSE_TEST_TRACK__ + custom-событие
        duopulse-test-track — тест-хук content-бандла): смежные реплики,
        перекрытие (должно смёржиться движком в одну плашку с двумя строками
-       текста), пауза, финальная реплика.
+       текста), пауза, финальная реплика. Для задачи 3.4: бандл принимает и
+       массив дорожек (набор из N строк) и {clear:true}; native <track> ниже —
+       проверка гашения нативного показа (docs/03 §2).
 
      Проверки детектора (MutationObserver, SPA-переход) выполняет ранер через
      CDP: удаляет/добавляет <video>, делает history.pushState. -->
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>duopulse · субтитры · тест-стенд 3.2</title>
+  <title>duopulse · субтитры · тест-стенд 3.2/3.4</title>
   <style>
     body { background: #101418; color: #cfd8dc; font-family: "Segoe UI", system-ui, sans-serif; margin: 24px; }
     video { width: 640px; max-width: 100%; background: #000; display: block; }
   </style>
 </head>
 <body>
-  <h2>DuoPulse · тест-стенд субтитров (задача 3.2)</h2>
+  <h2>DuoPulse · тест-стенд субтитров (задачи 3.2 / 3.4)</h2>
   <p>Сверяйте плашку субтитров с таймкодом ролика (счётчик кадров testsrc).</p>
-  <video id="v" src="/assets/testsrc.mp4" muted controls preload="auto"></video>
+  <video id="v" src="/assets/testsrc.mp4" muted controls preload="auto">
+    <track src="/assets/native.vtt" kind="subtitles" srclang="en" label="Native test">
+  </video>
   <script>
     // Тест-cue (мс): A и B смежные (не сливаются), C1/C2 перекрываются
     // (движок смёржит в [6000, 9500] с двумя строками), после C пауза.

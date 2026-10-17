@@ -14,6 +14,15 @@
 //   9) SPA-переход (pushState на /watch?v=…) пересчитывает ключ видео (yt:…);
 //  10) скриншот плашки над роликом (счётчик кадров testsrc = визуальная
 //      сверка таймингов).
+// Задача 3.4 (полный оверлей, карточка duopulse-025):
+//  11) набор из 3 дорожек: стили строк по гайду 06 §6 (белый 500 / лайм
+//      #BDFE4F 85% / приглушённые 75%, обводка 2px) и плашка (градиент,
+//      радиус 6, blur 2, ≤80% ширины видео) + скриншот;
+//  12) позиция top с отступом 6% высоты видео, по центру;
+//  13) колесо над плашкой — кегль +10% (Shift — сдвиг +100 мс);
+//  14) смена смежного cue без миганий: контейнер и узлы строк не пересоздаются;
+//  15) гашение нативных <track>-субтитров на время показа и возврат
+//      при выключении (docs/03 §2).
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -58,7 +67,7 @@ const check = (name, ok, extra = "") => {
 
 // --- 1. локальный http-стенд: тест-страница + видео (Range обязателен) ------
 const ROOT_WWW = path.join(ROOT, "e2e", "subtitles");
-const MIME = { ".html": "text/html; charset=utf-8", ".mp4": "video/mp4" };
+const MIME = { ".html": "text/html; charset=utf-8", ".mp4": "video/mp4", ".vtt": "text/vtt; charset=utf-8" };
 const httpServer = http.createServer((req, res) => {
   const urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
   const file = path.join(
@@ -199,6 +208,13 @@ const stateOf = (ws) => evalIn(ws, `window.__duopulseContent?.state() ?? null`);
 const overlayText = (ws) =>
   evalIn(ws, `document.querySelector("[data-duopulse-subtitles]")?.innerText ?? ""`);
 
+/** Применить window.__DUOPULSE_TEST_TRACK__ (глобал оставляет инлайн-скрипт
+ * страницы). Смена videoKey чистит набор (привязка к видео, docs/03 §6),
+ * поэтому ранер задаёт дорожку в детерминированные моменты — после
+ * успокоения детектора, а не инлайн-скриптом при разборе (гонка с очисткой). */
+const applyTestTrack = (ws) =>
+  evalIn(ws, `(function () { document.dispatchEvent(new CustomEvent("duopulse-test-track")); return true; })()`);
+
 let failures = 0;
 try {
   const target = targets.find((t) => t.type === "page" && t.url.startsWith(pageUrl));
@@ -212,6 +228,7 @@ try {
     (await evalIn(tab, `typeof window.__duopulseContent`)) === "object",
   );
   await waitForPage(tab, `document.getElementById("v")?.readyState >= 1`, 10000, "метаданные видео");
+  await applyTestTrack(tab); // после loadedmetadata-уточнения ключа (см. выше)
 
   // (1) тест-дорожка дошла до движка
   await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 1`, 5000, "trackCount=1");
@@ -319,6 +336,9 @@ try {
        const v = document.createElement("video");
        v.id = "v"; v.muted = true; v.controls = true; v.preload = "auto";
        v.src = "/assets/testsrc.mp4";
+       const tr = document.createElement("track"); // как в исходной разметке (для 15)
+       tr.src = "/assets/native.vtt"; tr.kind = "subtitles"; tr.srclang = "en"; tr.label = "Native test";
+       v.appendChild(tr);
        document.body.appendChild(v);
        return true;
      })()`,
@@ -339,8 +359,17 @@ try {
     (await stateOf(tab)).videoKey === spaKey,
   );
 
-  // (10) скриншот: плашка над роликом (t=2,0 — счётчик кадров testsrc ≈ 60)
+  // (10) скриншот: плашка над роликом (t=2,0 — счётчик кадров testsrc ≈ 60).
+  // Возврат URL из SPA-стиля — детектор пересчитает ключ (очистив набор),
+  // ждём успокоения и задаём дорожку заново.
   await evalIn(tab, `history.pushState(null, "", "/")`);
+  await waitForPage(
+    tab,
+    `window.__duopulseContent?.state().videoKey === ${JSON.stringify(`url:${pageUrl}:30`)}`,
+    4000,
+    "ключ после возврата на /",
+  );
+  await applyTestTrack(tab);
   await seekTo(tab, 2.0);
   await sleep(300); // fade 80 мс
   const geom = await evalIn(
@@ -368,6 +397,235 @@ try {
   check(
     "скриншот с плашкой сохранён (e2e/subtitles/shot-overlay.png)",
     fs.existsSync(path.join(OUT_DIR, "shot-overlay.png")),
+  );
+
+  // ===== задача 3.4: полный оверлей (стили/позиция/колесо/гашение) ==========
+
+  // (11) набор из 3 дорожек: стили строк по гайду 06 §6 и плашка (градиент,
+  // радиус 6, blur 2, макс 80% ширины видео)
+  await evalIn(
+    tab,
+    `(function () {
+       window.__DUOPULSE_TEST_TRACK__ = [
+         { id: "test:ru", source: "test", lang: "ru", role: "original", cues: [
+           { startMs: 1000, endMs: 3000, text: "Оригинал: реплика A (1–3 с)" },
+           { startMs: 3000, endMs: 5000, text: "Оригинал: реплика B (3–5 с)" } ] },
+         { id: "test:en", source: "test", lang: "en", role: "translation", cues: [
+           { startMs: 1000, endMs: 3000, text: "Original: line A (1–3 s)" },
+           { startMs: 3000, endMs: 5000, text: "Original: line B (3–5 s)" } ] },
+         { id: "test:es", source: "test", lang: "es", role: "translation", cues: [
+           { startMs: 1000, endMs: 3000, text: "Original: línea A (1–3 s)" },
+           { startMs: 3000, endMs: 5000, text: "Original: línea B (3–5 s)" } ] }
+       ];
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return true;
+     })()`,
+  );
+  await seekTo(tab, 2.0);
+  const trio = await waitForPage(
+    tab,
+    `(function () {
+       const rows = document.querySelectorAll("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       return rows.length === 3 && rows[2].textContent.includes("línea A") ? true : null;
+     })()`,
+    5000,
+    "плашка из 3 строк",
+  );
+  const styles = await evalIn(
+    tab,
+    `(function () {
+       const plate = document.querySelector("[data-duopulse-subtitles] > div");
+       const rows = document.querySelectorAll("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       const v = document.getElementById("v").getBoundingClientRect();
+       const cs = rows.length === 3 ? [0, 1, 2].map((i) => getComputedStyle(rows[i])) : [];
+       return {
+         rows: rows.length,
+         texts: Array.from(rows).map((r) => r.textContent),
+         colors: cs.map((c) => c.color),
+         weights: cs.map((c) => c.fontWeight),
+         sizes: cs.map((c) => parseFloat(c.fontSize)),
+         stroke: cs.length ? cs[0].webkitTextStrokeWidth : null,
+         radius: plate ? getComputedStyle(plate).borderTopLeftRadius : null,
+         blur: plate ? getComputedStyle(plate).backdropFilter : null,
+         bg: plate ? getComputedStyle(plate).backgroundImage : null,
+         plateW: plate ? plate.getBoundingClientRect().width : 0,
+         videoW: v.width,
+       };
+     })()`,
+  );
+  check(
+    "3 строки набора: тексты дорожек по порядку",
+    trio === true && styles.rows === 3 && styles.texts[0].includes("Оригинал") && styles.texts[1].includes("Original: line") && styles.texts[2].includes("línea"),
+    JSON.stringify(styles.texts),
+  );
+  check(
+    "стили строк по гайду 06 §6: белый 500 / лайм #BDFE4F 85% / приглушённые 75%",
+    styles.colors[0] === "rgb(255, 255, 255)" &&
+      styles.colors[1] === "rgb(189, 254, 79)" &&
+      styles.colors[2] === "rgba(255, 255, 255, 0.75)" &&
+      styles.weights[0] === "500" &&
+      Math.abs(styles.sizes[1] / styles.sizes[0] - 0.85) < 0.02 &&
+      Math.abs(styles.sizes[2] / styles.sizes[0] - 0.75) < 0.02,
+    `цвета ${styles.colors.join(" | ")}; кегли ${styles.sizes.map((s) => s.toFixed(1)).join("/")}`,
+  );
+  check(
+    "плашка по гайду 06 §6: обводка 2px, радиус 6px, blur(2px), градиент, ≤80% ширины видео",
+    styles.stroke === "2px" &&
+      styles.radius === "6px" &&
+      String(styles.blur).includes("blur(2px)") &&
+      String(styles.bg).includes("linear-gradient") &&
+      styles.plateW <= styles.videoW * 0.8 + 1,
+    `stroke=${styles.stroke} radius=${styles.radius} blur=${styles.blur} plate=${styles.plateW.toFixed(0)}/${styles.videoW.toFixed(0)}`,
+  );
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+  {
+    const shot3 = await tab.send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(path.join(OUT_DIR, "shot-overlay-3rows.png"), Buffer.from(shot3.data, "base64"));
+    check("скриншот trio-плашки сохранён (shot-overlay-3rows.png)", fs.existsSync(path.join(OUT_DIR, "shot-overlay-3rows.png")));
+  }
+
+  // (12) позиция: верх по центру с отступом 6% высоты видео (docs/03 §5)
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-style", { detail: { position: "top" } }))`);
+  const topGeom = await evalIn(
+    tab,
+    `(function () {
+       const v = document.getElementById("v").getBoundingClientRect();
+       const o = document.querySelector("[data-duopulse-subtitles] > div").getBoundingClientRect();
+       return { videoY: v.y, videoH: v.height, plateY: o.y, cx: o.x + o.width / 2, videoCX: v.x + v.width / 2 };
+     })()`,
+  );
+  const topMargin = topGeom.plateY - topGeom.videoY;
+  check(
+    "позиция top: плашка у верха видео, отступ 6% высоты, по центру",
+    topMargin >= 0.06 * topGeom.videoH - 2 && topMargin <= 0.06 * topGeom.videoH + 8 && Math.abs(topGeom.cx - topGeom.videoCX) < 4,
+    `отступ ${topMargin.toFixed(1)}px (6% = ${(0.06 * topGeom.videoH).toFixed(1)}), центр ${topGeom.cx.toFixed(0)} vs ${topGeom.videoCX.toFixed(0)}`,
+  );
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-style", { detail: { position: "bottom" } }))`);
+
+  // (13) колесо мыши над плашкой: кегль ±10% (75–300), Shift — сдвиг (docs/03 §8)
+  const baseSize = styles.sizes[0];
+  const wheeled = await evalIn(
+    tab,
+    `(function () {
+       const plate = document.querySelector("[data-duopulse-subtitles] > div");
+       const r = plate.getBoundingClientRect();
+       const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+       const el = document.elementFromPoint(cx, cy) || document.getElementById("v");
+       el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, clientX: cx, clientY: cy, bubbles: true, cancelable: true }));
+       return true;
+     })()`,
+  );
+  const afterWheel = await evalIn(
+    tab,
+    `(function () {
+       const row = document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       return { scale: window.__duopulseContent.state().style.fontScalePct, size: parseFloat(getComputedStyle(row).fontSize) };
+     })()`,
+  );
+  check(
+    "колесо над плашкой: масштаб 100→110%, кегль вырос ~на 10%",
+    wheeled === true && afterWheel.scale === 110 && afterWheel.size > baseSize * 1.08,
+    `scale=${afterWheel.scale}, ${baseSize.toFixed(1)}→${afterWheel.size.toFixed(1)}px`,
+  );
+  await evalIn(
+    tab,
+    `(function () {
+       const plate = document.querySelector("[data-duopulse-subtitles] > div");
+       const r = plate.getBoundingClientRect();
+       const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+       const el = document.elementFromPoint(cx, cy) || document.getElementById("v");
+       el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, clientX: cx, clientY: cy, bubbles: true, cancelable: true, shiftKey: true }));
+       return true;
+     })()`,
+  );
+  check(
+    "Shift+колесо: сдвиг синхронизации +100 мс (docs/03 §8)",
+    (await stateOf(tab)).engine.offsetMs === 100,
+    `offsetMs=${(await stateOf(tab)).engine.offsetMs}`,
+  );
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-offset", { detail: { offsetMs: 0 } }))`);
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-style", { detail: { fontScalePct: 100 } }))`);
+
+  // (14) без миганий: смена cue не пересоздаёт контейнер/строки, fade не мигает
+  // (идентичность узлов проверяется метками: returnByValue CDP узлы не несёт)
+  await evalIn(
+    tab,
+    `(function () {
+       const c = document.querySelector("[data-duopulse-subtitles]");
+       c.dataset.dpE2eMark = "container";
+       c.querySelector(".duopulse-subtitles-row").dataset.dpE2eMark = "row0";
+       return c.querySelector(".duopulse-subtitles-row").textContent;
+     })()`,
+  );
+  const textBefore = await overlayText(tab);
+  await seekTo(tab, 4.0); // реплика B (смежная с A, без паузы)
+  const switchState = await evalIn(
+    tab,
+    `(function () {
+       const c = document.querySelector("[data-duopulse-subtitles]");
+       const row0 = c.querySelector(".duopulse-subtitles-row");
+       return {
+         containerMarked: c.dataset.dpE2eMark === "container",
+         rowMarked: row0.dataset.dpE2eMark === "row0",
+         rowCount: c.querySelectorAll(".duopulse-subtitles-row").length,
+         opacity: getComputedStyle(c).opacity,
+         text: row0.textContent,
+       };
+     })()`,
+  );
+  check(
+    "смена смежного cue без миганий: тот же контейнер и узел строки, opacity 1",
+    switchState.containerMarked &&
+      switchState.rowMarked &&
+      switchState.opacity === "1" &&
+      textBefore.includes("реплика A") &&
+      switchState.text.includes("реплика B"),
+    `${JSON.stringify(textBefore.split("\n")[0])} → ${JSON.stringify(switchState.text)}`,
+  );
+
+  // (15) гашение нативных субтитров, пока активен наш показ (docs/03 §2)
+  await waitForPage(tab, `document.getElementById("v").textTracks.length >= 1`, 5000, "native <track> загружен");
+  await evalIn(
+    tab,
+    `(function () {
+       document.getElementById("v").textTracks[0].mode = "showing";
+       return true;
+     })()`,
+  );
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-track"))`); // пере-blank скроет включённую нативную дорожку
+  await sleep(200);
+  const nativeHidden = await evalIn(
+    tab,
+    `(function () {
+       const modes = Array.from(document.getElementById("v").textTracks).map((t) => t.mode);
+       return { modes, blanked: window.__duopulseContent.state().nativeBlanked };
+     })()`,
+  );
+  check(
+    "нативные <track>-субтитры погашены на время показа (showing → hidden)",
+    nativeHidden.blanked === true && nativeHidden.modes[0] === "hidden",
+    JSON.stringify(nativeHidden),
+  );
+  await evalIn(
+    tab,
+    `(function () {
+       window.__DUOPULSE_TEST_TRACK__ = { clear: true };
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return true;
+     })()`,
+  );
+  await sleep(200);
+  const nativeBack = await evalIn(
+    tab,
+    `(function () {
+       const modes = Array.from(document.getElementById("v").textTracks).map((t) => t.mode);
+       return { modes, blanked: window.__duopulseContent.state().nativeBlanked };
+     })()`,
+  );
+  check(
+    "выключение показа возвращает нативные субтитры (hidden → showing)",
+    nativeBack.blanked === false && nativeBack.modes[0] === "showing",
+    JSON.stringify(nativeBack),
   );
 
   tab.close();

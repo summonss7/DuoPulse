@@ -16,11 +16,15 @@
 // duopulse-select-tracks {detail:{ids:[…]}} или окно
 // __duopulseContent.selectTracks(ids) — id из tracksInfo() («yt:en»,
 // «yt:en+ru», голый код перевода — база по умолчанию). Тест-хуки 3.2
-// (duopulse-test-track/-offset) остаются для e2e-стенда не-YouTube страниц.
+// (duopulse-test-track/-offset) остаются для e2e-стенда не-YouTube страниц;
+// оверлей 3.4 добавляет duopulse-test-style {detail:{position|fontScalePct|
+// marginPct|plateOpacity}} и Shift+колесо (сдвиг).
 
 import { VideoDetector, type DetectedVideo } from "./detector";
 import { SubtitlesEngine, type ActiveRow } from "./engine/subtitles-engine";
 import { SubtitlesOverlay } from "./overlay/overlay";
+import type { SubtitleStyle } from "./overlay/style";
+import { NativeCaptionsBlanker } from "./native-captions";
 import { postToCore } from "./messaging";
 import { createCoreParser } from "./messaging/parse";
 import {
@@ -49,7 +53,10 @@ import type { Track } from "./types";
     capture,
   });
 
-  const overlay = new SubtitlesOverlay();
+  const overlay = new SubtitlesOverlay({
+    // Shift+колесо над плашкой — сдвиг синхронизации (docs/03 §8, шаг 100 мс).
+    onOffsetStep: (direction) => engine.setOffset(engine.getOffset() + direction * 100),
+  });
 
   const engine = new SubtitlesEngine({
     onRowsChange(rows: ActiveRow[]): void {
@@ -57,6 +64,16 @@ import type { Track } from "./types";
       else overlay.hide();
     },
   });
+
+  // Гашение нативных субтитров платформы, пока активен наш показ (docs/03 §2).
+  const blanker = new NativeCaptionsBlanker({ doc: document, href: () => location.href });
+
+  /** Единая точка смены набора: движок + гашение нативного показа. */
+  const applyTracks = (tracks: Track[]): void => {
+    engine.setTracks(tracks);
+    if (tracks.length > 0) blanker.blank(currentVideo?.el ?? null);
+    else blanker.restore();
+  };
 
   const parser = createCoreParser();
   let trackList: AdapterTrackList | null = null;
@@ -101,7 +118,7 @@ import type { Track } from "./types";
     const keyAtStart = currentVideo?.videoKey ?? null;
     const loaded = await adapter.loadTracks(resolved.refs, { parser });
     if (currentVideo?.videoKey !== keyAtStart) return { loaded: 0, failures, unknown: resolved.unknown };
-    engine.setTracks(loaded.tracks);
+    applyTracks(loaded.tracks);
     for (const f of loaded.failures) failures.push({ id: f.ref.id, reason: f.reason });
     return { loaded: loaded.tracks.length, failures, unknown: resolved.unknown };
   };
@@ -111,7 +128,7 @@ import type { Track } from "./types";
       const changed = currentVideo?.el !== video.el || currentVideo?.videoKey !== video.videoKey;
       currentVideo = video;
       if (changed) {
-        engine.setTracks([]); // набор дорожек привязан к видео (docs/03 §6)
+        applyTracks([]); // набор дорожек привязан к видео (docs/03 §6)
         engine.attach(video.el);
         if (adapter.matches(video.url)) onYouTubeVideo(video);
         else {
@@ -123,18 +140,33 @@ import type { Track } from "./types";
     onVideoLost(): void {
       currentVideo = null;
       engine.detach(); // плашка гасится (rows = [])
+      blanker.restore(); // нативный показ платформы возвращается (docs/03 §2)
     },
   });
 
   // Тест-хуки e2e-стенда (задача 3.2): тест-страница/CDP задаёт дорожку и сдвиг
   // напрямую — сервис-обвязка Core subtitles.* появится в задачах 3.5–3.7.
+  // __DUOPULSE_TEST_TRACK__ — дорожка, массив дорожек (набор 3.4) или {clear:true}.
   document.addEventListener("duopulse-test-track", () => {
-    const track = (window as unknown as Record<string, unknown>).__DUOPULSE_TEST_TRACK__ as Track | undefined;
-    if (track && Array.isArray(track.cues)) engine.setTracks([track]);
+    const payload = (window as unknown as Record<string, unknown>).__DUOPULSE_TEST_TRACK__;
+    if (payload === null || typeof payload !== "object") return;
+    if ("clear" in payload && (payload as { clear: unknown }).clear === true) {
+      applyTracks([]);
+      return;
+    }
+    if (Array.isArray(payload) || Array.isArray((payload as { cues?: unknown }).cues)) {
+      const tracks = (Array.isArray(payload) ? payload : [payload]) as Track[];
+      if (tracks.every((t) => Array.isArray(t.cues))) applyTracks(tracks);
+    }
   });
   document.addEventListener("duopulse-test-offset", (e) => {
     const detail = (e as CustomEvent<{ offsetMs?: number }>).detail;
     if (detail && typeof detail.offsetMs === "number") engine.setOffset(detail.offsetMs);
+  });
+  // Стиль плашки (задача 3.4): позиция/отступ/кегль/подложка — до панели 3.7.
+  document.addEventListener("duopulse-test-style", (e) => {
+    const detail = (e as CustomEvent<Partial<SubtitleStyle>>).detail;
+    if (detail && typeof detail === "object") overlay.setStyle(detail);
   });
 
   // Выбор дорожек YouTube-адаптера (до панели 3.7): событие или окно ниже.
@@ -152,12 +184,16 @@ import type { Track } from "./types";
       canTracks: boolean;
       engine: ReturnType<typeof engine.state>;
       overlayVisible: boolean;
+      style: SubtitleStyle;
+      nativeBlanked: boolean;
     } {
       return {
         videoKey: currentVideo?.videoKey ?? null,
         canTracks: (trackList?.base.length ?? 0) > 0,
         engine: engine.state(),
         overlayVisible: overlay.visible,
+        style: overlay.styleInfo(),
+        nativeBlanked: blanker.blanked,
       };
     },
     /** Список дорожек текущего видео (null — ещё не получен/не YouTube). */

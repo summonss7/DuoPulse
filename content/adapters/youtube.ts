@@ -159,6 +159,45 @@ export function isYouTubeHref(href: string): boolean {
   return videoIdFromHref(href) !== null;
 }
 
+// --- гашение нативных субтитров плеера (docs/03 §2) ---------------------------
+
+/** Класс на <html> страницы: пока активен наш показ, нативная панель
+ * субтитров плеера скрыта CSS-правилом ниже; снимается при выключении. */
+export const YT_NATIVE_CAPTIONS_CLASS = "duopulse-yt-captions-off";
+const YT_NATIVE_CAPTIONS_STYLE_ID = "duopulse-yt-captions-off-style";
+/** DOM-слой, в котором плеер рисует свои субтитры (знание YouTube — здесь). */
+const YT_NATIVE_CAPTIONS_CSS =
+  `.${YT_NATIVE_CAPTIONS_CLASS} .ytp-caption-window-container{display:none!important}`;
+
+/** Минимальный document для гашения (структурная типизация — тесты без DOM). */
+export interface DocumentLike {
+  documentElement: {
+    classList: { add(cls: string): void; remove(cls: string): void; contains(cls: string): boolean };
+    appendChild(node: unknown): unknown;
+  };
+  getElementById(id: string): unknown;
+  createElement(tag: string): { textContent: string; id: string };
+}
+
+/** Скрыть/показать нативные субтитры плеера, пока активен наш показ (docs/03
+ * §2: рендерим сами, нативные гасим). CSS, а не unloadModule(captions):
+ * переживает перезагрузку модуля плеером и не мешает добыче дорожек
+ * (программирование captions.setOption продолжает работать). */
+export function blankYouTubeCaptions(doc: DocumentLike, blank: boolean): void {
+  const list = doc.documentElement.classList;
+  if (blank) {
+    if (!doc.getElementById(YT_NATIVE_CAPTIONS_STYLE_ID)) {
+      const style = doc.createElement("style");
+      style.id = YT_NATIVE_CAPTIONS_STYLE_ID;
+      style.textContent = YT_NATIVE_CAPTIONS_CSS;
+      doc.documentElement.appendChild(style);
+    }
+    list.add(YT_NATIVE_CAPTIONS_CLASS);
+  } else {
+    list.remove(YT_NATIVE_CAPTIONS_CLASS); // правило остаётся — класс снят, CSS не активен
+  }
+}
+
 // --- URL-утилиты --------------------------------------------------------------
 
 /** Параметры query точным сравнением (lang=en не совпадает с lang=en-GB). */
