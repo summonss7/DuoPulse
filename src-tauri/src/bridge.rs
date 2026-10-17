@@ -404,6 +404,23 @@ pub struct AdblockListInfo {
 // Типы команд/событий perf.* определены в src/perf.rs рядом с их логикой;
 // здесь — реестр контракта и IPC-хендлеры (единое место IPC — этот модуль).
 
+// --- задача 3.5: субтитры — синхронизация (docs/03 §4) -----------------------
+
+/// subtitles.set_offset: сдвиг субтитров активной вкладки (±10 с, шаг 100 мс,
+/// docs/03 §4 п.3). Core доставляет значение в content-слой активной вкладки
+/// (eval диспатчит duopulse-set-offset); движок применяет сдвиг ко всему
+/// набору без перезагрузки дорожек и показывает HUD со слайдером. Активной
+/// контентной вкладки нет (или на странице нет субтитров) — no-op, не ошибка.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitlesSetOffsetParams {
+    /// Сдвиг, мс: положительный — показывать позже. Клампится в ±10 000.
+    pub offset_ms: i64,
+}
+
+/// Предел сдвига пользователя (docs/03 §4: ±10 с) — тот же, что в content-движке.
+const SUBTITLES_OFFSET_LIMIT_MS: i64 = 10_000;
+
 // ---------------------------------------------------------------------------
 // События Core → UI|Content
 // ---------------------------------------------------------------------------
@@ -608,6 +625,9 @@ pub fn contract_json() -> serde_json::Value {
                                 "result": null },
             "perf.list_runs": { "handler": "perf_list_runs", "params": null,
                                  "result": schema!(crate::perf::PerfRunListResult) },
+            "subtitles.set_offset": { "handler": "subtitles_set_offset",
+                                       "params": schema!(SubtitlesSetOffsetParams),
+                                       "result": null },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -1109,6 +1129,30 @@ fn perf_list_runs(
     })
 }
 
+/// subtitles.set_offset (задача 3.5): сдвиг субтитров активной вкладки.
+/// Доставка — eval в активный webview (как nav.*): документ диспатчит
+/// duopulse-set-offset, content-бандл применяет сдвиг движком (кламп ±10 с —
+/// и здесь, и в движке) без перезагрузки дорожек и открывает HUD (docs/03 §4).
+/// Ленивая вкладка без документа — тихо ок (применять нечего).
+#[tauri::command]
+fn subtitles_set_offset(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: SubtitlesSetOffsetParams,
+) -> Result<(), String> {
+    let offset_ms = params
+        .offset_ms
+        .clamp(-SUBTITLES_OFFSET_LIMIT_MS, SUBTITLES_OFFSET_LIMIT_MS);
+    let js = format!(
+        "document.dispatchEvent(new CustomEvent('duopulse-set-offset',{{detail:{{offsetMs:{offset_ms}}}}}))"
+    );
+    match manager.active_webview(&app) {
+        None if manager.active_is_lazy() => Ok(()),
+        None => Err("активной вкладки нет".to_string()),
+        Some(wv) => wv.eval(&js).map_err(|e| format!("eval: {e}")),
+    }
+}
+
 fn proxy_settings(cfg: &proxy::ProxyConfig, dir: &std::path::Path) -> ProxySettings {
     ProxySettings {
         enabled: cfg.enabled,
@@ -1172,6 +1216,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         perf_snapshot,
         perf_save_run,
         perf_list_runs,
+        subtitles_set_offset,
         app_restart
     ])
 }

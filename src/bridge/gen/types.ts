@@ -58,6 +58,7 @@ export interface DuoPulseBridgeContract {
   ProxyProto: ProxyProto;
   SettingsSetParams: SettingsSetParams;
   ProxyConfig: ProxyConfig;
+  SubtitlesSetOffsetParams: SubtitlesSetOffsetParams;
   TabsActivateParams: TabsActivateParams;
   TabsListResult: TabsListResult;
   TabInfo: TabInfo;
@@ -402,6 +403,15 @@ export interface ProxyConfig {
   login?: string | null;
   port?: number;
   proto?: ProxyProto & string;
+}
+/**
+ * subtitles.set_offset: сдвиг субтитров активной вкладки (±10 с, шаг 100 мс, docs/03 §4 п.3). Core доставляет значение в content-слой активной вкладки (eval диспатчит duopulse-set-offset); движок применяет сдвиг ко всему набору без перезагрузки дорожек и показывает HUD со слайдером. Активной контентной вкладки нет (или на странице нет субтитров) — no-op, не ошибка.
+ */
+export interface SubtitlesSetOffsetParams {
+  /**
+   * Сдвиг, мс: положительный — показывать позже. Клампится в ±10 000.
+   */
+  offsetMs: number;
 }
 /**
  * tabs.activate: сделать вкладку активной (клик по вкладке таб-бара).

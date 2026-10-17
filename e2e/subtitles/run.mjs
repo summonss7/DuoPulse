@@ -23,6 +23,16 @@
 //  14) смена смежного cue без миганий: контейнер и узлы строк не пересоздаются;
 //  15) гашение нативных <track>-субтитров на время показа и возврат
 //      при выключении (docs/03 §2).
+// Задача 3.5 (синхронизация, карточка duopulse-026):
+//  16) покадровая подписка rVFC активна (docs/03 §4 п.1);
+//  17) HUD сдвига: значение «+0,3 с», слайдер ±10 с/шаг 100, сброс,
+//      автоскрытие; ввод слайдера применяет offset;
+//  18) горячие клавиши Alt+[ / Alt+] — шаг ±100 мс, событие поглощается;
+//  19) IPC subtitles.set_offset сквозно: UI → Core → eval → content;
+//  20) серия быстрых seek: каждый раз ровно ожидаемая реплика, призраков нет;
+//  21) кламп offset в ±10 с;
+//  22) смена качества: смена src того же <video> и пересоздание элемента
+//      с тем же videoKey — набор дорожек не теряется, показ продолжается.
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -626,6 +636,192 @@ try {
     "выключение показа возвращает нативные субтитры (hidden → showing)",
     nativeBack.blanked === false && nativeBack.modes[0] === "showing",
     JSON.stringify(nativeBack),
+  );
+
+  // ===== задача 3.5: синхронизация — rVFC, HUD, клавиши, IPC, seek, качество ====
+
+  // Возвращаем одиночную тест-дорожку (после (11) глобал — trio-набор).
+  await evalIn(
+    tab,
+    `(function () {
+       window.__DUOPULSE_TEST_TRACK__ = {
+         id: "test:ru", source: "test", lang: "ru", role: "original", cues: [
+           { startMs: 1000, endMs: 3000, text: "Первая реплика (1,0–3,0 с)" },
+           { startMs: 3000, endMs: 5000, text: "Вторая реплика (3,0–5,0 с)" },
+           { startMs: 6000, endMs: 8000, text: "Третья: начало перекрытия" },
+           { startMs: 7000, endMs: 9500, text: "…и её перекрывающий хвост" },
+           { startMs: 12000, endMs: 15000, text: "Финальная реплика (12–15 с)" }
+         ]
+       };
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 1`, 5000, "trackCount=1 (3.5)");
+
+  // (16) покадровая подписка (docs/03 §4 п.1): WebView2/Chromium даёт rVFC —
+  // движок обязан тикать каждым кадром, а не только timeupdate (~4 Гц).
+  check(
+    "покадровая подписка rVFC активна на привязанном видео",
+    (await stateOf(tab)).engine.frameCallback === true,
+    `frameCallback=${(await stateOf(tab)).engine.frameCallback}`,
+  );
+
+  // (17) HUD сдвига: событие Core duopulse-set-offset применяет offset и
+  // открывает HUD со слайдером (docs/03 §4 п.3, §8).
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-set-offset", { detail: { offsetMs: 300 } }))`);
+  const hud = await evalIn(
+    tab,
+    `(function () {
+       const root = document.querySelector("[data-duopulse-offset-hud]");
+       if (!root) return null;
+       const slider = root.querySelector("input[type=range]");
+       return { opacity: getComputedStyle(root).opacity, text: root.innerText,
+                value: slider.value, min: slider.min, max: slider.max, step: slider.step };
+     })()`,
+  );
+  check(
+    "HUD сдвига: «+0,3 с», слайдер ±10 с с шагом 100 мс",
+    hud !== null &&
+      hud.opacity === "1" &&
+      hud.text.includes("+0,3 с") &&
+      hud.value === "300" &&
+      hud.min === "-10000" &&
+      hud.max === "10000" &&
+      hud.step === "100",
+    JSON.stringify(hud),
+  );
+  // ввод слайдера применяет offset (без перезагрузки дорожек)
+  await evalIn(
+    tab,
+    `(function () {
+       const slider = document.querySelector("[data-duopulse-offset-hud] input[type=range]");
+       slider.value = "700";
+       slider.dispatchEvent(new Event("input", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  check(
+    "ввод слайдера HUD применяет offset (700 мс), набор дорожек жив",
+    (await stateOf(tab)).engine.offsetMs === 700 && (await stateOf(tab)).engine.trackCount === 1,
+    `offsetMs=${(await stateOf(tab)).engine.offsetMs}`,
+  );
+  await evalIn(tab, `document.querySelector("[data-duopulse-offset-hud] button").click()`);
+  check("кнопка «Сброс» возвращает 0", (await stateOf(tab)).engine.offsetMs === 0);
+  await sleep(2600); // автоскрытие HUD (2,4 с простоя)
+  check("HUD автоскрывается после простоя", (await stateOf(tab)).offsetHudVisible === false);
+
+  // (18) горячие клавиши Alt+[ / Alt+] (docs/03 §8): шаг 100 мс, keydown
+  // поглощается (dispatchEvent возвращает false при preventDefault).
+  const keyOk = await evalIn(
+    tab,
+    `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "BracketRight", cancelable: true }))`,
+  );
+  check(
+    "Alt+] — сдвиг на +100 мс позже, событие поглощено",
+    keyOk === false && (await stateOf(tab)).engine.offsetMs === 100,
+    `dispatchEvent=${keyOk}, offsetMs=${(await stateOf(tab)).engine.offsetMs}`,
+  );
+  await evalIn(
+    tab,
+    `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "BracketLeft", cancelable: true }))`,
+  );
+  check("Alt+[ — сдвиг на 100 мс раньше", (await stateOf(tab)).engine.offsetMs === 0);
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-set-offset", { detail: { offsetMs: 0 } }))`);
+  await sleep(2600);
+
+  // (19) IPC subtitles.set_offset сквозно: UI-хук → tauri IPC → Core →
+  // eval активной вкладки → duopulse-set-offset → движок + HUD.
+  const uiTarget = targets.find((t) => t.type === "page" && /localhost:5173/.test(t.url));
+  if (!uiTarget) throw new Error("UI-цель CDP не найдена (нужен vite dev): " + targets.map((t) => t.url).join(", "));
+  const ui = connect(uiTarget.webSocketDebuggerUrl);
+  await waitForPage(ui, `typeof window.__duopulse === "object"`, 10000, "bridge-хук window.__duopulse");
+  await evalIn(ui, `window.__duopulse.subtitles.setOffset({ offsetMs: 500 })`);
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.offsetMs === 500`, 5000, "offset 500 через IPC");
+  check(
+    "IPC subtitles.set_offset: UI → Core → активная вкладка (offset 500, HUD открыт)",
+    (await stateOf(tab)).engine.offsetMs === 500 && (await stateOf(tab)).offsetHudVisible === true,
+    `offsetMs=${(await stateOf(tab)).engine.offsetMs}`,
+  );
+  ui.close();
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-set-offset", { detail: { offsetMs: 0 } }))`);
+  await sleep(2600);
+
+  // (20) seek-устойчивость: серия быстрых скачков — после каждого ровно
+  // ожидаемая реплика (или пусто), призраков прошлых cue нет (DoD 3.5).
+  const seekSeries = [
+    [2.0, "Первая реплика"],
+    [13.0, "Финальная реплика"],
+    [7.5, "перекрывающий хвост"], // смёрженное перекрытие — обе строки
+    [4.0, "Вторая реплика"],
+    [14.96, null], // хвост финальной: остаток 40 мс < 150 — не показывать
+    [10.5, null], // пауза между cue
+  ];
+  for (const [t, expected] of seekSeries) {
+    await seekTo(tab, t);
+    const text = await overlayText(tab);
+    const ok = expected ? text.includes(expected) : (await stateOf(tab)).engine.activeRows.length === 0;
+    check(`seek → t=${t.toFixed(2)} с: ${expected ? JSON.stringify(expected) : "пусто"}`, ok, JSON.stringify(text));
+  }
+
+  // (21) кламп offset в ±10 с (docs/03 §4)
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-set-offset", { detail: { offsetMs: 999999 } }))`);
+  check("кламп: 999 999 мс → +10 000", (await stateOf(tab)).engine.offsetMs === 10000);
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-set-offset", { detail: { offsetMs: -999999 } }))`);
+  check("кламп: −999 999 мс → −10 000", (await stateOf(tab)).engine.offsetMs === -10000);
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-set-offset", { detail: { offsetMs: 0 } }))`);
+  await sleep(2600);
+
+  // (22) смена качества (docs/03 §4: смена качества не рассинхронизирует
+  // показ). Кейс A: тот же <video>, новый поток (src) — таймлайн тот же,
+  // набор и привязка движка живут, показ продолжается.
+  await evalIn(
+    tab,
+    `(async function () {
+       const v = document.getElementById("v");
+       v.src = "/assets/testsrc.mp4";
+       await new Promise((res) => { const d = () => { v.removeEventListener("canplay", d); res(); }; v.addEventListener("canplay", d); });
+       return true;
+     })()`,
+  );
+  await seekTo(tab, 2.0);
+  const sQuality = await stateOf(tab);
+  check(
+    "смена качества (новый src того же <video>): набор жив, cue по времени",
+    sQuality.engine.trackCount === 1 && sQuality.engine.attached === true && (await overlayText(tab)).includes("Первая реплика"),
+    `trackCount=${sQuality.engine.trackCount}, text=${JSON.stringify(await overlayText(tab))}`,
+  );
+
+  // Кейс B: плеер пересоздаёт <video> (тем же ключом videoKey) — набор
+  // применяется из памяти, без повторного выбора дорожек.
+  await evalIn(tab, `document.getElementById("v").remove()`);
+  await waitForPage(tab, `window.__duopulseContent?.state().videoKey === null`, 5000, "videoKey=null после удаления");
+  await evalIn(
+    tab,
+    `(function () {
+       const v = document.createElement("video");
+       v.id = "v"; v.muted = true; v.controls = true; v.preload = "auto";
+       v.src = "/assets/testsrc.mp4";
+       document.body.appendChild(v);
+       return true;
+     })()`,
+  );
+  await waitForPage(
+    tab,
+    `(function () {
+       const s = window.__duopulseContent?.state();
+       return s && typeof s.videoKey === "string" && s.videoKey.endsWith(":30") && s.engine.trackCount === 1 ? true : null;
+     })()`,
+    8000,
+    "набор пережил пересоздание <video> (тот же videoKey)",
+  );
+  await waitForPage(tab, `document.getElementById("v")?.readyState >= 1`, 10000, "метаданные нового видео");
+  await seekTo(tab, 2.0);
+  const sRecreated = await stateOf(tab);
+  check(
+    "пересоздание <video> с тем же videoKey: набор восстановлен без повторного выбора, cue в такт",
+    sRecreated.engine.trackCount === 1 && (await overlayText(tab)).includes("Первая реплика"),
+    `trackCount=${sRecreated.engine.trackCount}, videoKey=${sRecreated.videoKey}`,
   );
 
   tab.close();

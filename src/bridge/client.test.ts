@@ -81,6 +81,7 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     params: { label: "срез", metrics: { p01_ms: 402, p03_mb: 48 } },
   },
   "perf.list_runs": { path: ["perf", "listRuns"] },
+  "subtitles.set_offset": { path: ["subtitles", "setOffset"], params: { offsetMs: 300 } },
   "app.restart": { path: ["app", "restart"] },
 };
 

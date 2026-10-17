@@ -1,9 +1,9 @@
 {
- "at": "2026-10-17T00:49:22.830Z",
+ "at": "2026-10-17T01:23:58.187Z",
  "videos": [
   {
    "videoId": "iG9CE55wbtY",
-   "baseLang": "65 баз / 156 перев. (путь player-api; плеер ad=true state=-1 paused=false t=0)",
+   "baseLang": "65 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0)",
    "set": "yt:af(af) + yt:af+ru + yt:af+es",
    "cues": [
     "yt:af:417",
@@ -15,7 +15,7 @@
   },
   {
    "videoId": "dQw4w9WgXcQ",
-   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.158982)",
+   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.121965)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:61",
@@ -27,7 +27,7 @@
   },
   {
    "videoId": "jNQXAC9IVRw",
-   "baseLang": "2 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.146)",
+   "baseLang": "2 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.011664)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:6",
@@ -39,7 +39,7 @@
   },
   {
    "videoId": "9bZkp7q19f0",
-   "baseLang": "1 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.144031)",
+   "baseLang": "1 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.037145)",
    "set": "yt:ko:asr(ko) + yt:ko:asr+ru + yt:ko:asr+es",
    "cues": [
     "yt:ko:asr:67",
@@ -51,7 +51,7 @@
   },
   {
    "videoId": "kJQP7kiw5Fk",
-   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.01139)",
+   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.017415)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:90",
@@ -63,63 +63,78 @@
   },
   {
    "videoId": "JGwWNGJdvx8",
-   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.017758)",
+   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.018136)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
-    "yt:en:92",
-    "yt:en+ru:91",
-    "yt:en+es:92"
+    "yt:en:92"
    ],
    "overlay": true,
-   "notes": []
+   "notes": [
+    "отказ yt:en+ru: HTTP 429",
+    "отказ yt:en+es: HTTP 429",
+    "сеть timedtext: 8 → v=JGwWNGJdvx8&lang=en | v=JGwWNGJdvx8&lang=en | v=JGwWNGJdvx8&lang=en&tlang=ru | v=JGwWNGJdvx8&lang=en&tlang=es",
+    "буфер хука: [\"1103Б v=JGwWNGJdvx8&lang=en&tlang=ru\",\"1103Б v=JGwWNGJdvx8&lang=en&tlang=es\",\"1103Б v=JGwWNGJdvx8&lang=en&tlang=ru\",\"1103Б v=JGwWNGJdvx8&lang=en&tlang=es\",\"1103Б v=JGwWNGJdvx8&lang=en&tlang=ru\",\"1103Б v=JGwWNGJdvx8&lang=en&tlang=es\"]"
+   ]
   },
   {
    "videoId": "fJ9rUzIMcZQ",
-   "baseLang": "18 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.019343)",
+   "baseLang": "18 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.018893)",
    "set": "yt:ar(ar) + yt:ar+ru + yt:ar+es",
    "cues": [
-    "yt:ar:65",
-    "yt:ar+ru:65",
-    "yt:ar+es:65"
+    "yt:ar:65"
    ],
    "overlay": true,
-   "notes": []
+   "notes": [
+    "отказ yt:ar+ru: HTTP 429",
+    "отказ yt:ar+es: HTTP 429",
+    "сеть timedtext: 7 → v=fJ9rUzIMcZQ&lang=ar | v=fJ9rUzIMcZQ&lang=ar&tlang=ru | v=fJ9rUzIMcZQ&lang=ar&tlang=es | v=fJ9rUzIMcZQ&lang=ar&tlang=ru",
+    "буфер хука: [\"1103Б v=fJ9rUzIMcZQ&lang=ar&tlang=ru\",\"1103Б v=fJ9rUzIMcZQ&lang=ar&tlang=es\",\"1103Б v=fJ9rUzIMcZQ&lang=ar&tlang=ru\",\"1103Б v=fJ9rUzIMcZQ&lang=ar&tlang=es\",\"1103Б v=fJ9rUzIMcZQ&lang=ar&tlang=ru\",\"1103Б v=fJ9rUzIMcZQ&lang=ar&tlang=es\"]"
+   ]
   },
   {
    "videoId": "hT_nvWreIhg",
-   "baseLang": "1 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.014547)",
+   "baseLang": "1 баз / 156 перев. (путь player-api; плеер ad=true state=-1 paused=false t=90.067055)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
-   "cues": [
-    "yt:en:83",
-    "yt:en+ru:83",
-    "yt:en+es:83"
-   ],
-   "overlay": true,
-   "notes": []
+   "cues": [],
+   "overlay": false,
+   "notes": [
+    "отказ yt:en: плеер не отдал дорожку (таймаут)",
+    "отказ yt:en+ru: базовая дорожка не получена",
+    "отказ yt:en+es: базовая дорожка не получена",
+    "сеть timedtext: 0 → ",
+    "буфер хука: []",
+    "не дождались: плашка с cue"
+   ]
   },
   {
    "videoId": "kXYiU_JCYtU",
-   "baseLang": "11 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.016781)",
+   "baseLang": "11 баз / 156 перев. (путь player-api; плеер ad=false state=-1 paused=false t=0)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
-    "yt:en:35",
-    "yt:en+ru:35",
-    "yt:en+es:35"
+    "yt:en:35"
    ],
    "overlay": true,
-   "notes": []
+   "notes": [
+    "отказ yt:en+es: HTTP 429",
+    "отказ yt:en+ru: HTTP 429",
+    "сеть timedtext: 7 → v=kXYiU_JCYtU&lang=en | v=kXYiU_JCYtU&lang=en&tlang=ru | v=kXYiU_JCYtU&lang=en&tlang=es | v=kXYiU_JCYtU&lang=en&tlang=es",
+    "буфер хука: [\"1103Б v=kXYiU_JCYtU&lang=en&tlang=es\",\"1103Б v=kXYiU_JCYtU&lang=en&tlang=ru\",\"1103Б v=kXYiU_JCYtU&lang=en&tlang=es\",\"1103Б v=kXYiU_JCYtU&lang=en&tlang=ru\",\"1103Б v=kXYiU_JCYtU&lang=en&tlang=es\",\"1103Б v=kXYiU_JCYtU&lang=en&tlang=ru\"]"
+   ]
   },
   {
    "videoId": "YQHsXMglC9A",
-   "baseLang": "2 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.003426)",
+   "baseLang": "2 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.071033)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
-    "yt:en:74",
-    "yt:en+ru:64",
-    "yt:en+es:74"
+    "yt:en:74"
    ],
    "overlay": true,
-   "notes": []
+   "notes": [
+    "отказ yt:en+es: HTTP 429",
+    "отказ yt:en+ru: HTTP 429",
+    "сеть timedtext: 8 → v=YQHsXMglC9A&lang=en | v=YQHsXMglC9A&lang=en | v=YQHsXMglC9A&lang=en&tlang=ru | v=YQHsXMglC9A&lang=en&tlang=es",
+    "буфер хука: [\"1103Б v=YQHsXMglC9A&lang=en&tlang=ru\",\"1103Б v=YQHsXMglC9A&lang=en&tlang=es\",\"1103Б v=YQHsXMglC9A&lang=en&tlang=ru\",\"1103Б v=YQHsXMglC9A&lang=en&tlang=es\",\"1103Б v=YQHsXMglC9A&lang=en&tlang=es\",\"1103Б v=YQHsXMglC9A&lang=en&tlang=ru\"]"
+   ]
   }
  ]
 }

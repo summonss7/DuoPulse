@@ -19,11 +19,20 @@
 // (duopulse-test-track/-offset) остаются для e2e-стенда не-YouTube страниц;
 // оверлей 3.4 добавляет duopulse-test-style {detail:{position|fontScalePct|
 // marginPct|plateOpacity}} и Shift+колесо (сдвиг).
+//
+// Синхронизация (задача 3.5, docs/03 §4 п.3, §8): сдвиг ±10 с шагом 100 мс —
+// Shift+колесо по плашке, горячие клавиши Alt+[ (раньше) / Alt+] (позже),
+// команда Core subtitles.set_offset (eval активной вкладки диспатчит
+// duopulse-set-offset {detail:{offsetMs}}); каждое изменение применяет
+// движок без перезагрузки дорожек и показывает HUD со слайдером. Набор
+// дорожек привязан к videoKey: пересоздание <video> с тем же ключом (смена
+// качества у ряда плееров) набор не теряет — реплика не пропадает.
 
 import { VideoDetector, type DetectedVideo } from "./detector";
 import { SubtitlesEngine, type ActiveRow } from "./engine/subtitles-engine";
 import { SubtitlesOverlay } from "./overlay/overlay";
 import type { SubtitleStyle } from "./overlay/style";
+import { OffsetHud, stepOffset } from "./overlay/hud";
 import { NativeCaptionsBlanker } from "./native-captions";
 import { postToCore } from "./messaging";
 import { createCoreParser } from "./messaging/parse";
@@ -53,11 +62,6 @@ import type { Track } from "./types";
     capture,
   });
 
-  const overlay = new SubtitlesOverlay({
-    // Shift+колесо над плашкой — сдвиг синхронизации (docs/03 §8, шаг 100 мс).
-    onOffsetStep: (direction) => engine.setOffset(engine.getOffset() + direction * 100),
-  });
-
   const engine = new SubtitlesEngine({
     onRowsChange(rows: ActiveRow[]): void {
       if (rows.length > 0 && currentVideo) overlay.show(rows, currentVideo.el);
@@ -65,14 +69,53 @@ import type { Track } from "./types";
     },
   });
 
+  const overlay = new SubtitlesOverlay({
+    // Shift+колесо над плашкой — шаг сдвига синхронизации (docs/03 §8, 100 мс).
+    onOffsetStep: (direction) => stepOffsetBy(direction),
+  });
+
+  /** HUD синхронизации (задача 3.5): слайдер ±10 с/шаг 100 + индикация. */
+  const hud = new OffsetHud({
+    onSet: (offsetMs) => setOffset(offsetMs),
+  });
+
+  /** Единая точка применения сдвига (docs/03 §4: ко всему набору, без
+   * перезагрузки дорожек): любой источник — клавиши, колесо, слайдер, IPC. */
+  const setOffset = (offsetMs: number): void => {
+    engine.setOffset(offsetMs);
+    if (currentVideo) {
+      // HUD — на свободном краю видео (противоположном плашке субтитров).
+      const side = overlay.styleInfo().position === "top" ? "bottom" : "top";
+      hud.show(engine.getOffset(), currentVideo.el, side);
+    }
+  };
+
+  const stepOffsetBy = (direction: number): void => {
+    if (engine.state().trackCount === 0) return;
+    setOffset(stepOffset(engine.getOffset(), direction));
+  };
+
   // Гашение нативных субтитров платформы, пока активен наш показ (docs/03 §2).
   const blanker = new NativeCaptionsBlanker({ doc: document, href: () => location.href });
+
+  /** Набор текущего видео (переживает пересоздание <video> с тем же ключом —
+   * смена качества: таймлайн тот же, дорожки те же, docs/03 §4). Помним
+   * последний применённый набор: детект нового элемента приходит до
+   * loadedmetadata (ключ без длительности), уточнённый ключ — следом. */
+  let tracksFor: { key: string; tracks: Track[] } | null = null;
 
   /** Единая точка смены набора: движок + гашение нативного показа. */
   const applyTracks = (tracks: Track[]): void => {
     engine.setTracks(tracks);
     if (tracks.length > 0) blanker.blank(currentVideo?.el ?? null);
     else blanker.restore();
+  };
+
+  /** Запомнить набор за текущим видео (пустой — забыть). */
+  const storeTracks = (tracks: Track[]): void => {
+    tracksFor = tracks.length > 0 && currentVideo
+      ? { key: currentVideo.videoKey, tracks }
+      : null;
   };
 
   const parser = createCoreParser();
@@ -119,16 +162,30 @@ import type { Track } from "./types";
     const loaded = await adapter.loadTracks(resolved.refs, { parser });
     if (currentVideo?.videoKey !== keyAtStart) return { loaded: 0, failures, unknown: resolved.unknown };
     applyTracks(loaded.tracks);
+    storeTracks(loaded.tracks);
     for (const f of loaded.failures) failures.push({ id: f.ref.id, reason: f.reason });
     return { loaded: loaded.tracks.length, failures, unknown: resolved.unknown };
   };
 
+  let lastAppliedVideoKey: string | null = null;
   const detector = new VideoDetector({
     onVideo(video: DetectedVideo): void {
-      const changed = currentVideo?.el !== video.el || currentVideo?.videoKey !== video.videoKey;
+      // Детектор уточняет ключ того же объекта (loadedmetadata/SPA) и
+      // переэмитит его — сравнение currentVideo.videoKey с video.videoKey
+      // здесь всегда «равно» (одна ссылка), поэтому помним ключ последней
+      // обработки сами: смена ключа = смена видео (docs/03 §6).
+      const changed =
+        currentVideo?.el !== video.el || lastAppliedVideoKey !== video.videoKey;
+      lastAppliedVideoKey = video.videoKey;
       currentVideo = video;
       if (changed) {
-        applyTracks([]); // набор дорожек привязан к видео (docs/03 §6)
+        // Набор привязан к videoKey (docs/03 §6). Новый <video> с тем же
+        // ключом (смена качества у плееров, пересоздающих элемент; ключ
+        // уточняется по loadedmetadata) — применяем запомненный набор без
+        // перезагрузки (3.5); чужой ключ — чистим показ, набор-память живёт
+        // для возврата к тому же видео.
+        if (tracksFor && tracksFor.key === video.videoKey) applyTracks(tracksFor.tracks);
+        else applyTracks([]);
         engine.attach(video.el);
         if (adapter.matches(video.url)) onYouTubeVideo(video);
         else {
@@ -141,6 +198,7 @@ import type { Track } from "./types";
       currentVideo = null;
       engine.detach(); // плашка гасится (rows = [])
       blanker.restore(); // нативный показ платформы возвращается (docs/03 §2)
+      hud.hide();
     },
   });
 
@@ -152,17 +210,44 @@ import type { Track } from "./types";
     if (payload === null || typeof payload !== "object") return;
     if ("clear" in payload && (payload as { clear: unknown }).clear === true) {
       applyTracks([]);
+      storeTracks([]);
       return;
     }
     if (Array.isArray(payload) || Array.isArray((payload as { cues?: unknown }).cues)) {
       const tracks = (Array.isArray(payload) ? payload : [payload]) as Track[];
-      if (tracks.every((t) => Array.isArray(t.cues))) applyTracks(tracks);
+      if (tracks.every((t) => Array.isArray(t.cues))) {
+        applyTracks(tracks);
+        storeTracks(tracks);
+      }
     }
   });
   document.addEventListener("duopulse-test-offset", (e) => {
     const detail = (e as CustomEvent<{ offsetMs?: number }>).detail;
-    if (detail && typeof detail.offsetMs === "number") engine.setOffset(detail.offsetMs);
+    if (detail && typeof detail.offsetMs === "number") setOffset(detail.offsetMs);
   });
+  // Команда Core subtitles.set_offset (задача 3.5): bridge-хендлер исполняет
+  // этот диспатч в активной вкладке (eval) — применение без перезагрузки
+  // дорожек, кламп ±10 с в движке.
+  document.addEventListener("duopulse-set-offset", (e) => {
+    const detail = (e as CustomEvent<{ offsetMs?: number }>).detail;
+    if (detail && typeof detail.offsetMs === "number") setOffset(detail.offsetMs);
+  });
+
+  // Горячие клавиши сдвига (задача 3.5, docs/03 §8): Alt+[ — раньше,
+  // Alt+] — позже, шаг 100 мс (docs/03 §4). Действуют при активном наборе
+  // субтитров; странице событие не отдаём. e.code — независимо от раскладки.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.code !== "BracketLeft" && e.code !== "BracketRight") return;
+      if (engine.state().trackCount === 0) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      stepOffsetBy(e.code === "BracketRight" ? 1 : -1);
+    },
+    true,
+  );
   // Стиль плашки (задача 3.4): позиция/отступ/кегль/подложка — до панели 3.7.
   document.addEventListener("duopulse-test-style", (e) => {
     const detail = (e as CustomEvent<Partial<SubtitleStyle>>).detail;
@@ -186,6 +271,7 @@ import type { Track } from "./types";
       overlayVisible: boolean;
       style: SubtitleStyle;
       nativeBlanked: boolean;
+      offsetHudVisible: boolean;
     } {
       return {
         videoKey: currentVideo?.videoKey ?? null,
@@ -194,6 +280,7 @@ import type { Track } from "./types";
         overlayVisible: overlay.visible,
         style: overlay.styleInfo(),
         nativeBlanked: blanker.blanked,
+        offsetHudVisible: hud.visible,
       };
     },
     /** Список дорожек текущего видео (null — ещё не получен/не YouTube). */

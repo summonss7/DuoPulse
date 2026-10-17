@@ -27,6 +27,45 @@ function fakeVideo(): VideoLike & { fire(type: string): void } {
   };
 }
 
+/** Видео с покадровым колбэком (docs/03 §4 п.1): runFrames(n) исполняет n
+ * запланированных кадров (движок перепланирует следующий в каждом). */
+function frameVideo(): VideoLike & {
+  canceled: number;
+  framesWaiting(): number;
+  runFrames(count: number): void;
+} {
+  const listeners = new Map<string, Array<() => void>>();
+  let scheduled: Array<() => void> = [];
+  let canceled = 0;
+  return {
+    currentTime: 0,
+    addEventListener(type: string, listener: () => void) {
+      listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+    },
+    removeEventListener(type: string, listener: () => void) {
+      listeners.set(type, (listeners.get(type) ?? []).filter((l) => l !== listener));
+    },
+    requestVideoFrameCallback(cb: () => void): number {
+      scheduled.push(cb);
+      return scheduled.length;
+    },
+    cancelVideoFrameCallback(): void {
+      canceled += scheduled.length;
+      scheduled = [];
+    },
+    get canceled() {
+      return canceled;
+    },
+    framesWaiting: () => scheduled.length,
+    runFrames(count: number): void {
+      for (let i = 0; i < count && scheduled.length > 0; i++) {
+        const cb = scheduled.shift()!;
+        cb(); // движок тикает и перепланирует следующий кадр
+      }
+    },
+  };
+}
+
 const track = (cues: Array<[number, number, string]>): Track => ({
   id: "test:ru",
   source: "test",
@@ -223,6 +262,76 @@ describe("SubtitlesEngine — offset (docs/03 §4: применяется к н�
 
     engine.setOffset(2000); // теперь эффективное время -0.8 с — реплика ещё не началась
     expect(shown()).toEqual([]);
+  });
+});
+
+describe("SubtitlesEngine — покадровая точность rVFC (задача 3.5, docs/03 §4 п.1)", () => {
+  it("кадры видео тикают движком: cue появляется по rVFC без timeupdate", () => {
+    const { engine, shown } = harness([[1000, 3000, "Первая"]]);
+    const video = frameVideo();
+    engine.attach(video);
+
+    video.currentTime = 2.0;
+    video.runFrames(1); // кадр отрисован — timeupdate не приходит
+    expect(shown()).toEqual([{ trackId: "test:ru", text: "Первая" }]);
+
+    video.currentTime = 3.5;
+    video.runFrames(1);
+    expect(shown()).toEqual([]);
+  });
+
+  it("перерисовка только при смене набора: поток кадров не спамит эмитами", () => {
+    const { engine, onRowsChange } = harness([[1000, 30000, "Длинная"]]);
+    const video = frameVideo();
+    engine.attach(video);
+    onRowsChange.mockClear();
+
+    for (let t = 1.0; t <= 3.0; t += 0.1) {
+      video.currentTime = t;
+      video.runFrames(1);
+    }
+    expect(onRowsChange).toHaveBeenCalledTimes(1); // только активация реплики
+  });
+
+  it("detach останавливает кадровой цикл: кадры прошлого видео не тикают", () => {
+    const { engine, shown } = harness([[1000, 30000, "Длинная"]]);
+    const video = frameVideo();
+    engine.attach(video);
+    video.currentTime = 2.0;
+    video.runFrames(1);
+    expect(shown()).toEqual([{ trackId: "test:ru", text: "Длинная" }]);
+
+    engine.detach();
+    expect(video.canceled).toBe(1); // ожидающий кадр снят с планирования
+    const waiting = video.framesWaiting();
+    video.currentTime = 4.0;
+    video.runFrames(10);
+    expect(video.framesWaiting()).toBe(waiting);
+    expect(shown()).toEqual([]);
+  });
+
+  it("резкий seek между кадрами распознаётся по |Δt| > 250 мс — призраков нет", () => {
+    const { engine, shown } = harness([[1000, 3000, "A"], [12000, 15000, "D"]]);
+    const video = frameVideo();
+    engine.attach(video);
+
+    video.currentTime = 13.0;
+    video.runFrames(1);
+    expect(shown()).toEqual([{ trackId: "test:ru", text: "D" }]);
+
+    video.currentTime = 2.9; // Δ ≈ 10 с назад, остаток cue A — 100 мс < 150
+    video.runFrames(1);
+    expect(shown()).toEqual([]); // подавлено правилом 150 мс, без вспышки
+  });
+
+  it("state().frameCallback — есть ли покадровая подписка (диагностика)", () => {
+    const { engine } = harness([[0, 1000, "x"]]);
+    expect(engine.state().frameCallback).toBe(false); // видео ещё не привязано
+    const video = frameVideo();
+    engine.attach(video);
+    expect(engine.state().frameCallback).toBe(true);
+    engine.detach();
+    expect(engine.state().frameCallback).toBe(false);
   });
 });
 

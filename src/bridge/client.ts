@@ -30,6 +30,7 @@ import type {
   ProxySettings,
   SettingsGetParams,
   SettingsSetParams,
+  SubtitlesSetOffsetParams,
   TabsActivateParams,
   TabsCloseParams,
   TabsListResult,
@@ -124,6 +125,11 @@ export const bridge = {
     saveRun: (params: PerfSaveRunParams) => invoke<void>("perf_save_run", { params }),
     /** perf.list_runs: прогоны истории для графика, новые → старые. */
     listRuns: () => invoke<PerfRunListResult>("perf_list_runs"),
+  },
+  subtitles: {
+    /** subtitles.set_offset: сдвиг субтитров активной вкладки (±10 с, шаг 100 мс,
+     *  docs/03 §4) — применяется без перезагрузки дорожек. */
+    setOffset: (params: SubtitlesSetOffsetParams) => invoke<void>("subtitles_set_offset", { params }),
   },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */

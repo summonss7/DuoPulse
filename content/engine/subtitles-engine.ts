@@ -2,7 +2,8 @@
 // video.currentTime (единственный источник правды: смена качества/скорости
 // не рассинхронизируют показ, собственного таймера нет). Подписки — timeupdate
 // (непрерывное воспроизведение, ~4 Гц) и seeked (скачок по таймлайну);
-// покадровая точность (requestVideoFrameCallback) — задача 3.5.
+// покадровая точность — requestVideoFrameCallback, если доступен (задача 3.5,
+// docs/03 §4 п.1: кадр отрисован — время пересчитано в том же тике).
 //
 // Скачок отличается от непрерывного показа (docs/03 §4): cue, в котором при
 // скачке осталось < 150 мс, не показывается («пропущенные» реплики не мигают);
@@ -47,6 +48,9 @@ export interface VideoLike {
   currentTime: number;
   addEventListener(type: string, listener: () => void): void;
   removeEventListener(type: string, listener: () => void): void;
+  /** Покадровый колбэк (docs/03 §4 п.1); отсутствует — движок живёт на timeupdate. */
+  requestVideoFrameCallback?(callback: () => void): number;
+  cancelVideoFrameCallback?(handle: number): void;
 }
 
 export class SubtitlesEngine {
@@ -56,6 +60,10 @@ export class SubtitlesEngine {
   private offsetMs = 0;
   private rows: ActiveRow[] = [];
   private lastTimeMs: number | null = null;
+  /** Поколение кадровой подписки: detach инвалидирует запланированные кадры. */
+  private frameGen = 0;
+  /** Хендл запланированного кадра (снимается при detach). */
+  private frameHandle: number | null = null;
 
   constructor(events: SubtitlesEngineEvents) {
     this.events = events;
@@ -77,7 +85,8 @@ export class SubtitlesEngine {
     return this.offsetMs;
   }
 
-  /** Привязать часы: подписки на timeupdate/seeked + немедленный пересчёт. */
+  /** Привязать часы: подписки на timeupdate/seeked + покадровый цикл rVFC
+   * (если доступен) + немедленный пересчёт. */
   attach(video: VideoLike): void {
     if (this.video === video) return;
     this.detach();
@@ -85,16 +94,40 @@ export class SubtitlesEngine {
     this.lastTimeMs = null;
     video.addEventListener("timeupdate", this.onTimeUpdate);
     video.addEventListener("seeked", this.onSeeked);
+    this.startFrameLoop();
     this.tick(true);
   }
 
   detach(): void {
     if (!this.video) return;
+    this.frameGen++; // запланированные кадры прошлого видео не тикают
+    if (this.frameHandle !== null) {
+      this.video.cancelVideoFrameCallback?.(this.frameHandle);
+      this.frameHandle = null;
+    }
     this.video.removeEventListener("timeupdate", this.onTimeUpdate);
     this.video.removeEventListener("seeked", this.onSeeked);
     this.video = null;
     this.lastTimeMs = null;
     this.setRows([]);
+  }
+
+  /** Покадровый цикл (docs/03 §4 п.1): каждый отрисованный кадр → пересчёт
+   * активных строк. Колбэк разовый — перепланируем сам себя, пока видео
+   * привязано; время читается из video.currentTime (не из меты кадра). */
+  private startFrameLoop(): void {
+    const video = this.video;
+    if (!video?.requestVideoFrameCallback) return;
+    const gen = ++this.frameGen;
+    const onFrame = (): void => {
+      if (gen !== this.frameGen || this.video !== video) return;
+      this.frameHandle = null;
+      this.tick();
+      if (video.requestVideoFrameCallback) {
+        this.frameHandle = video.requestVideoFrameCallback(onFrame);
+      }
+    };
+    this.frameHandle = video.requestVideoFrameCallback(onFrame);
   }
 
   private readonly onTimeUpdate = (): void => {
@@ -146,6 +179,8 @@ export class SubtitlesEngine {
     offsetMs: number;
     activeRows: ActiveRow[];
     attached: boolean;
+    /** Покадровая подписка активна (rVFC доступен и видео привязано). */
+    frameCallback: boolean;
     tracks: { id: string; lang: string; cues: number }[];
   } {
     return {
@@ -153,6 +188,7 @@ export class SubtitlesEngine {
       offsetMs: this.offsetMs,
       activeRows: this.rows,
       attached: this.video !== null,
+      frameCallback: this.video?.requestVideoFrameCallback !== undefined,
       tracks: this.tracks.map((b) => ({
         id: b.track.id,
         lang: b.track.lang,
