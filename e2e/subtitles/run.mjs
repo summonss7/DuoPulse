@@ -60,6 +60,13 @@
 //  39) subtitles.set_tracks fast-path: перестановка без перезагрузки;
 //  40) панельные контроли: слайдер сдвига = offset, размер/позиция — стиль;
 //  41) журнал событий subtitles:set_applied (dev-хук __duopulseSubtitlesEvents).
+// Полировка 046 (авто-уменьшение кегля при переполнении, M5; docs/03 §5):
+//  42) короткий trio-набор: кегль не тронут — авто-подгон не срабатывает;
+//  43) три длинных многострочных cue: плашка ≤ 50% высоты видео, кегль
+//      авто-уменьшен, ручной масштаб (100%) не изменился; скриншот;
+//  44) возврат к коротким cue: кегль восстанавливается до базового;
+//  45) колесо-размер поверх авто-подгона: масштаб учтён (110%), доля
+//      держится; ручное 75% — заметно ниже авто-подгона.
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -1276,7 +1283,156 @@ try {
     JSON.stringify(evLog.slice(-8)),
   );
 
+  // ===== полировка 046: авто-уменьшение кегля плашки при переполнении =====
+  // Возврат на главную тест-страницу (видео 640px): короткий trio — кегль
+  // не тронут; три длинных многострочных cue — плашка ≤ 50% высоты видео
+  // (docs/03 §5, PLATE_MAX_SHARE), кегль авто-уменьшен, ручной масштаб
+  // нетронут; колесо-размер работает поверх авто-подгона.
   ui3.close();
+  await evalIn(tab, `location.href = "/"`);
+  await waitForPage(tab, `typeof window.__duopulseContent === "object"`, 10000, "бандл после возврата (046)");
+  await waitForPage(tab, `document.getElementById("v")?.readyState >= 1`, 10000, "метаданные видео (046)");
+  await applyTestTrack(tab);
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 1`, 5000, "trackCount=1 (046)");
+
+  /** Замер плашки: кегль первой строки, высоты плашки/видео, ручной масштаб. */
+  const measurePlate = () =>
+    evalIn(
+      tab,
+      `(function () {
+         const plate = document.querySelector("[data-duopulse-subtitles] > div");
+         const row = document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row");
+         const v = document.getElementById("v").getBoundingClientRect();
+         return {
+           font: row ? parseFloat(getComputedStyle(row).fontSize) : 0,
+           plateH: plate ? plate.getBoundingClientRect().height : 0,
+           videoH: v.height,
+           scale: window.__duopulseContent.state().style.fontScalePct,
+         };
+       })()`,
+    );
+
+  /** Задать trio-набор (1–3 с) с заданными текстами строк. */
+  const setTrio = (ru, en, es) =>
+    evalIn(
+      tab,
+      `(function () {
+         window.__DUOPULSE_TEST_TRACK__ = [
+           { id: "test:ru", source: "test", lang: "ru", role: "original", cues: [
+             { startMs: 1000, endMs: 3000, text: ${JSON.stringify(ru)} } ] },
+           { id: "test:en", source: "test", lang: "en", role: "translation", cues: [
+             { startMs: 1000, endMs: 3000, text: ${JSON.stringify(en)} } ] },
+           { id: "test:es", source: "test", lang: "es", role: "translation", cues: [
+             { startMs: 1000, endMs: 3000, text: ${JSON.stringify(es)} } ] }
+         ];
+         document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+         return true;
+       })()`,
+    );
+
+  // (42) короткий trio: авто-подгон не срабатывает — кегль и вид без регресса
+  const SHORT = ["Оригинал: короткая реплика", "Original: short line", "Original: línea corta"];
+  await setTrio(...SHORT);
+  await seekTo(tab, 2.0);
+  await waitForPage(
+    tab,
+    `document.querySelectorAll("[data-duopulse-subtitles] .duopulse-subtitles-row").length === 3`,
+    5000,
+    "3 строки короткого набора (046)",
+  );
+  const shortM = await measurePlate();
+  check(
+    "(42) короткие cue: авто-подгон не срабатывает (плашка много меньше 50% видео, масштаб 100)",
+    shortM.scale === 100 && shortM.plateH < 0.5 * shortM.videoH * 0.75 && shortM.font > 0,
+    `plate=${shortM.plateH.toFixed(0)}px/${shortM.videoH.toFixed(0)}px, кегль ${shortM.font.toFixed(1)}px`,
+  );
+
+  // (43) три длинных многострочных cue: плашка в доле 50%, кегль авто-уменьшен.
+  // Многострочность — явными \n (pre-wrap): 4/3/3 строки по дорожкам, каждая
+  // строка короче ширины плашки — перенос от ширины не срабатывает, высота
+  // строго линейна кеглю (подгон детерминирован, без «ступеней» переноса).
+  const LONG_RU = "Первая строка длинной реплики оригинала,\nвторая строка переноса — плашка растёт,\nтретья строка: набор выше половины видео,\nчетвёртая строка — ждём авто-уменьшение кегля.";
+  const LONG_EN = "First line of the long original speech,\nsecond wrapped line grows the plate,\nthird line — the set exceeds half of the video.";
+  const LONG_ES = "Primera línea de la réplica larga,\nsegunda línea: la placa crece,\ntercera línea — pasada la mitad del vídeo.";
+  await setTrio(LONG_RU, LONG_EN, LONG_ES);
+  await seekTo(tab, 2.0);
+  await waitForPage(
+    tab,
+    `(document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row")?.textContent ?? "").includes("авто-уменьшение кегля")`,
+    5000,
+    "длинный набор показан (046)",
+  );
+  await sleep(300); // fade 80 мс + запас на итерации подгона
+  const overM = await measurePlate();
+  check(
+    "(43) три длинных cue: плашка ≤ 50% высоты видео, кегль авто-уменьшен, ручной масштаб не тронут",
+    overM.plateH <= 0.5 * overM.videoH + 2 && overM.font < shortM.font * 0.95 && overM.scale === 100,
+    `plate=${overM.plateH.toFixed(0)}px/${overM.videoH.toFixed(0)}px (потолок ${(0.5 * overM.videoH).toFixed(0)}), кегль ${shortM.font.toFixed(1)}→${overM.font.toFixed(1)}px, scale=${overM.scale}`,
+  );
+  {
+    const shotFit = await tab.send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(path.join(OUT_DIR, "shot-overlay-autofit.png"), Buffer.from(shotFit.data, "base64"));
+    check("скриншот авто-подгона сохранён (shot-overlay-autofit.png)", fs.existsSync(path.join(OUT_DIR, "shot-overlay-autofit.png")));
+  }
+
+  // (44) возврат к коротким cue: кегль восстанавливается до базового
+  await setTrio(...SHORT);
+  await waitForPage(
+    tab,
+    `Array.from(document.querySelectorAll("[data-duopulse-subtitles] .duopulse-subtitles-row")).some((r) => r.textContent.includes("short line"))`,
+    5000,
+    "короткий набор вернулся (046)",
+  );
+  const backM = await measurePlate();
+  check(
+    "(44) смена на короткие cue: кегль восстановился до базового (авто не «залипает»)",
+    Math.abs(backM.font - shortM.font) < 0.5,
+    `${backM.font.toFixed(1)} vs ${shortM.font.toFixed(1)}px`,
+  );
+
+  // (45) колесо-размер поверх авто-подгона: масштаб растёт (доля держится),
+  // ручное 75% — заметно ниже авто-подгона (клампы 75–300%, docs/03 §5).
+  await setTrio(LONG_RU, LONG_EN, LONG_ES);
+  await seekTo(tab, 2.0);
+  await sleep(300);
+  await waitForPage(
+    tab,
+    `(document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row")?.textContent ?? "").includes("авто-уменьшение кегля")`,
+    5000,
+    "длинный набор снова показан (046)",
+  );
+  const beforeWheel = await measurePlate();
+  await evalIn(
+    tab,
+    `(function () {
+       const plate = document.querySelector("[data-duopulse-subtitles] > div");
+       const r = plate.getBoundingClientRect();
+       const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+       const el = document.elementFromPoint(cx, cy) || document.getElementById("v");
+       el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, clientX: cx, clientY: cy, bubbles: true, cancelable: true }));
+       return true;
+     })()`,
+  );
+  await sleep(150);
+  const afterUp = await measurePlate();
+  check(
+    "(45a) колесо поверх авто: масштаб 100→110 учтён, плашка снова в доле 50%",
+    afterUp.scale === 110 && afterUp.plateH <= 0.5 * afterUp.videoH + 2 && afterUp.font >= beforeWheel.font - 0.5,
+    `scale=${afterUp.scale}, кегль ${beforeWheel.font.toFixed(1)}→${afterUp.font.toFixed(1)}px, plate=${afterUp.plateH.toFixed(0)}px`,
+  );
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-style", { detail: { fontScalePct: 75 } }))`);
+  await sleep(150);
+  const at75 = await measurePlate();
+  check(
+    "(45b) ручное 75% поверх авто: эффективный кегль ровно 75% базового, ниже авто-подгона",
+    at75.scale === 75 &&
+      Math.abs(at75.font / shortM.font - 0.75) < 0.02 &&
+      at75.font < beforeWheel.font - 0.5 &&
+      at75.plateH < 0.5 * at75.videoH,
+    `scale=75, кегль ${at75.font.toFixed(1)}px = ${(at75.font / shortM.font).toFixed(2)}×базы, авто-подгон был ${beforeWheel.font.toFixed(1)}px`,
+  );
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-style", { detail: { fontScalePct: 100 } }))`);
+
   tab.close();
 } catch (e) {
   failures++;

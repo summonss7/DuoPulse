@@ -1,11 +1,14 @@
 // Юнит-тесты стиля плашки (задача 3.4): клампы настроек, шаг колесом,
-// стили строк по гайду 06 §6, градиент подложки, кегль от масштаба.
+// стили строк по гайду 06 §6, градиент подложки, кегль от масштаба,
+// авто-подгон кегля при переполнении (карточка 046).
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SUBTITLE_STYLE,
   MARGIN_MAX_PCT,
+  PLATE_MAX_SHARE,
   SCALE_MAX_PCT,
   SCALE_MIN_PCT,
+  fitStepPct,
   mergeStyle,
   plateBackground,
   plateFontSizeCss,
@@ -81,6 +84,48 @@ describe("rowStyleFor — строки набора по гайду 06 §6", () 
   it("третья и далее — приглушённые: белый 75% прозрачности, 75% кегля", () => {
     expect(rowStyleFor(2)).toEqual({ color: "rgba(255,255,255,0.75)", fontScale: 0.75, weight: 400 });
     expect(rowStyleFor(5)).toEqual(rowStyleFor(2));
+  });
+});
+
+describe("fitStepPct — авто-уменьшение кегля при переполнении (карточка 046)", () => {
+  it("потолок плашки — половина высоты видео (PLATE_MAX_SHARE)", () => {
+    expect(PLATE_MAX_SHARE).toBe(0.5);
+  });
+
+  it("без переполнения кегль не меняется (влезает или впритык)", () => {
+    expect(fitStepPct(100, 180, 100)).toBe(100);
+    expect(fitStepPct(180, 180, 100)).toBe(100);
+    expect(fitStepPct(120, 180, 250)).toBe(250);
+  });
+
+  it("переполнение: кегль уменьшается пропорционально maxH/plateH", () => {
+    expect(fitStepPct(200, 180, 100)).toBe(90);
+    expect(fitStepPct(240, 180, 300)).toBe(225);
+  });
+
+  it("не ниже клампа читаемости 75% даже при сильном переполнении", () => {
+    expect(fitStepPct(400, 100, 100)).toBe(SCALE_MIN_PCT); // «хотел» 25%
+    expect(fitStepPct(200, 50, 90)).toBe(SCALE_MIN_PCT); // «хотел» 22,5%
+  });
+
+  it("некорректная геометрия (0/отрицательная) — кегль не трогаем", () => {
+    expect(fitStepPct(0, 180, 100)).toBe(100);
+    expect(fitStepPct(-10, 180, 100)).toBe(100);
+    expect(fitStepPct(200, 0, 100)).toBe(100);
+  });
+
+  it("итерации сходятся: шаги с замером монотонно приближают высоту к потолку", () => {
+    // Модель высоты: 199em-часть × кегль/100 + 16px паддинга (геометрия плашки)
+    const heightOf = (pct: number) => 1.99 * pct + 16;
+    let pct = 100;
+    for (let i = 0; i < 4; i++) {
+      const next = fitStepPct(heightOf(pct), 180, pct);
+      if (next >= pct - 0.05) break;
+      pct = next;
+    }
+    expect(pct).toBeGreaterThan(75);
+    expect(pct).toBeLessThan(90);
+    expect(heightOf(pct)).toBeLessThanOrEqual(180 + 1);
   });
 });
 

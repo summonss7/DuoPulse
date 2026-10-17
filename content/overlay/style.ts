@@ -51,6 +51,21 @@ export function stepScale(currentPct: number, direction: number): number {
   return clamp(stepped, SCALE_MIN_PCT, SCALE_MAX_PCT);
 }
 
+/** Потолок плашки — доля высоты видео (карточка 046, docs/03 §5): при
+ * превышении кегль строк плавно уменьшается (перенос длинных cue остаётся). */
+export const PLATE_MAX_SHARE = 0.5;
+
+/** Шаг авто-подгона кегля под потолок плашки (карточка 046): текущий кегль
+ * pct даёт высоту plateH при потолке maxH — вернуть кегль в пропорции
+ * maxH/plateH. Геометрия плашки em-линейна (паддинг 16px — малая нелинейность),
+ * поэтому итерации с замером сходятся за 2–3 шага; ниже клампа читаемости 75%
+ * не идём — лучше выйти за долю, чем потерять читаемость. Без переполнения
+ * кегль не меняется; некорректная геометрия (≤0) — тоже. */
+export function fitStepPct(plateH: number, maxH: number, pct: number): number {
+  if (!(plateH > 0) || !(maxH > 0) || plateH <= maxH) return pct;
+  return clamp((pct * maxH) / plateH, SCALE_MIN_PCT, SCALE_MAX_PCT);
+}
+
 /** Стиль строки набора по её номеру (гайд 06 §6): оригинал — белый 500 и
  * 100% кегля, перевод — фирменный лайм 85%/400, третья и далее — приглушённые
  * белые 75% кегля с прозрачностью 75%. */
@@ -78,7 +93,8 @@ export function plateBackground(opacity: number): string {
 }
 
 /** Базовый кегль плашки: от ширины видео (container query units — плашка
- * масштабируется вместе с плеером) × масштаб пользователя (docs/03 §5:
+ * масштабируется вместе с плеером) × эффективный масштаб (ручной колесо/
+ * панель, при переполнении — авто-уменьшенный, карточка 046; docs/03 §5:
  * относительные размеры строк сохраняются, кегль общий). */
 export function plateFontSizeCss(fontScalePct: number): string {
   const scale = (clamp(fontScalePct, SCALE_MIN_PCT, SCALE_MAX_PCT) / 100).toFixed(2);

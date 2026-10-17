@@ -11,11 +11,18 @@
 // (75–300%, общий для всех строк), Shift+колесо — сдвиг синхронизации
 // (колбэк в движок). Плашка не перехватывает события мыши (pointer-events:
 // none): попадание колесом считается геометрически, клики по плееру проходят.
+//
+// Авто-уменьшение кегля при переполнении (карточка 046, M5): плашка сверх
+// PLATE_MAX_SHARE высоты видео (docs/03 §5) — кегль плавно уменьшается под
+// потолок итерациями с замером (fit), не ниже 75%; ручное колесо работает
+// поверх — его масштаб база, авто только ограничивает долей видео.
 
 import type { ActiveRow } from "../engine/subtitles-engine";
 import {
   DEFAULT_SUBTITLE_STYLE,
   MARGIN_MAX_PCT,
+  PLATE_MAX_SHARE,
+  fitStepPct,
   plateBackground,
   plateFontSizeCss,
   rowStyleFor,
@@ -45,6 +52,16 @@ export class SubtitlesOverlay {
   private style: SubtitleStyle = { ...DEFAULT_SUBTITLE_STYLE };
   /** Строки последнего рендера: дифф-обновление текста на месте. */
   private rows: ActiveRow[] = [];
+  /** Эффективный кегль: ручной масштаб, при переполнении авто-уменьшенный
+   * под потолок доли видео (карточка 046); всегда ≤ style.fontScalePct.
+   * В styleInfo наружу отдаётся только ручной — авто-подгон преходящ,
+   * от cue к cue, и не персистится. */
+  private autoPct = DEFAULT_SUBTITLE_STYLE.fontScalePct;
+  /** Пересчитать авто-подгон: строки/стиль изменились (геометрия видео —
+   * в fit по факту); репозиция без изменений не дёргает layout. */
+  private fitDirty = true;
+  private lastFitW = 0;
+  private lastFitH = 0;
   private wheelBound = false;
   private repositionBound = false;
   private resizeObserver: ResizeObserver | null = null;
@@ -86,6 +103,10 @@ export class SubtitlesOverlay {
    * уже созданной плашке немедленно. */
   setStyle(patch: Partial<SubtitleStyle>): void {
     this.style = mergeStyle(this.style, patch);
+    // Ручной масштаб — база авто-подгона: стартуем с него, fit при показе
+    // уменьшит под потолок (колесо/панель работают поверх, карточка 046).
+    this.autoPct = this.style.fontScalePct;
+    this.fitDirty = true;
     if (this.plate) this.applyPlateStyle();
     if (this.container && this.video && this.visible) this.positionOver(this.video);
     this.opts.onStyleChange?.(this.styleInfo());
@@ -122,6 +143,7 @@ export class SubtitlesOverlay {
       );
     }
     this.rows = rows;
+    this.fitDirty = true; // текст сменился — высота могла измениться
   }
 
   /** Плашка по прямоугольнику видео (fixed): низ/верх по центру, отступ
@@ -144,12 +166,37 @@ export class SubtitlesOverlay {
     s.alignItems = this.style.position === "top" ? "flex-start" : "flex-end";
     this.plate.style.marginTop = this.style.position === "top" ? `${margin}px` : "";
     this.plate.style.marginBottom = this.style.position === "bottom" ? `${margin}px` : "";
+    this.fit(r.width, r.height);
+  }
+
+  /** Авто-уменьшение кегля при переполнении (карточка 046, M5): плашка
+   * сверх PLATE_MAX_SHARE высоты видео — кегль уменьшается пропорционально
+   * переполнению, итерациями с замером (перенос строк при уменьшении меняет
+   * высоту нелинейно), не ниже клампа читаемости 75%. Ручной масштаб — база
+   * подгона: колесо/панель задают стартовое значение, авто только ограничивает
+   * сверху долей видео. Пересчёт — по смене строк/стиля или геометрии видео. */
+  private fit(videoW: number, videoH: number): void {
+    if (!this.plate) return;
+    if (!this.fitDirty && Math.abs(videoW - this.lastFitW) < 1 && Math.abs(videoH - this.lastFitH) < 1) return;
+    this.lastFitW = videoW;
+    this.lastFitH = videoH;
+    this.fitDirty = false;
+    const maxH = videoH * PLATE_MAX_SHARE;
+    this.autoPct = this.style.fontScalePct;
+    this.applyPlateStyle();
+    for (let i = 0; i < 4; i++) {
+      const plateH = this.plate.getBoundingClientRect().height;
+      const next = fitStepPct(plateH, maxH, this.autoPct);
+      if (next >= this.autoPct - 0.05) break; // влезает или достигнут кламп читаемости
+      this.autoPct = next;
+      this.applyPlateStyle();
+    }
   }
 
   private applyPlateStyle(): void {
     if (!this.plate) return;
     const p = this.plate.style;
-    p.fontSize = plateFontSizeCss(this.style.fontScalePct);
+    p.fontSize = plateFontSizeCss(this.autoPct);
     p.background = plateBackground(this.style.plateOpacity);
   }
 
