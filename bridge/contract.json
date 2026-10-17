@@ -2055,6 +2055,192 @@
         "type": "object"
       }
     },
+    "translate.get_settings": {
+      "handler": "translate_get_settings",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "DeeplPlan": {
+            "description": "Тариф DeepL: free — api-free.deepl.com (500 тыс. знаков/мес), pro — api.deepl.com; отличается только хост эндпоинта.",
+            "enum": [
+              "free",
+              "pro"
+            ],
+            "type": "string"
+          },
+          "ProviderId": {
+            "description": "Провайдер машинного перевода (docs/03 §7, приоритет 2–3: облачный API по ключу пользователя или self-hosted LibreTranslate). Перевод самой платформы (YouTube tlang, приоритет 1) сюда не входит.",
+            "enum": [
+              "deepl",
+              "google",
+              "libretranslate"
+            ],
+            "type": "string"
+          }
+        },
+        "description": "Значение translate.get_settings для UI: конфиг + факт наличия ключей в DPAPI (сами ключи наружу не отдаются — как hasPassword прокси).",
+        "properties": {
+          "deeplPlan": {
+            "$ref": "#/definitions/DeeplPlan"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "hasApiKeys": {
+            "description": "Провайдеры, у которых сохранён ключ API (DPAPI).",
+            "items": {
+              "$ref": "#/definitions/ProviderId"
+            },
+            "type": "array"
+          },
+          "libretranslateUrl": {
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/definitions/ProviderId"
+          }
+        },
+        "required": [
+          "deeplPlan",
+          "enabled",
+          "hasApiKeys",
+          "libretranslateUrl",
+          "provider"
+        ],
+        "title": "TranslateSettings",
+        "type": "object"
+      }
+    },
+    "translate.set_settings": {
+      "handler": "translate_set_settings",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "DeeplPlan": {
+            "description": "Тариф DeepL: free — api-free.deepl.com (500 тыс. знаков/мес), pro — api.deepl.com; отличается только хост эндпоинта.",
+            "enum": [
+              "free",
+              "pro"
+            ],
+            "type": "string"
+          },
+          "ProviderId": {
+            "description": "Провайдер машинного перевода (docs/03 §7, приоритет 2–3: облачный API по ключу пользователя или self-hosted LibreTranslate). Перевод самой платформы (YouTube tlang, приоритет 1) сюда не входит.",
+            "enum": [
+              "deepl",
+              "google",
+              "libretranslate"
+            ],
+            "type": "string"
+          },
+          "TranslateConfig": {
+            "description": "Конфиг перевода в settings.json. Ключи API сюда НЕ пишутся — только DPAPI.",
+            "properties": {
+              "deeplPlan": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/DeeplPlan"
+                  }
+                ],
+                "default": "free",
+                "description": "Тариф DeepL (host free/pro)."
+              },
+              "enabled": {
+                "description": "Облачный перевод разрешён (выкл — только переводы платформы, tlang).",
+                "type": "boolean"
+              },
+              "libretranslateUrl": {
+                "default": "http://localhost:5000",
+                "description": "Адрес self-hosted LibreTranslate (base URL, без /translate).",
+                "type": "string"
+              },
+              "provider": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/ProviderId"
+                  }
+                ],
+                "description": "Выбранный провайдер (панель «Перевод»)."
+              }
+            },
+            "required": [
+              "enabled",
+              "provider"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "translate.set_settings: value — конфиг без ключей (ключи — только DPAPI); secret — ключ API выбранного провайдера (value.provider): None — не менять, Some(\"\") — удалить, Some(k) — перезаписать.",
+        "properties": {
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "$ref": "#/definitions/TranslateConfig"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "TranslateSetSettingsParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "translate.test": {
+      "handler": "translate_test",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "translate.test: живая проверка выбранного провайдера (кнопка «Проверить» панели «Перевод») — перевод короткой фразы; text/target_lang опциональны (дефолт «DuoPulse» → ru).",
+        "properties": {
+          "targetLang": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "TranslateTestParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "detail": {
+            "description": "Диагностика панели: подпись успеха или текст ошибки.",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "translated": {
+            "description": "Перевод пробной фразы (ok=true).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "detail",
+          "ok"
+        ],
+        "title": "TranslateTestResult",
+        "type": "object"
+      }
+    },
     "vpn.set_enabled": {
       "handler": "vpn_set_enabled",
       "params": {
@@ -2608,5 +2794,5 @@
       }
     }
   },
-  "version": 2
+  "version": 3
 }

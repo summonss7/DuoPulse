@@ -1533,3 +1533,107 @@ body.internal-page {
 input[type="range"] {
   accent-color: var(--accent-neon); /* бегунки слайдеров — фирменный лайм */
 }
+
+/* --- секция «Перевод» duo-панели (задача 4.1; паттерн .proxy-*) ------------- */
+.duo-tr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.duo-tr {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+}
+.duo-tr .duo-field {
+  flex: none;
+}
+.duo-tr .duo-field > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.duo-tr input[type="text"],
+.duo-tr input[type="password"],
+.duo-tr select {
+  height: 28px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 8px;
+  font-size: 12px;
+  outline: none;
+  font-family: var(--font-mono); /* ключ/адрес — моно, гайд 06 §4 */
+}
+.duo-tr select {
+  font-family: inherit;
+}
+.duo-tr input:focus,
+.duo-tr select:focus {
+  border-color: var(--accent-neon);
+  box-shadow: var(--focus-ring-soft);
+}
+.duo-tr .link {
+  width: auto;
+  height: auto;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-decoration: underline;
+  padding: 0;
+  cursor: pointer;
+}
+.duo-tr .link:hover {
+  color: var(--text-primary);
+}
+.duo-tr-status {
+  grid-column: span 2;
+  font-size: 12px;
+  color: var(--err);
+}
+.duo-tr-status[data-ok="true"] {
+  color: var(--accent-neon);
+}
+.duo-tr-actions {
+  grid-column: span 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.duo-tr-actions button {
+  width: auto;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.duo-tr-actions button:hover {
+  background: var(--hover-neutral);
+}
+.duo-tr-actions button.primary {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+  font-weight: 700;
+}
+.duo-tr-actions button.primary:hover {
+  background: color-mix(in srgb, var(--accent-neon) 10%, transparent);
+  box-shadow: var(--focus-ring-soft);
+}
+.duo-tr-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.duo-tr .duo-hint {
+  grid-column: span 2;
+}
+/* display:flex выше перебивает UA-стиль [hidden] — возвращаем (как .tab-menu) */
+.duo-tr .duo-field[hidden],
+.duo-tr-status[hidden] {
+  display: none;
+}

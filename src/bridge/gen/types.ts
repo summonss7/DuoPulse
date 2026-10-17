@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 2); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 3); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
@@ -13,6 +13,14 @@ export type SettingsKey = "proxy";
  * Тип прокси. Схемы --proxy-server у Chromium: socks5/http/https (для socks5 Chromium резолвит домены на стороне прокси).
  */
 export type ProxyProto = "socks5" | "http" | "https";
+/**
+ * Тариф DeepL: free — api-free.deepl.com (500 тыс. знаков/мес), pro — api.deepl.com; отличается только хост эндпоинта.
+ */
+export type DeeplPlan = "free" | "pro";
+/**
+ * Провайдер машинного перевода (docs/03 §7, приоритет 2–3: облачный API по ключу пользователя или self-hosted LibreTranslate). Перевод самой платформы (YouTube tlang, приоритет 1) сюда не входит.
+ */
+export type ProviderId = "deepl" | "google" | "libretranslate";
 export type ProxyState = "off" | "on" | "error";
 
 /**
@@ -78,6 +86,13 @@ export interface DuoPulseBridgeContract {
   TabsOpenParams: TabsOpenParams;
   TabsSleepParams: TabsSleepParams;
   TabsWakeParams: TabsWakeParams;
+  TranslateSettings: TranslateSettings;
+  DeeplPlan: DeeplPlan;
+  ProviderId: ProviderId;
+  TranslateSetSettingsParams: TranslateSetSettingsParams;
+  TranslateConfig: TranslateConfig;
+  TranslateTestParams: TranslateTestParams;
+  TranslateTestResult: TranslateTestResult;
   VpnSetEnabledParams: VpnSetEnabledParams;
   VpnStatusResult: VpnStatusResult;
   ProxyState: ProxyState;
@@ -654,6 +669,65 @@ export interface TabsSleepParams {
  */
 export interface TabsWakeParams {
   id: string;
+}
+/**
+ * Значение translate.get_settings для UI: конфиг + факт наличия ключей в DPAPI (сами ключи наружу не отдаются — как hasPassword прокси).
+ */
+export interface TranslateSettings {
+  deeplPlan: DeeplPlan;
+  enabled: boolean;
+  /**
+   * Провайдеры, у которых сохранён ключ API (DPAPI).
+   */
+  hasApiKeys: ProviderId[];
+  libretranslateUrl: string;
+  provider: ProviderId;
+}
+/**
+ * translate.set_settings: value — конфиг без ключей (ключи — только DPAPI); secret — ключ API выбранного провайдера (value.provider): None — не менять, Some("") — удалить, Some(k) — перезаписать.
+ */
+export interface TranslateSetSettingsParams {
+  secret?: string | null;
+  value: TranslateConfig;
+}
+/**
+ * Конфиг перевода в settings.json. Ключи API сюда НЕ пишутся — только DPAPI.
+ */
+export interface TranslateConfig {
+  /**
+   * Тариф DeepL (host free/pro).
+   */
+  deeplPlan?: DeeplPlan & string;
+  /**
+   * Облачный перевод разрешён (выкл — только переводы платформы, tlang).
+   */
+  enabled: boolean;
+  /**
+   * Адрес self-hosted LibreTranslate (base URL, без /translate).
+   */
+  libretranslateUrl?: string;
+  /**
+   * Выбранный провайдер (панель «Перевод»).
+   */
+  provider: ProviderId;
+}
+/**
+ * translate.test: живая проверка выбранного провайдера (кнопка «Проверить» панели «Перевод») — перевод короткой фразы; text/target_lang опциональны (дефолт «DuoPulse» → ru).
+ */
+export interface TranslateTestParams {
+  targetLang?: string | null;
+  text?: string | null;
+}
+export interface TranslateTestResult {
+  /**
+   * Диагностика панели: подпись успеха или текст ошибки.
+   */
+  detail: string;
+  ok: boolean;
+  /**
+   * Перевод пробной фразы (ok=true).
+   */
+  translated?: string | null;
 }
 /**
  * vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется.

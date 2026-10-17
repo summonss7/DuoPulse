@@ -67,6 +67,10 @@
 //  44) возврат к коротким cue: кегль восстанавливается до базового;
 //  45) колесо-размер поверх авто-подгона: масштаб учтён (110%), доля
 //      держится; ручное 75% — заметно ниже авто-подгона.
+// Задача 4.1 (провайдеры перевода, M4; docs/03 §7–8, карточка duopulse-030):
+//  46) секция «Перевод» панели: 3 провайдера, поля по провайдеру;
+//  47) сохранение формы: конфиг в settings.json (ключ "translate"),
+//      ключ API — DPAPI-blob (открытого текста нет нигде).
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -1132,6 +1136,72 @@ try {
       panelOpen.checked === true,
     JSON.stringify(panelOpen),
   );
+
+  // (34a) задача 4.1: секция «Перевод» панели — выбор провайдера
+  // DeepL/Google/LibreTranslate; поля по провайдеру (тариф DeepL виден,
+  // адрес LibreTranslate скрыт — docs/03 §8 п.3).
+  const trInitial = await evalIn(
+    ui3,
+    `(function () {
+       const p = document.getElementById("duoPanel");
+       const sel = p.querySelector("#trProvider");
+       return { providers: Array.from(sel.options).map((o) => o.value).join(","),
+                value: sel.value,
+                planHidden: p.querySelector("#trDeeplPlanField").hidden,
+                urlHidden: p.querySelector("#trLibreUrlField").hidden,
+                enabled: p.querySelector("#trEnabled").checked };
+     })()`,
+  );
+  check(
+    "секция «Перевод»: 3 провайдера, дефолт deepl (тариф виден, адрес Libre скрыт), выкл",
+    trInitial.providers === "deepl,google,libretranslate" &&
+      trInitial.value === "deepl" &&
+      trInitial.planHidden === false &&
+      trInitial.urlHidden === true &&
+      trInitial.enabled === false,
+    JSON.stringify(trInitial),
+  );
+
+  // (34b) смена провайдера перестраивает поля; сохранение формы — конфиг в
+  // settings.json (ключ "translate"), ключ API — DPAPI-blob, не открытый
+  // текст (карточка duopulse-030: ключи НЕ в settings.json).
+  await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.getElementById("trProvider");
+       sel.value = "libretranslate";
+       sel.dispatchEvent(new Event("change"));
+       document.getElementById("trLibreUrl").value = "http://localhost:5055";
+       document.getElementById("trKey").value = "lt-e2e-key";
+     })()`,
+  );
+  const trSwitch = await evalIn(
+    ui3,
+    `(function () { const p = document.getElementById("duoPanel");
+       return { planHidden: p.querySelector("#trDeeplPlanField").hidden,
+                urlHidden: p.querySelector("#trLibreUrlField").hidden }; })()`,
+  );
+  check(
+    "смена провайдера на libretranslate: адрес появился, тариф DeepL скрыт",
+    trSwitch.planHidden === true && trSwitch.urlHidden === false,
+    JSON.stringify(trSwitch),
+  );
+  await evalIn(ui3, `document.getElementById("trSave").click()`);
+  await sleep(500); // set_settings + get_settings refresh
+  const trSaved = await evalIn(ui3, `window.__duopulse.translate.getSettings()`);
+  const trSettingsJson = fs.readFileSync(path.join(tmp, "DuoPulse", "profile", "settings.json"), "utf8");
+  const trKeyBlob = fs.readFileSync(path.join(tmp, "DuoPulse", "profile", "translate", "keys", "libretranslate.bin"));
+  check(
+    "перевод сохранён: getSettings {provider: libretranslate}, settings.json без ключа, DPAPI-blob есть",
+    trSaved.provider === "libretranslate" &&
+      trSaved.hasApiKeys.includes("libretranslate") &&
+      trSettingsJson.includes("libretranslate") &&
+      !trSettingsJson.includes("lt-e2e-key") &&
+      trKeyBlob.length > 64 && // DPAPI-blob заметно больше сырого ключа
+      !trKeyBlob.includes("lt-e2e-key"),
+    JSON.stringify({ provider: trSaved.provider, hasApiKeys: trSaved.hasApiKeys }),
+  );
+
   await evalIn(ui3, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
   await sleep(150);
   check(

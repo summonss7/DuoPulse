@@ -98,6 +98,44 @@
           <span class="duo-hint">или перетащите на страницу</span>
         </div>
         <div class="duo-file-meta" id="duoFileMeta" hidden></div>
+        <div class="duo-section-title duo-tr-head">
+          Перевод
+          <label class="switch" title="Разрешить облачный перевод субтитров (кроме переводов платформы)">
+            <input type="checkbox" id="trEnabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="duo-tr">
+          <label class="duo-field">
+            <span>Провайдер</span>
+            <select id="trProvider">
+              <option value="deepl">DeepL</option>
+              <option value="google">Google Translate</option>
+              <option value="libretranslate">LibreTranslate</option>
+            </select>
+          </label>
+          <label class="duo-field" id="trDeeplPlanField">
+            <span>Тариф DeepL</span>
+            <select id="trDeeplPlan">
+              <option value="free">Free (api-free.deepl.com)</option>
+              <option value="pro">Pro (api.deepl.com)</option>
+            </select>
+          </label>
+          <label class="duo-field" id="trLibreUrlField">
+            <span>Адрес LibreTranslate</span>
+            <input id="trLibreUrl" type="text" placeholder="http://localhost:5000" spellcheck="false" autocomplete="off" />
+          </label>
+          <label class="duo-field">
+            <span>Ключ API&nbsp;<button type="button" id="trKeyClear" class="link" hidden>удалить</button></span>
+            <input id="trKey" type="password" placeholder="ключ" autocomplete="new-password" />
+          </label>
+          <div class="duo-tr-status" id="trStatus" hidden></div>
+          <div class="duo-tr-actions">
+            <button type="button" id="trTest" class="ghost" title="Сохраняет форму и делает один живой запрос провайдера">Проверить</button>
+            <button type="button" id="trSave" class="primary">Сохранить</button>
+          </div>
+          <div class="duo-hint">Ключ хранится в DPAPI (не в settings.json). Кнопка «Проверить» сначала сохраняет форму.</div>
+        </div>
         <div class="duo-section-title">Синхронизация</div>
         <div class="duo-offset">
           <input type="range" id="duoOffset" min="-10000" max="10000" step="100" value="0" />

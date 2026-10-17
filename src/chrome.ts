@@ -8,6 +8,7 @@ import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
 import "./chrome/mainmenu";
 import "./proxy-menu";
 import { initDuo } from "./subtitles-panel/duo";
+import { initTranslateSettings } from "./subtitles-panel/translate-settings";
 
 // Таб-бар (задача 1.2): рендер вкладок, хоткеи, контекст-меню.
 initTabBar();
@@ -15,6 +16,8 @@ initTabBar();
 initOmnibox();
 // Кнопка «duo» + панель настроек набора субтитров (задача 3.7, docs/03 §8).
 initDuo();
+// Секция «Перевод» duo-панели: провайдеры DeepL/Google/LibreTranslate (4.1).
+initTranslateSettings();
 
 // URL активной вкладки — в адресную строку (кроме моментов ввода).
 onTabsChanged((tabs) => {

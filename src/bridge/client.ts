@@ -44,6 +44,10 @@ import type {
   TabsOpenParams,
   TabsSleepParams,
   TabsWakeParams,
+  TranslateSetSettingsParams,
+  TranslateSettings,
+  TranslateTestParams,
+  TranslateTestResult,
   VpnSetEnabledParams,
   VpnStatusResult,
 } from "./gen/types";
@@ -160,6 +164,17 @@ export const bridge = {
     /** subtitles.remove_track: снять дорожку из набора (остальные без перезагрузки). */
     removeTrack: (params: SubtitlesRemoveTrackParams) =>
       invoke<void>("subtitles_remove_track", { params }),
+  },
+  translate: {
+    /** translate.get_settings: конфиг перевода + наличие ключей в DPAPI (4.1). */
+    getSettings: () => invoke<TranslateSettings>("translate_get_settings"),
+    /** translate.set_settings: сохранить конфиг; secret — ключ выбранного
+     *  провайдера в DPAPI (undefined — не менять, "" — удалить). */
+    setSettings: (params: TranslateSetSettingsParams) =>
+      invoke<void>("translate_set_settings", { params }),
+    /** translate.test: живая проверка выбранного провайдера — перевод
+     *  короткой фразы (кнопка «Проверить» панели «Перевод»). */
+    test: (params: TranslateTestParams) => invoke<TranslateTestResult>("translate_test", { params }),
   },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */

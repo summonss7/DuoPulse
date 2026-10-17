@@ -101,6 +101,15 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["subtitles", "removeTrack"],
     params: { id: "yt:en+ru" },
   },
+  "translate.get_settings": { path: ["translate", "getSettings"] },
+  "translate.set_settings": {
+    path: ["translate", "setSettings"],
+    params: {
+      value: { enabled: true, provider: "deepl", deeplPlan: "free", libretranslateUrl: "http://localhost:5000" },
+      secret: null,
+    },
+  },
+  "translate.test": { path: ["translate", "test"], params: { text: null, targetLang: "ru" } },
   "app.restart": { path: ["app", "restart"] },
 };
 
@@ -134,7 +143,7 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(2);
+    expect(contract.version).toBe(3);
   });
 
   it("клиент знает все события контракта (listen по имени из bridge.events)", () => {

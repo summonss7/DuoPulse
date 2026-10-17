@@ -227,6 +227,21 @@ cargo требует content/gen (include_str!) и dist (generate_context!));
 полировка M5). Gate M3 (ROADMAP) — двойные/тройные субтитры стабильны на
 10 случайных видео подряд, свой .srt на любом сайте; итоги — CHANGELOG
 17.10 (карточка duopulse-029).
+**Задача 4.1 (duopulse-030, контракт v3):** домен `translate` —
+`translate.{get_settings, set_settings, test}` (`src-tauri/src/translate/`):
+интерфейс провайдера `TranslationProvider` (перевод пачки строк: лимиты
+`ProviderLimits`, типизированные ошибки `TranslateError` с
+`retryable()`, ретраи `translate_with_retries` — экспоненциальная пауза;
+HTTP за интерфейсом `HttpTransport` — ureq в бою, mock в тестах, без сети),
+реализации DeepL (free/pro хост, `context` для связности терминов, цели
+EN-US/PT-BR), Google Translate v2 (ключ в заголовке `x-goog-api-key`,
+≤128 строк), LibreTranslate (self-hosted URL, ключ опционален, q-массив);
+конфиг — ключ "translate" в settings.json (выбор провайдера, тариф,
+адрес), ключи API — ТОЛЬКО DPAPI `translate/keys/<provider>.bin` (общий
+код с паролем прокси вынесен в `src-tauri/src/secrets.rs`);
+`translate.test` — один живой запрос (кнопка «Проверить», spawn_blocking);
+UI — секция «Перевод» duo-панели (`src/subtitles-panel/translate-settings.ts`).
+Батчинг cue/кэш — задача 4.2, офлайн-деградация — 4.3.
 
 ## 3. Эпики → карточки (порядок работ)
 
@@ -284,7 +299,7 @@ Gate-проверки этапов включены в последние кар
 ### M4 — перевод
 | # | Задача | DoD |
 |---|---|---|
-| 4.1 | Провайдеры перевода (интерфейс + DeepL/Google/LibreTranslate) | подменные тесты провайдеров зелёные |
+| 4.1 | **✅ выполнено 18.10.2026 (карточка duopulse-030)** Провайдеры перевода (интерфейс + DeepL/Google/LibreTranslate) | подменные тесты провайдеров зелёные — **достигнуто** (cargo 134/134, из них ~30 по translate: запросы/ответы/ошибки/лимиты/ретраи всех трёх провайдеров на mock-транспорте без сети; e2e/subtitles 87/87 — секция «Перевод» панели, конфиг в settings.json, ключ API в DPAPI-blob). Механика: `src-tauri/src/translate/` — trait `TranslationProvider` (пачка строк: `ProviderLimits` max_texts/max_bytes, `TranslateError` с retryable-таксономией Network/RateLimited/Server/Auth/Quota/TooLarge/UnsupportedLang/BadResponse/Config, `translate_with_retries` — экспоненциальная пауза 400·2ⁿ, до 3 попыток), `HttpTransport` (ureq-агент 10/30 с; HTTP-статусы маппятся провайдерами, транспортные сбои — Network) + MockTransport (очередь ответов + запись запросов); DeepL (хосты free/pro, `Authorization: DeepL-Auth-Key`, `context` предыдущей пачки, цели EN→EN-US/PT→PT-BR, квота 456), Google v2 (`x-goog-api-key` — не в query, ≤128 строк, «API key not valid» из 400 → Auth, daily limit из 403 → Quota), LibreTranslate (base URL + ключ в теле, q-массив + один-строка, `{"error":"…"}`-тела). Ключи API — DPAPI `translate/keys/<id>.bin`, DPAPI-код выделен из proxy.rs в общий `src-tauri/src/secrets.rs`; конфиг — ключ "translate" settings.json (provider/deeplPlan/libretranslateUrl/enabled, инъекция ключей в JSON игнорируется). IPC (контракт v3): `translate.{get_settings, set_settings, test}`; UI — секция «Перевод» duo-панели (провайдер, поля по провайдеру, ключ с placeholder «сохранён», «Проверить» = сохранить + один живой запрос). Использование в конвейере (батчинг ≤2 КБ, контекст, кэш) — 4.2 |
 | 4.2 | Батчинг cue + контекст + кэш SQLite | повторный просмотр — 0 сетевых вызовов перевода |
 | 4.3 | Офлайн-деградация и бейдж «перевод недоступен» | сценарий docs/01 §5.4 проходит |
 

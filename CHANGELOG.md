@@ -1903,3 +1903,86 @@
   сдвигаются).
 - backup.bat — 17.10 23:27 (backups/backup_2026-10-17_23-27-37).
 - Коммит: см. git log (duopulse-046, пуш в summonss7/DuoPulse main).
+
+## 18.10.2026, 01:03 — 01:35, задача 4.1 (M4) — Провайдеры перевода: интерфейс + DeepL/Google/LibreTranslate (карточка duopulse-030)
+- Начало: 18.10.2026 01:03 (backup 01:07:55), окончание: 18.10.2026 01:35.
+- Что изменено (этап M4 стартовал; docs/03 §7, docs/05 §3 задача 4.1):
+  подсистема перевода — интерфейс провайдера и три реализации, выбор
+  провайдера в настройках субтитров, ключи API в DPAPI:
+  - src-tauri/src/translate/ (новый модуль) — mod.rs: trait
+    TranslationProvider (перевод пачки строк TranslateRequest: texts/
+    source/target/context_before; ProviderLimits max_texts/max_bytes —
+    батчер задачи 4.2 режет cue по ним ДО запроса), TranslateError с
+    retryable-таксономией (Network/RateLimited/Server — ретраятся;
+    Auth/Quota/TooLarge/UnsupportedLang/BadResponse/Config — нет) и
+    message() для UI, translate_with_retries (RetryPolicy: 3 попытки,
+    экспоненциальная пауза 400·2ⁿ мс), общие хелперы (карта статусов,
+    api_message для трёх форм тел ошибок, check_limits);
+    http.rs: HttpTransport (post_json) — ureq-агент (connect 10 с /
+    всего 30 с; HTTP-статусы провайдерам, транспортные сбои → Network)
+    и MockTransport (cfg(test): очередь ответов + запись запросов) —
+    тесты провайдеров без сети;
+    deepl.rs: POST /v2/translate, хосты free (api-free.deepl.com) /
+    pro (api.deepl.com), Authorization: DeepL-Auth-Key, context
+    предыдущей пачки (связность терминов, docs/03 §7), целевые языки
+    верхним регистром с региональными EN-US/PT-BR, лимиты 50/100КБ;
+    google.rs: Translation API v2, ключ в заголовке x-goog-api-key
+    (не в query), q-массив ≤128 строк, формат text, специфика ошибок
+    («API key not valid» приходит с 400 → Auth, daily limit с 403 →
+    Quota, упоминание language/target с 400 → UnsupportedLang);
+    libre.rs: self-hosted POST {base}/translate, ключ опционален в теле
+    api_key, q-массив (ответ translatedText — массив или строка),
+    source auto, «*zz is not supported» → UnsupportedLang;
+    config.rs: TranslateConfig (ключ "translate" в settings.json:
+    enabled/provider/deeplPlan/libretranslateUrl; инъекция apiKey в JSON
+    игнорируется), валидация адреса LibreTranslate при включённом
+    режиме, ключи API — DPAPI translate/keys/<id>.bin (save/load/clear/
+    has по образцу пароля прокси), ApiKeys::load + build_provider
+    (нет обязательного ключа → Config-ошибка), settings_view (hasApiKeys
+    для UI — сами ключи наружу не отдаются), save_settings (секрет
+    None/«»/строка — не менять/удалить/перезаписать), test_provider
+    (один живой запрос без ретраев).
+  - src-tauri/src/secrets.rs (новый): DPAPI-код пароля прокси выделен
+    из proxy.rs в общий модуль (protect/unprotect + save/load/clear/
+    exists по пути); proxy.rs делегирует — поведение не изменилось
+    (тест password_dpapi_roundtrip на месте).
+  - IPC (контракт v3, перегенерирован + TS-типы): команды
+    translate.{get_settings, set_settings, test} (set_settings —
+    конфиг+секрет выбранного провайдера; test — spawn_blocking, один
+    запрос, результат всегда ok=true/false с диагностикой);
+    src/bridge/client.ts — домен translate; client.test.ts — кейсы
+    трёх команд + версия контракта 3.
+  - UI: секция «Перевод» duo-панели (index.html + src/subtitles-panel/
+    translate-settings.ts + стили по образцу .proxy-*): тумблер
+    «облачный перевод разрешён», выбор провайдера, поля по провайдеру
+    (тариф DeepL / адрес LibreTranslate), ключ API с placeholder
+    «сохранён — пусто = не менять» и «удалить», кнопки «Проверить»
+    (сначала сохраняет форму — ключ мог измениться) и «Сохранить»;
+    чистые функции формы — translate-form.ts (vitest), клиентская
+    валидация зеркально Core.
+- Тесты:
+  - cargo test 134/134 (+34: таксономия ошибок/ретраи/бэкофф/лимиты/
+    api_message/карта статусов; DeepL — форма запроса free/pro,
+    региональные языки, context, ошибки по статусам, count-mismatch,
+    oversized-пачка без запроса; Google — ключ в заголовке, source
+    lowercase, специфика 400/403, битые ответы; Libre — URL/ключ в теле,
+    один-строка ответ, 400/401/429/5xx; конфиг — roundtrip с сохранением
+    чужих ключей и .bak, инъекция ключа в JSON игнорируется, дефолт на
+    битом файле, валидация Libre-адреса, невалидное не пишется, ключи
+    DPAPI по провайдерам, семантика секрета; secrets — DPAPI roundtrip
+    без открытого текста, вложенные каталоги).
+  - vitest 149/149 (+4 translate-form: конфиг↔форма с тримом,
+    placeholder/секрет, валидация зеркально Core).
+  - e2e/subtitles 87/87 ALL PASS (живое приложение, +3 к 84: секция
+    «Перевод» — 3 провайдера, дефолт deepl с полями по провайдеру;
+    смена на libretranslate перестраивает поля; сохранение —
+    getSettings provider=libretranslate, settings.json содержит
+    конфиг и НЕ содержит ключ, ключ в DPAPI-blob без открытого текста);
+    регресс панели/оверлея — все прежние PASS.
+  - tsc чисто; cargo fmt --check и clippy чисто (0 предупреждений);
+    прод-сборка ок, content-бандл 74,3 КБ/19,9 gzip ≤ 80.
+- Документация: docs/05 §2 (словарь: домен translate, контракт v3) и
+  §3 (задача 4.1 — выполнено, механика); docs/03 §7 (реализация
+  интерфейса и провайдеров, хранение ключей; батчинг/кэш — 4.2);
+  README (статус: старт M4, структура: translate/, secrets.rs).
+- Коммит: см. git log (duopulse-030).

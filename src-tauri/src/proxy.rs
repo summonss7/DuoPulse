@@ -8,7 +8,7 @@
 //! Хранение (docs/02 §8–9): `%APPDATA%\DuoPulse\profile\`
 //!   - settings.json — конфиг прокси БЕЗ пароля (+ .bak — предыдущая версия);
 //!   - vpn/proxy-pass.bin — пароль прокси, зашифрованный DPAPI (только blob,
-//!     открытого секрета на диске нет).
+//!     открытого секрета на диске нет; общий DPAPI-код — src/secrets.rs).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -141,95 +141,21 @@ pub fn save_config(dir: &Path, cfg: &ProxyConfig) -> Result<(), String> {
 
 /// Шифрует пароль DPAPI (CurrentUser, без UI-промпта) и кладёт blob в vpn/proxy-pass.bin.
 pub fn save_password(dir: &Path, password: &str) -> Result<(), String> {
-    let blob = protect(password.as_bytes())?;
-    let path = password_path(dir);
-    std::fs::create_dir_all(path.parent().expect("путь с родителем"))
-        .map_err(|e| format!("создать каталог пароля: {e}"))?;
-    std::fs::write(&path, blob).map_err(|e| format!("записать {path:?}: {e}"))
+    crate::secrets::save(&password_path(dir), password)
 }
 
 /// Читает пароль из DPAPI-blob. None — пароль не задан или blob не читается.
 pub fn load_password(dir: &Path) -> Option<String> {
-    let blob = std::fs::read(password_path(dir)).ok()?;
-    let plain = unprotect(&blob).ok()?;
-    String::from_utf8(plain).ok()
+    crate::secrets::load(&password_path(dir))
 }
 
 pub fn clear_password(dir: &Path) {
-    let _ = std::fs::remove_file(password_path(dir));
+    crate::secrets::clear(&password_path(dir))
 }
 
 /// Есть ли сохранённый пароль (для UI: показать «пароль сохранён»).
 pub fn has_password(dir: &Path) -> bool {
-    password_path(dir).is_file()
-}
-
-#[cfg(windows)]
-fn protect(data: &[u8]) -> Result<Vec<u8>, String> {
-    use windows::Win32::Security::Cryptography::{
-        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-    };
-    unsafe {
-        let input = CRYPT_INTEGER_BLOB {
-            cbData: data.len() as u32,
-            pbData: data.as_ptr() as *mut u8,
-        };
-        let mut output = std::mem::zeroed();
-        CryptProtectData(
-            &input,
-            windows_core::PCWSTR::null(),
-            None,
-            None,
-            None,
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut output,
-        )
-        .map_err(|e| format!("DPAPI CryptProtectData: {e}"))?;
-        let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
-        windows::Win32::Foundation::LocalFree(Some(windows::Win32::Foundation::HLOCAL(
-            output.pbData as *mut core::ffi::c_void,
-        )));
-        Ok(bytes)
-    }
-}
-
-#[cfg(windows)]
-fn unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
-    use windows::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-    };
-    unsafe {
-        let input = CRYPT_INTEGER_BLOB {
-            cbData: blob.len() as u32,
-            pbData: blob.as_ptr() as *mut u8,
-        };
-        let mut output = std::mem::zeroed();
-        CryptUnprotectData(
-            &input,
-            None,
-            None,
-            None,
-            None,
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut output,
-        )
-        .map_err(|e| format!("DPAPI CryptUnprotectData: {e}"))?;
-        let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
-        windows::Win32::Foundation::LocalFree(Some(windows::Win32::Foundation::HLOCAL(
-            output.pbData as *mut core::ffi::c_void,
-        )));
-        Ok(bytes)
-    }
-}
-
-#[cfg(not(windows))]
-fn protect(_data: &[u8]) -> Result<Vec<u8>, String> {
-    Err("DPAPI доступен только на Windows".into())
-}
-
-#[cfg(not(windows))]
-fn unprotect(_blob: &[u8]) -> Result<Vec<u8>, String> {
-    Err("DPAPI доступен только на Windows".into())
+    crate::secrets::exists(&password_path(dir))
 }
 
 // ---------------------------------------------------------------------------

@@ -32,7 +32,7 @@ use crate::proxy;
 /// v2 (задача 2.5, без bump — совместимое расширение): домен perf.* — команды
 /// perf.{snapshot, save_run, list_runs} и события perf:{startup_ms,
 /// tab_switch_ms} (страница «Диагностика», docs/04 §2, docs/05 §2).
-pub const CONTRACT_VERSION: u32 = 2;
+pub const CONTRACT_VERSION: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -498,6 +498,45 @@ pub struct SubtitlesSetStyleParams {
 /// полный список дорожек адаптера (языки/переводы), сдвиг и стиль.
 pub type SubtitlesListTracksResult = crate::subtitles::service::TabSubtitles;
 
+// --- задача 4.1: провайдеры перевода (src/translate/, docs/03 §7) ------------
+
+/// translate.get_settings: конфиг перевода + факт наличия ключей в DPAPI
+/// (сами ключи наружу не отдаются — как hasPassword прокси).
+pub type TranslateGetSettingsResult = crate::translate::TranslateSettings;
+
+/// translate.set_settings: value — конфиг без ключей (ключи — только DPAPI);
+/// secret — ключ API выбранного провайдера (value.provider): None — не
+/// менять, Some("") — удалить, Some(k) — перезаписать.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateSetSettingsParams {
+    pub value: crate::translate::TranslateConfig,
+    pub secret: Option<String>,
+}
+
+/// translate.test: живая проверка выбранного провайдера (кнопка «Проверить»
+/// панели «Перевод») — перевод короткой фразы; text/target_lang опциональны
+/// (дефолт «DuoPulse» → ru).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateTestParams {
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub target_lang: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateTestResult {
+    pub ok: bool,
+    /// Диагностика панели: подпись успеха или текст ошибки.
+    pub detail: String,
+    /// Перевод пробной фразы (ok=true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub translated: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // События Core → UI|Content
 // ---------------------------------------------------------------------------
@@ -771,6 +810,13 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles.remove_track": { "handler": "subtitles_remove_track",
                                          "params": schema!(SubtitlesRemoveTrackParams),
                                          "result": null },
+            "translate.get_settings": { "handler": "translate_get_settings", "params": null,
+                                         "result": schema!(TranslateGetSettingsResult) },
+            "translate.set_settings": { "handler": "translate_set_settings",
+                                         "params": schema!(TranslateSetSettingsParams),
+                                         "result": null },
+            "translate.test": { "handler": "translate_test", "params": schema!(TranslateTestParams),
+                                 "result": schema!(TranslateTestResult) },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -1510,6 +1556,59 @@ fn proxy_settings(cfg: &proxy::ProxyConfig, dir: &std::path::Path) -> ProxySetti
     }
 }
 
+// --- задача 4.1: команды перевода (src/translate/, docs/03 §7) ---------------
+
+/// translate.get_settings: снапшот настроек перевода для панели «Перевод».
+#[tauri::command]
+fn translate_get_settings() -> Result<TranslateGetSettingsResult, String> {
+    Ok(crate::translate::settings_view(&proxy::profile_dir()))
+}
+
+/// translate.set_settings: сохранить конфиг (settings.json, ключ "translate")
+/// и секрет выбранного провайдера (DPAPI). Включённый конфиг валидируется.
+#[tauri::command]
+fn translate_set_settings(params: TranslateSetSettingsParams) -> Result<(), String> {
+    crate::translate::save_settings(
+        &proxy::profile_dir(),
+        &params.value,
+        params.secret.as_deref(),
+    )
+}
+
+/// translate.test: один живой запрос выбранного провайдера (кнопка
+/// «Проверить» панели). HTTP блокирующий — spawn_blocking; ретраев нет
+/// (одна попытка — быстрая обратная связь), результат всегда ок=true/false
+/// с диагностикой, Err — только транспорт команды не поднялся.
+#[tauri::command]
+async fn translate_test(params: TranslateTestParams) -> Result<TranslateTestResult, String> {
+    let text = params
+        .text
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| "DuoPulse dual subtitles".into());
+    let target_lang = params
+        .target_lang
+        .filter(|l| !l.trim().is_empty())
+        .unwrap_or_else(|| "ru".into());
+    let dir = proxy::profile_dir();
+    let translated = tauri::async_runtime::spawn_blocking(move || {
+        crate::translate::test_provider(&dir, &text, &target_lang)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    match translated {
+        Ok(t) => Ok(TranslateTestResult {
+            ok: true,
+            detail: "провайдер отвечает".into(),
+            translated: Some(t),
+        }),
+        Err(e) => Ok(TranslateTestResult {
+            ok: false,
+            detail: e.message(),
+            translated: None,
+        }),
+    }
+}
+
 fn save_proxy(cfg: &proxy::ProxyConfig, secret: Option<String>) -> Result<(), String> {
     if cfg.enabled {
         cfg.validate()?;
@@ -1570,6 +1669,9 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         subtitles_toggle,
         subtitles_set_style,
         subtitles_remove_track,
+        translate_get_settings,
+        translate_set_settings,
+        translate_test,
         app_restart
     ])
 }
