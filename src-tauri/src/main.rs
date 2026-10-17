@@ -259,6 +259,13 @@ unsafe fn referer_of(
 /// - «video» — детектор <video> нашёл/сменял ключевое видео (content-бандл
 ///   субтитров, задача 3.2): Core эмитит событие контракта page:video_detected
 ///   в UI (payload PageVideoDetected — videoKey/canTracks, docs/05 §2);
+/// - «tracks» — YouTube-адаптер выдал список дорожек видео (задача 3.3):
+///   пока фиксируется в журнал ([subtitles]); IPC subtitles.list_tracks/
+///   событие subtitles:tracks_ready — сервис-обвязка задач 3.5–3.7;
+/// - «parse-subtitles» — разбор payload дорожки каноническими парсерами
+///   src/subtitles (задача 3.1) по запросу content-слоя (задача 3.3):
+///   ответ {duopulse:"subtitles-parsed", reqId, ok, cues, warnings} приходит
+///   тому же документу PostWebMessageAsString;
 /// - прочие (IPC tauri обрабатывает свои параллельно) игнорируются.
 #[cfg(windows)]
 unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
@@ -305,6 +312,53 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                             can_tracks,
                         },
                     );
+                }
+            } else if parsed["duopulse"] == "tracks" {
+                // Список дорожек от YouTube-адаптера (задача 3.3): журнал до
+                // появления потребителей (IPC subtitles.* — задачи 3.5–3.7).
+                if let Some(video_key) = parsed["videoKey"].as_str() {
+                    let base = parsed["base"].as_u64().unwrap_or(0);
+                    let translations = parsed["translations"].as_u64().unwrap_or(0);
+                    let path = parsed["path"].as_str().unwrap_or("?");
+                    eprintln!(
+                        "[subtitles] tracks: {video_key} — {base} дорожек, {translations} переводов (путь {path})"
+                    );
+                }
+            } else if parsed["duopulse"] == "parse-subtitles" {
+                // Разбор payload дорожки в Core (задача 3.3): канонические
+                // парсеры задачи 3.1, формат — автодетект по содержимому.
+                if let (Some(req_id), Some(payload)) =
+                    (parsed["reqId"].as_u64(), parsed["payload"].as_str())
+                {
+                    let parsed_cues = if payload.len() > 4 * 1024 * 1024 {
+                        eprintln!(
+                            "[subtitles] parse reqId={req_id}: payload {} КБ — сверх лимита",
+                            payload.len() / 1024
+                        );
+                        None
+                    } else {
+                        Some(subtitles::parse_auto(payload))
+                    };
+                    let reply = match parsed_cues {
+                        Some(out) => serde_json::json!({
+                            "duopulse": "subtitles-parsed",
+                            "reqId": req_id,
+                            "ok": true,
+                            "cues": out.cues.iter().map(|c| serde_json::json!({
+                                "startMs": c.start_ms, "endMs": c.end_ms, "text": c.text,
+                            })).collect::<Vec<_>>(),
+                            "warnings": out.warnings.iter()
+                                .map(|w| format!("строка {}: {}", w.line, w.message))
+                                .collect::<Vec<_>>(),
+                        }),
+                        None => serde_json::json!({
+                            "duopulse": "subtitles-parsed",
+                            "reqId": req_id,
+                            "ok": false,
+                            "error": "payload слишком большой",
+                        }),
+                    };
+                    post_to_page(sender.as_ref(), &reply);
                 }
             } else if parsed["duopulse"] == "cosmetic" {
                 if let Some(url) = parsed["url"].as_str() {

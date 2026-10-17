@@ -11,8 +11,14 @@ interface WebviewHost {
 }
 
 function host(): WebviewHost | null {
+  if (typeof window === "undefined") return null; // Node-тесты/SSR — канала нет
   const w = window as unknown as { chrome?: { webview?: WebviewHost } };
   return w.chrome?.webview ?? null;
+}
+
+/** Есть ли WebMessage-канал до Core (false — обычный браузер/тесты). */
+export function hasCoreChannel(): boolean {
+  return host() !== null;
 }
 
 /** Сообщение в Core (JSON-строкой; Best-effort — канал может не быть). */

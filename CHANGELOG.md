@@ -1414,3 +1414,60 @@
   e2e/adblock/shots-2.2/).
 - backup.bat — 17.10 01:20 (backups/backup_2026-10-17_01-20-24).
 - Коммит: см. git log (duopulse-023, пуш в summonss7/DuoPulse main).
+
+## 17.10.2026, задача 3.3 (M3) — YouTube-адаптер: список дорожек и загрузка выбранных N (карточка duopulse-024)
+- Начало: 17.10.2026 01:45 (backup 01:45:13), окончание: 17.10.2026 03:15.
+- Что изменено: YouTube-адаптер дорожек субтитров `content/adapters/`
+  (types.ts — интерфейс Adapter по docs/05 §1; youtube.ts — все знания о
+  YouTube в одном модуле, docs/03 §9): полный список дорожек из player-ответа
+  по цепочке путей player-api (movie_player.getPlayerResponse) → initial
+  (ytInitialPlayerResponse) → texttrack (последний resort; у текущего плеера
+  YT native TextTrack пуст — субтитры рендерятся DOM-слоем плеера), включая
+  asr-дорожки и ~156 языков машинного перевода (tlang), пометка языка
+  оригинала по audioTracks.original; загрузка выбранного набора 2–3 дорожек
+  (id «yt:en» / «yt:en:asr» / «yt:en+ru» / голый код перевода → база по
+  умолчанию) в движок задачи 3.2 как cue-таймлайны; разбор тел —
+  канонический в Core: `subtitles::parse_auto` (автодетект json3/XML/vtt/srt
+  по содержимому) + WebMessage `parse-subtitles`/`subtitles-parsed` (reqId,
+  cues camelCase, лимит 4 МБ) в main.rs, сообщение `tracks` — журнал Core
+  ([subtitles]) до сервис-обвязки subtitles.* (задачи 3.5–3.7); выбор —
+  custom-событие duopulse-select-tracks / __duopulseContent.selectTracks /
+  tracksInfo; набор привязан к videoKey (смена видео сбрасывает, in-flight
+  не применяется к новому видео). Ключевая механика добычи (открыта пробами
+  на живом YouTube, прямые URL из player-ответа отдают 200/0 Б — нужен
+  PO-токен): initialization script (до скриптов страницы) подменяет
+  fetch/XHR и снимает ТЕЛА timedtext-ответов, которые сам плеер запрашивает
+  по команде captions.setOption track (адаптер программирует плеер на языки
+  набора); переводы — параллельным fetch живого URL + &tlang= (подпись
+  sparams не покрывает tlang, pot остаётся валиден, работает после
+  unloadModule). Живучесть транспорта: ожидание конца рекламы (ad-showing,
+  серии прероллов 2–3 подряд) и фактического воспроизведения
+  (getPlayerState()===1 — ленивая загрузка только у играющего), при пустом
+  ответе (pot не сгенерирован BotGuard) — перезапуск captions-модуля между
+  попытками + паузы, при 429/5xx на tlang — бэкофф 6/12/18 с. Фикстуры
+  записанных player-ответов e2e/fixtures/youtube/playerResponses/ (11 видео;
+  рекордер e2e/youtube/record.mjs), стенд e2e/youtube/run.mjs — «10 случайных
+  видео» с телеметрией плеера/сети/хука.
+- Как проверено: e2e/youtube/run.mjs — ALL PASS 22/22: все 10 видео дали
+  набор «оригинал + ru + es» (3 дорожки, cue 5–417 на дорожку: TED
+  af/ru/es ×417, Gangnam ko-asr/ru/es ×67, Bohemian ar/ru/es ×65, Numb, Hello,
+  zoo, Despacito, Shape of You, Counting Stars), оверлей рисует строки набора
+  (примеры: «Teen die tyd…/К тому времени…», «강남 스타 오/Каннам Стар О/Oban al
+  estilo Gangnam»), скриншот e2e/youtube/shot-duo.png, итог run-last.json;
+  vitest 71/71 (+33: извлечение списка на фикстурах, id/dedupe/asr,
+  пути добычи, SPA-stale, resolveIds, оркестрация загрузки с фейковым
+  транспортом, отказы/восстановление, перехват fetch/XHR, tlang-URL);
+  cargo fmt/clippy -D warnings чисто, test 93/93 (+1 parse_auto);
+  tsc чисто; бандл content/gen 39,6 КБ / 11,3 КБ gzip ≤ 80; [subtitles]
+  tracks в журнале Core.
+- Замечания: (1) ted-подобная телеметрия e2e показывала 3 разных источника
+  отказов — реклама длиннее одной попытки, setOption у незапущенного плеера,
+  пустые тела без pot — все закрыты ожиданиями/ретраями в транспорте;
+  (2) серийные tlang-запросы рейт-лимитит YouTube (HTTP 429) — у реального
+  пользователя частота ниже на порядки, бэкофф оставлен; (3) initialization
+  script WebView2 исполняется в главном мире страницы — перехват fetch
+  работает напрямую, без <script>-инъекций (в отличие от скриптлетов 043,
+  где мир иной); (4) фикстуры — без baseUrl-«жизни»: живые URL требуют pot и
+  напрямую не скачиваются (поле оставлено как историческая запись ответа).
+- backup.bat — 17.10 01:45 (backups/backup_2026-10-17_01-45-13).
+- Коммит: см. git log (duopulse-024, пуш в summonss7/DuoPulse main).

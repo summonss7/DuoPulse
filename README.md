@@ -178,8 +178,18 @@ IIFE-бандл `content/gen/`, 5 КБ gzip, инжектируется в ка�
 `page:video_detected`), движок cue-таймлайна (часы `video.currentTime`,
 бинарный поиск, смёрж перекрытий, offset ±10 с, правило 150 мс при seek) и
 overlay-плашка; стенд [e2e/subtitles/run.mjs](e2e/subtitles/run.mjs) —
-21/21 (тест-страница с реальным роликом, скриншот плашки). Сервис-обвязка
-(IPC, кэш), YouTube-адаптер и полный оверлей — следующие задачи M3.
+21/21 (тест-страница с реальным роликом, скриншот плашки). И **YouTube-адаптер
+дорожек** (задача 3.3, карточка duopulse-024): `content/adapters/youtube.ts`
+— полный список дорожек из player-ответа (пути player-api → initial →
+texttrack, включая asr и ~156 языков машинного перевода tlang) и загрузка
+выбранного набора 2–3 дорожек в движок; тела timedtext снимает перехват
+fetch/XHR (initialization script до скриптов страницы) с команд плееру
+`captions.setOption` (прямые URL отдают пустое тело — нужен PO-токен),
+переводы — fetch живого URL + `tlang`, разбор — канонический в Core
+(`subtitles::parse_auto`, WebMessage). Стенд [e2e/youtube/run.mjs](e2e/youtube/run.mjs)
+— «10 случайных видео» (оригинал + ru + es, cue в движке, оверлей), фикстуры
+player-ответов — [e2e/fixtures/youtube/](e2e/fixtures/youtube/). Сервис-обвязка
+(IPC, кэш) и полный оверлей — следующие задачи M3.
 
 ### Запуск спайка M0
 

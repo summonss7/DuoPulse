@@ -22,6 +22,21 @@ pub mod vtt;
 
 use serde::{Deserialize, Serialize};
 
+/// Автодетект формата по содержимому (задача 3.3: YouTube-адаптер присылает
+/// тела timedtext/json3; формат выбирает платформа, разбирает Core — единый
+/// источник логики): `{` — JSON3 timedtext, `<` — XML timedtext, `WEBVTT` —
+/// WebVTT, остальное — SubRip.
+pub fn parse_auto(input: &str) -> ParsedCues {
+    let t = input.trim_start();
+    if t.starts_with('{') || t.starts_with('<') {
+        timedtext::parse(input)
+    } else if normalize(input).starts_with("WEBVTT") {
+        vtt::parse(input)
+    } else {
+        srt::parse(input)
+    }
+}
+
 /// Единица субтитра — docs/03 §6 (`Cue { startMs, endMs, text }`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cue {
@@ -323,6 +338,31 @@ mod tests {
         assert_eq!(normalize("\u{FEFF}1\nx"), "1\nx");
         assert_eq!(normalize("a\r\nb\rc"), "a\nb\nc");
         assert_eq!(normalize("plain"), "plain");
+    }
+
+    #[test]
+    fn parse_auto_dispatches_by_content() {
+        // JSON3 (YouTube, адаптер 3.3): детект по «{»
+        let json3 = r#"{"wireMagic":"ga3","events":[{"tStartMs":1000,"dDurationMs":1500,"segs":[{"utf8":"привет"}]}]}"#;
+        assert_eq!(
+            parse_auto(json3).cues,
+            vec![Cue {
+                start_ms: 1_000,
+                end_ms: 2_500,
+                text: "привет".into(),
+            }]
+        );
+        // XML timedtext: детект по «<»
+        let xml = "<transcript><text start=\"1.0\" dur=\"1.5\">hi</text></transcript>";
+        assert_eq!(parse_auto(xml).cues.len(), 1);
+        // WebVTT / SubRip — по маркерам
+        let vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhi\n";
+        assert_eq!(parse_auto(vtt).cues.len(), 1);
+        let srt = "1\n00:00:01,000 --> 00:00:02,000\nhi\n";
+        assert_eq!(parse_auto(srt).cues.len(), 1);
+        // пустое/мусорное — не паника, пустой итог с диагностикой
+        assert!(parse_auto("").cues.is_empty());
+        assert!(parse_auto("мусор").cues.is_empty());
     }
 
     #[test]

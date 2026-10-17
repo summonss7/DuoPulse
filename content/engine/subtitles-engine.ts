@@ -146,12 +146,18 @@ export class SubtitlesEngine {
     offsetMs: number;
     activeRows: ActiveRow[];
     attached: boolean;
+    tracks: { id: string; lang: string; cues: number }[];
   } {
     return {
       trackCount: this.tracks.length,
       offsetMs: this.offsetMs,
       activeRows: this.rows,
       attached: this.video !== null,
+      tracks: this.tracks.map((b) => ({
+        id: b.track.id,
+        lang: b.track.lang,
+        cues: b.track.cues.length,
+      })),
     };
   }
 }
