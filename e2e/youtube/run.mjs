@@ -18,6 +18,10 @@
 // на первом видео кнопка «duo» (list_tracks/состояние), панель набора,
 // пресет «Дуо» → тройной набор (оригинал + перевод + свой файл),
 // порядок строк панелью (fast-path), Alt+D вкл/выкл с восстановлением.
+// Задача 3.8 (карточка duopulse-029, gate M3): на каждом видео offset
+// Alt+[ / Alt+] (шаг 100 мс, HUD), отказы набора из-за HTTP 429 — один
+// ретрай после паузы (сетевая флакучесть, транспорт не меняем), итог —
+// сводка рабочих путей адаптера (фиксация DoD 3.8).
 //
 // Механика адаптера (октябрь 2026): прямые timedtext-URL из player-ответа
 // отдают пустое тело (PO-токен), поэтому дорожки грузит сам плеер по команде
@@ -204,7 +208,7 @@ try {
 
   let shotDone = false;
   for (const [vi, videoId] of VIDEOS.entries()) {
-    const row = { videoId, baseLang: "-", set: "-", cues: [], overlay: false, notes: [] };
+    const row = { videoId, path: "-", baseLang: "-", set: "-", cues: [], overlay: false, notes: [] };
     netTimedtext = [];
     try {
       await tab.send("Page.navigate", { url: `https://www.youtube.com/watch?v=${videoId}` });
@@ -236,6 +240,7 @@ try {
         };
       })()`);
       const info = await evalRetry(tab, `window.__duopulseContent.tracksInfo()`);
+      row.path = info.path;
       row.baseLang = `${info.base.length} баз / ${info.translationsCount} перев. (путь ${info.path}; плеер ad=${playerBefore.ad} state=${playerBefore.state} paused=${playerBefore.paused} t=${playerBefore.t})`;
       if (info.base.length === 0) throw new Error("нет базовых дорожек");
 
@@ -261,10 +266,24 @@ try {
       }
       row.set = names.join(" + ");
 
-      const sel = await evalRetry(
+      let sel = await evalRetry(
         tab,
         `window.__duopulseContent.selectTracks(${JSON.stringify(ids)})`,
       );
+      // Задача 3.8: серийные timedtext-запросы рейт-лимитятся (HTTP 429) —
+      // адаптер бэкоффит 6/12/18 с, но окно лимита анонимной сессии длиннее
+      // (кумулятивно ~15 tlang-запросов). Ретраи набора ранером с растущей
+      // паузой (сетевая флакучесть, не дефект транспорта; docs/03 §9);
+      // результат последнего ретрая канонический для проверок ниже.
+      for (const [ri, retryDelay] of [75, 150].entries()) {
+        if (!sel.failures.length) break;
+        row.notes.push(`ретрай #${ri + 1} через ${retryDelay} с (${sel.failures.map((f) => f.reason).join("; ")})`);
+        await sleep(retryDelay * 1000);
+        sel = await evalRetry(
+          tab,
+          `window.__duopulseContent.selectTracks(${JSON.stringify(ids)})`,
+        );
+      }
       if (sel.unknown.length) row.notes.push(`неизвестные: ${sel.unknown.join(",")}`);
       for (const f of sel.failures) row.notes.push(`отказ ${f.id}: ${f.reason}`);
       if (sel.failures.length) {
@@ -330,6 +349,34 @@ try {
         `window.__duopulseContent.state().nativeBlanked === true && document.documentElement.classList.contains("duopulse-yt-captions-off")`,
       );
       check(`${videoId}: нативные субтитры YouTube погашены (класс <html>)`, ytBlanked === true);
+
+      // Задача 3.8 (gate M3): offset на живом YouTube — Alt+] / Alt+[
+      // (шаг 100 мс, docs/03 §8) при активном наборе; HUD открывается и
+      // показывает сдвиг, возврат к нулю — той же клавишей в минус.
+      await evalIn(
+        tab,
+        `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "BracketRight", cancelable: true }))`,
+      );
+      const plus = await waitForPage(
+        tab,
+        `(function () {
+           const s = window.__duopulseContent.state();
+           return s.engine.offsetMs === 100 && s.offsetHudVisible === true ? true : null;
+         })()`,
+        6000,
+        "Alt+] +100 мс с HUD",
+      );
+      await evalIn(
+        tab,
+        `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "BracketLeft", cancelable: true }))`,
+      );
+      const back = await waitForPage(
+        tab,
+        `window.__duopulseContent.state().engine.offsetMs === 0`,
+        6000,
+        "Alt+[ возврат к 0",
+      );
+      check(`${videoId}: offset Alt+]/Alt+[ — +100 мс с HUD, возврат к 0`, plus === true && back === true);
 
       // Задача 3.6 (ручные файлы, карточка duopulse-027): дроп .srt поверх
       // дорожек платформы — смешанный набор (docs/01 F-06). На первом видео:
@@ -496,8 +543,9 @@ try {
     }
     rows.push(row);
     console.log(`      ${videoId}: ${row.baseLang} | набор: ${row.set}${row.notes.length ? " | " + row.notes.join("; ") : ""}`);
-    // Пауза между видео: серийные timedtext-запросы рейт-лимитятся (429)
-    if (vi < VIDEOS.length - 1) await sleep(4000);
+    // Пауза между видео: серийные tlang-запросы рейт-лимитятся (429) —
+    // окно лимита кумулятивное, размазываем запросы по времени прогона
+    if (vi < VIDEOS.length - 1) await sleep(25000);
   }
 
   // Core видел сообщения адаптера (журнал [subtitles])
@@ -525,10 +573,15 @@ try {
 }
 
 const withFullSet = results.filter((r) => r.ok && r.name.includes("набор 2–3")).length;
+// Задача 3.8 (DoD «фиксация рабочих путей адаптера»): каким путём добычи
+// (docs/03 §9) собран список дорожек на каждом видео прогона.
+const pathsOf = {};
+for (const r of rows) if (r.path && r.path !== "-") pathsOf[r.path] = (pathsOf[r.path] ?? 0) + 1;
 console.log(`\nвидео с полным набором 2–3 дорожек: ${withFullSet} из ${VIDEOS.length}`);
+console.log(`рабочие пути адаптера (список дорожек): ${JSON.stringify(pathsOf)}`);
 console.log(`${failures === 0 ? "ALL PASS" : "FAILURES: " + failures} (${results.length} проверок)`);
 fs.writeFileSync(
   path.join(OUT_DIR, "run-last.json"),
-  JSON.stringify({ at: new Date().toISOString(), videos: rows }, null, 1),
+  JSON.stringify({ at: new Date().toISOString(), paths: pathsOf, videos: rows }, null, 1),
 );
 process.exit(failures === 0 ? 0 : 1);

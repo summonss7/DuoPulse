@@ -1,0 +1,58 @@
+# CI DuoPulse (задача 3.8, карточка duopulse-029; docs/05 §5): фикс-контур
+# без сети на каждый коммит (docs/03 §9 — падение фикстурных тестов адаптера
+# = карточка «адаптер сломан» с приоритетом 0).
+#   js:   content-бандл + strict tsc + vitest — включая юнит-тесты
+#         YouTube-адаптера на записанных фикстурах player-ответов
+#         (e2e/fixtures/youtube, без обращения к сети) и парсеры Core
+#         на фикстурах e2e/fixtures/subtitles (cargo-часть ниже);
+#   rust: cargo fmt --check + clippy -D warnings + test (контракт bridge
+#         актуален: тест contract_file_is_up_to_date).
+# Релизные артефакты (NSIS/portable) собираются локально в builds/ по правилу
+# проекта (карточка duopulse-045) — в CI не собираются и не публикуются.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  js:
+    name: JS/TS — tsc + vitest (фикстуры YouTube без сети)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build:content
+      - run: npm run typecheck
+      - run: npm test
+
+  rust:
+    name: Rust — fmt + clippy + test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # cargo требует content/gen (include_str!) и dist (generate_context!)
+      - run: npm ci
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo fmt --all --check
+        working-directory: src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test
+        working-directory: src-tauri
