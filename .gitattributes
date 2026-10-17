@@ -1,0 +1,5 @@
+# Генерённые файлы сравниваются побайтово (cargo-тест contract_file_is_up_to_date)
+# и генерируются с "\n" (npm run gen:bridge). CI-раннеры Windows держат
+# core.autocrlf=true — без форса LF свежий checkout даёт CRLF и тест падает.
+bridge/contract.json text eol=lf
+src/bridge/gen/types.ts text eol=lf
