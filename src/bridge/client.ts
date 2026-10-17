@@ -32,7 +32,12 @@ import type {
   SettingsSetParams,
   SubtitlesLoadFileParams,
   SubtitlesLoadFileResult,
+  SubtitlesRemoveTrackParams,
+  SubtitlesSetEnabledParams,
   SubtitlesSetOffsetParams,
+  SubtitlesSetStyleParams,
+  SubtitlesSetTracksParams,
+  TabSubtitles,
   TabsActivateParams,
   TabsCloseParams,
   TabsListResult,
@@ -136,6 +141,25 @@ export const bridge = {
      *  чтение и разбор в Core, cue доставляются в активную вкладку. */
     loadFile: (params: SubtitlesLoadFileParams) =>
       invoke<SubtitlesLoadFileResult>("subtitles_load_file", { params }),
+    /** subtitles.list_tracks: снапшот субтитров активной вкладки (задача 3.7):
+     *  видео, показ, применённый набор, список дорожек адаптера, сдвиг, стиль. */
+    listTracks: () => invoke<TabSubtitles>("subtitles_list_tracks"),
+    /** subtitles.set_tracks: применить платформенную часть набора (порядок id =
+     *  порядок строк; тот же состав в другом порядке — перестановка). */
+    setTracks: (params: SubtitlesSetTracksParams) =>
+      invoke<void>("subtitles_set_tracks", { params }),
+    /** subtitles.set_enabled: включить/выключить показ набора (состав помнят
+     *  обе стороны — docs/03 §8 п.2). */
+    setEnabled: (params: SubtitlesSetEnabledParams) =>
+      invoke<void>("subtitles_set_enabled", { params }),
+    /** subtitles.toggle: переключить показ (Alt+D из хрома; на пустом наборе
+     *  включение собирает дефолт «оригинал + ru» в content-слое). */
+    toggle: () => invoke<void>("subtitles_toggle"),
+    /** subtitles.set_style: стиль плашки активной вкладки (патч, клампы в оверлее). */
+    setStyle: (params: SubtitlesSetStyleParams) => invoke<void>("subtitles_set_style", { params }),
+    /** subtitles.remove_track: снять дорожку из набора (остальные без перезагрузки). */
+    removeTrack: (params: SubtitlesRemoveTrackParams) =>
+      invoke<void>("subtitles_remove_track", { params }),
   },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */
@@ -159,5 +183,10 @@ export const bridge = {
     perfStartupMs: "perf:startup_ms",
     /** perf.tab_switch_ms: переключение активной вкладки (задача 2.5). */
     perfTabSwitchMs: "perf:tab_switch_ms",
+    /** subtitles.tracks_ready: адаптер вкладки выдал список дорожек (3.7). */
+    subtitlesTracksReady: "subtitles:tracks_ready",
+    /** subtitles.set_applied: состояние показа вкладки изменилось (3.7):
+     *  кнопка «duo» и панель обновляются событием. */
+    subtitlesSetApplied: "subtitles:set_applied",
   } as const,
 };

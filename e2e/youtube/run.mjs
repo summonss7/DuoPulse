@@ -12,6 +12,13 @@
 //      задача 3.4, docs/03 §2);
 //   6) скриншот-пример. Итог — таблица + счётчик видео с полным набором.
 //
+// Задача 3.6 (карточка duopulse-027): на первом видео дроп .srt поверх
+// дорожки платформы — смешанный набор (docs/01 F-06).
+// Задача 3.7 (карточка duopulse-028, сценарий docs/01 §5.1 из UI-хрома):
+// на первом видео кнопка «duo» (list_tracks/состояние), панель набора,
+// пресет «Дуо» → тройной набор (оригинал + перевод + свой файл),
+// порядок строк панелью (fast-path), Alt+D вкл/выкл с восстановлением.
+//
 // Механика адаптера (октябрь 2026): прямые timedtext-URL из player-ответа
 // отдают пустое тело (PO-токен), поэтому дорожки грузит сам плеер по команде
 // captions.setOption (тела снимает перехват fetch/XHR в initialization
@@ -370,6 +377,110 @@ try {
           fs.writeFileSync(path.join(OUT_DIR, "shot-file-mix-yt.png"), Buffer.from(shot.data, "base64"));
           check("скриншот смешанного набора на YouTube (shot-file-mix-yt.png)", fs.existsSync(path.join(OUT_DIR, "shot-file-mix-yt.png")));
         }
+
+        // Задача 3.7 (карточка duopulse-028): сценарий docs/01 §5.1 из UI-хрома —
+        // кнопка «duo», панель набора, пресет «Дуо» (третья строка — свой файл),
+        // порядок строк, Alt+D вкл/выкл с восстановлением последнего набора.
+        const tlist = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
+        const uiT = tlist.find((t) => t.type === "page" && /localhost:5173/.test(t.url));
+        if (!uiT) throw new Error("UI-цель CDP не найдена (нужен vite dev)");
+        const ui = connect(uiT.webSocketDebuggerUrl);
+        await waitForPage(ui, `typeof window.__duopulse === "object"`, 10000, "bridge-хук в хроме");
+        await sleep(600); // set-state смешанного набора долетел до кнопки
+
+        const snap = await evalRetry(ui, `window.__duopulse.subtitles.listTracks()`);
+        check(
+          `${videoId}: §5.1 list_tracks — видео, набор (оригинал + файл ru), список адаптера`,
+          snap.videoKey === `yt:${videoId}` && snap.enabled === true &&
+            snap.tracks.length === 2 && snap.tracks.some((t) => t.source === "file") &&
+            snap.canTracks === true && snap.base.length > 0,
+          JSON.stringify({ videoKey: snap.videoKey, tracks: snap.tracks.map((t) => t.id) }),
+        );
+        const btnState = await evalRetry(
+          ui,
+          `(function () { const b = document.getElementById("duoBtn"); return { hidden: b.hidden, count: b.dataset.count }; })()`,
+        );
+        check(
+          `${videoId}: §5.1 кнопка «duo» видна, состояние «дуо» (2 дорожки)`,
+          btnState.hidden === false && btnState.count === "2",
+          JSON.stringify(btnState),
+        );
+
+        // Панель: пресет «Дуо» добавляет перевод tlang к оригиналу — с файловой
+        // строкой это тройной набор (docs/03 §1: оригинал + перевод + свой файл).
+        await evalIn(ui, `document.getElementById("duoBtn").click()`);
+        await sleep(500);
+        const duoChip = await evalIn(
+          ui,
+          `(function () {
+             const chips = Array.from(document.querySelectorAll("#duoPresets .duo-chip"));
+             const chip = chips.find((c) => c.textContent.startsWith("Дуо"));
+             if (!chip) return null;
+             chip.click();
+             return chip.dataset.ids;
+           })()`,
+        );
+        check(`${videoId}: §5.1 панель открылась, пресет «Дуо» кликнут`, duoChip !== null, String(duoChip));
+        const trioState = await waitForPage(
+          tab,
+          `(function () {
+             const s = window.__duopulseContent.state();
+             return s.engine.trackCount === 3 && s.engine.tracks.every((t) => t.cues > 0) ? s.engine.tracks.map((t) => t.id) : null;
+           })()`,
+          60000, // загрузка перевода tlang: при 429 адаптер бэкоффит 6/12/18 с
+          "тройной набор из панели (пресет + файл)",
+        );
+        check(
+          `${videoId}: §5.1 тройной набор: оригинал + перевод платформы + свой файл`,
+          trioState.length === 3 && trioState[0] === original.id && trioState[1] === `${original.id}+ru` && trioState[2] === "file:ru",
+          trioState.join(" + "),
+        );
+
+        // Порядок строк: «↓» в панели — fast-path перестановка (без сети).
+        await evalIn(ui, `document.querySelector("#duoSet .duo-row [data-act='down']").click()`);
+        const swapped = await waitForPage(
+          tab,
+          `(function () {
+             const ids = window.__duopulseContent.state().engine.tracks.map((t) => t.id);
+             return ids[0] === ${JSON.stringify(`${original.id}+ru`)} ? ids : null;
+           })()`,
+          10000,
+          "перестановка строк набора",
+        );
+        check(
+          `${videoId}: §5.1 порядок строк настраивается (перевод выше оригинала)`,
+          swapped[0] === `${original.id}+ru` && swapped[1] === original.id && swapped[2] === "file:ru",
+          swapped.join(" + "),
+        );
+
+        // Alt+D: выключить (нативные не гасим) / включить — последний набор тот же.
+        await evalIn(tab, `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "KeyD", cancelable: true }))`);
+        const offState = await waitForPage(
+          tab,
+          `(function () {
+             const s = window.__duopulseContent.state();
+             return s.enabled === false && s.engine.trackCount === 0 && !document.documentElement.classList.contains("duopulse-yt-captions-off") ? true : null;
+           })()`,
+          10000,
+          "Alt+D выкл на YouTube",
+        );
+        check(`${videoId}: §5.1 Alt+D выключил показ (нативные субтитры не гасим)`, offState === true);
+        await evalIn(tab, `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "KeyD", cancelable: true }))`);
+        const onState = await waitForPage(
+          tab,
+          `(function () {
+             const s = window.__duopulseContent.state();
+             return s.enabled === true && s.engine.trackCount === 3 && s.nativeBlanked === true ? s.engine.tracks.map((t) => t.id) : null;
+           })()`,
+          10000,
+          "Alt+D включил последний набор",
+        );
+        check(
+          `${videoId}: §5.1 Alt+D включил: последний набор восстановлен без перезагрузки`,
+          onState.join(",") === swapped.join(","),
+          onState.join(" + "),
+        );
+        ui.close();
       }
 
       if (!shotDone) {

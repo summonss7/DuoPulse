@@ -18,6 +18,7 @@
         <button id="reload" class="icon-btn" title="Обновить"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.7-3.75"/><path d="M13 2.8v2.7h-2.7"/></svg></button>
         <input id="omnibox" type="text" placeholder="Введите адрес или поисковый запрос" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest" />
         <div id="suggest" class="suggest" hidden role="listbox" aria-label="Подсказки адресной строки"></div>
+        <button id="duoBtn" class="duo-btn" title="Субтитры DuoPulse — клик: панель набора, Alt+D: вкл/выкл" hidden>duo<span class="duo-dots" aria-hidden="true"><i></i><i></i><i></i></span></button>
         <button id="go" class="go">Перейти</button>
         <button id="libBtn" class="icon-btn" title="История и закладки"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></button>
         <button id="proxyBtn" class="icon-btn" title="Прокси (VPN-инкремент A)"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l5.2 2v3.5c0 3.2-2.2 5.5-5.2 7-3-1.5-5.2-3.8-5.2-7V3.8z"/></svg></button>
@@ -76,6 +77,47 @@
           <button id="proxyIpEcho" class="link" title="Откроет api.ipify.org в браузере: при включённом прокси покажет адрес прокси">
             Проверить IP-эхом &rarr;
           </button>
+        </div>
+      </div>
+      <div id="duoPanel" class="duo-panel" hidden>
+        <div class="duo-head">
+          <span class="duo-title">Субтитры</span>
+          <label class="switch" title="Вкл/выкл показ набора (Alt+D)">
+            <input type="checkbox" id="duoEnabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="duo-meta" id="duoMeta">Видео не найдено</div>
+        <div class="duo-presets" id="duoPresets"></div>
+        <div class="duo-section-title">Набор <span class="duo-hint">до 3 строк</span></div>
+        <div class="duo-set" id="duoSet"></div>
+        <div class="duo-add" id="duoAdd"></div>
+        <div class="duo-section-title">Свои субтитры</div>
+        <div class="duo-files">
+          <button type="button" id="duoFileBtn" class="ghost">Файл .srt / .vtt…</button>
+          <span class="duo-hint">или перетащите на страницу</span>
+        </div>
+        <div class="duo-file-meta" id="duoFileMeta" hidden></div>
+        <div class="duo-section-title">Синхронизация</div>
+        <div class="duo-offset">
+          <input type="range" id="duoOffset" min="-10000" max="10000" step="100" value="0" />
+          <span class="duo-offset-val" id="duoOffsetVal">0,0 с</span>
+          <button type="button" id="duoOffsetReset" class="link">Сброс</button>
+        </div>
+        <div class="duo-section-title">Вид плашки</div>
+        <div class="duo-style">
+          <label class="duo-field">
+            <span>Размер</span>
+            <input type="range" id="duoScale" min="75" max="300" step="5" value="100" />
+            <span class="duo-scale-val" id="duoScaleVal">100%</span>
+          </label>
+          <div class="duo-field">
+            <span>Позиция</span>
+            <div class="duo-seg" id="duoPosition">
+              <button type="button" data-pos="bottom" class="on">Низ</button>
+              <button type="button" data-pos="top">Верх</button>
+            </div>
+          </div>
         </div>
       </div>
       <div id="tabMenu" class="tab-menu" hidden>

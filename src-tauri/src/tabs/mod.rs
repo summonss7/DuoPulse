@@ -674,6 +674,13 @@ impl TabManager {
     /// пока webview в app-origin: уход по внешнему адресу превращает вкладку
     /// в обычную.
     pub(crate) fn on_page_load(&self, app: &AppHandle, id: &str, event: PageLoadEvent, url: &Url) {
+        if matches!(event, PageLoadEvent::Started) {
+            // Новый документ вкладки: состояние субтитров прошлого документа
+            // (список дорожек, набор) не актуально — чистим до первых
+            // сообщений нового документа (задача 3.7).
+            app.state::<crate::subtitles::service::SubtitlesService>()
+                .reset_tab(id);
+        }
         let mut st = self.state.lock().expect("tabs: лок не отравлен");
         let Some(entry) = st.tabs.iter_mut().find(|t| t.id == id) else {
             return;

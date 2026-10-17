@@ -262,13 +262,17 @@ unsafe fn referer_of(
 ///   ответе — код скриптлетов `##+js` (injectedScript, карточка duopulse-043);
 /// - «video» — детектор <video> нашёл/сменял ключевое видео (content-бандл
 ///   субтитров, задача 3.2): Core эмитит событие контракта page:video_detected
-///   в UI (payload PageVideoDetected — videoKey/canTracks, docs/05 §2);
+///   в UI (payload PageVideoDetected — videoKey/canTracks, docs/05 §2) и
+///   чистит состояние субтитров вкладки в сервисе (задача 3.7: список/набор
+///   прошлого видео не актуальны);
 /// - «tracks» — YouTube-адаптер выдал список дорожек видео (задача 3.3):
-///   пока фиксируется в журнал ([subtitles]); IPC subtitles.list_tracks/
-///   событие subtitles:tracks_ready — сервис-обвязка задач 3.5–3.7;
+///   полный список (базовые + переводы) уходит в сервис состояния (3.7) и
+///   событием subtitles:tracks_ready — панель наполняет выбор языков;
+/// - «set-state» — content-слой сообщил состояние показа (задача 3.7:
+///   состав набора, enabled, offset, стиль — источник изменения в via):
+///   сервис состояния + событие subtitles:set_applied (кнопка «duo»/панель);
 /// - «file-tracks» — файловые дорожки применились к набору (задача 3.6:
-///   drag&drop или subtitles.load_file); журнал [subtitles] до сервисной
-///   обвязки subtitles.* (задачи 3.7+);
+///   drag&drop или subtitles.load_file); журнал [subtitles];
 /// - «parse-subtitles» — разбор payload дорожки каноническими парсерами
 ///   src/subtitles (задача 3.1) по запросу content-слоя (задача 3.3):
 ///   ответ {duopulse:"subtitles-parsed", reqId, ok, cues, warnings} приходит
@@ -307,30 +311,74 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 // Детектор <video> content-бандла субтитров (задача 3.2):
                 // проброс в UI событием контракта. Детектор эмитит только по
                 // факту (новое видео/смена ключа), повторов не бывает.
+                // Задача 3.7: tab_id — кнопка «duo»/панель следят за активной
+                // вкладкой; сервис состояния чистит прошлое видео.
                 if let (Some(video_key), Some(can_tracks)) = (
                     parsed["videoKey"].as_str(),
                     parsed["canTracks"].as_bool(),
                 ) {
                     eprintln!("[subtitles] video detected: {video_key} (tab {tab_id}, canTracks={can_tracks})");
+                    let service = app.state::<subtitles::service::SubtitlesService>();
+                    service.on_video(&tab_id, video_key, can_tracks);
                     let _ = bridge::emit::<bridge::PageVideoDetected>(
                         &app,
                         &bridge::PageVideoDetected {
+                            tab_id: tab_id.clone(),
                             video_key: video_key.to_string(),
                             can_tracks,
                         },
                     );
                 }
             } else if parsed["duopulse"] == "tracks" {
-                // Список дорожек от YouTube-адаптера (задача 3.3): журнал до
-                // появления потребителей (IPC subtitles.* — задачи 3.5–3.7).
+                // Полный список дорожек от YouTube-адаптера (задача 3.3) в
+                // сервис состояния + событие subtitles:tracks_ready (3.7):
+                // панель наполняет выбор языков/переводов.
                 if let Some(video_key) = parsed["videoKey"].as_str() {
-                    let base = parsed["base"].as_u64().unwrap_or(0);
-                    let translations = parsed["translations"].as_u64().unwrap_or(0);
-                    let path = parsed["path"].as_str().unwrap_or("?");
+                    let base = parse_base_tracks(&parsed["base"]);
+                    let translations = parse_translation_langs(&parsed["translations"]);
                     eprintln!(
-                        "[subtitles] tracks: {video_key} — {base} дорожек, {translations} переводов (путь {path})"
+                        "[subtitles] tracks: {video_key} — {} дорожек, {} переводов (путь {}, tab {tab_id})",
+                        base.len(),
+                        translations.len(),
+                        parsed["path"].as_str().unwrap_or("?"),
+                    );
+                    let service = app.state::<subtitles::service::SubtitlesService>();
+                    let st = service.on_tracks(&tab_id, video_key, base, translations);
+                    let _ = bridge::emit::<bridge::SubtitlesTracksReadyEvent>(
+                        &app,
+                        &bridge::SubtitlesTracksReady {
+                            tab_id: tab_id.clone(),
+                            video_key: video_key.to_string(),
+                            base: st.base,
+                            translations: st.translations,
+                        },
                     );
                 }
+            } else if parsed["duopulse"] == "set-state" {
+                // Состояние показа content-слоя (задача 3.7): сервис состояния
+                // + событие subtitles:set_applied — кнопка «duo» (выкл/1/дуо/
+                // три) и панель обновляются; via — источник изменения.
+                let state = parse_set_state(&parsed);
+                let via = parsed["via"].as_str().unwrap_or("?").to_string();
+                eprintln!(
+                    "[subtitles] set-state: {} — {} дорожек (via {via}, tab {tab_id})",
+                    if state.enabled { "вкл" } else { "выкл" },
+                    state.tracks.len(),
+                );
+                let service = app.state::<subtitles::service::SubtitlesService>();
+                let st = service.on_set_state(&tab_id, state);
+                let _ = bridge::emit::<bridge::SubtitlesSetAppliedEvent>(
+                    &app,
+                    &bridge::SubtitlesSetApplied {
+                        tab_id: tab_id.clone(),
+                        video_key: st.video_key.clone(),
+                        enabled: st.enabled,
+                        tracks: st.tracks.clone(),
+                        offset_ms: st.offset_ms,
+                        style: st.style.clone(),
+                        via,
+                    },
+                );
             } else if parsed["duopulse"] == "file-tracks" {
                 // Файловые дорожки в наборе (задача 3.6): журнал до сервисной
                 // обвязки subtitles.* (панель — задача 3.7).
@@ -443,6 +491,97 @@ fn post_to_page(
     }
 }
 
+// --- разбор сообщений content-слоя субтитров (задача 3.7, снисходительно) ---
+
+fn json_str(v: &serde_json::Value, key: &str) -> String {
+    v[key].as_str().unwrap_or_default().to_string()
+}
+
+fn json_bool(v: &serde_json::Value, key: &str) -> bool {
+    v[key].as_bool().unwrap_or(false)
+}
+
+fn json_u32(v: &serde_json::Value, key: &str) -> u32 {
+    v[key].as_u64().map(|n| n as u32).unwrap_or(0)
+}
+
+/// «tracks».base — базовые дорожки адаптера (content BaseTrackInfo).
+fn parse_base_tracks(value: &serde_json::Value) -> Vec<subtitles::service::BaseTrackInfo> {
+    value
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter(|v| !v["id"].as_str().unwrap_or("").is_empty())
+                .map(|v| subtitles::service::BaseTrackInfo {
+                    id: json_str(v, "id"),
+                    lang: json_str(v, "lang"),
+                    kind: json_str(v, "kind"),
+                    name: json_str(v, "name"),
+                    original: json_bool(v, "original"),
+                    translatable: json_bool(v, "translatable"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// «tracks».translations — языки машинного перевода (tlang).
+fn parse_translation_langs(
+    value: &serde_json::Value,
+) -> Vec<subtitles::service::TranslationLangInfo> {
+    value
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter(|v| !v["lang"].as_str().unwrap_or("").is_empty())
+                .map(|v| subtitles::service::TranslationLangInfo {
+                    lang: json_str(v, "lang"),
+                    name: json_str(v, "name"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// «set-state» — состояние показа вкладки: состав набора, enabled, offset,
+/// стиль (клампы остаются за content-слоем; здесь — снисходительный разбор).
+fn parse_set_state(value: &serde_json::Value) -> subtitles::service::TabSubtitles {
+    let mut st = subtitles::service::TabSubtitles::fresh();
+    st.video_key = value["videoKey"].as_str().map(str::to_string);
+    st.enabled = value["enabled"].as_bool().unwrap_or(true);
+    st.offset_ms = value["offsetMs"].as_i64().unwrap_or(0);
+    if let Some(tracks) = value["tracks"].as_array() {
+        st.tracks = tracks
+            .iter()
+            .filter(|t| !t["id"].as_str().unwrap_or("").is_empty())
+            .map(|t| subtitles::service::AppliedTrackInfo {
+                id: json_str(t, "id"),
+                lang: json_str(t, "lang"),
+                source: json_str(t, "source"),
+                name: json_str(t, "name"),
+                role: json_str(t, "role"),
+            })
+            .collect();
+    }
+    if let Some(style) = value["style"].as_object() {
+        let style = serde_json::Value::Object(style.clone());
+        st.style = subtitles::service::SubtitlesStyleInfo {
+            font_scale_pct: json_u32(&style, "fontScalePct"),
+            position: {
+                let p = json_str(&style, "position");
+                if p.is_empty() {
+                    "bottom".to_string()
+                } else {
+                    p
+                }
+            },
+            margin_pct: json_u32(&style, "marginPct"),
+            plate_opacity: style["plateOpacity"].as_f64().unwrap_or(0.78),
+        };
+    }
+    st
+}
+
 /// Полный набор COM-обработчиков для каждой вкладки: сетевой перехват M0 +
 /// блокировщик (задача 2.1), аутентификация прокси (1.8), сообщения content
 /// (горячие клавиши, 1.2). tab_id — вкладка-владелец: её URL — запасной
@@ -492,10 +631,12 @@ fn main() {
     startup_mark("stores-open");
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
+        .plugin(tauri_plugin_dialog::init())
         .manage(tabs::TabManager::new())
         .manage(history_store)
         .manage(perf_store)
         .manage(adblock_service)
+        .manage(subtitles::service::SubtitlesService::new())
         .setup(move |app| {
             startup_mark("setup");
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и

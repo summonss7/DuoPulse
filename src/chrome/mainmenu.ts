@@ -22,6 +22,7 @@ const adblockUpdateBtn = document.getElementById("adblockUpdate") as HTMLButtonE
 function closeOtherPanels(): void {
   (document.getElementById("tabMenu") as HTMLElement).hidden = true;
   (document.getElementById("proxyMenu") as HTMLElement).hidden = true;
+  (document.getElementById("duoPanel") as HTMLElement).hidden = true;
 }
 
 btn.addEventListener("click", (e) => {

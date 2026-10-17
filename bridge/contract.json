@@ -1182,6 +1182,194 @@
       },
       "result": null
     },
+    "subtitles.list_tracks": {
+      "handler": "subtitles_list_tracks",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "AppliedTrackInfo": {
+            "description": "Дорожка применённого набора (зеркало set-state content-слоя): панель показывает состав/порядок, кнопка «duo» — количество (выкл/1/дуо/три).",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "lang": {
+                "type": "string"
+              },
+              "name": {
+                "description": "Отображаемое имя (имя платформы/слаг файла).",
+                "type": "string"
+              },
+              "role": {
+                "description": "original | translation.",
+                "type": "string"
+              },
+              "source": {
+                "description": "youtube | file | translate | test (docs/03 §6).",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "lang",
+              "name",
+              "role",
+              "source"
+            ],
+            "type": "object"
+          },
+          "BaseTrackInfo": {
+            "description": "Базовая дорожка из player-ответа платформы (зеркало BaseTrackInfo content-адаптера, docs/03 §3.1).",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "description": "manual | asr (ручная или распознанная).",
+                "type": "string"
+              },
+              "lang": {
+                "type": "string"
+              },
+              "name": {
+                "description": "Отображаемое имя (локализовано платформой).",
+                "type": "string"
+              },
+              "original": {
+                "description": "Дорожка языка оригинала (audioTracks.original).",
+                "type": "boolean"
+              },
+              "translatable": {
+                "description": "Платформа разрешает машинный перевод (tlang) этой дорожки.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "lang",
+              "name",
+              "original",
+              "translatable"
+            ],
+            "type": "object"
+          },
+          "SubtitlesStyleInfo": {
+            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение.",
+            "properties": {
+              "fontScalePct": {
+                "description": "Масштаб кегля, %: 75–300 (docs/03 §5).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "marginPct": {
+                "description": "Отступ от края видео, % высоты.",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "plateOpacity": {
+                "description": "Непрозрачность подложки, 0–1 (гайд 06 §6).",
+                "format": "double",
+                "type": "number"
+              },
+              "position": {
+                "description": "bottom | top.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "fontScalePct",
+              "marginPct",
+              "plateOpacity",
+              "position"
+            ],
+            "type": "object"
+          },
+          "TranslationLangInfo": {
+            "description": "Язык машинного перевода (tlang), доступный для базовых дорожек.",
+            "properties": {
+              "lang": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "lang",
+              "name"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "Состояние субтитров одной вкладки (default — видео не найдено, показ включён: флаг управляет показом последнего набора, docs/03 §8 п.2).",
+        "properties": {
+          "base": {
+            "description": "Полный список базовых дорожек адаптера (пуст — не YouTube/не получен).",
+            "items": {
+              "$ref": "#/definitions/BaseTrackInfo"
+            },
+            "type": "array"
+          },
+          "canTracks": {
+            "description": "Адаптер платформы дал список дорожек (кнопка «duo» видна).",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Показ включён (Alt+D/панель; при false набор помнят обе стороны).",
+            "type": "boolean"
+          },
+          "offsetMs": {
+            "description": "Сдвиг показа, мс (±10 с, docs/03 §4).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "style": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/SubtitlesStyleInfo"
+              }
+            ],
+            "description": "Стиль плашки."
+          },
+          "tracks": {
+            "description": "Применённый набор (до 3 дорожек, порядок = порядок строк).",
+            "items": {
+              "$ref": "#/definitions/AppliedTrackInfo"
+            },
+            "type": "array"
+          },
+          "translations": {
+            "description": "Доступные переводы (tlang).",
+            "items": {
+              "$ref": "#/definitions/TranslationLangInfo"
+            },
+            "type": "array"
+          },
+          "videoKey": {
+            "description": "Ключ текущего видео (None — видео не детектировано/ушло).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "base",
+          "canTracks",
+          "enabled",
+          "offsetMs",
+          "style",
+          "tracks",
+          "translations"
+        ],
+        "title": "TabSubtitles",
+        "type": "object"
+      }
+    },
     "subtitles.load_file": {
       "handler": "subtitles_load_file",
       "params": {
@@ -1229,6 +1417,42 @@
         "type": "object"
       }
     },
+    "subtitles.remove_track": {
+      "handler": "subtitles_remove_track",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "subtitles.remove_track: снять дорожку из набора (панель, «×» у строки): файловую или платформенную, остальные — без перезагрузки.",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SubtitlesRemoveTrackParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "subtitles.set_enabled": {
+      "handler": "subtitles_set_enabled",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "subtitles.set_enabled: включить/выключить показ набора (Alt+D, тумблер панели): состав помнят обе стороны, включение восстанавливает без перезагрузки (docs/03 §8 п.2).",
+        "properties": {
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "on"
+        ],
+        "title": "SubtitlesSetEnabledParams",
+        "type": "object"
+      },
+      "result": null
+    },
     "subtitles.set_offset": {
       "handler": "subtitles_set_offset",
       "params": {
@@ -1247,6 +1471,88 @@
         "title": "SubtitlesSetOffsetParams",
         "type": "object"
       },
+      "result": null
+    },
+    "subtitles.set_style": {
+      "handler": "subtitles_set_style",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "SubtitlesStylePatch": {
+            "description": "Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4).",
+            "properties": {
+              "fontScalePct": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "marginPct": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "plateOpacity": {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "position": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "description": "subtitles.set_style: стиль плашки активной вкладки (размер/позиция панели; то же значение меняют колесо мыши по плашке и тест-хук 3.4).",
+        "properties": {
+          "style": {
+            "$ref": "#/definitions/SubtitlesStylePatch"
+          }
+        },
+        "required": [
+          "style"
+        ],
+        "title": "SubtitlesSetStyleParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "subtitles.set_tracks": {
+      "handler": "subtitles_set_tracks",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "subtitles.set_tracks: применить платформенную часть набора активной вкладки (порядок id = порядок строк на плашке; content-слой тот же состав в другом порядке переставляет без перезагрузки дорожек).",
+        "properties": {
+          "ids": {
+            "description": "id дорожек из списка адаптера («yt:en», «yt:en+ru», голый код перевода).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "SubtitlesSetTracksParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "subtitles.toggle": {
+      "handler": "subtitles_toggle",
+      "params": null,
       "result": null
     },
     "tabs.activate": {
@@ -1932,10 +2238,13 @@
     "page:video_detected": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "page:video_detected: на странице найден <video> (M3; каркас с 1.1).",
+        "description": "page:video_detected: на странице найден <video> (M3; каркас с 1.1). tab_id — вкладка-источник (задача 3.7: кнопка «duo»/панель следят только за активной вкладкой).",
         "properties": {
           "canTracks": {
             "type": "boolean"
+          },
+          "tabId": {
+            "type": "string"
           },
           "videoKey": {
             "type": "string"
@@ -1943,6 +2252,7 @@
         },
         "required": [
           "canTracks",
+          "tabId",
           "videoKey"
         ],
         "title": "PageVideoDetected",
@@ -1986,6 +2296,207 @@
           "ms"
         ],
         "title": "PerfTabSwitchMs",
+        "type": "object"
+      }
+    },
+    "subtitles:set_applied": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "AppliedTrackInfo": {
+            "description": "Дорожка применённого набора (зеркало set-state content-слоя): панель показывает состав/порядок, кнопка «duo» — количество (выкл/1/дуо/три).",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "lang": {
+                "type": "string"
+              },
+              "name": {
+                "description": "Отображаемое имя (имя платформы/слаг файла).",
+                "type": "string"
+              },
+              "role": {
+                "description": "original | translation.",
+                "type": "string"
+              },
+              "source": {
+                "description": "youtube | file | translate | test (docs/03 §6).",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "lang",
+              "name",
+              "role",
+              "source"
+            ],
+            "type": "object"
+          },
+          "SubtitlesStyleInfo": {
+            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение.",
+            "properties": {
+              "fontScalePct": {
+                "description": "Масштаб кегля, %: 75–300 (docs/03 §5).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "marginPct": {
+                "description": "Отступ от края видео, % высоты.",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "plateOpacity": {
+                "description": "Непрозрачность подложки, 0–1 (гайд 06 §6).",
+                "format": "double",
+                "type": "number"
+              },
+              "position": {
+                "description": "bottom | top.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "fontScalePct",
+              "marginPct",
+              "plateOpacity",
+              "position"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "subtitles:set_applied: состояние показа вкладки изменилось (состав набора, включён ли показ, сдвиг, стиль; docs/05 §2) — кнопка «duo» (выкл/1/дуо/три) и панель обновляются событием; via — источник изменения (телеметрия: alt-d/panel/select/drop/video/lost/…).",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "offsetMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "style": {
+            "$ref": "#/definitions/SubtitlesStyleInfo"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/definitions/AppliedTrackInfo"
+            },
+            "type": "array"
+          },
+          "via": {
+            "type": "string"
+          },
+          "videoKey": {
+            "description": "None — видео ушло со страницы (детектор onVideoLost).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "offsetMs",
+          "style",
+          "tabId",
+          "tracks",
+          "via"
+        ],
+        "title": "SubtitlesSetApplied",
+        "type": "object"
+      }
+    },
+    "subtitles:tracks_ready": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "BaseTrackInfo": {
+            "description": "Базовая дорожка из player-ответа платформы (зеркало BaseTrackInfo content-адаптера, docs/03 §3.1).",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "description": "manual | asr (ручная или распознанная).",
+                "type": "string"
+              },
+              "lang": {
+                "type": "string"
+              },
+              "name": {
+                "description": "Отображаемое имя (локализовано платформой).",
+                "type": "string"
+              },
+              "original": {
+                "description": "Дорожка языка оригинала (audioTracks.original).",
+                "type": "boolean"
+              },
+              "translatable": {
+                "description": "Платформа разрешает машинный перевод (tlang) этой дорожки.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "lang",
+              "name",
+              "original",
+              "translatable"
+            ],
+            "type": "object"
+          },
+          "TranslationLangInfo": {
+            "description": "Язык машинного перевода (tlang), доступный для базовых дорожек.",
+            "properties": {
+              "lang": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "lang",
+              "name"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "subtitles:tracks_ready: адаптер вкладки выдал полный список дорожек видео (docs/05 §2) — панель наполняет выбор языков/переводов.",
+        "properties": {
+          "base": {
+            "items": {
+              "$ref": "#/definitions/BaseTrackInfo"
+            },
+            "type": "array"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "translations": {
+            "items": {
+              "$ref": "#/definitions/TranslationLangInfo"
+            },
+            "type": "array"
+          },
+          "videoKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base",
+          "tabId",
+          "translations",
+          "videoKey"
+        ],
+        "title": "SubtitlesTracksReady",
         "type": "object"
       }
     },

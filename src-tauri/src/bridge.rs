@@ -443,6 +443,61 @@ pub struct SubtitlesLoadFileResult {
     pub warnings: Vec<String>,
 }
 
+// --- задача 3.7: панель настроек набора + кнопка «duo» (docs/03 §8) ----------
+
+/// subtitles.set_tracks: применить платформенную часть набора активной
+/// вкладки (порядок id = порядок строк на плашке; content-слой тот же состав
+/// в другом порядке переставляет без перезагрузки дорожек).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubtitlesSetTracksParams {
+    /// id дорожек из списка адаптера («yt:en», «yt:en+ru», голый код перевода).
+    pub ids: Vec<String>,
+}
+
+/// subtitles.set_enabled: включить/выключить показ набора (Alt+D, тумблер
+/// панели): состав помнят обе стороны, включение восстанавливает без
+/// перезагрузки (docs/03 §8 п.2).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitlesSetEnabledParams {
+    pub on: bool,
+}
+
+/// subtitles.remove_track: снять дорожку из набора (панель, «×» у строки):
+/// файловую или платформенную, остальные — без перезагрузки.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubtitlesRemoveTrackParams {
+    pub id: String,
+}
+
+/// Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля
+/// не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitlesStylePatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_scale_pct: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin_pct: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plate_opacity: Option<f64>,
+}
+
+/// subtitles.set_style: стиль плашки активной вкладки (размер/позиция
+/// панели; то же значение меняют колесо мыши по плашке и тест-хук 3.4).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubtitlesSetStyleParams {
+    pub style: SubtitlesStylePatch,
+}
+
+/// subtitles.list_tracks: снапшот состояния субтитров активной вкладки
+/// (сервис состояния, задача 3.7) — панель настроек набора и кнопка «duo»:
+/// текущее видео, включён ли показ, применённый набор (порядок = строки),
+/// полный список дорожек адаптера (языки/переводы), сдвиг и стиль.
+pub type SubtitlesListTracksResult = crate::subtitles::service::TabSubtitles;
+
 // ---------------------------------------------------------------------------
 // События Core → UI|Content
 // ---------------------------------------------------------------------------
@@ -470,10 +525,13 @@ impl BridgeEvent for PageLoaded {
 }
 
 /// page:video_detected: на странице найден <video> (M3; каркас с 1.1).
+/// tab_id — вкладка-источник (задача 3.7: кнопка «duo»/панель следят только
+/// за активной вкладкой).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct PageVideoDetected {
+    pub tab_id: String,
     pub video_key: String,
     pub can_tracks: bool,
 }
@@ -481,6 +539,50 @@ pub struct PageVideoDetected {
 impl BridgeEvent for PageVideoDetected {
     const NAME: &'static str = "page:video_detected";
     type Payload = Self;
+}
+
+/// subtitles:tracks_ready: адаптер вкладки выдал полный список дорожек
+/// видео (docs/05 §2) — панель наполняет выбор языков/переводов.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitlesTracksReady {
+    pub tab_id: String,
+    pub video_key: String,
+    pub base: Vec<crate::subtitles::service::BaseTrackInfo>,
+    pub translations: Vec<crate::subtitles::service::TranslationLangInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubtitlesTracksReadyEvent;
+
+impl BridgeEvent for SubtitlesTracksReadyEvent {
+    const NAME: &'static str = "subtitles:tracks_ready";
+    type Payload = SubtitlesTracksReady;
+}
+
+/// subtitles:set_applied: состояние показа вкладки изменилось (состав набора,
+/// включён ли показ, сдвиг, стиль; docs/05 §2) — кнопка «duo» (выкл/1/дуо/три)
+/// и панель обновляются событием; via — источник изменения (телеметрия:
+/// alt-d/panel/select/drop/video/lost/…).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitlesSetApplied {
+    pub tab_id: String,
+    /// None — видео ушло со страницы (детектор onVideoLost).
+    pub video_key: Option<String>,
+    pub enabled: bool,
+    pub tracks: Vec<crate::subtitles::service::AppliedTrackInfo>,
+    pub offset_ms: i64,
+    pub style: crate::subtitles::service::SubtitlesStyleInfo,
+    pub via: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubtitlesSetAppliedEvent;
+
+impl BridgeEvent for SubtitlesSetAppliedEvent {
+    const NAME: &'static str = "subtitles:set_applied";
+    type Payload = SubtitlesSetApplied;
 }
 
 /// vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1;
@@ -653,6 +755,22 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles.load_file": { "handler": "subtitles_load_file",
                                       "params": schema!(SubtitlesLoadFileParams),
                                       "result": schema!(SubtitlesLoadFileResult) },
+            "subtitles.list_tracks": { "handler": "subtitles_list_tracks",
+                                        "params": null,
+                                        "result": schema!(SubtitlesListTracksResult) },
+            "subtitles.set_tracks": { "handler": "subtitles_set_tracks",
+                                       "params": schema!(SubtitlesSetTracksParams),
+                                       "result": null },
+            "subtitles.set_enabled": { "handler": "subtitles_set_enabled",
+                                        "params": schema!(SubtitlesSetEnabledParams),
+                                        "result": null },
+            "subtitles.toggle": { "handler": "subtitles_toggle", "params": null, "result": null },
+            "subtitles.set_style": { "handler": "subtitles_set_style",
+                                      "params": schema!(SubtitlesSetStyleParams),
+                                      "result": null },
+            "subtitles.remove_track": { "handler": "subtitles_remove_track",
+                                         "params": schema!(SubtitlesRemoveTrackParams),
+                                         "result": null },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -664,6 +782,8 @@ pub fn contract_json() -> serde_json::Value {
             "adblock:site_exception_changed": { "payload": schema!(AdblockSiteException) },
             "perf:startup_ms": { "payload": schema!(crate::perf::PerfStartupMs) },
             "perf:tab_switch_ms": { "payload": schema!(crate::perf::PerfTabSwitchMs) },
+            "subtitles:tracks_ready": { "payload": schema!(SubtitlesTracksReady) },
+            "subtitles:set_applied": { "payload": schema!(SubtitlesSetApplied) },
         },
     })
 }
@@ -733,6 +853,14 @@ fn event_names_match_registry() {
                 <crate::perf::PerfTabSwitchEvent as BridgeEvent>::NAME,
                 schema!(crate::perf::PerfTabSwitchMs),
             ),
+            (
+                <SubtitlesTracksReadyEvent as BridgeEvent>::NAME,
+                schema!(SubtitlesTracksReady),
+            ),
+            (
+                <SubtitlesSetAppliedEvent as BridgeEvent>::NAME,
+                schema!(SubtitlesSetApplied),
+            ),
         ]
         .into_iter()
         .map(|(n, s)| (n, s["title"].as_str().expect("title у схемы").to_string()))
@@ -777,8 +905,10 @@ async fn tabs_open(
 fn tabs_close(
     app: AppHandle,
     manager: tauri::State<'_, crate::tabs::TabManager>,
+    service: tauri::State<'_, crate::subtitles::service::SubtitlesService>,
     params: TabsCloseParams,
 ) -> Result<TabsListResult, String> {
+    service.remove_tab(&params.id); // кэш состояния субтитров вкладки (3.7)
     manager.close(&app, &params.id)
 }
 
@@ -1241,6 +1371,134 @@ async fn subtitles_load_file(
     })
 }
 
+// --- задача 3.7: панель настроек набора + кнопка «duo» (docs/03 §8) ----------
+
+/// Диспатч document-события в активную контентную вкладку (паттерн
+/// subtitles.set_offset, задачи 3.5–3.7). JS собирается конкатенацией без
+/// format!: тройные скобки в eval уже давали тихий SyntaxError (e2e 3.6).
+/// Ленивая вкладка без документа — тихо ок (применять нечего).
+fn eval_active_event(
+    app: &AppHandle,
+    manager: &tauri::State<'_, crate::tabs::TabManager>,
+    event: &str,
+    detail: &serde_json::Value,
+) -> Result<(), String> {
+    let detail_json =
+        serde_json::to_string(detail).map_err(|e| format!("сериализация detail: {e}"))?;
+    let mut js = String::from("document.dispatchEvent(new CustomEvent('");
+    js.push_str(event);
+    js.push_str("',{detail:");
+    js.push_str(&detail_json);
+    js.push_str("}))");
+    match manager.active_webview(app) {
+        None if manager.active_is_lazy() => Ok(()),
+        None => Err("активной вкладки нет".to_string()),
+        Some(wv) => wv.eval(&js).map_err(|e| format!("eval: {e}")),
+    }
+}
+
+/// Идентификатор активной вкладки (нет активной — пусто: снапшот пустого
+/// состояния, панель покажет «видео не найдено»).
+fn active_tab_id(manager: &tauri::State<'_, crate::tabs::TabManager>) -> String {
+    manager
+        .snapshot()
+        .tabs
+        .into_iter()
+        .find(|t| t.active)
+        .map(|t| t.id)
+        .unwrap_or_default()
+}
+
+/// subtitles.list_tracks: снапшот состояния субтитров активной вкладки
+/// (сервис состояния — кэш сообщений content-слоя, задача 3.7).
+#[tauri::command]
+fn subtitles_list_tracks(
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    service: tauri::State<'_, crate::subtitles::service::SubtitlesService>,
+) -> SubtitlesListTracksResult {
+    service.snapshot(&active_tab_id(&manager))
+}
+
+/// subtitles.set_tracks: применить платформенную часть набора активной
+/// вкладки — eval диспатчит duopulse-select-tracks (content-слой задачи
+/// 3.3+3.7: загрузка выбранных дорожек, fast-path перестановки).
+#[tauri::command]
+fn subtitles_set_tracks(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: SubtitlesSetTracksParams,
+) -> Result<(), String> {
+    if params.ids.len() > 3 {
+        return Err("набор — до 3 дорожек (docs/03 §1)".to_string());
+    }
+    eval_active_event(
+        &app,
+        &manager,
+        "duopulse-select-tracks",
+        &serde_json::json!({ "ids": params.ids }),
+    )
+}
+
+/// subtitles.set_enabled: включить/выключить показ набора активной вкладки
+/// (тумблер панели; состав помнят обе стороны — docs/03 §8 п.2).
+#[tauri::command]
+fn subtitles_set_enabled(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: SubtitlesSetEnabledParams,
+) -> Result<(), String> {
+    eval_active_event(
+        &app,
+        &manager,
+        "duopulse-toggle",
+        &serde_json::json!({ "enabled": params.on, "via": "panel" }),
+    )
+}
+
+/// subtitles.toggle: переключить показ набора (Alt+D из хрома — в странице
+/// клавишу ловит сам content-слой; без detail — «переключить», включение на
+/// пустом наборе собирает дефолт «оригинал + ru» в content-слое).
+#[tauri::command]
+fn subtitles_toggle(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<(), String> {
+    eval_active_event(&app, &manager, "duopulse-toggle", &serde_json::json!({}))
+}
+
+/// subtitles.set_style: стиль плашки активной вкладки (панель: размер/
+/// позиция; патч — неназванные поля не меняются).
+#[tauri::command]
+fn subtitles_set_style(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: SubtitlesSetStyleParams,
+) -> Result<(), String> {
+    let style = serde_json::to_value(&params.style).map_err(|e| format!("стиль: {e}"))?;
+    eval_active_event(
+        &app,
+        &manager,
+        "duopulse-set-style",
+        &serde_json::json!({ "style": style }),
+    )
+}
+
+/// subtitles.remove_track: снять дорожку из набора активной вкладки (панель,
+/// «×» у строки) — eval диспатчит duopulse-remove-track.
+#[tauri::command]
+fn subtitles_remove_track(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: SubtitlesRemoveTrackParams,
+) -> Result<(), String> {
+    eval_active_event(
+        &app,
+        &manager,
+        "duopulse-remove-track",
+        &serde_json::json!({ "id": params.id }),
+    )
+}
+
 fn proxy_settings(cfg: &proxy::ProxyConfig, dir: &std::path::Path) -> ProxySettings {
     ProxySettings {
         enabled: cfg.enabled,
@@ -1306,6 +1564,12 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         perf_list_runs,
         subtitles_set_offset,
         subtitles_load_file,
+        subtitles_list_tracks,
+        subtitles_set_tracks,
+        subtitles_set_enabled,
+        subtitles_toggle,
+        subtitles_set_style,
+        subtitles_remove_track,
         app_restart
     ])
 }

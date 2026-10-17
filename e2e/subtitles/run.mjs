@@ -48,6 +48,18 @@
 //  31) clearFiles снимает файловую часть, платформенная продолжает показ.
 //		Дроп эмулируется синтетическим DragEvent на window с настоящим File
 //		страницы (чтение текста + разбор в Core — путь реального дропа).
+// Задача 3.7 (кнопка «duo» + панель, карточка duopulse-028; docs/03 §8):
+//  32) IPC subtitles.list_tracks — снапшот сервисного состояния вкладки;
+//  33) кнопка «duo» в навбаре: видна при видео с дорожками, data-count=1;
+//  34) клик открывает панель (состав, тумблер, слайдер), Esc закрывает;
+//  35) Alt+D в странице: выкл (набор помнят), событие via=alt-d, панель
+//      закрылась, кнопка погасла;
+//  36) Alt+D снова: последний набор восстановлен, панель открылась;
+//  37) Alt+D из хрома (subtitles.toggle) + subtitles.set_enabled(true);
+//  38) subtitles.remove_track: дорожка снята, кнопка скрылась;
+//  39) subtitles.set_tracks fast-path: перестановка без перезагрузки;
+//  40) панельные контроли: слайдер сдвига = offset, размер/позиция — стиль;
+//  41) журнал событий subtitles:set_applied (dev-хук __duopulseSubtitlesEvents).
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -1056,6 +1068,215 @@ try {
     `файлов=${s31.fileTracks.length}, текст=${JSON.stringify(text31)}`,
   );
 
+  // ===== задача 3.7: кнопка «duo» + панель настроек набора (docs/03 §8) =====
+  // Состояние сайта-3: видео детектировано, платформенная часть test:ru
+  // (1 дорожка), файловые сняты. UI-хром — отдельная CDP-цель (vite dev).
+
+  const ui3Target = targets.find((t) => t.type === "page" && /localhost:5173/.test(t.url));
+  if (!ui3Target) throw new Error("UI-цель CDP не найдена: " + targets.map((t) => t.url).join(", "));
+  const ui3 = connect(ui3Target.webSocketDebuggerUrl);
+  await waitForPage(ui3, `typeof window.__duopulse === "object"`, 10000, "bridge-хук window.__duopulse");
+
+  // (32) IPC subtitles.list_tracks: снапшот сервисного состояния активной
+  // вкладки (сервис Core — кэш сообщений content-слоя).
+  await sleep(400); // set-state сайта-3 долетел
+  const snap = await evalIn(ui3, `window.__duopulse.subtitles.listTracks()`);
+  check(
+    "IPC subtitles.list_tracks: снапшот активной вкладки (видео, набор, стиль)",
+    snap.videoKey === (await stateOf(tab)).videoKey &&
+      snap.enabled === true &&
+      snap.tracks.length === 1 &&
+      snap.tracks[0].id === "test:ru" &&
+      snap.tracks[0].source === "test" &&
+      snap.style.fontScalePct === 100,
+    JSON.stringify({ videoKey: snap.videoKey, tracks: snap.tracks.map((t) => t.id), enabled: snap.enabled }),
+  );
+
+  // (33) кнопка «duo»: видна (видео с дорожками), состояние «одна дорожка»
+  // (docs/03 §8 п.1: выкл / одна / дуо / три).
+  await sleep(300);
+  const duoBtnState = await evalIn(
+    ui3,
+    `(function () { const b = document.getElementById("duoBtn"); return { hidden: b.hidden, count: b.dataset.count, pressed: b.getAttribute("aria-pressed") }; })()`,
+  );
+  check(
+    "кнопка «duo» видна в навбаре, состояние «одна дорожка» (data-count=1)",
+    duoBtnState.hidden === false && duoBtnState.count === "1" && duoBtnState.pressed === "true",
+    JSON.stringify(duoBtnState),
+  );
+
+  // (34) клик по кнопке открывает панель настроек; Esc закрывает.
+  await evalIn(ui3, `document.getElementById("duoBtn").click()`);
+  await sleep(500); // refresh() панели (tabs.list + list_tracks)
+  const panelOpen = await evalIn(
+    ui3,
+    `(function () {
+       const p = document.getElementById("duoPanel");
+       const set = Array.from(p.querySelectorAll("#duoSet .duo-row .duo-name")).map((n) => n.textContent);
+       const slider = p.querySelector("#duoOffset");
+       return { hidden: p.hidden, rows: set, offset: slider.value, checked: p.querySelector("#duoEnabled").checked };
+     })()`,
+  );
+  check(
+    "панель «duo» открылась: набор (test:ru), тумблер включён, слайдер сдвига 0",
+    panelOpen.hidden === false &&
+      panelOpen.rows.length === 1 &&
+      panelOpen.offset === "0" &&
+      panelOpen.checked === true,
+    JSON.stringify(panelOpen),
+  );
+  await evalIn(ui3, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
+  await sleep(150);
+  check(
+    "Esc закрывает панель",
+    (await evalIn(ui3, `document.getElementById("duoPanel").hidden`)) === true,
+  );
+
+  // (35) Alt+D в контентной вкладке (docs/03 §8 п.2): выключить показ —
+  // состав помнят обе стороны, событие subtitles:set_applied via=alt-d
+  // доходит до UI, кнопка гаснет, панель закрывается за ним (карточка 028).
+  const altOff = await evalIn(
+    tab,
+    `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "KeyD", cancelable: true }))`,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().enabled === false`, 5000, "enabled=false");
+  const offState = await stateOf(tab);
+  const offUi = await evalIn(
+    ui3,
+    `(function () {
+       const evs = (window.__duopulseSubtitlesEvents ?? []).filter((e) => e.kind === "set_applied");
+       return { count: document.getElementById("duoBtn").dataset.count,
+                panelHidden: document.getElementById("duoPanel").hidden,
+                lastVia: evs.length ? evs[evs.length - 1].payload.via : null,
+                lastEnabled: evs.length ? evs[evs.length - 1].payload.enabled : null };
+     })()`,
+  );
+  check(
+    "Alt+D в странице: показ выключен (набор движка 0, поглощено), Core событие via=alt-d",
+    altOff === false && offState.enabled === false && offState.engine.trackCount === 0 && offUi.count === "0",
+    `dispatch=${altOff}, count=${offUi.count}, via=${offUi.lastVia}`,
+  );
+  check(
+    "кнопка «duo» погасла (data-count=0), панель закрылась, enabled=false в событии",
+    offUi.count === "0" && offUi.panelHidden === true && offUi.lastEnabled === false,
+    JSON.stringify(offUi),
+  );
+
+  // (36) Alt+D снова: включение восстанавливает последний набор (тот же id),
+  // панель открывается (via=alt-d), показ в такт.
+  await evalIn(tab, `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "KeyD", cancelable: true }))`);
+  await waitForPage(tab, `window.__duopulseContent?.state().enabled === true && window.__duopulseContent?.state().engine.trackCount === 1`, 5000, "набор восстановлен");
+  const onUi = await evalIn(
+    ui3,
+    `(function () { return { count: document.getElementById("duoBtn").dataset.count, panelHidden: document.getElementById("duoPanel").hidden }; })()`,
+  );
+  check(
+    "Alt+D включил: последний набор восстановлен (test:ru), кнопка «дуо-режим», панель открылась",
+    onUi.count === "1" && onUi.panelHidden === false,
+    JSON.stringify(onUi),
+  );
+
+  // (37) Alt+D из хрома (IPC subtitles.toggle — фокус в UI): тот же эффект.
+  await evalIn(ui3, `document.getElementById("duoBtn").click()`); // закрыть панель
+  await sleep(150);
+  const toggleViaChrome = await evalIn(
+    ui3,
+    `window.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "KeyD", cancelable: true }))`,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().enabled === false`, 5000, "toggle из хрома");
+  check(
+    "Alt+D в хроме (subtitles.toggle): показ выключен",
+    toggleViaChrome === false && (await stateOf(tab)).enabled === false,
+  );
+  await evalIn(ui3, `window.__duopulse.subtitles.setEnabled({ on: true })`);
+  await waitForPage(tab, `window.__duopulseContent?.state().enabled === true`, 5000, "setEnabled(true)");
+
+  // (38) subtitles.remove_track: снять дорожку панели («×») — набор пуст,
+  // кнопка «duo» скрывается (видео без дорожек, docs/03 §8 п.1).
+  await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "test:ru" })})`);
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 0`, 5000, "дорожка снята");
+  await sleep(400);
+  check(
+    "subtitles.remove_track: дорожка снята, кнопка «duo» скрылась (нет дорожек)",
+    (await stateOf(tab)).engine.trackCount === 0 &&
+      (await evalIn(ui3, `document.getElementById("duoBtn").hidden`)) === true,
+  );
+  // вернуть платформенную часть тест-хуком (кнопка снова видна)
+  await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-track"))`);
+  await waitForPage(ui3, `document.getElementById("duoBtn").hidden === false && document.getElementById("duoBtn").dataset.count === "1"`, 5000, "кнопка вернулась");
+
+  // (39) subtitles.set_tracks fast-path: тот же состав в новом порядке —
+  // перестановка без перезагрузки (duo-набор из 2 тест-дорожек).
+  await evalIn(
+    tab,
+    `(function () {
+       window.__DUOPULSE_TEST_TRACK__ = [
+         { id: "test:ru", source: "test", lang: "ru", role: "original",
+           cues: [{ startMs: 6000, endMs: 8000, text: "Строка оригинала" }] },
+         { id: "test:en", source: "test", lang: "en", role: "translation",
+           cues: [{ startMs: 6000, endMs: 8000, text: "Translation line" }] }
+       ];
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 2`, 5000, "duo-набор");
+  await evalIn(ui3, `window.__duopulse.subtitles.setTracks(${JSON.stringify({ ids: ["test:en", "test:ru"] })})`);
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 2`, 5000, "перестановка жива");
+  await seekTo(tab, 7.0);
+  const reordered = await overlayText(tab);
+  check(
+    "subtitles.set_tracks (fast-path): перестановка набора без перезагрузки — первой строкой перевод",
+    reordered.indexOf("Translation line") < reordered.indexOf("Строка оригинала"),
+    JSON.stringify(reordered),
+  );
+
+  // (40) панельные контроли: слайдер синхронизации — тот же offset (docs/03
+  // §8 п.5); размер и позиция — subtitles.set_style в оверлей.
+  await evalIn(ui3, `document.getElementById("duoBtn").click()`);
+  await sleep(400);
+  await evalIn(
+    ui3,
+    `(function () {
+       const s = document.getElementById("duoOffset");
+       s.value = "400";
+       s.dispatchEvent(new Event("change", { bubbles: true }));
+       const scale = document.getElementById("duoScale");
+       scale.value = "150";
+       scale.dispatchEvent(new Event("change", { bubbles: true }));
+       document.querySelector('#duoPosition button[data-pos="top"]').click();
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.offsetMs === 400`, 5000, "offset из панели");
+  const styledState = await stateOf(tab);
+  const styleEvents = await evalIn(
+    ui3,
+    `(window.__duopulseSubtitlesEvents ?? []).filter((e) => e.kind === "set_applied" && e.payload.via === "style").map((e) => e.payload.style.fontScalePct + "/" + e.payload.style.position)`,
+  );
+  check(
+    "панель: слайдер сдвига задаёт тот же offset (400 мс), размер 150%, позиция top",
+    styledState.engine.offsetMs === 400 && styledState.style.fontScalePct === 150 && styledState.style.position === "top",
+    `offset=${styledState.engine.offsetMs}, scale=${styledState.style.fontScalePct}, pos=${styledState.style.position}, события стиля: ${JSON.stringify(styleEvents)}`,
+  );
+  // вернуть стиль/сдвиг (не мешать последующим проверкам)
+  await evalIn(ui3, `window.__duopulse.subtitles.setOffset({ offsetMs: 0 })`);
+  await evalIn(ui3, `window.__duopulse.subtitles.setStyle({ style: { fontScalePct: 100, position: "bottom" } })`);
+  await waitForPage(tab, `window.__duopulseContent?.state().style.position === "bottom"`, 5000, "стиль возвращён");
+
+  // (41) события Core: subtitles:set_applied накапливаются в dev-журнале UI
+  // (все изменения 35–40 долетели с актуальным составом).
+  const evLog = await evalIn(
+    ui3,
+    `(window.__duopulseSubtitlesEvents ?? []).filter((e) => e.kind === "set_applied").map((e) => e.payload.via + ":" + (e.payload.enabled ? "on" : "off") + ":" + e.payload.tracks.length)`,
+  );
+  check(
+    "журнал событий subtitles:set_applied: alt-d/panel/remove/select с составами",
+    evLog.includes("alt-d:off:1") && evLog.includes("alt-d:on:1") && evLog.includes("panel:on:1") && evLog.includes("remove:on:0") && evLog.includes("select:on:2"),
+    JSON.stringify(evLog.slice(-8)),
+  );
+
+  ui3.close();
   tab.close();
 } catch (e) {
   failures++;

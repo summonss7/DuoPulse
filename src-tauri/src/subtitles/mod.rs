@@ -14,8 +14,9 @@
 //! `<font>`, `<v Имя>`…) вырезаются; XML-сущности декодируются (YouTube
 //! timedtext — два прохода: апстрим экранирует дважды, `&amp;#39;` → `'`);
 //! результат стабильно отсортирован по `start_ms`.
-#![allow(dead_code)] // сервис-обвязка subtitles.* — задачи 3.3–3.6 (duopulse-022)
+#![allow(dead_code)] // парсеры — фикстурные тесты (duopulse-022); сервис — задача 3.7
 
+pub mod service;
 pub mod srt;
 pub mod timedtext;
 pub mod vtt;

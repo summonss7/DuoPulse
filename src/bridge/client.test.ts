@@ -86,6 +86,21 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["subtitles", "loadFile"],
     params: { path: "D:\\subs\\movie.ru.srt" },
   },
+  "subtitles.list_tracks": { path: ["subtitles", "listTracks"] },
+  "subtitles.set_tracks": {
+    path: ["subtitles", "setTracks"],
+    params: { ids: ["yt:en", "ru", "es"] },
+  },
+  "subtitles.set_enabled": { path: ["subtitles", "setEnabled"], params: { on: true } },
+  "subtitles.toggle": { path: ["subtitles", "toggle"] },
+  "subtitles.set_style": {
+    path: ["subtitles", "setStyle"],
+    params: { style: { fontScalePct: 120, position: "top" } },
+  },
+  "subtitles.remove_track": {
+    path: ["subtitles", "removeTrack"],
+    params: { id: "yt:en+ru" },
+  },
   "app.restart": { path: ["app", "restart"] },
 };
 

@@ -122,8 +122,10 @@ btn.addEventListener("click", async (e) => {
     // прочие панели хрома закрываются (единое «одно меню на экран», mainmenu.ts)
     const mainMenu = document.getElementById("mainMenu") as HTMLElement | null;
     const tabMenu = document.getElementById("tabMenu") as HTMLElement | null;
+    const duoPanel = document.getElementById("duoPanel") as HTMLElement | null;
     if (mainMenu) mainMenu.hidden = true;
     if (tabMenu) tabMenu.hidden = true;
+    if (duoPanel) duoPanel.hidden = true;
   }
   menu.hidden = !open;
   if (!menu.hidden) {

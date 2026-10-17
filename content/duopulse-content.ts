@@ -33,6 +33,19 @@
 // и панельный путь subtitles.load_file (Core читает файл с диска и доставляет
 // cue событием duopulse-file-track). Файловые дорожки — в общем наборе с
 // дорожками платформы (docs/01 F-06): платформенные + файловые, до 3 строк.
+//
+// Панель настроек набора (задача 3.7, docs/03 §8): Core доставляет команды
+// eval'ом активной вкладки (паттерн subtitles.set_offset) — duopulse-toggle
+// {enabled} (без detail — переключение, Alt+D; на пустом наборе включение
+// собирает дефолт «оригинал + предпочитаемый перевод», content/set-defaults),
+// duopulse-set-style (частичный SubtitleStyle), duopulse-remove-track {id}
+// (снять дорожку из любой части набора без перезагрузки остальных);
+// duopulse-select-tracks получил fast-path: тот же состав в другом порядке —
+// перестановка без повторной загрузки. Обратно в Core шлётся «set-state»
+// (состав набора + enabled + offset + стиль, поле via — источник изменения):
+// сервис состояния Core (subtitles.list_tracks) и события subtitles:* для
+// кнопки «duo» и панели — Core-обвязка задачи 3.7. Alt+D в странице (e.code
+// KeyD) переключает показ, поглощая клавишу, как Alt+[ / Alt+].
 
 import { VideoDetector, type DetectedVideo } from "./detector";
 import { SubtitlesEngine, type ActiveRow } from "./engine/subtitles-engine";
@@ -58,6 +71,7 @@ import {
   type FileLoadResult,
 } from "./adapters/file";
 import type { Cue, Track } from "./types";
+import { defaultSetIds, sameMembers } from "./set-defaults";
 
 (function (): void {
   "use strict";
@@ -86,6 +100,9 @@ import type { Cue, Track } from "./types";
   const overlay = new SubtitlesOverlay({
     // Shift+колесо над плашкой — шаг сдвига синхронизации (docs/03 §8, 100 мс).
     onOffsetStep: (direction) => stepOffsetBy(direction),
+    // Стиль изменился (колесо-размер, панель 3.7) — сообщить в Core (set-state),
+    // чтобы панель показывала актуальные значения.
+    onStyleChange: () => reportSetState("style"),
   });
 
   /** HUD синхронизации (задача 3.5): слайдер ±10 с/шаг 100 + индикация. */
@@ -102,6 +119,7 @@ import type { Cue, Track } from "./types";
       const side = overlay.styleInfo().position === "top" ? "bottom" : "top";
       hud.show(engine.getOffset(), currentVideo.el, side);
     }
+    reportSetState("offset");
   };
 
   const stepOffsetBy = (direction: number): void => {
@@ -123,6 +141,11 @@ import type { Cue, Track } from "./types";
   const setMemory = new Map<string, { platform: Track[]; files: Track[] }>();
   const SET_MEMORY_LIMIT = 8;
 
+  /** Показ включён (задача 3.7, docs/03 §8 п.2: Alt+D — «выключить, помня
+   * последний набор»): при false движок получает пустой набор, состав и
+   * набор-память живут — включение восстанавливает показ без перезагрузки. */
+  let enabled = true;
+
   /** Единая точка смены набора: движок + гашение нативного показа. */
   const applyTracks = (tracks: Track[]): void => {
     engine.setTracks(tracks);
@@ -130,8 +153,48 @@ import type { Cue, Track } from "./types";
     else blanker.restore();
   };
 
+  /** Состав набора как он ляжет на плашку (до 3 строк, платформа затем
+   * файлы); при выключенном показе панели показывается тот же «последний
+   * набор» — гашенность передаёт флаг enabled. */
+  const lastSetTracks = (): Track[] => combinedTracks(platformTracks, fileTracks).tracks;
+
+  /** Отчёт состояния в Core (задача 3.7): сервис состояния (subtitles.*
+   * IPC) и события subtitles:set_applied для кнопки «duo» и панели.
+   * via — источник изменения (alt-d/panel/select/drop/video/…, телеметрия). */
+  const reportSetState = (via: string): void => {
+    postToCore({
+      duopulse: "set-state",
+      videoKey: currentVideo?.videoKey ?? null,
+      enabled,
+      via,
+      tracks: lastSetTracks().map((t) => ({
+        id: t.id,
+        lang: t.lang,
+        source: t.source,
+        role: t.role,
+        name: displayNameOf(t),
+      })),
+      offsetMs: engine.getOffset(),
+      style: overlay.styleInfo(),
+    });
+  };
+
+  /** Отображаемое имя дорожки для панели: базовые/переводы — из списка
+   * адаптера, файловые — слаг из id (file:movie_ru → movie_ru). */
+  const displayNameOf = (t: Track): string => {
+    if (t.source === "file") return t.id.replace(/^file:/, "");
+    if (t.source === "youtube" && trackList) {
+      const base = trackList.base.find((b) => b.id === t.id);
+      if (base) return base.name;
+      const pair = t.id.split("+");
+      const translation = trackList.translations.find((x) => x.lang === pair[1]);
+      if (translation) return translation.name;
+    }
+    return t.lang;
+  };
+
   /** Применить и запомнить текущее разбиение набора за текущим видео. */
-  const applySet = (): void => {
+  const applySet = (via: string): void => {
     const { tracks, droppedFiles } = combinedTracks(platformTracks, fileTracks);
     if (droppedFiles > 0) {
       // Файлы сверх лимита набора отброшены — телеметрия для диагностики.
@@ -142,7 +205,7 @@ import type { Cue, Track } from "./types";
         dropped: droppedFiles,
       });
     }
-    applyTracks(tracks);
+    applyTracks(enabled ? tracks : []);
     if (currentVideo) {
       const key = currentVideo.videoKey;
       setMemory.delete(key); // LRU: освежить порядок
@@ -151,6 +214,30 @@ import type { Cue, Track } from "./types";
         setMemory.delete(setMemory.keys().next().value as string);
       }
     }
+    reportSetState(via);
+  };
+
+  /** Переключение показа (docs/03 §8 п.2): выключить — погасить, состав
+   * помним; включить — восстановить, а на пустом наборе собрать дефолт
+   * «оригинал + предпочитаемый перевод» (сценарий §5.1: Alt+D на свежей
+   * лекции даёт дуо en+ru). Работает только при детектированном видео. */
+  const toggleSubs = (via: string): void => {
+    if (!currentVideo) return;
+    if (enabled) {
+      enabled = false;
+      applyTracks([]);
+      reportSetState(via);
+      return;
+    }
+    enabled = true;
+    if (platformTracks.length === 0 && fileTracks.length === 0) {
+      const ids = defaultSetIds(trackList);
+      if (ids.length > 0) {
+        void selectTracks(ids, via); // применит и отчитает (set-state)
+        return;
+      }
+    }
+    applySet(via);
   };
 
   const parser = createCoreParser();
@@ -173,13 +260,21 @@ import type { Cue, Track } from "./types";
       const canTracks = (list?.base.length ?? 0) > 0;
       reportDetected(video, canTracks);
       if (list) {
-        // Журнал Core до сервис-обвязки subtitles.* (задачи 3.5–3.7).
+        // Полный список — в Core (сервис состояния + событие subtitles:
+        // tracks_ready для панели, задача 3.7); журнал — путь добычи.
         postToCore({
           duopulse: "tracks",
           videoKey: video.videoKey,
           path: list.usedPath,
-          base: list.base.length,
-          translations: list.translations.length,
+          base: list.base.map((b) => ({
+            id: b.id,
+            lang: b.lang,
+            kind: b.kind,
+            name: b.name,
+            original: b.original,
+            translatable: b.translatable,
+          })),
+          translations: list.translations.map((t) => ({ lang: t.lang, name: t.name })),
         });
       }
     });
@@ -187,18 +282,30 @@ import type { Cue, Track } from "./types";
 
   /** Загрузка выбранного набора (id из tracksInfo()) в движок. Смена видео
    * во время загрузки — результат не применяется (дорожки прошлого видео);
-   * файловая часть набора не трогается (смешивание, docs/01 F-06). */
+   * файловая часть набора не трогается (смешивание, docs/01 F-06).
+   * Fast-path задачи 3.7: тот же состав в другом порядке (панель ↑/↓) —
+   * перестановка без повторной загрузки (tlang-запросы рейт-лимитятся). */
   const selectTracks = async (
     ids: string[],
+    via = "select",
   ): Promise<{ loaded: number; failures: { id: string; reason: string }[]; unknown: string[] }> => {
-    const resolved = adapter.resolveIds(ids);
+    const unique = [...new Set(ids)];
+    if (sameMembers(platformTracks.map((t) => t.id), unique)) {
+      const byId = new Map(platformTracks.map((t) => [t.id, t]));
+      platformTracks = unique
+        .map((id) => byId.get(id))
+        .filter((t): t is Track => t !== undefined);
+      applySet(via);
+      return { loaded: platformTracks.length, failures: [], unknown: [] };
+    }
+    const resolved = adapter.resolveIds(unique);
     const failures = resolved.unknown.map((id) => ({ id, reason: "неизвестный id дорожки" }));
     if (resolved.refs.length === 0) return { loaded: 0, failures, unknown: resolved.unknown };
     const keyAtStart = currentVideo?.videoKey ?? null;
     const loaded = await adapter.loadTracks(resolved.refs, { parser });
     if (currentVideo?.videoKey !== keyAtStart) return { loaded: 0, failures, unknown: resolved.unknown };
     platformTracks = loaded.tracks;
-    applySet();
+    applySet(via);
     for (const f of loaded.failures) failures.push({ id: f.ref.id, reason: f.reason });
     return { loaded: loaded.tracks.length, failures, unknown: resolved.unknown };
   };
@@ -225,8 +332,12 @@ import type { Cue, Track } from "./types";
         const mem = setMemory.get(video.videoKey);
         platformTracks = mem ? mem.platform : [];
         fileTracks = mem ? mem.files : [];
-        applyTracks(combinedTracks(platformTracks, fileTracks).tracks);
+        // Список дорожек принадлежит прошлому видео — сброс до свежего
+        // (придёт с onYouTubeVideo; дефолт-набор Alt+D не соберётся по чужому).
+        trackList = null;
+        applyTracks(enabled ? combinedTracks(platformTracks, fileTracks).tracks : []);
         engine.attach(video.el);
+        reportSetState("video");
         if (adapter.matches(video.url)) onYouTubeVideo(video);
         else {
           trackList = null;
@@ -239,6 +350,7 @@ import type { Cue, Track } from "./types";
       engine.detach(); // плашка гасится (rows = [])
       blanker.restore(); // нативный показ платформы возвращается (docs/03 §2)
       hud.hide();
+      reportSetState("lost"); // панель/кнопка «duo»: видео ушло (videoKey null)
     },
   });
 
@@ -253,14 +365,14 @@ import type { Cue, Track } from "./types";
     if ("clear" in payload && (payload as { clear: unknown }).clear === true) {
       platformTracks = [];
       fileTracks = [];
-      applySet();
+      applySet("test");
       return;
     }
     if (Array.isArray(payload) || Array.isArray((payload as { cues?: unknown }).cues)) {
       const tracks = (Array.isArray(payload) ? payload : [payload]) as Track[];
       if (tracks.every((t) => Array.isArray(t.cues))) {
         platformTracks = tracks;
-        applySet();
+        applySet("test");
       }
     }
   });
@@ -291,13 +403,58 @@ import type { Cue, Track } from "./types";
     },
     true,
   );
-  // Стиль плашки (задача 3.4): позиция/отступ/кегль/подложка — до панели 3.7.
+  // Alt+D — включить/выключить субтитры (задача 3.7, docs/03 §8 п.2):
+  // выключить, помня последний набор; включить — восстановить его, на пустом
+  // наборе собрать дефолт «оригинал + предпочитаемый перевод» (сценарий
+  // docs/01 §5.1). Клавишу поглощаем, странице не отдаём; e.code KeyD —
+  // независимо от раскладки.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.code !== "KeyD") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      toggleSubs("alt-d");
+    },
+    true,
+  );
+  // Стиль плашки: тест-хук 3.4 и панель 3.7 (subtitles.set_style → Core eval).
   document.addEventListener("duopulse-test-style", (e) => {
     const detail = (e as CustomEvent<Partial<SubtitleStyle>>).detail;
     if (detail && typeof detail === "object") overlay.setStyle(detail);
   });
+  document.addEventListener("duopulse-set-style", (e) => {
+    const detail = (e as CustomEvent<{ style?: Partial<SubtitleStyle> }>).detail;
+    if (detail && detail.style && typeof detail.style === "object") overlay.setStyle(detail.style);
+  });
 
-  // Выбор дорожек YouTube-адаптера (до панели 3.7): событие или окно ниже.
+  // Переключение показа (панель 3.7: subtitles.set_enabled/toggle → Core eval;
+  // без detail — «переключить», путь Alt+D из хрома — там свой keydown).
+  document.addEventListener("duopulse-toggle", (e) => {
+    const detail = (e as CustomEvent<{ enabled?: unknown; via?: unknown }>).detail;
+    if (detail && typeof detail.enabled === "boolean") {
+      if (detail.enabled !== enabled) toggleSubs(typeof detail.via === "string" ? detail.via : "panel");
+    } else {
+      toggleSubs("alt-d");
+    }
+  });
+
+  // Снять дорожку из набора (панель 3.7: subtitles.remove_track → Core eval):
+  // файловую или платформенную — остальные дорожки без перезагрузки.
+  document.addEventListener("duopulse-remove-track", (e) => {
+    const id = (e as CustomEvent<{ id?: unknown }>).detail?.id;
+    if (typeof id !== "string" || !id) return;
+    if (id.startsWith("file:")) {
+      fileTracks = fileTracks.filter((t) => t.id !== id);
+      applySet("remove");
+    } else {
+      platformTracks = platformTracks.filter((t) => t.id !== id);
+      applySet("remove");
+    }
+  });
+
+  // Выбор дорожек YouTube-адаптера (панель 3.7 / e2e): событие или окно ниже.
   document.addEventListener("duopulse-select-tracks", (e) => {
     const detail = (e as CustomEvent<{ ids?: string[] }>).detail;
     if (Array.isArray(detail?.ids)) void selectTracks(detail.ids);
@@ -320,7 +477,7 @@ import type { Cue, Track } from "./types";
     if (cues.length === 0) return;
     const name = typeof detail.name === "string" && detail.name ? detail.name : "субтитры.srt";
     fileTracks = [fileTrackFrom(name, langOfFileName(name), cues)];
-    applySet();
+    applySet("load_file");
     postToCore({
       duopulse: "file-tracks",
       videoKey: currentVideo?.videoKey ?? "",
@@ -338,7 +495,7 @@ import type { Cue, Track } from "./types";
     hasVideo: () => currentVideo !== null,
     onApply(result: FileLoadResult): void {
       fileTracks = result.tracks;
-      applySet();
+      applySet("drop");
       postToCore({
         duopulse: "file-tracks",
         videoKey: currentVideo?.videoKey ?? "",
@@ -357,6 +514,7 @@ import type { Cue, Track } from "./types";
     state(): {
       videoKey: string | null;
       canTracks: boolean;
+      enabled: boolean;
       engine: ReturnType<typeof engine.state>;
       overlayVisible: boolean;
       style: SubtitleStyle;
@@ -368,6 +526,7 @@ import type { Cue, Track } from "./types";
       return {
         videoKey: currentVideo?.videoKey ?? null,
         canTracks: (trackList?.base.length ?? 0) > 0,
+        enabled,
         engine: engine.state(),
         overlayVisible: overlay.visible,
         style: overlay.styleInfo(),
@@ -401,17 +560,21 @@ import type { Cue, Track } from "./types";
       };
     },
     selectTracks,
+    /** Переключить показ (диагностика/e2e пути панели). */
+    setEnabled(on: boolean): void {
+      if (on !== enabled) toggleSubs("test");
+    },
     /** Убрать файловые дорожки набора (панель/e2e): платформенные остаются. */
     clearFiles(): void {
       fileTracks = [];
-      applySet();
+      applySet("clear");
     },
     /** Применить файловые дорожки как после дропа (диагностика стенда 3.6):
      * чтение+разбор — тем же путём, что и реальный drop. */
     async addFiles(files: readonly { name: string; text: () => Promise<string> }[]): Promise<FileLoadResult> {
       const result = await buildFileTracks(files, { parser });
       fileTracks = result.tracks;
-      applySet();
+      applySet("test");
       return result;
     },
   };

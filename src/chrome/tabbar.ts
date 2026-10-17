@@ -142,6 +142,11 @@ newtabBtn.addEventListener("click", () => {
 // --- контекстное меню вкладки -------------------------------------------------
 function openMenu(id: string, x: number, y: number): void {
   menuTabId = id;
+  // прочие панели хрома закрываются (единое «одно меню на экран», mainmenu.ts)
+  for (const other of ["mainMenu", "proxyMenu", "duoPanel"]) {
+    const node = document.getElementById(other);
+    if (node) node.hidden = true;
+  }
   for (const btn of menuEl.querySelectorAll("button[data-act]")) {
     (btn as HTMLButtonElement).disabled = false;
   }

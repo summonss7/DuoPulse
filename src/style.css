@@ -1200,3 +1200,336 @@ body.internal-page {
 .diag-run-vals {
   font-family: var(--font-mono);
 }
+
+/* --- Кнопка «duo» + панель набора субтитров (задача 3.7; гайд 06: панель 12px,
+   контролы 8px, неон — только акцент «включено», тёплые ховеры внутри) --- */
+.duo-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-muted);
+  font-family: var(--font-logo);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+}
+.duo-btn:hover {
+  background: var(--hover-neutral);
+  color: var(--text-primary);
+}
+.duo-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-soft);
+}
+/* Состояние показа (docs/03 §8 п.1): выкл — приглушено; 1/2/3 — включено,
+   неон по правилу «свечение = включено» (§3): активный набор — лайм-кромка. */
+.duo-btn[data-count="1"],
+.duo-btn[data-count="2"],
+.duo-btn[data-count="3"] {
+  color: var(--accent-neon);
+  border-color: var(--accent-neon);
+  box-shadow: 0 0 10px rgba(189, 254, 79, 0.22);
+}
+.duo-dots {
+  display: inline-flex;
+  gap: 2px;
+}
+.duo-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.duo-btn[data-count="1"] .duo-dots i:nth-child(-n + 1),
+.duo-btn[data-count="2"] .duo-dots i:nth-child(-n + 2),
+.duo-btn[data-count="3"] .duo-dots i:nth-child(-n + 3) {
+  background: currentColor;
+}
+.duo-panel {
+  position: absolute;
+  top: 100%;
+  z-index: 130; /* поверх подсказок omnibox и меню хрома — открыто позже них */
+  width: 372px;
+  padding: 14px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.duo-panel[hidden] {
+  display: none;
+}
+.duo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.duo-title {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.duo-meta {
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.duo-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.duo-presets:empty {
+  display: none;
+}
+.duo-chip {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.duo-chip:hover {
+  background: var(--hover-neutral);
+}
+.duo-chip[data-on="true"] {
+  color: var(--accent-neon);
+  border-color: var(--accent-neon);
+}
+.duo-section-title {
+  margin: 10px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.duo-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+.duo-set {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.duo-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 2px 4px;
+  border-radius: var(--radius-control);
+  background: var(--bg-warm); /* «полка» вторичной поверхности — §2 */
+}
+.duo-move {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.duo-move:hover:not(:disabled) {
+  background: var(--bg-warm-2); /* тёплый ховер вторичных элементов — §2 */
+  color: var(--text-primary);
+}
+.duo-move:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.duo-move-spacer {
+  flex: none;
+  width: 22px;
+}
+.duo-lang {
+  flex: none;
+  min-width: 26px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-base);
+  color: var(--accent-neon);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.duo-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.duo-src {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.duo-x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.duo-x:hover {
+  background: var(--bg-warm-2);
+  color: var(--err);
+}
+.duo-empty {
+  padding: 6px 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.duo-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.duo-add:empty {
+  display: none;
+  margin-top: 0;
+}
+.duo-add .duo-empty {
+  margin: 0;
+}
+.duo-select {
+  flex: 1;
+  height: 28px;
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+.duo-select:focus {
+  border-color: var(--accent-neon);
+  box-shadow: var(--focus-ring-soft);
+}
+.duo-files {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.duo-files button {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.duo-files button:hover {
+  background: var(--hover-neutral);
+  border-color: var(--line);
+}
+.duo-file-meta {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.duo-offset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.duo-offset-val {
+  flex: none;
+  min-width: 52px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+}
+.duo-offset button {
+  flex: none;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.duo-offset button:hover {
+  color: var(--text-primary);
+}
+.duo-style {
+  display: flex;
+  gap: 14px;
+}
+.duo-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.duo-scale-val {
+  font-family: var(--font-mono);
+}
+.duo-seg {
+  display: flex;
+  gap: 4px;
+}
+.duo-seg button {
+  flex: 1;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.duo-seg button:hover {
+  background: var(--hover-neutral);
+}
+.duo-seg button[data-on="true"] {
+  color: var(--accent-neon);
+  border-color: var(--accent-neon);
+}
+input[type="range"] {
+  accent-color: var(--accent-neon); /* бегунки слайдеров — фирменный лайм */
+}

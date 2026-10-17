@@ -11,6 +11,10 @@ tauri-build = { version = "2", features = [] }
 # unstable: API нескольких webview в одном окне (WebviewBuilder/Window::add_child,
 # AppHandle::get_webview/get_window) — нужен для схемы «UI-полоса + контентный webview».
 tauri = { version = "2", features = ["unstable"] }
+# Нативный выбор файла (панель субтитров «Свои субтитры…», задача 3.7:
+# subtitles.load_file нужен абсолютный путь — HTML input в WebView2 даёт
+# fakepath). Вызов — напрямую invoke("plugin:dialog|open"), без npm-пакета.
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # JSON Schema из Rust-типов: единый источник IPC-контракта bridge (задача 1.1,

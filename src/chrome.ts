@@ -7,11 +7,14 @@ import { initTabBar, onTabsChanged } from "./chrome/tabbar";
 import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
 import "./chrome/mainmenu";
 import "./proxy-menu";
+import { initDuo } from "./subtitles-panel/duo";
 
 // Таб-бар (задача 1.2): рендер вкладок, хоткеи, контекст-меню.
 initTabBar();
 // Omnibox (задача 1.3): подсказки, Enter/Esc/стрелки, кнопки навигации.
 initOmnibox();
+// Кнопка «duo» + панель настроек набора субтитров (задача 3.7, docs/03 §8).
+initDuo();
 
 // URL активной вкладки — в адресную строку (кроме моментов ввода).
 onTabsChanged((tabs) => {

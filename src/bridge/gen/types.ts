@@ -58,9 +58,19 @@ export interface DuoPulseBridgeContract {
   ProxyProto: ProxyProto;
   SettingsSetParams: SettingsSetParams;
   ProxyConfig: ProxyConfig;
+  TabSubtitles: TabSubtitles;
+  AppliedTrackInfo: AppliedTrackInfo;
+  BaseTrackInfo: BaseTrackInfo;
+  SubtitlesStyleInfo: SubtitlesStyleInfo;
+  TranslationLangInfo: TranslationLangInfo;
   SubtitlesLoadFileParams: SubtitlesLoadFileParams;
   SubtitlesLoadFileResult: SubtitlesLoadFileResult;
+  SubtitlesRemoveTrackParams: SubtitlesRemoveTrackParams;
+  SubtitlesSetEnabledParams: SubtitlesSetEnabledParams;
   SubtitlesSetOffsetParams: SubtitlesSetOffsetParams;
+  SubtitlesSetStyleParams: SubtitlesSetStyleParams;
+  SubtitlesStylePatch: SubtitlesStylePatch;
+  SubtitlesSetTracksParams: SubtitlesSetTracksParams;
   TabsActivateParams: TabsActivateParams;
   TabsListResult: TabsListResult;
   TabInfo: TabInfo;
@@ -77,6 +87,8 @@ export interface DuoPulseBridgeContract {
   PageVideoDetected: PageVideoDetected;
   PerfStartupMs: PerfStartupMs;
   PerfTabSwitchMs: PerfTabSwitchMs;
+  SubtitlesSetApplied: SubtitlesSetApplied;
+  SubtitlesTracksReady: SubtitlesTracksReady;
   VpnStateChanged: VpnStateChanged;
 }
 /**
@@ -407,6 +419,113 @@ export interface ProxyConfig {
   proto?: ProxyProto & string;
 }
 /**
+ * Состояние субтитров одной вкладки (default — видео не найдено, показ включён: флаг управляет показом последнего набора, docs/03 §8 п.2).
+ */
+export interface TabSubtitles {
+  /**
+   * Полный список базовых дорожек адаптера (пуст — не YouTube/не получен).
+   */
+  base: BaseTrackInfo[];
+  /**
+   * Адаптер платформы дал список дорожек (кнопка «duo» видна).
+   */
+  canTracks: boolean;
+  /**
+   * Показ включён (Alt+D/панель; при false набор помнят обе стороны).
+   */
+  enabled: boolean;
+  /**
+   * Сдвиг показа, мс (±10 с, docs/03 §4).
+   */
+  offsetMs: number;
+  /**
+   * Стиль плашки.
+   */
+  style: SubtitlesStyleInfo;
+  /**
+   * Применённый набор (до 3 дорожек, порядок = порядок строк).
+   */
+  tracks: AppliedTrackInfo[];
+  /**
+   * Доступные переводы (tlang).
+   */
+  translations: TranslationLangInfo[];
+  /**
+   * Ключ текущего видео (None — видео не детектировано/ушло).
+   */
+  videoKey?: string | null;
+}
+/**
+ * Базовая дорожка из player-ответа платформы (зеркало BaseTrackInfo content-адаптера, docs/03 §3.1).
+ */
+export interface BaseTrackInfo {
+  id: string;
+  /**
+   * manual | asr (ручная или распознанная).
+   */
+  kind: string;
+  lang: string;
+  /**
+   * Отображаемое имя (локализовано платформой).
+   */
+  name: string;
+  /**
+   * Дорожка языка оригинала (audioTracks.original).
+   */
+  original: boolean;
+  /**
+   * Платформа разрешает машинный перевод (tlang) этой дорожки.
+   */
+  translatable: boolean;
+}
+/**
+ * Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение.
+ */
+export interface SubtitlesStyleInfo {
+  /**
+   * Масштаб кегля, %: 75–300 (docs/03 §5).
+   */
+  fontScalePct: number;
+  /**
+   * Отступ от края видео, % высоты.
+   */
+  marginPct: number;
+  /**
+   * Непрозрачность подложки, 0–1 (гайд 06 §6).
+   */
+  plateOpacity: number;
+  /**
+   * bottom | top.
+   */
+  position: string;
+}
+/**
+ * Дорожка применённого набора (зеркало set-state content-слоя): панель показывает состав/порядок, кнопка «duo» — количество (выкл/1/дуо/три).
+ */
+export interface AppliedTrackInfo {
+  id: string;
+  lang: string;
+  /**
+   * Отображаемое имя (имя платформы/слаг файла).
+   */
+  name: string;
+  /**
+   * original | translation.
+   */
+  role: string;
+  /**
+   * youtube | file | translate | test (docs/03 §6).
+   */
+  source: string;
+}
+/**
+ * Язык машинного перевода (tlang), доступный для базовых дорожек.
+ */
+export interface TranslationLangInfo {
+  lang: string;
+  name: string;
+}
+/**
  * subtitles.load_file (задача 3.6, docs/03 §3.2): ручной файл субтитров с диска (панель «Свои субтитры»). Чтение и разбор — в Core (канонические парсеры задачи 3.1, src/subtitles), разобранные cue доставляются в content-слой активной вкладки (eval диспатчит duopulse-file-track); файловая дорожка входит в общий набор с дорожками платформы (docs/01 F-06).
  */
 export interface SubtitlesLoadFileParams {
@@ -430,6 +549,18 @@ export interface SubtitlesLoadFileResult {
   warnings: string[];
 }
 /**
+ * subtitles.remove_track: снять дорожку из набора (панель, «×» у строки): файловую или платформенную, остальные — без перезагрузки.
+ */
+export interface SubtitlesRemoveTrackParams {
+  id: string;
+}
+/**
+ * subtitles.set_enabled: включить/выключить показ набора (Alt+D, тумблер панели): состав помнят обе стороны, включение восстанавливает без перезагрузки (docs/03 §8 п.2).
+ */
+export interface SubtitlesSetEnabledParams {
+  on: boolean;
+}
+/**
  * subtitles.set_offset: сдвиг субтитров активной вкладки (±10 с, шаг 100 мс, docs/03 §4 п.3). Core доставляет значение в content-слой активной вкладки (eval диспатчит duopulse-set-offset); движок применяет сдвиг ко всему набору без перезагрузки дорожек и показывает HUD со слайдером. Активной контентной вкладки нет (или на странице нет субтитров) — no-op, не ошибка.
  */
 export interface SubtitlesSetOffsetParams {
@@ -437,6 +568,30 @@ export interface SubtitlesSetOffsetParams {
    * Сдвиг, мс: положительный — показывать позже. Клампится в ±10 000.
    */
   offsetMs: number;
+}
+/**
+ * subtitles.set_style: стиль плашки активной вкладки (размер/позиция панели; то же значение меняют колесо мыши по плашке и тест-хук 3.4).
+ */
+export interface SubtitlesSetStyleParams {
+  style: SubtitlesStylePatch;
+}
+/**
+ * Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4).
+ */
+export interface SubtitlesStylePatch {
+  fontScalePct?: number | null;
+  marginPct?: number | null;
+  plateOpacity?: number | null;
+  position?: string | null;
+}
+/**
+ * subtitles.set_tracks: применить платформенную часть набора активной вкладки (порядок id = порядок строк на плашке; content-слой тот же состав в другом порядке переставляет без перезагрузки дорожек).
+ */
+export interface SubtitlesSetTracksParams {
+  /**
+   * id дорожек из списка адаптера («yt:en», «yt:en+ru», голый код перевода).
+   */
+  ids: string[];
 }
 /**
  * tabs.activate: сделать вкладку активной (клик по вкладке таб-бара).
@@ -540,10 +695,11 @@ export interface PageLoaded {
   url: string;
 }
 /**
- * page:video_detected: на странице найден <video> (M3; каркас с 1.1).
+ * page:video_detected: на странице найден <video> (M3; каркас с 1.1). tab_id — вкладка-источник (задача 3.7: кнопка «duo»/панель следят только за активной вкладкой).
  */
 export interface PageVideoDetected {
   canTracks: boolean;
+  tabId: string;
   videoKey: string;
 }
 /**
@@ -558,6 +714,30 @@ export interface PerfStartupMs {
  */
 export interface PerfTabSwitchMs {
   ms: number;
+}
+/**
+ * subtitles:set_applied: состояние показа вкладки изменилось (состав набора, включён ли показ, сдвиг, стиль; docs/05 §2) — кнопка «duo» (выкл/1/дуо/три) и панель обновляются событием; via — источник изменения (телеметрия: alt-d/panel/select/drop/video/lost/…).
+ */
+export interface SubtitlesSetApplied {
+  enabled: boolean;
+  offsetMs: number;
+  style: SubtitlesStyleInfo;
+  tabId: string;
+  tracks: AppliedTrackInfo[];
+  via: string;
+  /**
+   * None — видео ушло со страницы (детектор onVideoLost).
+   */
+  videoKey?: string | null;
+}
+/**
+ * subtitles:tracks_ready: адаптер вкладки выдал полный список дорожек видео (docs/05 §2) — панель наполняет выбор языков/переводов.
+ */
+export interface SubtitlesTracksReady {
+  base: BaseTrackInfo[];
+  tabId: string;
+  translations: TranslationLangInfo[];
+  videoKey: string;
 }
 /**
  * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).

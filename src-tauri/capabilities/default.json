@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "UI-окно (адресная строка) имеет доступ к командам приложения; дочерний webview content (удалённые сайты) — нет.",
+  "description": "UI-окно (адресная строка) имеет доступ к командам приложения; дочерний webview content (удалённые сайты) — нет. dialog:default — нативный выбор файла субтитров (панель, задача 3.7).",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

@@ -31,6 +31,9 @@ const TEXT_STROKE = "2px rgba(5,8,12,0.85)";
 export interface SubtitlesOverlayOptions {
   /** Shift+колесо над плашкой: шаг сдвига синхронизации (±1) в движок. */
   onOffsetStep?: (direction: number) => void;
+  /** Стиль изменился (колесо-размер, панель настроек 3.7) — итоговый стиль
+   * наружу (set-state в Core: панель показывает актуальные значения). */
+  onStyleChange?: (style: SubtitleStyle) => void;
 }
 
 export class SubtitlesOverlay {
@@ -85,6 +88,7 @@ export class SubtitlesOverlay {
     this.style = mergeStyle(this.style, patch);
     if (this.plate) this.applyPlateStyle();
     if (this.container && this.video && this.visible) this.positionOver(this.video);
+    this.opts.onStyleChange?.(this.styleInfo());
   }
 
   /** Дифф-обновление строк: при том же составе дорожек (порядок = положение)
