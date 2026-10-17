@@ -58,6 +58,8 @@ export interface DuoPulseBridgeContract {
   ProxyProto: ProxyProto;
   SettingsSetParams: SettingsSetParams;
   ProxyConfig: ProxyConfig;
+  SubtitlesLoadFileParams: SubtitlesLoadFileParams;
+  SubtitlesLoadFileResult: SubtitlesLoadFileResult;
   SubtitlesSetOffsetParams: SubtitlesSetOffsetParams;
   TabsActivateParams: TabsActivateParams;
   TabsListResult: TabsListResult;
@@ -403,6 +405,29 @@ export interface ProxyConfig {
   login?: string | null;
   port?: number;
   proto?: ProxyProto & string;
+}
+/**
+ * subtitles.load_file (задача 3.6, docs/03 §3.2): ручной файл субтитров с диска (панель «Свои субтитры»). Чтение и разбор — в Core (канонические парсеры задачи 3.1, src/subtitles), разобранные cue доставляются в content-слой активной вкладки (eval диспатчит duopulse-file-track); файловая дорожка входит в общий набор с дорожками платформы (docs/01 F-06).
+ */
+export interface SubtitlesLoadFileParams {
+  /**
+   * Абсолютный путь к файлу .srt/.vtt.
+   */
+  path: string;
+}
+export interface SubtitlesLoadFileResult {
+  /**
+   * Разобрано cue (0 — валидных cue нет, см. warnings).
+   */
+  cueCount: number;
+  /**
+   * Имя файла без каталога (панель/диагностика его показывают).
+   */
+  name: string;
+  /**
+   * Предупреждения разбора (снисходительный разбор — задача 3.1).
+   */
+  warnings: string[];
 }
 /**
  * subtitles.set_offset: сдвиг субтитров активной вкладки (±10 с, шаг 100 мс, docs/03 §4 п.3). Core доставляет значение в content-слой активной вкладки (eval диспатчит duopulse-set-offset); движок применяет сдвиг ко всему набору без перезагрузки дорожек и показывает HUD со слайдером. Активной контентной вкладки нет (или на странице нет субтитров) — no-op, не ошибка.

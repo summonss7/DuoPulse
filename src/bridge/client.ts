@@ -30,6 +30,8 @@ import type {
   ProxySettings,
   SettingsGetParams,
   SettingsSetParams,
+  SubtitlesLoadFileParams,
+  SubtitlesLoadFileResult,
   SubtitlesSetOffsetParams,
   TabsActivateParams,
   TabsCloseParams,
@@ -130,6 +132,10 @@ export const bridge = {
     /** subtitles.set_offset: сдвиг субтитров активной вкладки (±10 с, шаг 100 мс,
      *  docs/03 §4) — применяется без перезагрузки дорожек. */
     setOffset: (params: SubtitlesSetOffsetParams) => invoke<void>("subtitles_set_offset", { params }),
+    /** subtitles.load_file: ручной файл .srt/.vtt с диска (задача 3.6):
+     *  чтение и разбор в Core, cue доставляются в активную вкладку. */
+    loadFile: (params: SubtitlesLoadFileParams) =>
+      invoke<SubtitlesLoadFileResult>("subtitles_load_file", { params }),
   },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */

@@ -421,6 +421,28 @@ pub struct SubtitlesSetOffsetParams {
 /// Предел сдвига пользователя (docs/03 §4: ±10 с) — тот же, что в content-движке.
 const SUBTITLES_OFFSET_LIMIT_MS: i64 = 10_000;
 
+/// subtitles.load_file (задача 3.6, docs/03 §3.2): ручной файл субтитров с
+/// диска (панель «Свои субтитры»). Чтение и разбор — в Core (канонические
+/// парсеры задачи 3.1, src/subtitles), разобранные cue доставляются в
+/// content-слой активной вкладки (eval диспатчит duopulse-file-track);
+/// файловая дорожка входит в общий набор с дорожками платформы (docs/01 F-06).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubtitlesLoadFileParams {
+    /// Абсолютный путь к файлу .srt/.vtt.
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitlesLoadFileResult {
+    /// Имя файла без каталога (панель/диагностика его показывают).
+    pub name: String,
+    /// Разобрано cue (0 — валидных cue нет, см. warnings).
+    pub cue_count: u32,
+    /// Предупреждения разбора (снисходительный разбор — задача 3.1).
+    pub warnings: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------
 // События Core → UI|Content
 // ---------------------------------------------------------------------------
@@ -628,6 +650,9 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles.set_offset": { "handler": "subtitles_set_offset",
                                        "params": schema!(SubtitlesSetOffsetParams),
                                        "result": null },
+            "subtitles.load_file": { "handler": "subtitles_load_file",
+                                      "params": schema!(SubtitlesLoadFileParams),
+                                      "result": schema!(SubtitlesLoadFileResult) },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -1153,6 +1178,69 @@ fn subtitles_set_offset(
     }
 }
 
+/// subtitles.load_file (задача 3.6): ручной файл .srt/.vtt с диска — чтение и
+/// разбор в Core, доставка cue в content-слой активной вкладки (eval диспатчит
+/// duopulse-file-track, паттерн subtitles.set_offset; файловая дорожка входит
+/// в общий набор — docs/01 F-06). Файл читается на блокирующем пуле (spawn_
+/// blocking), ответ команды — итог разбора для панели. Ленивая вкладка без
+/// документа — доставка пропускается (не ошибка, как у set_offset).
+///
+/// eval — строго на главном потоке (run_on_main_thread): sync-команды tauri
+/// исполняются там сами, а у async-команда с tokio-пула ExecuteScript в
+/// апартментном COM WebView2 тихо не исполнялся (e2e 3.6: Ok без эффекта).
+#[tauri::command]
+async fn subtitles_load_file(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: SubtitlesLoadFileParams,
+) -> Result<SubtitlesLoadFileResult, String> {
+    let track = {
+        let path = std::path::PathBuf::from(&params.path);
+        tauri::async_runtime::spawn_blocking(move || crate::subtitles::read_manual_file(&path))
+            .await
+            .map_err(|e| e.to_string())?? // join-ошибка, затем отказ чтения файла
+    };
+    // JSON — валидный JS-объектный литерал: вкладывается как detail события.
+    let detail = serde_json::json!({
+        "name": track.name,
+        "cues": track.cues.iter().map(|c| serde_json::json!({
+            "startMs": c.start_ms, "endMs": c.end_ms, "text": c.text,
+        })).collect::<Vec<_>>(),
+        "warnings": track.warnings.iter()
+            .map(|w| format!("строка {}: {}", w.line, w.message))
+            .collect::<Vec<_>>(),
+    });
+    // Склейка без format!: тройные экранирования скобок однажды уже дали
+    // SyntaxError в eval (тихий Ok у ExecuteScript — e2e 3.6 ловил час).
+    let detail_json =
+        serde_json::to_string(&detail).map_err(|e| format!("сериализация detail: {e}"))?;
+    let mut js =
+        String::from("document.dispatchEvent(new CustomEvent('duopulse-file-track',{detail:");
+    js.push_str(&detail_json);
+    js.push_str("}))");
+    match manager.active_webview(&app) {
+        None if manager.active_is_lazy() => {}
+        None => return Err("активной вкладки нет".to_string()),
+        Some(wv) => {
+            let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+            app.run_on_main_thread(move || {
+                let _ = tx.send(wv.eval(&js).map_err(|e| format!("eval: {e}")));
+            })
+            .map_err(|e| format!("планирование на главном потоке: {e}"))?;
+            rx.recv().map_err(|e| format!("eval-канал: {e}"))??;
+        }
+    }
+    Ok(SubtitlesLoadFileResult {
+        name: track.name,
+        cue_count: track.cues.len() as u32,
+        warnings: track
+            .warnings
+            .iter()
+            .map(|w| format!("строка {}: {}", w.line, w.message))
+            .collect(),
+    })
+}
+
 fn proxy_settings(cfg: &proxy::ProxyConfig, dir: &std::path::Path) -> ProxySettings {
     ProxySettings {
         enabled: cfg.enabled,
@@ -1217,6 +1305,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         perf_save_run,
         perf_list_runs,
         subtitles_set_offset,
+        subtitles_load_file,
         app_restart
     ])
 }

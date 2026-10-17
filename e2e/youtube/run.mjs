@@ -324,6 +324,54 @@ try {
       );
       check(`${videoId}: нативные субтитры YouTube погашены (класс <html>)`, ytBlanked === true);
 
+      // Задача 3.6 (ручные файлы, карточка duopulse-027): дроп .srt поверх
+      // дорожек платформы — смешанный набор (docs/01 F-06). На первом видео:
+      // платформенная часть сужается до оригинала, дроп добавляет файл.
+      if (vi === 0) {
+        await evalRetry(tab, `window.__duopulseContent.selectTracks([${JSON.stringify(original.id)}])`);
+        const swallow = await evalRetry(
+          tab,
+          `(function () {
+             const dt = new DataTransfer();
+             dt.items.add(new File(["1\\n00:00:00,500 --> 01:00:00,000\\nРучной файл поверх YouTube\\n"], "manual.ru.srt", { type: "text/plain" }));
+             return window.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+           })()`,
+        );
+        const mixState = await waitForPage(
+          tab,
+          `(function () {
+             const s = window.__duopulseContent.state();
+             return s.fileTracks.length === 1 && s.fileTracks[0].id === "file:ru" && s.engine.trackCount === 2 ? s : null;
+           })()`,
+          15000,
+          "файловая дорожка поверх YouTube",
+        );
+        check(
+          `${videoId}: дроп .srt поверх дорожки платформы — смешанный набор 2 дорожки (${mixState.engine.tracks.map((t) => t.id).join(" + ")})`,
+          swallow === false,
+        );
+        const mixOverlay = await waitForPage(
+          tab,
+          `(function () {
+             const t = document.querySelector("[data-duopulse-subtitles]");
+             return t && t.innerText.includes("Ручной файл поверх YouTube") ? t.innerText.trim() : null;
+           })()`,
+          15000,
+          "плашка со строкой файла",
+        );
+        check(
+          `${videoId}: overlay рисует смешанный набор (платформа + файл)`,
+          mixOverlay.includes("Ручной файл поверх YouTube") && mixOverlay.split("\n").filter((l) => l.trim()).length >= 2,
+          JSON.stringify(mixOverlay.split("\n").slice(0, 2)).slice(0, 140),
+        );
+        if (!shotDone) {
+          fs.mkdirSync(OUT_DIR, { recursive: true });
+          const shot = await tab.send("Page.captureScreenshot", { format: "png" });
+          fs.writeFileSync(path.join(OUT_DIR, "shot-file-mix-yt.png"), Buffer.from(shot.data, "base64"));
+          check("скриншот смешанного набора на YouTube (shot-file-mix-yt.png)", fs.existsSync(path.join(OUT_DIR, "shot-file-mix-yt.png")));
+        }
+      }
+
       if (!shotDone) {
         fs.mkdirSync(OUT_DIR, { recursive: true });
         const shot = await tab.send("Page.captureScreenshot", { format: "png" });

@@ -37,6 +37,46 @@ pub fn parse_auto(input: &str) -> ParsedCues {
     }
 }
 
+// --- задача 3.6: ручные файлы .srt/.vtt (docs/03 §3.2) ------------------------
+
+/// Ручной файл субтитров, прочитанный с диска: имя (без каталога — его видит
+/// пользователь в панели/диагностике) + итог канонического разбора.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualFileTrack {
+    pub name: String,
+    pub cues: Vec<Cue>,
+    pub warnings: Vec<ParseWarning>,
+}
+
+/// Лимит размера файла — тот же, что у WebMessage-разбора дорожек (main.rs).
+const MANUAL_FILE_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Прочитать и разобрать ручной файл субтитров (панельный путь задачи 3.6,
+/// IPC `subtitles.load_file`): чтение UTF-8 с диска (Windows-1251 — v1.1,
+/// docs/03 §3.2), разбор — канонический `parse_auto` (задача 3.1). Ошибки —
+/// текстом для панели (файл недоступен/не UTF-8/слишком большой).
+pub fn read_manual_file(path: &std::path::Path) -> Result<ManualFileTrack, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("файл недоступен: {e}"))?;
+    if !meta.is_file() {
+        return Err("это не файл".to_string());
+    }
+    if meta.len() > MANUAL_FILE_MAX_BYTES {
+        return Err(format!("файл {} КБ — сверх лимита 4 МБ", meta.len() / 1024));
+    }
+    let text = std::fs::read_to_string(path)
+        .map_err(|_| "файл не в UTF-8 (Windows-1251 — v1.1, docs/03 §3.2)".to_string())?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let parsed = parse_auto(&text);
+    Ok(ManualFileTrack {
+        name,
+        cues: parsed.cues,
+        warnings: parsed.warnings,
+    })
+}
+
 /// Единица субтитра — docs/03 §6 (`Cue { startMs, endMs, text }`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cue {
@@ -401,5 +441,73 @@ mod tests {
         assert!(warnings.iter().any(|w| w.message.contains("пустой текст")));
         assert!(warnings.iter().any(|w| w.message.contains("≤ начало")));
         assert!(warnings.iter().any(|w| w.message.contains("перекрывает")));
+    }
+
+    // --- задача 3.6: чтение ручного файла с диска (subtitles.load_file) ------
+
+    /// Временный файл с содержимым — путь для read_manual_file.
+    fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "duopulse-subtitles-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("создать temp-каталог");
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).expect("записать temp-файл");
+        path
+    }
+
+    #[test]
+    fn read_manual_file_srt_from_disk() {
+        let srt = b"1\n00:00:01,000 --> 00:00:03,000\nhello\n";
+        let path = temp_file("movie.en.srt", srt);
+        let track = read_manual_file(&path).expect("файл читается");
+        assert_eq!(track.name, "movie.en.srt");
+        assert_eq!(track.cues.len(), 1);
+        assert_eq!(track.cues[0].text, "hello");
+        assert!(track.warnings.is_empty());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn read_manual_file_rejects_non_utf8_and_oversize_and_missing() {
+        // Windows-1251 «привет» — не UTF-8: внятный отказ (v1.1 — детект)
+        let win1251 = [0xEF, 0xF0, 0xE8, 0xE2, 0xE5, 0xF2];
+        let path = temp_file("cp1251.srt", &win1251);
+        let err = read_manual_file(&path).expect_err("не UTF-8 — ошибка");
+        assert!(err.contains("UTF-8"), "текст ошибки: {err}");
+        std::fs::remove_file(&path).ok();
+
+        let big = vec![b'x'; (MANUAL_FILE_MAX_BYTES + 1) as usize];
+        let path = temp_file("big.srt", &big);
+        let err = read_manual_file(&path).expect_err("сверх лимита — ошибка");
+        assert!(err.contains("лимита"), "текст ошибки: {err}");
+        std::fs::remove_file(&path).ok();
+
+        let err = read_manual_file(std::path::Path::new("Z:/нет/такого/файла.srt"))
+            .expect_err("нет файла — ошибка");
+        assert!(err.contains("недоступен"), "текст ошибки: {err}");
+    }
+
+    #[test]
+    fn read_manual_file_empty_is_not_an_error() {
+        // Файл без единого валидного cue — это итог разбора (0 cue + диагностика),
+        // а не ошибка чтения: панель покажет предупреждения, не «файл недоступен».
+        // Полностью пустой файл парсер молчит (философия 3.1 «пустой вход —
+        // тишина»), поэтому мусорный блок без тайминга — диагностика есть.
+        let path = temp_file("garbage.srt", b"not a subtitle file\njust text lines\n");
+        let track = read_manual_file(&path).expect("чтение ок");
+        assert!(track.cues.is_empty());
+        assert!(!track.warnings.is_empty());
+        std::fs::remove_file(&path).ok();
+
+        let path = temp_file("blank.srt", b"\n\n\n");
+        let track = read_manual_file(&path).expect("чтение ок");
+        assert!(track.cues.is_empty());
+        assert!(track.warnings.is_empty());
+        std::fs::remove_file(&path).ok();
     }
 }

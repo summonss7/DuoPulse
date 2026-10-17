@@ -24,6 +24,10 @@
 // на старте, смена настроек применяется перезапуском приложения. Аргументы старта
 // фиксируются в STARTUP_PROXY_ARGS — новые вкладки создаются с теми же.
 
+// schemars schema!-макросы в contract_json (bridge.rs) вложены в один json!:
+// с ростом словаря (v2: subtitles.load_file) глубина экспансии превысила
+// дефолт макро-рекурсии rustc (128).
+#![recursion_limit = "256"]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod adblock;
@@ -262,6 +266,9 @@ unsafe fn referer_of(
 /// - «tracks» — YouTube-адаптер выдал список дорожек видео (задача 3.3):
 ///   пока фиксируется в журнал ([subtitles]); IPC subtitles.list_tracks/
 ///   событие subtitles:tracks_ready — сервис-обвязка задач 3.5–3.7;
+/// - «file-tracks» — файловые дорожки применились к набору (задача 3.6:
+///   drag&drop или subtitles.load_file); журнал [subtitles] до сервисной
+///   обвязки subtitles.* (задачи 3.7+);
 /// - «parse-subtitles» — разбор payload дорожки каноническими парсерами
 ///   src/subtitles (задача 3.1) по запросу content-слоя (задача 3.3):
 ///   ответ {duopulse:"subtitles-parsed", reqId, ok, cues, warnings} приходит
@@ -324,6 +331,16 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                         "[subtitles] tracks: {video_key} — {base} дорожек, {translations} переводов (путь {path})"
                     );
                 }
+            } else if parsed["duopulse"] == "file-tracks" {
+                // Файловые дорожки в наборе (задача 3.6): журнал до сервисной
+                // обвязки subtitles.* (панель — задача 3.7).
+                let applied = parsed["applied"].as_u64().unwrap_or(0);
+                let failures = parsed["failures"].as_u64().unwrap_or(0);
+                let dropped = parsed["dropped"].as_u64().unwrap_or(0);
+                let via = parsed["via"].as_str().unwrap_or("drop");
+                eprintln!(
+                    "[subtitles] file-tracks: применено {applied}, отказов {failures}, сверх набора {dropped} ({via}, tab {tab_id})"
+                );
             } else if parsed["duopulse"] == "parse-subtitles" {
                 // Разбор payload дорожки в Core (задача 3.3): канонические
                 // парсеры задачи 3.1, формат — автодетект по содержимому.

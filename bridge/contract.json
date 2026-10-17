@@ -1182,6 +1182,53 @@
       },
       "result": null
     },
+    "subtitles.load_file": {
+      "handler": "subtitles_load_file",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "subtitles.load_file (задача 3.6, docs/03 §3.2): ручной файл субтитров с диска (панель «Свои субтитры»). Чтение и разбор — в Core (канонические парсеры задачи 3.1, src/subtitles), разобранные cue доставляются в content-слой активной вкладки (eval диспатчит duopulse-file-track); файловая дорожка входит в общий набор с дорожками платформы (docs/01 F-06).",
+        "properties": {
+          "path": {
+            "description": "Абсолютный путь к файлу .srt/.vtt.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "SubtitlesLoadFileParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "cueCount": {
+            "description": "Разобрано cue (0 — валидных cue нет, см. warnings).",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "name": {
+            "description": "Имя файла без каталога (панель/диагностика его показывают).",
+            "type": "string"
+          },
+          "warnings": {
+            "description": "Предупреждения разбора (снисходительный разбор — задача 3.1).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cueCount",
+          "name",
+          "warnings"
+        ],
+        "title": "SubtitlesLoadFileResult",
+        "type": "object"
+      }
+    },
     "subtitles.set_offset": {
       "handler": "subtitles_set_offset",
       "params": {

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!-- DuoPulse — тест-«сайт» №2 задачи 3.6 (ручные субтитры, карточка
+     duopulse-027). Отличие от testpage.html (сайт №1): видео живёт внутри
+     вложенной плеерной обвязки (не первый элемент страницы), вокруг текст —
+     имитация страницы видеосайта. Дроп файлов проверяется ранером через CDP
+     (синтетический DragEvent с реальным File) — эта страница только отдаёт
+     <video> и уникальный URL (другой videoKey, docs/03 §6). -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>сайт-2 · плеер с обвязкой</title>
+  <style>
+    body { background: #14161c; color: #cfd8dc; font-family: "Segoe UI", system-ui, sans-serif; margin: 0; }
+    header { padding: 18px 32px; background: #1b1f27; }
+    main { display: flex; gap: 24px; padding: 24px 32px; }
+    .player { position: relative; max-width: 720px; }
+    .player__wrap { position: relative; padding: 8px; background: #0b0d12; border-radius: 10px; }
+    video { width: 100%; background: #000; display: block; }
+    aside { max-width: 280px; }
+  </style>
+</head>
+<body>
+  <header><h2>сайт-2 — плеер внутри обвязки</h2></header>
+  <main>
+    <div class="player">
+      <div class="player__wrap">
+        <video id="v" src="/assets/testsrc.mp4" muted controls preload="auto"></video>
+      </div>
+    </div>
+    <aside>
+      <h3>Описание</h3>
+      <p>Ролик 30 секунд со счётчиком кадров. Плашка DuoPulse должна лечь поверх
+         видео и следовать за ним (задача 3.4), а файл субтитров — наложиться
+         дропом на это видео (задача 3.6).</p>
+    </aside>
+  </main>
+</body>
+</html>

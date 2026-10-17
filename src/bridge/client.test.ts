@@ -82,6 +82,10 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   },
   "perf.list_runs": { path: ["perf", "listRuns"] },
   "subtitles.set_offset": { path: ["subtitles", "setOffset"], params: { offsetMs: 300 } },
+  "subtitles.load_file": {
+    path: ["subtitles", "loadFile"],
+    params: { path: "D:\\subs\\movie.ru.srt" },
+  },
   "app.restart": { path: ["app", "restart"] },
 };
 

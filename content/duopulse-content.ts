@@ -27,6 +27,12 @@
 // движок без перезагрузки дорожек и показывает HUD со слайдером. Набор
 // дорожек привязан к videoKey: пересоздание <video> с тем же ключом (смена
 // качества у ряда плееров) набор не теряет — реплика не пропадает.
+//
+// Ручные файлы (задача 3.6, docs/03 §3.2): drag&drop 1–3 файлов .srt/.vtt на
+// страницу с <video> (content/adapters/file.ts; разбор — канонический в Core)
+// и панельный путь subtitles.load_file (Core читает файл с диска и доставляет
+// cue событием duopulse-file-track). Файловые дорожки — в общем наборе с
+// дорожками платформы (docs/01 F-06): платформенные + файловые, до 3 строк.
 
 import { VideoDetector, type DetectedVideo } from "./detector";
 import { SubtitlesEngine, type ActiveRow } from "./engine/subtitles-engine";
@@ -43,7 +49,15 @@ import {
   type PageWindow,
 } from "./adapters/youtube";
 import type { AdapterTrackList } from "./adapters/types";
-import type { Track } from "./types";
+import {
+  FileDropZone,
+  buildFileTracks,
+  combinedTracks,
+  fileTrackFrom,
+  langOfFileName,
+  type FileLoadResult,
+} from "./adapters/file";
+import type { Cue, Track } from "./types";
 
 (function (): void {
   "use strict";
@@ -98,11 +112,16 @@ import type { Track } from "./types";
   // Гашение нативных субтитров платформы, пока активен наш показ (docs/03 §2).
   const blanker = new NativeCaptionsBlanker({ doc: document, href: () => location.href });
 
-  /** Набор текущего видео (переживает пересоздание <video> с тем же ключом —
-   * смена качества: таймлайн тот же, дорожки те же, docs/03 §4). Помним
-   * последний применённый набор: детект нового элемента приходит до
-   * loadedmetadata (ключ без длительности), уточнённый ключ — следом. */
-  let tracksFor: { key: string; tracks: Track[] } | null = null;
+  /** Набор текущего видео из двух частей (задача 3.6): платформенная
+   * (адаптер/тест-хук) и файловая (drag&drop/subtitles.load_file). Итог —
+   * платформенные + файловые до 3 строк (docs/03 §1); дроп замещает файловую
+   * часть целиком. Переживает пересоздание <video> с тем же ключом — смена
+   * качества: таймлайн тот же, дорожки те же, docs/03 §4. Память — последние
+   * ключи (LRU): возврат к видео восстанавливает обе части. */
+  let platformTracks: Track[] = [];
+  let fileTracks: Track[] = [];
+  const setMemory = new Map<string, { platform: Track[]; files: Track[] }>();
+  const SET_MEMORY_LIMIT = 8;
 
   /** Единая точка смены набора: движок + гашение нативного показа. */
   const applyTracks = (tracks: Track[]): void => {
@@ -111,11 +130,27 @@ import type { Track } from "./types";
     else blanker.restore();
   };
 
-  /** Запомнить набор за текущим видео (пустой — забыть). */
-  const storeTracks = (tracks: Track[]): void => {
-    tracksFor = tracks.length > 0 && currentVideo
-      ? { key: currentVideo.videoKey, tracks }
-      : null;
+  /** Применить и запомнить текущее разбиение набора за текущим видео. */
+  const applySet = (): void => {
+    const { tracks, droppedFiles } = combinedTracks(platformTracks, fileTracks);
+    if (droppedFiles > 0) {
+      // Файлы сверх лимита набора отброшены — телеметрия для диагностики.
+      postToCore({
+        duopulse: "file-tracks",
+        videoKey: currentVideo?.videoKey ?? "",
+        applied: fileTracks.length,
+        dropped: droppedFiles,
+      });
+    }
+    applyTracks(tracks);
+    if (currentVideo) {
+      const key = currentVideo.videoKey;
+      setMemory.delete(key); // LRU: освежить порядок
+      setMemory.set(key, { platform: platformTracks, files: fileTracks });
+      while (setMemory.size > SET_MEMORY_LIMIT) {
+        setMemory.delete(setMemory.keys().next().value as string);
+      }
+    }
   };
 
   const parser = createCoreParser();
@@ -151,7 +186,8 @@ import type { Track } from "./types";
   };
 
   /** Загрузка выбранного набора (id из tracksInfo()) в движок. Смена видео
-   * во время загрузки — результат не применяется (дорожки прошлого видео). */
+   * во время загрузки — результат не применяется (дорожки прошлого видео);
+   * файловая часть набора не трогается (смешивание, docs/01 F-06). */
   const selectTracks = async (
     ids: string[],
   ): Promise<{ loaded: number; failures: { id: string; reason: string }[]; unknown: string[] }> => {
@@ -161,8 +197,8 @@ import type { Track } from "./types";
     const keyAtStart = currentVideo?.videoKey ?? null;
     const loaded = await adapter.loadTracks(resolved.refs, { parser });
     if (currentVideo?.videoKey !== keyAtStart) return { loaded: 0, failures, unknown: resolved.unknown };
-    applyTracks(loaded.tracks);
-    storeTracks(loaded.tracks);
+    platformTracks = loaded.tracks;
+    applySet();
     for (const f of loaded.failures) failures.push({ id: f.ref.id, reason: f.reason });
     return { loaded: loaded.tracks.length, failures, unknown: resolved.unknown };
   };
@@ -183,9 +219,13 @@ import type { Track } from "./types";
         // ключом (смена качества у плееров, пересоздающих элемент; ключ
         // уточняется по loadedmetadata) — применяем запомненный набор без
         // перезагрузки (3.5); чужой ключ — чистим показ, набор-память живёт
-        // для возврата к тому же видео.
-        if (tracksFor && tracksFor.key === video.videoKey) applyTracks(tracksFor.tracks);
-        else applyTracks([]);
+        // для возврата к тому же видео. Детект до loadedmetadata приходит с
+        // ключом без длительности — память по уточнённому ключу не стёрта,
+        // уточнённый детект следом её поднимет.
+        const mem = setMemory.get(video.videoKey);
+        platformTracks = mem ? mem.platform : [];
+        fileTracks = mem ? mem.files : [];
+        applyTracks(combinedTracks(platformTracks, fileTracks).tracks);
         engine.attach(video.el);
         if (adapter.matches(video.url)) onYouTubeVideo(video);
         else {
@@ -204,20 +244,23 @@ import type { Track } from "./types";
 
   // Тест-хуки e2e-стенда (задача 3.2): тест-страница/CDP задаёт дорожку и сдвиг
   // напрямую — сервис-обвязка Core subtitles.* появится в задачах 3.5–3.7.
-  // __DUOPULSE_TEST_TRACK__ — дорожка, массив дорожек (набор 3.4) или {clear:true}.
+  // __DUOPULSE_TEST_TRACK__ — дорожка, массив дорожек (набор 3.4) или {clear:true};
+  // до 3.6 хук задавал весь набор, теперь — платформенную часть (файловые
+  // дорожки дропа живут своей частью — смешивание проверяется стендом 3.6).
   document.addEventListener("duopulse-test-track", () => {
     const payload = (window as unknown as Record<string, unknown>).__DUOPULSE_TEST_TRACK__;
     if (payload === null || typeof payload !== "object") return;
     if ("clear" in payload && (payload as { clear: unknown }).clear === true) {
-      applyTracks([]);
-      storeTracks([]);
+      platformTracks = [];
+      fileTracks = [];
+      applySet();
       return;
     }
     if (Array.isArray(payload) || Array.isArray((payload as { cues?: unknown }).cues)) {
       const tracks = (Array.isArray(payload) ? payload : [payload]) as Track[];
       if (tracks.every((t) => Array.isArray(t.cues))) {
-        applyTracks(tracks);
-        storeTracks(tracks);
+        platformTracks = tracks;
+        applySet();
       }
     }
   });
@@ -260,6 +303,53 @@ import type { Track } from "./types";
     if (Array.isArray(detail?.ids)) void selectTracks(detail.ids);
   });
 
+  // Панельный путь задачи 3.6: Core прочитал файл с диска (subtitles.load_file)
+  // и доставил cue этим событием (eval активной вкладки — паттерн
+  // subtitles.set_offset). Дорожка строится тем же fileTrackFrom, что и после
+  // drop; дроп/панель замещают файловую часть набора целиком.
+  document.addEventListener("duopulse-file-track", (e) => {
+    const detail = (e as CustomEvent<{ name?: unknown; cues?: unknown }>).detail;
+    if (!detail || typeof detail !== "object" || !Array.isArray(detail.cues)) return;
+    const cues: Cue[] = [];
+    for (const c of detail.cues) {
+      if (!c || typeof c !== "object") continue;
+      const cue = c as Record<string, unknown>;
+      if (typeof cue["startMs"] !== "number" || typeof cue["endMs"] !== "number") continue;
+      cues.push({ startMs: cue["startMs"], endMs: cue["endMs"], text: String(cue["text"] ?? "") });
+    }
+    if (cues.length === 0) return;
+    const name = typeof detail.name === "string" && detail.name ? detail.name : "субтитры.srt";
+    fileTracks = [fileTrackFrom(name, langOfFileName(name), cues)];
+    applySet();
+    postToCore({
+      duopulse: "file-tracks",
+      videoKey: currentVideo?.videoKey ?? "",
+      applied: 1,
+      via: "load_file",
+    });
+  });
+
+  // Drag&drop ручных файлов (задача 3.6): приём на window (capture), поглощение
+  // только своих дропов; разбор тел — в Core (WebMessage parse-subtitles).
+  const dropzone = new FileDropZone({
+    win: window,
+    doc: document,
+    parser,
+    hasVideo: () => currentVideo !== null,
+    onApply(result: FileLoadResult): void {
+      fileTracks = result.tracks;
+      applySet();
+      postToCore({
+        duopulse: "file-tracks",
+        videoKey: currentVideo?.videoKey ?? "",
+        applied: result.tracks.length,
+        failures: result.failures.length,
+        via: "drop",
+      });
+    },
+  });
+  dropzone.start();
+
   detector.start();
 
   // Диагностика стендов: состояние content-слоя в контексте страницы.
@@ -272,6 +362,8 @@ import type { Track } from "./types";
       style: SubtitleStyle;
       nativeBlanked: boolean;
       offsetHudVisible: boolean;
+      dropHintVisible: boolean;
+      fileTracks: { id: string; lang: string; cues: number }[];
     } {
       return {
         videoKey: currentVideo?.videoKey ?? null,
@@ -281,6 +373,8 @@ import type { Track } from "./types";
         style: overlay.styleInfo(),
         nativeBlanked: blanker.blanked,
         offsetHudVisible: hud.visible,
+        dropHintVisible: dropzone.hintVisible(),
+        fileTracks: fileTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
       };
     },
     /** Список дорожек текущего видео (null — ещё не получен/не YouTube). */
@@ -307,5 +401,18 @@ import type { Track } from "./types";
       };
     },
     selectTracks,
+    /** Убрать файловые дорожки набора (панель/e2e): платформенные остаются. */
+    clearFiles(): void {
+      fileTracks = [];
+      applySet();
+    },
+    /** Применить файловые дорожки как после дропа (диагностика стенда 3.6):
+     * чтение+разбор — тем же путём, что и реальный drop. */
+    async addFiles(files: readonly { name: string; text: () => Promise<string> }[]): Promise<FileLoadResult> {
+      const result = await buildFileTracks(files, { parser });
+      fileTracks = result.tracks;
+      applySet();
+      return result;
+    },
   };
 })();

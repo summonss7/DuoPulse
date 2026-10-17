@@ -33,6 +33,21 @@
 //  21) кламп offset в ±10 с;
 //  22) смена качества: смена src того же <video> и пересоздание элемента
 //      с тем же videoKey — набор дорожек не теряется, показ продолжается.
+// Задача 3.6 (ручные субтитры, карточка duopulse-027; docs/03 §3.2):
+//  23) подсказка при переносе файлов (dragenter → «Отпустите…», dragleave);
+//  24) дроп 2 файлов .srt/.vtt — поглощение, разбор в Core, смешивание с
+//      платформенной дорожкой в одном наборе (docs/01 F-06), журнал Core;
+//  25) повторный дроп замещает файловую часть набора целиком;
+//  26) чужой дроп (без .srt/.vtt) — странице, набор не трогаем;
+//  27) лимит набора 3: лишний файл отброшен, телеметрия «сверх набора»;
+//  28) сайт-2 (site2.html): видео в плеерной обвязке, файл без платформенных;
+//  29) сайт-3 (site3.html): ленивый монтаж видео — дроп до детекта не наш,
+//      после — смешивание с «платформенной» дорожкой;
+//  30) панельный путь IPC subtitles.load_file: Core читает файл с диска,
+//      ответ команды (name/cueCount/warnings), дорожка в наборе;
+//  31) clearFiles снимает файловую часть, платформенная продолжает показ.
+//		Дроп эмулируется синтетическим DragEvent на window с настоящим File
+//		страницы (чтение текста + разбор в Core — путь реального дропа).
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -822,6 +837,223 @@ try {
     "пересоздание <video> с тем же videoKey: набор восстановлен без повторного выбора, cue в такт",
     sRecreated.engine.trackCount === 1 && (await overlayText(tab)).includes("Первая реплика"),
     `trackCount=${sRecreated.engine.trackCount}, videoKey=${sRecreated.videoKey}`,
+  );
+
+  // ===== задача 3.6: ручные файлы — drag&drop .srt/.vtt + смешивание ==========
+
+  /** Синтетический drag&drop (задача 3.6): событие на window — capture-слу-
+   * шатель бандла; файл — настоящий File страницы, чтение текста и разбор в
+   * Core идут тем же путём, что у дропа пользователя. Возвращает dispatchEvent
+   * (false ⇢ preventDefault ⇢ дроп поглощён нами, странице не ушёл). */
+  const dragFiles = (ws, type, files) =>
+    evalIn(
+      ws,
+      `(function () {
+         const dt = new DataTransfer();
+         for (const f of ${JSON.stringify(files)}) dt.items.add(new File([f.text], f.name, { type: "text/plain" }));
+         return window.dispatchEvent(new DragEvent(${JSON.stringify(type)}, { dataTransfer: dt, bubbles: true, cancelable: true }));
+       })()`,
+    );
+
+  // (23) подсказка дропа: dragenter с файлами — плашка «Отпустите…» (гайд 06),
+  // dragleave прячет. Сайт №1 — testpage (платформенная часть — test:ru с 22).
+  await dragFiles(tab, "dragenter", [{ name: "movie.ru.srt", text: "x" }]);
+  await sleep(150);
+  check(
+    "подсказка дропа при переносе файла (dragenter → плашка «Отпустите»)",
+    (await stateOf(tab)).dropHintVisible === true &&
+      (await evalIn(tab, `document.querySelector("[data-duopulse-dropzone]")?.textContent ?? ""`)).includes("Отпустите"),
+  );
+  await evalIn(tab, `window.dispatchEvent(new DragEvent("dragleave", { bubbles: true, cancelable: true }))`);
+  await sleep(150);
+  check("dragleave прячет подсказку", (await stateOf(tab)).dropHintVisible === false);
+
+  // (24) дроп 2 файлов на видео с платформенной дорожкой — смешанный набор
+  // из 3 строк (docs/01 F-06): платформенные + файловые, файлы в конец.
+  const logBefore24 = appLog.length;
+  const swallowed24 = await dragFiles(tab, "drop", [
+    { name: "movie.ru.srt", text: "1\n00:00:01,000 --> 00:00:03,000\nФайл: русская реплика\n" },
+    { name: "subs.en.vtt", text: "WEBVTT\n\n00:00:01.000 --> 00:00:03.500\nFile: English line\n" },
+  ]);
+  await waitForPage(tab, `window.__duopulseContent?.state().fileTracks.length === 2`, 5000, "файловые дорожки после дропа");
+  await seekTo(tab, 2.0);
+  const mix = await evalIn(
+    tab,
+    `(function () {
+       const s = window.__duopulseContent.state();
+       const rows = document.querySelectorAll("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       return { files: s.fileTracks, trackCount: s.engine.trackCount, texts: Array.from(rows).map((r) => r.textContent) };
+     })()`,
+  );
+  check(
+    "дроп 2 файлов (.srt + .vtt) поглощён и разобран в Core: file:ru + file:en по 1 cue",
+    swallowed24 === false &&
+      JSON.stringify(mix.files.map((t) => [t.id, t.lang, t.cues])) ===
+        JSON.stringify([
+          ["file:ru", "ru", 1],
+          ["file:en", "en", 1],
+        ]),
+    JSON.stringify(mix.files),
+  );
+  check(
+    "смешивание (docs/01 F-06): платформенная + 2 файловых = 3 строки по порядку набора",
+    mix.trackCount === 3 &&
+      mix.texts.length === 3 &&
+      mix.texts[0].includes("Первая реплика") &&
+      mix.texts[1].includes("Файл: русская") &&
+      mix.texts[2].includes("File: English"),
+    JSON.stringify(mix.texts),
+  );
+  await sleep(400); // WebMessage file-tracks → Core (журнал)
+  check(
+    "Core зафиксировал дроп ([subtitles] file-tracks … via drop)",
+    appLog.slice(logBefore24).join("").includes("file-tracks: применено 2") &&
+      appLog.slice(logBefore24).join("").includes("(drop"),
+  );
+
+  // (25) повторный дроп замещает файловую часть набора целиком
+  await dragFiles(tab, "drop", [{ name: "replacer.de.srt", text: "1\n00:00:04,000 --> 00:00:06,000\nErsatz: deutsche Zeile\n" }]);
+  await waitForPage(tab, `window.__duopulseContent?.state().fileTracks.length === 1`, 5000, "замещение файловой части");
+  const s25 = await stateOf(tab);
+  check(
+    "повторный дроп замещает файловую часть целиком (осталась file:de)",
+    s25.fileTracks.length === 1 && s25.fileTracks[0].id === "file:de" && s25.engine.trackCount === 2,
+    JSON.stringify(s25.fileTracks),
+  );
+
+  // (26) чужой дроп (без .srt/.vtt) — странице: не поглощаем, набор не трогаем
+  const alien = await dragFiles(tab, "drop", [
+    { name: "photo.png", text: "\x89PNG" },
+    { name: "notes.txt", text: "hello" },
+  ]);
+  await sleep(200);
+  check(
+    "дроп без .srt/.vtt не поглощается и набор не трогает (странице)",
+    alien === true && (await stateOf(tab)).fileTracks.length === 1,
+  );
+
+  // (27) лимит набора 3: платформенная + 3 файла → показаны 2 файла, лишний
+  // отброшен; телеметрия «сверх набора 1» (docs/03 §1 — набор 1–3).
+  const logBefore27 = appLog.length;
+  await dragFiles(tab, "drop", [
+    { name: "a.ru.srt", text: "1\n00:00:01,000 --> 00:00:03,000\nПервый файл\n" },
+    { name: "b.en.srt", text: "1\n00:00:01,000 --> 00:00:03,000\nSecond file\n" },
+    { name: "c.es.srt", text: "1\n00:00:01,000 --> 00:00:03,000\nTercer fichero\n" },
+  ]);
+  await waitForPage(tab, `window.__duopulseContent?.state().fileTracks.length === 3`, 5000, "3 файловые построены");
+  await sleep(400);
+  const s27 = await stateOf(tab);
+  check(
+    "лимит набора ≤ 3: платформа + 3 файла → показ 3 строк (2 файла), лишний отброшен",
+    s27.engine.trackCount === 3 && s27.fileTracks.length === 3,
+    `trackCount=${s27.engine.trackCount}, файлов=${s27.fileTracks.length}`,
+  );
+  check(
+    "отброшенный файл — телеметрия в Core ([subtitles] … сверх набора 1)",
+    appLog.slice(logBefore27).join("").includes("сверх набора 1"),
+    appLog.slice(logBefore27).join("").split("\n").find((l) => l.includes("file-tracks")) ?? "",
+  );
+
+  // (28) сайт №2 (site2.html): видео внутри плеерной обвязки; платформенных
+  // дорожек нет — файл идёт сам (голый HTML5-видео, docs/03 §3.3).
+  await evalIn(tab, `location.href = "/site2.html"`);
+  await waitForPage(tab, `typeof window.__duopulseContent === "object"`, 10000, "бандл на сайте-2");
+  await waitForPage(tab, `document.getElementById("v")?.readyState >= 1`, 10000, "метаданные на сайте-2");
+  const key2 = await waitForPage(tab, `window.__duopulseContent?.state().videoKey`, 5000, "ключ видео сайта-2");
+  check(
+    "сайт-2: детектор нашёл видео в обвязке (ключ url:…site2.html…)",
+    typeof key2 === "string" && key2.includes("site2.html"),
+    key2,
+  );
+  await dragFiles(tab, "drop", [{ name: "film.fr.srt", text: "1\n00:00:01,000 --> 00:00:03,000\nFichier: ligne française\n" }]);
+  await waitForPage(tab, `window.__duopulseContent?.state().fileTracks.length === 1`, 5000, "файл на сайте-2");
+  await seekTo(tab, 2.0);
+  check(
+    "сайт-2: файл сам по себе (без платформенных) — 1 строка оверлея",
+    (await stateOf(tab)).engine.trackCount === 1 && (await overlayText(tab)).includes("ligne française"),
+    JSON.stringify(await overlayText(tab)),
+  );
+
+  // (29) сайт №3 (site3.html): ленивый монтаж видео — дроп до детекта не наш
+  // (docs/03 §3.2 «на <video> найденного детектора»); после — смешивание
+  // с «платформенной» дорожкой (тест-хук имитирует адаптер платформы).
+  await evalIn(tab, `location.href = "/site3.html"`);
+  await waitForPage(tab, `typeof window.__duopulseContent === "object"`, 10000, "бандл на сайте-3");
+  const early = await dragFiles(tab, "drop", [{ name: "early.ru.srt", text: "1\n00:00:01,000 --> 00:00:03,000\nРано\n" }]);
+  await sleep(200);
+  check(
+    "сайт-3: дроп до появления видео не поглощается (странице), набор пуст",
+    early === true && (await stateOf(tab)).fileTracks.length === 0,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().videoKey !== null`, 8000, "ленивое видео смонтировано");
+  await waitForPage(tab, `document.getElementById("v")?.readyState >= 1`, 10000, "метаданные на сайте-3");
+  await evalIn(
+    tab,
+    `(function () {
+       window.__DUOPULSE_TEST_TRACK__ = {
+         id: "test:ru", source: "test", lang: "ru", role: "original",
+         cues: [{ startMs: 6000, endMs: 8000, text: "Платформенная реплика (6–8 с)" }]
+       };
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 1`, 5000, "платформенная дорожка на сайте-3");
+  await dragFiles(tab, "drop", [{ name: "movie.ru.srt", text: "1\n00:00:06,000 --> 00:00:08,000\nФайл: русская реплика (6–8 с)\n" }]);
+  await waitForPage(tab, `window.__duopulseContent?.state().fileTracks.length === 1`, 5000, "файл на сайте-3");
+  await seekTo(tab, 7.0);
+  const mix3 = await overlayText(tab);
+  check(
+    "сайт-3: файл лёг поверх лениво смонтированного видео и смешан с платформенной дорожкой",
+    mix3.includes("Платформенная реплика") && mix3.includes("Файл: русская реплика"),
+    JSON.stringify(mix3),
+  );
+
+  // (30) панельный путь (IPC subtitles.load_file, docs/03 §3.2): Core читает
+  // файл с диска (tmp-каталог стенда), доставляет cue событием
+  // duopulse-file-track; дорожка замещает файловую часть набора.
+  const panelPath = path.join(tmp, "panel.es.vtt");
+  fs.writeFileSync(panelPath, "WEBVTT\n\n00:00:06.000 --> 00:00:08.000\nHola desde el panel\n");
+  const ui2Target = targets.find((t) => t.type === "page" && /localhost:5173/.test(t.url));
+  if (!ui2Target) throw new Error("UI-цель CDP не найдена (нужен vite dev): " + targets.map((t) => t.url).join(", "));
+  const ui2 = connect(ui2Target.webSocketDebuggerUrl);
+  await waitForPage(ui2, `typeof window.__duopulse === "object"`, 10000, "bridge-хук window.__duopulse");
+  const loadRes = await evalIn(ui2, `window.__duopulse.subtitles.loadFile(${JSON.stringify({ path: panelPath })})`);
+  await waitForPage(
+    tab,
+    `window.__duopulseContent?.state().fileTracks.length === 1 && window.__duopulseContent?.state().fileTracks[0].id === "file:es"`,
+    5000,
+    "панельный файл применён",
+  );
+  check(
+    "IPC subtitles.load_file: ответ команды — имя, cueCount=1, без предупреждений",
+    loadRes.name === "panel.es.vtt" && loadRes.cueCount === 1 && loadRes.warnings.length === 0,
+    JSON.stringify(loadRes),
+  );
+  await seekTo(tab, 7.5);
+  const panelMix = await overlayText(tab);
+  check(
+    "панельный файл в наборе с платформенной (заместил дроп): 2 строки",
+    panelMix.includes("Платформенная реплика") && panelMix.includes("Hola desde el panel"),
+    JSON.stringify(panelMix),
+  );
+  ui2.close();
+
+  // Скриншот смешанного набора (платформенная + панельный файл) + (31) clearFiles
+  await sleep(300); // fade плашки
+  {
+    const shotMix = await tab.send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(path.join(OUT_DIR, "shot-file-mix.png"), Buffer.from(shotMix.data, "base64"));
+    check("скриншот смешанного набора сохранён (shot-file-mix.png)", fs.existsSync(path.join(OUT_DIR, "shot-file-mix.png")));
+  }
+  await evalIn(tab, `window.__duopulseContent.clearFiles()`);
+  await sleep(150);
+  const s31 = await stateOf(tab);
+  const text31 = await overlayText(tab);
+  check(
+    "clearFiles: файловая часть снята, платформенная продолжает показ",
+    s31.fileTracks.length === 0 && s31.engine.trackCount === 1 && text31.includes("Платформенная реплика") && !text31.includes("Hola"),
+    `файлов=${s31.fileTracks.length}, текст=${JSON.stringify(text31)}`,
   );
 
   tab.close();

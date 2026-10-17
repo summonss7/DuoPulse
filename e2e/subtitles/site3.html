@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<!-- DuoPulse — тест-«сайт» №3 задачи 3.6 (ручные субтитры, карточка
+     duopulse-027). Отличие от testpage.html (сайт №1): ленивая SPA-страница —
+     <video> монтируется скриптом через ~800 мс после загрузки (имитация
+     плеера, приезжающего по данным). Проверки ранера: дроп до появления видео
+     не поглощается (docs/03 §3.2 — только на <video> детектора), после —
+     работает; сюда же панельный путь subtitles.load_file (IPC) и смешивание
+     файловой дорожки с «платформенной» (тест-хук duopulse-test-track). -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>сайт-3 · ленивый SPA-плеер</title>
+  <style>
+    body { background: #0f1216; color: #cfd8dc; font-family: "Segoe UI", system-ui, sans-serif; margin: 0; }
+    nav { padding: 14px 32px; background: #171b22; }
+    main { padding: 32px; }
+    #mount { max-width: 680px; min-height: 200px; }
+    .spinner { color: #6b7480; padding: 60px 0; text-align: center; }
+    video { width: 100%; background: #000; display: block; }
+  </style>
+</head>
+<body>
+  <nav><h2>сайт-3 — видео приезжает лениво</h2></nav>
+  <main>
+    <div id="mount"><div class="spinner">загружаем плеер…</div></div>
+    <p>До появления видео дроп субтитров — не наш (странице), после — наложение.</p>
+  </main>
+  <script>
+    // Ленивый монтаж плеера (SPA): детектор должен подобрать видео
+    // MutationObserver'ом (задача 3.2), дроп — ждать currentVideo.
+    setTimeout(function () {
+      document.getElementById("mount").innerHTML = "";
+      const v = document.createElement("video");
+      v.id = "v";
+      v.src = "/assets/testsrc.mp4";
+      v.muted = true;
+      v.controls = true;
+      v.preload = "auto";
+      document.getElementById("mount").appendChild(v);
+    }, 800);
+  </script>
+</body>
+</html>
