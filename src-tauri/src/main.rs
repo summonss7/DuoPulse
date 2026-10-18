@@ -38,6 +38,7 @@ mod perf;
 mod prefetch;
 mod proxy;
 mod secrets;
+mod settings;
 mod subtitles;
 mod tabs;
 mod translate;
@@ -636,6 +637,15 @@ fn main() {
     // (P-02), пустой → холодный (P-01); проверка ДО открытия хранилищ.
     let profile_dir = proxy::profile_dir();
     perf::set_cold(!profile_dir.join("duopulse.db").exists());
+    // Миграции settings.json (задача 5.1): до открытия хранилищ и чтения
+    // конфигов — все разделы видят актуальную схему.
+    let migrated_from = settings::migrate(&profile_dir);
+    if migrated_from < settings::SETTINGS_SCHEMA_VERSION {
+        eprintln!(
+            "[settings] settings.json мигрирован: v{migrated_from} → v{}",
+            settings::SETTINGS_SCHEMA_VERSION
+        );
+    }
     let adblock_service = std::sync::Arc::new(adblock::AdblockService::new(&profile_dir));
     let history_store = history::HistoryStore::open(&profile_dir)
         .expect("открыть/создать duopulse.db в профиле (docs/02 §8)");
@@ -723,6 +733,20 @@ fn main() {
                 // Запись идемпотентна — менеджер вкладок в момент выхода ещё жив,
                 // состояние списка не меняется между событиями.
                 app.state::<tabs::TabManager>().persist_session();
+                // Приватность (задача 5.1): очищать историю при выходе —
+                // настройка privacy.clearHistoryOnExit; вся история (диапазон
+                // до «будущего»), закладки не трогаются (как на странице
+                // управления). app.restart тоже проходит здесь — после
+                // перезапуска для применения прокси история будет чиста.
+                if settings::load_privacy(&proxy::profile_dir()).clear_history_on_exit {
+                    let far = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64 + 86_400_000)
+                        .unwrap_or(i64::MAX / 4);
+                    if let Err(e) = app.state::<history::HistoryStore>().delete_range(0, far) {
+                        eprintln!("[settings] очистка истории при выходе: {e}");
+                    }
+                }
             }
             if let tauri::RunEvent::Ready = event {
                 startup_mark("ready");

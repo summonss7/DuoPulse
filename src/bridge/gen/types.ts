@@ -1,10 +1,14 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 5); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 6); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
  */
 export type HistorySource = "history" | "bookmark";
+/**
+ * Поисковые системы omnibox (задача 5.1): выбор по умолчанию — настройка «Поиск». Префикс — шаблон ссылки с encoded-запросом в конце (omnibox.rs).
+ */
+export type SearchEngine = ("google" | "bing" | "duckduckgo") | "youtube";
 /**
  * settings.get / settings.set: ключи настроек профиля. M1: один ключ.
  */
@@ -13,6 +17,7 @@ export type SettingsKey = "proxy";
  * Тип прокси. Схемы --proxy-server у Chromium: socks5/http/https (для socks5 Chromium резолвит домены на стороне прокси).
  */
 export type ProxyProto = "socks5" | "http" | "https";
+export type Theme = "dark";
 /**
  * Тариф DeepL: free — api-free.deepl.com (500 тыс. знаков/мес), pro — api.deepl.com; отличается только хост эндпоинта.
  */
@@ -60,10 +65,28 @@ export interface DuoPulseBridgeContract {
   PerfStartupInfo: PerfStartupInfo;
   PerfTabSwitchInfo: PerfTabSwitchInfo;
   PerfTabs: PerfTabs;
+  SettingsPatch: SettingsPatch;
+  PrivacyConfig: PrivacyConfig;
+  SearchConfig: SearchConfig;
+  SearchEngine: SearchEngine;
+  SubtitlesConfig: SubtitlesConfig;
+  SubtitlesStyleDefaults: SubtitlesStyleDefaults;
+  SettingsExportParams: SettingsExportParams;
+  SettingsExportResult: SettingsExportResult;
+  ProfileCounts: ProfileCounts;
   SettingsGetParams: SettingsGetParams;
   SettingsKey: SettingsKey;
   ProxySettings: ProxySettings;
   ProxyProto: ProxyProto;
+  SettingsAll: SettingsAll;
+  AppearanceConfig: AppearanceConfig;
+  DeeplPlan: DeeplPlan;
+  ProviderId: ProviderId;
+  SearchEngineInfo: SearchEngineInfo;
+  Theme: Theme;
+  TranslateSettings: TranslateSettings;
+  SettingsImportParams: SettingsImportParams;
+  ImportOutcome: ImportOutcome;
   SettingsSetParams: SettingsSetParams;
   ProxyConfig: ProxyConfig;
   TabSubtitles: TabSubtitles;
@@ -87,9 +110,7 @@ export interface DuoPulseBridgeContract {
   TabsOpenParams: TabsOpenParams;
   TabsSleepParams: TabsSleepParams;
   TabsWakeParams: TabsWakeParams;
-  TranslateSettings: TranslateSettings;
-  DeeplPlan: DeeplPlan;
-  ProviderId: ProviderId;
+  TranslateClearCacheResult: TranslateClearCacheResult;
   TranslateSetSettingsParams: TranslateSetSettingsParams;
   TranslateConfig: TranslateConfig;
   TranslateTestParams: TranslateTestParams;
@@ -402,6 +423,90 @@ export interface PerfTabs {
   total: number;
 }
 /**
+ * settings.apply: частичный патч разделов (неназванные не меняются). Прокси-пароль и ключи API — только существующими командами (settings.set proxy / translate.set_settings: секреты идут в DPAPI, не в патче).
+ */
+export interface SettingsPatch {
+  privacy?: PrivacyConfig | null;
+  search?: SearchConfig | null;
+  subtitles?: SubtitlesConfig | null;
+}
+/**
+ * Раздел "privacy" settings.json (задача 5.1).
+ */
+export interface PrivacyConfig {
+  /**
+   * Очищать историю посещений при выходе из браузера.
+   */
+  clearHistoryOnExit?: boolean;
+}
+/**
+ * Раздел "search" settings.json.
+ */
+export interface SearchConfig {
+  engine?: SearchEngine & string;
+}
+/**
+ * Раздел "subtitles" settings.json — дефолты субтитров (задача 5.1): язык перевода дефолт-набора Alt+D («оригинал + <язык>») и стиль плашки для вкладок, где пользователь ещё не менял стиль вручную.
+ */
+export interface SubtitlesConfig {
+  /**
+   * Язык перевода дефолт-набора, код 2–3 буквы («ru»).
+   */
+  defaultTranslationLang?: string;
+  style?: SubtitlesStyleDefaults;
+}
+/**
+ * Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle).
+ */
+export interface SubtitlesStyleDefaults {
+  /**
+   * Масштаб кегля, % (75–300).
+   */
+  fontScalePct?: number;
+  /**
+   * Отступ от края видео, % высоты (0–25).
+   */
+  marginPct?: number;
+  /**
+   * Непрозрачность подложки, 0.2–1.
+   */
+  plateOpacity?: number;
+  /**
+   * Позиция плашки: bottom|top.
+   */
+  position?: string;
+}
+/**
+ * settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на чистую машину за 1 файл). path — абсолютный путь из нативного диалога сохранения (UI); include_secrets — явный выбор пользователя (UI предупреждает: пароль прокси и ключи API попадут в файл открытым текстом).
+ */
+export interface SettingsExportParams {
+  includeSecrets: boolean;
+  path: string;
+}
+export interface SettingsExportResult {
+  bytes: number;
+  /**
+   * Что вошло в файл (разделы настроек, закладки, визиты, строки кэша, секреты) + размер файла.
+   */
+  counts: ProfileCounts;
+}
+/**
+ * Числа отчёта экспорта/импорта (страница настроек показывает их пользователю).
+ */
+export interface ProfileCounts {
+  bookmarks?: number;
+  /**
+   * Секретов в файле/записано при импорте (0 — файл без секретов).
+   */
+  secrets?: number;
+  /**
+   * Разделы настроек, попавшие в файл/применённые из него.
+   */
+  settingsSections?: number;
+  translatedTracks?: number;
+  visits?: number;
+}
+/**
  * settings.get: ключ, значение которого читаем.
  */
 export interface SettingsGetParams {
@@ -417,6 +522,78 @@ export interface ProxySettings {
   login?: string | null;
   port: number;
   proto: ProxyProto;
+}
+/**
+ * settings.get_all: полный снапшот настроек для страницы «Настройки». Прокси (settings.get M1), перевод (translate.get_settings) и блокировщик (adblock.status) включены сюда же — страница показывает все разделы одной командой; их живые команды остаются (хром-панели).
+ */
+export interface SettingsAll {
+  /**
+   * Глобальный тумблер блокировщика (исключения сайтов — adblock.status).
+   */
+  adblockEnabled: boolean;
+  appearance: AppearanceConfig;
+  engines: SearchEngineInfo[];
+  privacy: PrivacyConfig;
+  proxy: ProxySettings;
+  /**
+   * Версия схемы settings.json (миграции — на старте Core).
+   */
+  schemaVersion: number;
+  /**
+   * Текущий поисковик omnibox + доступные.
+   */
+  search: SearchConfig;
+  /**
+   * Дефолты субтитров (язык перевода набора Alt+D, стиль новых вкладок).
+   */
+  subtitles: SubtitlesConfig;
+  translate: TranslateSettings;
+}
+/**
+ * Раздел "appearance" settings.json. v1 — только тёмная фирменная тема (docs/01 F-10, ROADMAP M5): светлая — за пределами карточки 5.1, значение фиксировано, селект страницы показывает её единственной активной опцией.
+ */
+export interface AppearanceConfig {
+  theme?: Theme & string;
+}
+/**
+ * Поисковик для селекта «Поиск» (id — значение настройки, title — подпись).
+ */
+export interface SearchEngineInfo {
+  id: SearchEngine;
+  title: string;
+}
+/**
+ * Значение translate.get_settings для UI: конфиг + факт наличия ключей в DPAPI (сами ключи наружу не отдаются — как hasPassword прокси).
+ */
+export interface TranslateSettings {
+  deeplPlan: DeeplPlan;
+  enabled: boolean;
+  /**
+   * Провайдеры, у которых сохранён ключ API (DPAPI).
+   */
+  hasApiKeys: ProviderId[];
+  libretranslateUrl: string;
+  provider: ProviderId;
+}
+/**
+ * settings.import: применить файл профиля (path — нативный диалог выбора). Импорт идемпотентен (дубликаты визитов скипаются, закладки/кэш — upsert); переехавший прокси применяется аргументами WebView2 со следующего старта (needs_restart, docs/02 §6.1).
+ */
+export interface SettingsImportParams {
+  path: string;
+}
+/**
+ * Итог импорта: отчёт + нужен ли перезапуск (прокси применяется аргументами WebView2 только на старте — docs/02 §6.1).
+ */
+export interface ImportOutcome {
+  counts?: ProfileCounts;
+  /**
+   * Файл содержал секреты (применены в DPAPI).
+   */
+  hasSecrets?: boolean;
+  /**
+   * Импортирован раздел proxy — аргументы применятся со следующего старта.
+   */
+  needsRestart?: boolean;
 }
 /**
  * settings.set: value — значение ключа; secret — секрет ключа в DPAPI: None — не менять, Some("") — удалить, Some(p) — перезаписать. Для "proxy" value без пароля (пароль — только DPAPI, docs/02 §9).
@@ -687,17 +864,13 @@ export interface TabsWakeParams {
   id: string;
 }
 /**
- * Значение translate.get_settings для UI: конфиг + факт наличия ключей в DPAPI (сами ключи наружу не отдаются — как hasPassword прокси).
+ * translate.clear_cache (приватность, задача 5.1): очистить кэш переведённых дорожек (translated_tracks, duopulse.db).
  */
-export interface TranslateSettings {
-  deeplPlan: DeeplPlan;
-  enabled: boolean;
+export interface TranslateClearCacheResult {
   /**
-   * Провайдеры, у которых сохранён ключ API (DPAPI).
+   * Удалено строк кэша.
    */
-  hasApiKeys: ProviderId[];
-  libretranslateUrl: string;
-  provider: ProviderId;
+  cleared: number;
 }
 /**
  * translate.set_settings: value — конфиг без ключей (ключи — только DPAPI); secret — ключ API выбранного провайдера (value.provider): None — не менять, Some("") — удалить, Some(k) — перезаписать.

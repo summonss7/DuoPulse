@@ -14,8 +14,25 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use super::Cue;
+
+/// Строка кэша для экспорта/импорта профиля (задача 5.1, settings/profile.rs):
+/// ключ дорожки + cue-JSON как есть (повторный просмотр на новой машине —
+/// из кэша без сети, DoD 4.2 переживает переезд).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackRow {
+    pub video_key: String,
+    pub track_id: String,
+    pub target_lang: String,
+    pub provider: String,
+    pub cues: String,
+    pub cue_count: i64,
+    pub last_used_at: i64,
+}
 
 /// Максимум дорожек в кэше (LRU сверх него; типичный трек ~30 КБ — потолок
 /// ~4 МБ, docs/03 §7 «LRU-очистка»).
@@ -159,6 +176,80 @@ impl TranslationsCache {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    // --- задача 5.1: экспорт/импорт профиля -----------------------------------
+
+    /// Дамп всех строк кэша (экспорт профиля).
+    pub fn dump(&self) -> Result<Vec<TrackRow>, String> {
+        let conn = self.conn.lock().expect("translations: лок не отравлен");
+        let mut stmt = conn
+            .prepare(
+                "SELECT video_key, track_id, target_lang, provider, cues, cue_count, last_used_at
+                 FROM translated_tracks ORDER BY last_used_at",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(TrackRow {
+                    video_key: r.get(0)?,
+                    track_id: r.get(1)?,
+                    target_lang: r.get(2)?,
+                    provider: r.get(3)?,
+                    cues: r.get(4)?,
+                    cue_count: r.get(5)?,
+                    last_used_at: r.get(6)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    /// Импорт строк (переезд профиля): upsert по ключу дорожки, затем LRU-
+    /// подрезка до MAX_ROWS. Битый cues-JSON строки — пропуск (не роняем
+    /// импорт). Возвращает число записанных.
+    pub fn import_rows(&self, rows: &[TrackRow]) -> Result<u32, String> {
+        let conn = self.conn.lock().expect("translations: лок не отравлен");
+        let mut written = 0u32;
+        for row in rows {
+            if row.video_key.is_empty() || row.track_id.is_empty() {
+                continue;
+            }
+            // валидность cue-JSON: битая строка в кэше — мусор, не перевод
+            if serde_json::from_str::<Vec<Cue>>(&row.cues).is_err() {
+                continue;
+            }
+            conn.execute(
+                "INSERT INTO translated_tracks(video_key, track_id, target_lang, provider, cues, cue_count, last_used_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(video_key, track_id, target_lang, provider)
+                 DO UPDATE SET cues=excluded.cues, cue_count=excluded.cue_count,
+                               last_used_at=excluded.last_used_at",
+                rusqlite::params![
+                    row.video_key,
+                    row.track_id,
+                    row.target_lang,
+                    row.provider,
+                    row.cues,
+                    row.cue_count,
+                    row.last_used_at
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+            written += 1;
+        }
+        self.trim(&conn, MAX_ROWS);
+        Ok(written)
+    }
+
+    /// Очистить кэш целиком (приватность, задача 5.1). Возвращает число
+    /// удалённых строк.
+    pub fn clear(&self) -> usize {
+        let conn = self.conn.lock().expect("translations: лок не отравлен");
+        conn.execute("DELETE FROM translated_tracks", [])
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -289,5 +380,48 @@ mod tests {
         let c2 = TranslationsCache::open(&dir).expect("переоткрыть");
         assert!(c2.get("v", "t", "ru", "deepl", now_ms()).is_some());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- задача 5.1: дамп/импорт/очистка ---------------------------------------
+
+    #[test]
+    fn dump_import_roundtrip_and_clear() {
+        let src = TranslationsCache::open_in_memory().unwrap();
+        src.put(
+            "yt:v1",
+            "yt:en",
+            "ru",
+            "deepl",
+            &[cue("привет"), cue("мир")],
+            100,
+        );
+        src.put("yt:v2", "yt:es", "ru", "google", &[cue("hola")], 200);
+
+        let rows = src.dump().unwrap();
+        assert_eq!(rows.len(), 2);
+
+        // чистая машина: импорт даёт рабочие кэш-хиты без сети
+        let dst = TranslationsCache::open_in_memory().unwrap();
+        assert_eq!(dst.import_rows(&rows).unwrap(), 2);
+        let hit = dst
+            .get("yt:v1", "yt:en", "ru", "deepl", 300)
+            .expect("кэш-хит после переезда");
+        assert_eq!(hit[1].text, "мир");
+
+        // повторный импорт — upsert, не дубли
+        assert_eq!(dst.import_rows(&rows).unwrap(), 2);
+        assert_eq!(dst.len(), 2);
+
+        // битый cues-JSON — строка пропущена, импорт не падает
+        let mut broken = rows[0].clone();
+        broken.cues = "не json".into();
+        broken.video_key = "yt:v3".into();
+        assert_eq!(dst.import_rows(std::slice::from_ref(&broken)).unwrap(), 0);
+        assert_eq!(dst.len(), 2);
+
+        // очистка (приватность)
+        assert_eq!(dst.clear(), 2);
+        assert!(dst.is_empty());
+        assert_eq!(dst.clear(), 0, "повторная очистка — 0");
     }
 }

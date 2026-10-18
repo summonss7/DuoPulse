@@ -13,7 +13,7 @@
 //! офлайн-деградация, бейдж «перевод недоступен» и автоповтор при появлении
 //! сети — watcher.rs (задача 4.3).
 
-mod config;
+pub(crate) mod config;
 mod deepl;
 mod google;
 mod http;

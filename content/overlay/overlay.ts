@@ -18,8 +18,8 @@
 // поверх — его масштаб база, авто только ограничивает долей видео.
 
 import type { ActiveRow } from "../engine/subtitles-engine";
+import { baseStyle } from "../defaults";
 import {
-  DEFAULT_SUBTITLE_STYLE,
   MARGIN_MAX_PCT,
   PLATE_MAX_SHARE,
   fitStepPct,
@@ -49,14 +49,16 @@ export class SubtitlesOverlay {
   private plate: HTMLDivElement | null = null;
   private rowsEl: HTMLDivElement | null = null;
   private video: HTMLVideoElement | null = null;
-  private style: SubtitleStyle = { ...DEFAULT_SUBTITLE_STYLE };
+  /** Базовый стиль — дефолты content-слоя + настройки профиля задачи 5.1
+   *  (window.__DUOPULSE_DEFAULTS__ от Core; клампы — в baseStyle). */
+  private style: SubtitleStyle = baseStyle();
   /** Строки последнего рендера: дифф-обновление текста на месте. */
   private rows: ActiveRow[] = [];
   /** Эффективный кегль: ручной масштаб, при переполнении авто-уменьшенный
-   * под потолок доли видео (карточка 046); всегда ≤ style.fontScalePct.
-   * В styleInfo наружу отдаётся только ручной — авто-подгон преходящ,
-   * от cue к cue, и не персистится. */
-  private autoPct = DEFAULT_SUBTITLE_STYLE.fontScalePct;
+   *  под потолок доли видео (карточка 046); всегда ≤ style.fontScalePct.
+   *  В styleInfo наружу отдаётся только ручной — авто-подгон преходящ,
+   *  от cue к cue, и не персистится. */
+  private autoPct = baseStyle().fontScalePct;
   /** Пересчитать авто-подгон: строки/стиль изменились (геометрия видео —
    * в fit по факту); репозиция без изменений не дёргает layout. */
   private fitDirty = true;

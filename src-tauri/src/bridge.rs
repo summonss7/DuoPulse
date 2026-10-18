@@ -32,7 +32,11 @@ use crate::proxy;
 /// v2 (задача 2.5, без bump — совместимое расширение): домен perf.* — команды
 /// perf.{snapshot, save_run, list_runs} и события perf:{startup_ms,
 /// tab_switch_ms} (страница «Диагностика», docs/04 §2, docs/05 §2).
-pub const CONTRACT_VERSION: u32 = 5;
+/// v6 (задача 5.1): домен settings вырос — команды settings.{get_all, apply,
+/// export, import} (полные настройки + перенос профиля одним файлом) и
+/// translate.clear_cache (приватность); settings.{get, set} (прокси-инкремент
+/// M1) не изменились. По словарю docs/05 §2 экспорт/импорт ложатся сюда же.
+pub const CONTRACT_VERSION: u32 = 6;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -282,7 +286,7 @@ pub struct HistoryBookmarkListResult {
     pub total: u32,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryBookmark {
     pub url: String,
@@ -327,6 +331,93 @@ pub struct SettingsSetParams {
     pub key: SettingsKey,
     pub value: proxy::ProxyConfig,
     pub secret: Option<String>,
+}
+
+// --- задача 5.1: полные настройки + перенос профиля (src/settings/) ----------
+
+/// Поисковик для селекта «Поиск» (id — значение настройки, title — подпись).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchEngineInfo {
+    pub id: crate::settings::SearchEngine,
+    pub title: String,
+}
+
+/// settings.get_all: полный снапшот настроек для страницы «Настройки».
+/// Прокси (settings.get M1), перевод (translate.get_settings) и блокировщик
+/// (adblock.status) включены сюда же — страница показывает все разделы одной
+/// командой; их живые команды остаются (хром-панели).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsAll {
+    /// Версия схемы settings.json (миграции — на старте Core).
+    pub schema_version: u32,
+    pub appearance: crate::settings::AppearanceConfig,
+    /// Текущий поисковик omnibox + доступные.
+    pub search: crate::settings::SearchConfig,
+    pub engines: Vec<SearchEngineInfo>,
+    /// Дефолты субтитров (язык перевода набора Alt+D, стиль новых вкладок).
+    pub subtitles: crate::settings::SubtitlesConfig,
+    pub privacy: crate::settings::PrivacyConfig,
+    pub proxy: ProxySettings,
+    /// Глобальный тумблер блокировщика (исключения сайтов — adblock.status).
+    pub adblock_enabled: bool,
+    pub translate: crate::translate::TranslateSettings,
+}
+
+/// settings.apply: частичный патч разделов (неназванные не меняются).
+/// Прокси-пароль и ключи API — только существующими командами (settings.set
+/// proxy / translate.set_settings: секреты идут в DPAPI, не в патче).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<crate::settings::SearchConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitles: Option<crate::settings::SubtitlesConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub privacy: Option<crate::settings::PrivacyConfig>,
+}
+
+/// settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на
+/// чистую машину за 1 файл). path — абсолютный путь из нативного диалога
+/// сохранения (UI); include_secrets — явный выбор пользователя (UI предупреждает:
+/// пароль прокси и ключи API попадут в файл открытым текстом).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsExportParams {
+    pub path: String,
+    pub include_secrets: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsExportResult {
+    /// Что вошло в файл (разделы настроек, закладки, визиты, строки кэша,
+    /// секреты) + размер файла.
+    pub counts: crate::settings::profile::ProfileCounts,
+    pub bytes: u64,
+}
+
+/// settings.import: применить файл профиля (path — нативный диалог выбора).
+/// Импорт идемпотентен (дубликаты визитов скипаются, закладки/кэш — upsert);
+/// переехавший прокси применяется аргументами WebView2 со следующего старта
+/// (needs_restart, docs/02 §6.1).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsImportParams {
+    pub path: String,
+}
+
+pub type SettingsImportResult = crate::settings::profile::ImportOutcome;
+
+/// translate.clear_cache (приватность, задача 5.1): очистить кэш переведённых
+/// дорожек (translated_tracks, duopulse.db).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateClearCacheResult {
+    /// Удалено строк кэша.
+    pub cleared: u32,
 }
 
 /// vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси
@@ -797,6 +888,16 @@ pub fn contract_json() -> serde_json::Value {
                               "result": schema!(ProxySettings) },
             "settings.set": { "handler": "settings_set", "params": schema!(SettingsSetParams),
                               "result": null },
+            "settings.get_all": { "handler": "settings_get_all", "params": null,
+                                  "result": schema!(SettingsAll) },
+            "settings.apply": { "handler": "settings_apply", "params": schema!(SettingsPatch),
+                                "result": null },
+            "settings.export": { "handler": "settings_export",
+                                 "params": schema!(SettingsExportParams),
+                                 "result": schema!(SettingsExportResult) },
+            "settings.import": { "handler": "settings_import",
+                                 "params": schema!(SettingsImportParams),
+                                 "result": schema!(SettingsImportResult) },
             "vpn.set_enabled": { "handler": "vpn_set_enabled", "params": schema!(VpnSetEnabledParams),
                                  "result": null },
             "vpn.status": { "handler": "vpn_status", "params": null,
@@ -850,6 +951,8 @@ pub fn contract_json() -> serde_json::Value {
                                          "result": null },
             "translate.test": { "handler": "translate_test", "params": schema!(TranslateTestParams),
                                  "result": schema!(TranslateTestResult) },
+            "translate.clear_cache": { "handler": "translate_clear_cache", "params": null,
+                                        "result": schema!(TranslateClearCacheResult) },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -1087,10 +1190,14 @@ fn nav_go_forward(
 }
 
 /// nav.resolve_omnibox: разбор ввода адресной строки (URL vs поиск) —
-/// src/omnibox.rs, правила и тесты там.
+/// src/omnibox.rs, правила и тесты там. Задача 5.1: поисковик — настройка
+/// «Поиск» (settings.json "search"), дефолт YouTube.
 #[tauri::command]
 fn nav_resolve_omnibox(params: NavResolveOmniboxParams) -> NavResolveOmniboxResult {
-    let r = crate::omnibox::resolve(&params.input);
+    let prefix = crate::settings::load_search(&proxy::profile_dir())
+        .engine
+        .url_prefix();
+    let r = crate::omnibox::resolve_with(&params.input, prefix);
     NavResolveOmniboxResult {
         url: r.url,
         is_search: r.is_search,
@@ -1251,6 +1358,93 @@ fn settings_set(params: SettingsSetParams) -> Result<(), String> {
     match params.key {
         SettingsKey::Proxy => save_proxy(&params.value, params.secret),
     }
+}
+
+// --- задача 5.1: полные настройки + перенос профиля (src/settings/) ----------
+
+/// settings.get_all: снапшот всех разделов для страницы «Настройки».
+#[tauri::command]
+fn settings_get_all(
+    adblock: tauri::State<'_, std::sync::Arc<crate::adblock::AdblockService>>,
+) -> Result<SettingsAll, String> {
+    let dir = proxy::profile_dir();
+    let proxy_cfg = proxy::load_config(&dir);
+    Ok(SettingsAll {
+        schema_version: crate::settings::SETTINGS_SCHEMA_VERSION,
+        appearance: crate::settings::load_appearance(&dir),
+        search: crate::settings::load_search(&dir),
+        engines: crate::settings::SearchEngine::ALL
+            .into_iter()
+            .map(|id| SearchEngineInfo {
+                title: id.title().into(),
+                id,
+            })
+            .collect(),
+        subtitles: crate::settings::load_subtitles(&dir),
+        privacy: crate::settings::load_privacy(&dir),
+        proxy: proxy_settings(&proxy_cfg, &dir),
+        adblock_enabled: adblock.status().enabled,
+        translate: crate::translate::settings_view(&dir),
+    })
+}
+
+/// settings.apply: записать названные разделы настроек (search/subtitles/
+/// privacy; внешний вид v1 фиксирован — поле не в патче). Субтитры
+/// нормализуются (язык, клампы стиля) до записи.
+#[tauri::command]
+fn settings_apply(params: SettingsPatch) -> Result<(), String> {
+    let dir = proxy::profile_dir();
+    if let Some(search) = params.search {
+        crate::settings::save_search(&dir, &search)?;
+    }
+    if let Some(subtitles) = params.subtitles {
+        crate::settings::save_subtitles(&dir, &subtitles.normalized())?;
+    }
+    if let Some(privacy) = params.privacy {
+        crate::settings::save_privacy(&dir, &privacy)?;
+    }
+    Ok(())
+}
+
+/// settings.export: собрать профиль в один файл (задача 5.1). path — из
+/// нативного диалога сохранения (UI); include_secrets — явный выбор
+/// пользователя. Файлы/SQLite — sync-команда (паттерн history.*: короткие
+/// обращения, действие редкое и инициируется пользователем).
+#[tauri::command]
+fn settings_export(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    cache: tauri::State<'_, std::sync::Arc<crate::subtitles::cache::TranslationsCache>>,
+    params: SettingsExportParams,
+) -> Result<SettingsExportResult, String> {
+    let dir = proxy::profile_dir();
+    let file = crate::settings::profile::build(&dir, &history, &cache, params.include_secrets)?;
+    let counts = crate::settings::profile::counts_of(&file);
+    let json =
+        serde_json::to_string_pretty(&file).map_err(|e| format!("сериализация профиля: {e}"))?;
+    let path = std::path::Path::new(&params.path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("создать каталог файла: {e}"))?;
+    }
+    std::fs::write(path, &json).map_err(|e| format!("записать {}: {e}", path.display()))?;
+    let bytes = std::fs::metadata(path)
+        .map(|m| m.len())
+        .unwrap_or(json.len() as u64);
+    Ok(SettingsExportResult { counts, bytes })
+}
+
+/// settings.import: применить файл профиля (настройки, секреты, закладки,
+/// история, кэш переводов). Импорт идемпотентен; переехавший прокси
+/// применяется аргументами WebView2 со следующего старта (needs_restart).
+#[tauri::command]
+fn settings_import(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    cache: tauri::State<'_, std::sync::Arc<crate::subtitles::cache::TranslationsCache>>,
+    params: SettingsImportParams,
+) -> Result<SettingsImportResult, String> {
+    let raw = std::fs::read_to_string(&params.path)
+        .map_err(|e| format!("прочитать {}: {e}", params.path))?;
+    let file = crate::settings::profile::parse_file(&raw)?;
+    crate::settings::profile::apply(&proxy::profile_dir(), &file, &history, &cache)
 }
 
 /// vpn.set_enabled: переключить флаг прокси в сохранённом конфиге.
@@ -1704,6 +1898,17 @@ async fn translate_test(params: TranslateTestParams) -> Result<TranslateTestResu
     }
 }
 
+/// translate.clear_cache (приватность, задача 5.1): очистить кэш переведённых
+/// дорожек — повторные просмотры снова пойдут в провайдер.
+#[tauri::command]
+fn translate_clear_cache(
+    cache: tauri::State<'_, std::sync::Arc<crate::subtitles::cache::TranslationsCache>>,
+) -> TranslateClearCacheResult {
+    TranslateClearCacheResult {
+        cleared: cache.clear() as u32,
+    }
+}
+
 fn save_proxy(cfg: &proxy::ProxyConfig, secret: Option<String>) -> Result<(), String> {
     if cfg.enabled {
         cfg.validate()?;
@@ -1747,6 +1952,10 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         history_bookmark_list,
         settings_get,
         settings_set,
+        settings_get_all,
+        settings_apply,
+        settings_export,
+        settings_import,
         vpn_set_enabled,
         vpn_status,
         vpn_test_connection,
@@ -1768,6 +1977,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         translate_get_settings,
         translate_set_settings,
         translate_test,
+        translate_clear_cache,
         app_restart
     ])
 }

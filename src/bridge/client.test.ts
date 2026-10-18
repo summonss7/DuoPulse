@@ -69,6 +69,19 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
       value: { enabled: false, proto: "socks5", host: "127.0.0.1", port: 1080, login: null },
     },
   },
+  "settings.get_all": { path: ["settings", "getAll"] },
+  "settings.apply": {
+    path: ["settings", "apply"],
+    params: { search: { engine: "google" } },
+  },
+  "settings.export": {
+    path: ["settings", "export"],
+    params: { path: "D:\\duopulse-profile.json", includeSecrets: false },
+  },
+  "settings.import": {
+    path: ["settings", "import"],
+    params: { path: "D:\\duopulse-profile.json" },
+  },
   "vpn.set_enabled": { path: ["vpn", "setEnabled"], params: { on: true } },
   "vpn.status": { path: ["vpn", "status"] },
   "vpn.test_connection": { path: ["vpn", "testConnection"] },
@@ -114,6 +127,7 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     },
   },
   "translate.test": { path: ["translate", "test"], params: { text: null, targetLang: "ru" } },
+  "translate.clear_cache": { path: ["translate", "clearCache"] },
   "app.restart": { path: ["app", "restart"] },
 };
 
@@ -147,7 +161,7 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(5); // v5: событие subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
+    expect(contract.version).toBe(6); // v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
   });
 
   it("клиент знает все события контракта (listen по имени из bridge.events)", () => {

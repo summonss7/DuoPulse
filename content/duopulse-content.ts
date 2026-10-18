@@ -78,6 +78,7 @@ import {
   type FileLoadResult,
 } from "./adapters/file";
 import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from "./adapters/cloud";
+import { preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, sameMembers } from "./set-defaults";
 
@@ -247,7 +248,9 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     }
     enabled = true;
     if (platformTracks.length === 0 && translateTracks.length === 0 && fileTracks.length === 0) {
-      const ids = defaultSetIds(trackList);
+      // Дефолт-набор Alt+D: предпочитаемый язык перевода — из настроек
+      // профиля (задача 5.1, window.__DUOPULSE_DEFAULTS__ от Core).
+      const ids = defaultSetIds(trackList, preferredLangs());
       if (ids.length > 0) {
         void selectTracks(ids, via); // применит и отчитает (set-state)
         return;

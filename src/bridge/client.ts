@@ -21,14 +21,21 @@ import type {
   HistorySearchParams,
   HistorySearchResult,
   HistoryVisitParams,
+  ImportOutcome,
   NavNavigateParams,
   NavResolveOmniboxParams,
   NavResolveOmniboxResult,
   PerfRunListResult,
   PerfSaveRunParams,
   PerfSnapshotResult,
+  ProfileCounts,
   ProxySettings,
+  SettingsAll,
+  SettingsExportParams,
+  SettingsExportResult,
   SettingsGetParams,
+  SettingsImportParams,
+  SettingsPatch,
   SettingsSetParams,
   SubtitlesLoadFileParams,
   SubtitlesLoadFileResult,
@@ -49,6 +56,7 @@ import type {
   TranslateSettings,
   TranslateTestParams,
   TranslateTestResult,
+  TranslateClearCacheResult,
   VpnSetEnabledParams,
   VpnStatusResult,
 } from "./gen/types";
@@ -111,6 +119,21 @@ export const bridge = {
     get: (params: SettingsGetParams) => invoke<ProxySettings>("settings_get", { params }),
     /** settings.set: сохранить ключ; secret — секрет ключа в DPAPI. */
     set: (params: SettingsSetParams) => invoke<void>("settings_set", { params }),
+    /** settings.get_all (задача 5.1): снапшот всех разделов для страницы
+     * «Настройки» (внешний вид, поиск, субтитры, приватность, прокси,
+     * блокировщик, перевод). */
+    getAll: () => invoke<SettingsAll>("settings_get_all"),
+    /** settings.apply (задача 5.1): записать названные разделы (search/
+     * subtitles/privacy); неназванные не меняются. */
+    apply: (params: SettingsPatch) => invoke<void>("settings_apply", { params }),
+    /** settings.export (задача 5.1): профиль одним файлом — настройки,
+     * закладки, история, кэш переводов; includeSecrets — секреты открытым
+     * текстом (UI предупреждает). path — нативный диалог сохранения. */
+    export: (params: SettingsExportParams) =>
+      invoke<SettingsExportResult>("settings_export", { params }),
+    /** settings.import (задача 5.1): применить файл профиля (идемпотентен;
+     * переехавший прокси — needsRestart). */
+    import: (params: SettingsImportParams) => invoke<ImportOutcome>("settings_import", { params }),
   },
   vpn: {
     /** vpn.set_enabled: включить/выключить маршрутизацию (внешний прокси). */
@@ -181,6 +204,9 @@ export const bridge = {
     /** translate.test: живая проверка выбранного провайдера — перевод
      *  короткой фразы (кнопка «Проверить» панели «Перевод»). */
     test: (params: TranslateTestParams) => invoke<TranslateTestResult>("translate_test", { params }),
+    /** translate.clear_cache (задача 5.1, приватность): очистить кэш
+     *  переведённых дорожек — повторные просмотры снова в провайдер. */
+    clearCache: () => invoke<TranslateClearCacheResult>("translate_clear_cache"),
   },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */

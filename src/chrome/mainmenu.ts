@@ -65,6 +65,10 @@ menu.addEventListener("click", (e) => {
       // «Диагностика» (задача 2.5): живые метрики + история прогонов
       void bridge.tabs.open({ url: "duopulse://diagnostics" }).catch(err);
       break;
+    case "settings":
+      // «Настройки» (задача 5.1): полные настройки + экспорт/импорт профиля
+      void bridge.tabs.open({ url: "duopulse://settings" }).catch(err);
+      break;
     case "proxy":
       // переиспользуем обработчик кнопки навбара: тумблер/статус обновятся сами
       document.getElementById("proxyBtn")?.click();

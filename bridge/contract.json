@@ -1024,6 +1024,235 @@
         "type": "object"
       }
     },
+    "settings.apply": {
+      "handler": "settings_apply",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "PrivacyConfig": {
+            "description": "Раздел \"privacy\" settings.json (задача 5.1).",
+            "properties": {
+              "clearHistoryOnExit": {
+                "default": false,
+                "description": "Очищать историю посещений при выходе из браузера.",
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "SearchConfig": {
+            "description": "Раздел \"search\" settings.json.",
+            "properties": {
+              "engine": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/SearchEngine"
+                  }
+                ],
+                "default": "youtube"
+              }
+            },
+            "type": "object"
+          },
+          "SearchEngine": {
+            "description": "Поисковые системы omnibox (задача 5.1): выбор по умолчанию — настройка «Поиск». Префикс — шаблон ссылки с encoded-запросом в конце (omnibox.rs).",
+            "oneOf": [
+              {
+                "enum": [
+                  "google",
+                  "bing",
+                  "duckduckgo"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Семантика продукта (M0): DuoPulse — браузер про YouTube-субтитры.",
+                "enum": [
+                  "youtube"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "SubtitlesConfig": {
+            "description": "Раздел \"subtitles\" settings.json — дефолты субтитров (задача 5.1): язык перевода дефолт-набора Alt+D («оригинал + <язык>») и стиль плашки для вкладок, где пользователь ещё не менял стиль вручную.",
+            "properties": {
+              "defaultTranslationLang": {
+                "default": "ru",
+                "description": "Язык перевода дефолт-набора, код 2–3 буквы («ru»).",
+                "type": "string"
+              },
+              "style": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/SubtitlesStyleDefaults"
+                  }
+                ],
+                "default": {
+                  "fontScalePct": 100,
+                  "marginPct": 6,
+                  "plateOpacity": 0.78,
+                  "position": "bottom"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "SubtitlesStyleDefaults": {
+            "description": "Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle).",
+            "properties": {
+              "fontScalePct": {
+                "default": 100,
+                "description": "Масштаб кегля, % (75–300).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "marginPct": {
+                "default": 6,
+                "description": "Отступ от края видео, % высоты (0–25).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "plateOpacity": {
+                "default": 0.78,
+                "description": "Непрозрачность подложки, 0.2–1.",
+                "format": "double",
+                "type": "number"
+              },
+              "position": {
+                "default": "bottom",
+                "description": "Позиция плашки: bottom|top.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "description": "settings.apply: частичный патч разделов (неназванные не меняются). Прокси-пароль и ключи API — только существующими командами (settings.set proxy / translate.set_settings: секреты идут в DPAPI, не в патче).",
+        "properties": {
+          "privacy": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/PrivacyConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "search": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/SearchConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subtitles": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/SubtitlesConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "SettingsPatch",
+        "type": "object"
+      },
+      "result": null
+    },
+    "settings.export": {
+      "handler": "settings_export",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на чистую машину за 1 файл). path — абсолютный путь из нативного диалога сохранения (UI); include_secrets — явный выбор пользователя (UI предупреждает: пароль прокси и ключи API попадут в файл открытым текстом).",
+        "properties": {
+          "includeSecrets": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "includeSecrets",
+          "path"
+        ],
+        "title": "SettingsExportParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProfileCounts": {
+            "description": "Числа отчёта экспорта/импорта (страница настроек показывает их пользователю).",
+            "properties": {
+              "bookmarks": {
+                "default": 0,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "secrets": {
+                "default": 0,
+                "description": "Секретов в файле/записано при импорте (0 — файл без секретов).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "settingsSections": {
+                "default": 0,
+                "description": "Разделы настроек, попавшие в файл/применённые из него.",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "translatedTracks": {
+                "default": 0,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "visits": {
+                "default": 0,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "properties": {
+          "bytes": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "counts": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/ProfileCounts"
+              }
+            ],
+            "description": "Что вошло в файл (разделы настроек, закладки, визиты, строки кэша, секреты) + размер файла."
+          }
+        },
+        "required": [
+          "bytes",
+          "counts"
+        ],
+        "title": "SettingsExportResult",
+        "type": "object"
+      }
+    },
     "settings.get": {
       "handler": "settings_get",
       "params": {
@@ -1096,6 +1325,394 @@
           "proto"
         ],
         "title": "ProxySettings",
+        "type": "object"
+      }
+    },
+    "settings.get_all": {
+      "handler": "settings_get_all",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "AppearanceConfig": {
+            "description": "Раздел \"appearance\" settings.json. v1 — только тёмная фирменная тема (docs/01 F-10, ROADMAP M5): светлая — за пределами карточки 5.1, значение фиксировано, селект страницы показывает её единственной активной опцией.",
+            "properties": {
+              "theme": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/Theme"
+                  }
+                ],
+                "default": "dark"
+              }
+            },
+            "type": "object"
+          },
+          "DeeplPlan": {
+            "description": "Тариф DeepL: free — api-free.deepl.com (500 тыс. знаков/мес), pro — api.deepl.com; отличается только хост эндпоинта.",
+            "enum": [
+              "free",
+              "pro"
+            ],
+            "type": "string"
+          },
+          "PrivacyConfig": {
+            "description": "Раздел \"privacy\" settings.json (задача 5.1).",
+            "properties": {
+              "clearHistoryOnExit": {
+                "default": false,
+                "description": "Очищать историю посещений при выходе из браузера.",
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "ProviderId": {
+            "description": "Провайдер машинного перевода (docs/03 §7, приоритет 2–3: облачный API по ключу пользователя или self-hosted LibreTranslate). Перевод самой платформы (YouTube tlang, приоритет 1) сюда не входит.",
+            "enum": [
+              "deepl",
+              "google",
+              "libretranslate"
+            ],
+            "type": "string"
+          },
+          "ProxyProto": {
+            "description": "Тип прокси. Схемы --proxy-server у Chromium: socks5/http/https (для socks5 Chromium резолвит домены на стороне прокси).",
+            "enum": [
+              "socks5",
+              "http",
+              "https"
+            ],
+            "type": "string"
+          },
+          "ProxySettings": {
+            "description": "Значение ключа \"proxy\" для UI: конфиг прокси + факт наличия пароля в DPAPI (сам пароль наружу не отдаётся).",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "hasPassword": {
+                "type": "boolean"
+              },
+              "host": {
+                "type": "string"
+              },
+              "login": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "port": {
+                "format": "uint16",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "proto": {
+                "$ref": "#/definitions/ProxyProto"
+              }
+            },
+            "required": [
+              "enabled",
+              "hasPassword",
+              "host",
+              "port",
+              "proto"
+            ],
+            "type": "object"
+          },
+          "SearchConfig": {
+            "description": "Раздел \"search\" settings.json.",
+            "properties": {
+              "engine": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/SearchEngine"
+                  }
+                ],
+                "default": "youtube"
+              }
+            },
+            "type": "object"
+          },
+          "SearchEngine": {
+            "description": "Поисковые системы omnibox (задача 5.1): выбор по умолчанию — настройка «Поиск». Префикс — шаблон ссылки с encoded-запросом в конце (omnibox.rs).",
+            "oneOf": [
+              {
+                "enum": [
+                  "google",
+                  "bing",
+                  "duckduckgo"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Семантика продукта (M0): DuoPulse — браузер про YouTube-субтитры.",
+                "enum": [
+                  "youtube"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "SearchEngineInfo": {
+            "description": "Поисковик для селекта «Поиск» (id — значение настройки, title — подпись).",
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/SearchEngine"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "type": "object"
+          },
+          "SubtitlesConfig": {
+            "description": "Раздел \"subtitles\" settings.json — дефолты субтитров (задача 5.1): язык перевода дефолт-набора Alt+D («оригинал + <язык>») и стиль плашки для вкладок, где пользователь ещё не менял стиль вручную.",
+            "properties": {
+              "defaultTranslationLang": {
+                "default": "ru",
+                "description": "Язык перевода дефолт-набора, код 2–3 буквы («ru»).",
+                "type": "string"
+              },
+              "style": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/SubtitlesStyleDefaults"
+                  }
+                ],
+                "default": {
+                  "fontScalePct": 100,
+                  "marginPct": 6,
+                  "plateOpacity": 0.78,
+                  "position": "bottom"
+                }
+              }
+            },
+            "type": "object"
+          },
+          "SubtitlesStyleDefaults": {
+            "description": "Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle).",
+            "properties": {
+              "fontScalePct": {
+                "default": 100,
+                "description": "Масштаб кегля, % (75–300).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "marginPct": {
+                "default": 6,
+                "description": "Отступ от края видео, % высоты (0–25).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "plateOpacity": {
+                "default": 0.78,
+                "description": "Непрозрачность подложки, 0.2–1.",
+                "format": "double",
+                "type": "number"
+              },
+              "position": {
+                "default": "bottom",
+                "description": "Позиция плашки: bottom|top.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "Theme": {
+            "enum": [
+              "dark"
+            ],
+            "type": "string"
+          },
+          "TranslateSettings": {
+            "description": "Значение translate.get_settings для UI: конфиг + факт наличия ключей в DPAPI (сами ключи наружу не отдаются — как hasPassword прокси).",
+            "properties": {
+              "deeplPlan": {
+                "$ref": "#/definitions/DeeplPlan"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "hasApiKeys": {
+                "description": "Провайдеры, у которых сохранён ключ API (DPAPI).",
+                "items": {
+                  "$ref": "#/definitions/ProviderId"
+                },
+                "type": "array"
+              },
+              "libretranslateUrl": {
+                "type": "string"
+              },
+              "provider": {
+                "$ref": "#/definitions/ProviderId"
+              }
+            },
+            "required": [
+              "deeplPlan",
+              "enabled",
+              "hasApiKeys",
+              "libretranslateUrl",
+              "provider"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "settings.get_all: полный снапшот настроек для страницы «Настройки». Прокси (settings.get M1), перевод (translate.get_settings) и блокировщик (adblock.status) включены сюда же — страница показывает все разделы одной командой; их живые команды остаются (хром-панели).",
+        "properties": {
+          "adblockEnabled": {
+            "description": "Глобальный тумблер блокировщика (исключения сайтов — adblock.status).",
+            "type": "boolean"
+          },
+          "appearance": {
+            "$ref": "#/definitions/AppearanceConfig"
+          },
+          "engines": {
+            "items": {
+              "$ref": "#/definitions/SearchEngineInfo"
+            },
+            "type": "array"
+          },
+          "privacy": {
+            "$ref": "#/definitions/PrivacyConfig"
+          },
+          "proxy": {
+            "$ref": "#/definitions/ProxySettings"
+          },
+          "schemaVersion": {
+            "description": "Версия схемы settings.json (миграции — на старте Core).",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "search": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/SearchConfig"
+              }
+            ],
+            "description": "Текущий поисковик omnibox + доступные."
+          },
+          "subtitles": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/SubtitlesConfig"
+              }
+            ],
+            "description": "Дефолты субтитров (язык перевода набора Alt+D, стиль новых вкладок)."
+          },
+          "translate": {
+            "$ref": "#/definitions/TranslateSettings"
+          }
+        },
+        "required": [
+          "adblockEnabled",
+          "appearance",
+          "engines",
+          "privacy",
+          "proxy",
+          "schemaVersion",
+          "search",
+          "subtitles",
+          "translate"
+        ],
+        "title": "SettingsAll",
+        "type": "object"
+      }
+    },
+    "settings.import": {
+      "handler": "settings_import",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "settings.import: применить файл профиля (path — нативный диалог выбора). Импорт идемпотентен (дубликаты визитов скипаются, закладки/кэш — upsert); переехавший прокси применяется аргументами WebView2 со следующего старта (needs_restart, docs/02 §6.1).",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "SettingsImportParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProfileCounts": {
+            "description": "Числа отчёта экспорта/импорта (страница настроек показывает их пользователю).",
+            "properties": {
+              "bookmarks": {
+                "default": 0,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "secrets": {
+                "default": 0,
+                "description": "Секретов в файле/записано при импорте (0 — файл без секретов).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "settingsSections": {
+                "default": 0,
+                "description": "Разделы настроек, попавшие в файл/применённые из него.",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "translatedTracks": {
+                "default": 0,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "visits": {
+                "default": 0,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "description": "Итог импорта: отчёт + нужен ли перезапуск (прокси применяется аргументами WebView2 только на старте — docs/02 §6.1).",
+        "properties": {
+          "counts": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/ProfileCounts"
+              }
+            ],
+            "default": {
+              "bookmarks": 0,
+              "secrets": 0,
+              "settingsSections": 0,
+              "translatedTracks": 0,
+              "visits": 0
+            }
+          },
+          "hasSecrets": {
+            "default": false,
+            "description": "Файл содержал секреты (применены в DPAPI).",
+            "type": "boolean"
+          },
+          "needsRestart": {
+            "default": false,
+            "description": "Импортирован раздел proxy — аргументы применятся со следующего старта.",
+            "type": "boolean"
+          }
+        },
+        "title": "ImportOutcome",
         "type": "object"
       }
     },
@@ -2082,6 +2699,27 @@
         "type": "object"
       }
     },
+    "translate.clear_cache": {
+      "handler": "translate_clear_cache",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "translate.clear_cache (приватность, задача 5.1): очистить кэш переведённых дорожек (translated_tracks, duopulse.db).",
+        "properties": {
+          "cleared": {
+            "description": "Удалено строк кэша.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cleared"
+        ],
+        "title": "TranslateClearCacheResult",
+        "type": "object"
+      }
+    },
     "translate.get_settings": {
       "handler": "translate_get_settings",
       "params": null,
@@ -2927,5 +3565,5 @@
       }
     }
   },
-  "version": 5
+  "version": 6
 }

@@ -1642,3 +1642,196 @@ input[type="range"] {
 .duo-tr-status[hidden] {
   display: none;
 }
+
+/* --- страница «Настройки» (задача 5.1, duopulse://settings; гайд 06:
+       сине-чёрные поверхности, неон — акценты; паттерны .diag/.proxy-*) ------ */
+.set {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 0 24px 24px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.set-section {
+  margin: 14px auto 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card, 8px);
+  background: var(--bg-surface);
+  max-width: 720px;
+}
+.set-section-title {
+  margin: 0 0 10px;
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.set-note {
+  margin: -4px 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.set-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.set-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.set-field-name {
+  min-width: 170px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.set-field-name .link {
+  font-size: 11px;
+}
+.set-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+.set-field input[type="text"],
+.set-field input[type="number"],
+.set-field input[type="password"],
+.set-field select {
+  height: 28px;
+  min-width: 200px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 8px;
+  font-size: 12px;
+  outline: none;
+  font-family: var(--font-mono); /* коды языков/адреса — моно, §4 */
+}
+.set-field select {
+  font-family: inherit;
+}
+.set-field input:focus,
+.set-field select:focus {
+  border-color: var(--accent-neon); /* фокус — неон, §3 */
+  box-shadow: var(--focus-ring-soft);
+}
+.set-field input[type="range"] {
+  flex: 1;
+  max-width: 320px;
+  accent-color: var(--accent-neon);
+}
+.set-range-val {
+  min-width: 42px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.set-lang {
+  max-width: 120px;
+}
+.set-seg {
+  display: flex;
+  gap: 4px;
+}
+.set-seg button {
+  height: 24px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.set-seg button:hover {
+  background: var(--hover-neutral);
+}
+.set-seg button.on {
+  color: var(--accent-neon);
+  border-color: var(--accent-neon);
+}
+.set-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.set-check input {
+  accent-color: var(--accent-neon); /* тумблеры/чекбоксы — лайм */
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.set-row button {
+  width: auto;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.set-row button:hover {
+  background: var(--hover-neutral);
+}
+.set-row button.primary {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+  font-weight: 700;
+}
+.set-row button.primary:hover {
+  background: color-mix(in srgb, var(--accent-neon) 10%, transparent);
+  box-shadow: var(--focus-ring-soft);
+}
+.set-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.set-warn {
+  padding: 8px 10px;
+  border: 1px solid var(--warn, #e6b450);
+  border-radius: var(--radius-control);
+  color: var(--warn, #e6b450);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.set-restart {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.set-restart button {
+  width: auto;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-neon);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--accent-neon);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}

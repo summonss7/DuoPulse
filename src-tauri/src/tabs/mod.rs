@@ -760,6 +760,7 @@ fn internal_page_name(url: &Url) -> Option<&'static str> {
         "history" => Some("history"),
         "newtab" => Some("newtab"), // «Новая вкладка», задача 1.5 (гайд 06 §7)
         "diagnostics" => Some("diagnostics"), // «Диагностика», задача 2.5
+        "settings" => Some("settings"), // «Настройки», задача 5.1
         _ => None,
     }
 }
@@ -794,6 +795,13 @@ fn build_tab_webview(app: &AppHandle, id: &str, url: &Url) -> WebviewBuilder<tau
         // страницы — ресурс запрашивается у Core сразу после создания
         // документа (content/cosmetic.js → main.rs → PostWebMessage).
         .initialization_script(crate::CONTENT_INIT_SCRIPT_COSMETIC)
+        // Дефолты субтитров из настроек (задача 5.1): до бандла субтитров —
+        // window.__DUOPULSE_DEFAULTS__ (язык перевода дефолт-набора Alt+D,
+        // стиль плашки новых вкладок). Читается при создании каждой вкладки:
+        // новые вкладки видят свежесохранённые настройки.
+        .initialization_script(crate::settings::content_defaults_script(
+            &crate::proxy::profile_dir(),
+        ))
         // Бандл субтитров (задача 3.2): детектор <video> + движок cue-таймлайна
         // + оверлей; обнаруженное видео уходит в Core сообщением «video»
         // (main.rs → событие контракта page:video_detected, docs/05 §2).
@@ -872,11 +880,16 @@ mod tests {
             Some("diagnostics")
         );
         assert_eq!(
+            internal_page_name(&Url::parse("duopulse://settings").unwrap()),
+            Some("settings"),
+            "страница «Настройки» (задача 5.1)"
+        );
+        assert_eq!(
             internal_page_name(&Url::parse("https://www.youtube.com/").unwrap()),
             None
         );
         assert_eq!(
-            internal_page_name(&Url::parse("duopulse://settings").unwrap()),
+            internal_page_name(&Url::parse("duopulse://unknown").unwrap()),
             None
         );
     }

@@ -18,6 +18,8 @@ if (page === "history") {
   void import("./pages/newtab");
 } else if (page === "diagnostics") {
   void import("./pages/diagnostics");
+} else if (page === "settings") {
+  void import("./pages/settings"); // задача 5.1: полные настройки + профиль
 } else {
   void import("./chrome");
 }

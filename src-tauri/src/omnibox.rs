@@ -5,11 +5,8 @@
 //! всех точек входа и покрывалась юнит-тестами без браузера. Результат —
 //! готовый URL: UI на Enter просто зовёт `nav.navigate`.
 //!
-//! Поисковик по умолчанию — YouTube (семантика M0-спайка: DuoPulse — браузер
-//! про YouTube-субтитры). Выбор поисковика настройкой — с задачей 5.1.
-
-/// Шаблон поисковой ссылки поисковика по умолчанию (encoded-запрос дописывается).
-pub const DEFAULT_SEARCH_URL_PREFIX: &str = "https://www.youtube.com/results?search_query=";
+//! Поисковик по умолчанию — настройка «Поиск» задачи 5.1 (settings.json,
+//! раздел "search"; словарь движков и дефолт YouTube — src/settings/mod.rs).
 
 /// Разобранный ввод omnibox: готовый URL перехода + признак поиска.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,8 +17,10 @@ pub struct Resolution {
     pub is_search: bool,
 }
 
-/// Разобрать ввод пользователя: адрес (с догадкой схемы) или поиск.
-pub fn resolve(input: &str) -> Resolution {
+/// Разобрать ввод пользователя: адрес (с догадкой схемы) или поиск —
+/// поисковик с шаблоном ссылки `prefix` (encoded-запрос дописывается в конец;
+/// хендлер nav.resolve_omnibox подставляет выбранный движок из настроек).
+pub fn resolve_with(input: &str, prefix: &str) -> Resolution {
     let t = input.trim();
     if has_known_scheme(t) {
         return Resolution {
@@ -31,7 +30,7 @@ pub fn resolve(input: &str) -> Resolution {
     }
     // Адрес не содержит пробелов — проверяем до разбора хоста.
     if t.chars().any(char::is_whitespace) {
-        return search(t);
+        return search(t, prefix);
     }
     let (host, _rest) = split_host_rest(t);
     if is_ipv6_literal(host) || is_local_host(host) || is_ipv4(host) || is_domain(host) {
@@ -46,12 +45,12 @@ pub fn resolve(input: &str) -> Resolution {
             is_search: false,
         };
     }
-    search(t)
+    search(t, prefix)
 }
 
-fn search(query: &str) -> Resolution {
+fn search(query: &str, prefix: &str) -> Resolution {
     Resolution {
-        url: format!("{DEFAULT_SEARCH_URL_PREFIX}{}", encode_query(query)),
+        url: format!("{prefix}{}", encode_query(query)),
         is_search: true,
     }
 }
@@ -153,12 +152,15 @@ fn is_domain(host: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Дефолтный движок (YouTube) — префикс из настроек задачи 5.1.
+    const YT: &str = "https://www.youtube.com/results?search_query=";
+
     fn url(input: &str) -> String {
-        resolve(input).url
+        resolve_with(input, YT).url
     }
 
     fn is_search(input: &str) -> bool {
-        resolve(input).is_search
+        resolve_with(input, YT).is_search
     }
 
     #[test]
@@ -221,6 +223,31 @@ mod tests {
 
     #[test]
     fn query_is_percent_encoded() {
+        assert_eq!(
+            url("кот && 100%"),
+            "https://www.youtube.com/results?search_query=%D0%BA%D0%BE%D1%82%20%26%26%20100%25"
+        );
+    }
+
+    // --- задача 5.1: поисковик по умолчанию — настройка -----------------------
+
+    #[test]
+    fn search_engine_prefix_from_settings() {
+        // настройка «Поиск» → префикс движка; адреса от двигателя не зависят
+        let g = resolve_with("как дела", "https://www.google.com/search?q=");
+        assert!(g.is_search);
+        assert_eq!(
+            g.url,
+            "https://www.google.com/search?q=%D0%BA%D0%B0%D0%BA%20%D0%B4%D0%B5%D0%BB%D0%B0"
+        );
+        let ddg = resolve_with("rust lang", "https://duckduckgo.com/?q=");
+        assert_eq!(ddg.url, "https://duckduckgo.com/?q=rust%20lang");
+        assert_eq!(
+            resolve_with("youtube.com", "https://www.google.com/search?q=").url,
+            "https://youtube.com",
+            "адрес не зависит от поисковика"
+        );
+        // дефолтная семантика не изменилась
         assert_eq!(
             url("кот && 100%"),
             "https://www.youtube.com/results?search_query=%D0%BA%D0%BE%D1%82%20%26%26%20100%25"

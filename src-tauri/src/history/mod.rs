@@ -22,8 +22,22 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-use crate::bridge::{HistoryBookmark, HistoryEntry, HistoryHit, HistorySource};
+// HistoryBookmark — тип контракта bridge; реэкспорт для settings/profile.rs.
+pub use crate::bridge::HistoryBookmark;
+use crate::bridge::{HistoryEntry, HistoryHit, HistorySource};
+
+/// Строка визита для экспорта/импорта профиля (задача 5.1, settings/profile.rs):
+/// поля таблицы visits без внутреннего id.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VisitRow {
+    pub url: String,
+    pub title: String,
+    pub visited_at: i64,
+}
 
 /// Повторный визит того же URL в этом окне — не новый визит: обновляются
 /// время и заголовок последнего (защита от F5/миграций заголовка).
@@ -522,6 +536,143 @@ impl HistoryStore {
             .map_err(err_sql)? as u32;
         Ok((bookmarks, total))
     }
+
+    // --- задача 5.1: экспорт/импорт профиля -----------------------------------
+
+    /// Дамп всех закладок (экспорт профиля; url — ключ, даты сохраняются).
+    pub fn dump_bookmarks(&self) -> Result<Vec<HistoryBookmark>, String> {
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        let mut stmt = conn
+            .prepare("SELECT url, title, added_at FROM bookmarks ORDER BY added_at, url")
+            .map_err(err_sql)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(HistoryBookmark {
+                    url: r.get(0)?,
+                    title: r.get(1)?,
+                    added_at: r.get(2)?,
+                })
+            })
+            .map_err(err_sql)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(err_sql)?;
+        Ok(rows)
+    }
+
+    /// Дамп всех визитов (экспорт профиля).
+    pub fn dump_visits(&self) -> Result<Vec<VisitRow>, String> {
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        let mut stmt = conn
+            .prepare("SELECT url, title, visited_at FROM visits ORDER BY id")
+            .map_err(err_sql)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(VisitRow {
+                    url: r.get(0)?,
+                    title: r.get(1)?,
+                    visited_at: r.get(2)?,
+                })
+            })
+            .map_err(err_sql)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(err_sql)?;
+        Ok(rows)
+    }
+
+    /// Импорт закладок (переезд профиля): существующий url получает заголовок
+    /// из файла (непустой), дата добавления сохраняется у новых. Возвращает
+    /// число вставленных.
+    pub fn import_bookmarks(&self, rows: &[HistoryBookmark]) -> Result<u32, String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let mut inserted = 0u32;
+        for b in rows {
+            if b.url.trim().is_empty() {
+                continue;
+            }
+            let existing: Option<i64> = tx
+                .query_row("SELECT id FROM bookmarks WHERE url = ?1", [&b.url], |r| {
+                    r.get(0)
+                })
+                .map(Some)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other),
+                })
+                .map_err(err_sql)?;
+            match existing {
+                Some(id) => {
+                    if !b.title.is_empty() {
+                        tx.execute(
+                            "UPDATE bookmarks SET title = ?1 WHERE id = ?2",
+                            rusqlite::params![b.title, id],
+                        )
+                        .map_err(err_sql)?;
+                        tx.execute(
+                            "UPDATE search SET title = ?1 WHERE source = 'bookmark' AND ref = ?2",
+                            rusqlite::params![b.title, id],
+                        )
+                        .map_err(err_sql)?;
+                    }
+                }
+                None => {
+                    tx.execute(
+                        "INSERT INTO bookmarks(url, title, added_at) VALUES (?1, ?2, ?3)",
+                        rusqlite::params![b.url, b.title, b.added_at],
+                    )
+                    .map_err(err_sql)?;
+                    let id = tx.last_insert_rowid();
+                    tx.execute(
+                        "INSERT INTO search(title, url, source, ref) VALUES (?1, ?2, 'bookmark', ?3)",
+                        rusqlite::params![b.title, b.url, id],
+                    )
+                    .map_err(err_sql)?;
+                    inserted += 1;
+                }
+            }
+        }
+        tx.commit().map_err(err_sql)?;
+        Ok(inserted)
+    }
+
+    /// Импорт визитов (переезд профиля): вставка с исходным временем (дедуп
+    /// источника уже отработал), точные дубликаты (url + время) пропускаются —
+    /// повторный импорт того же файла не раздувает историю. Возвращает число
+    /// вставленных.
+    pub fn import_visits(&self, rows: &[VisitRow]) -> Result<u32, String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let mut inserted = 0u32;
+        for v in rows {
+            if v.url.trim().is_empty() {
+                continue;
+            }
+            let dup: bool = tx
+                .query_row(
+                    "SELECT 1 FROM visits WHERE url = ?1 AND visited_at = ?2",
+                    rusqlite::params![v.url, v.visited_at],
+                    |_| Ok(()),
+                )
+                .is_ok();
+            if dup {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO visits(url, title, visited_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![v.url, v.title, v.visited_at],
+            )
+            .map_err(err_sql)?;
+            let id = tx.last_insert_rowid();
+            tx.execute(
+                "INSERT INTO search(title, url, source, ref) VALUES (?1, ?2, 'history', ?3)",
+                rusqlite::params![v.title, v.url, id],
+            )
+            .map_err(err_sql)?;
+            inserted += 1;
+        }
+        tx.commit().map_err(err_sql)?;
+        Ok(inserted)
+    }
 }
 
 fn err_sql(e: rusqlite::Error) -> String {
@@ -937,6 +1088,67 @@ mod tests {
         let _ = std::fs::remove_file(dir.join("duopulse.db-wal"));
         let _ = std::fs::remove_file(dir.join("duopulse.db-shm"));
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    // --- задача 5.1: дамп/импорт профиля --------------------------------------
+
+    #[test]
+    fn dump_import_roundtrip_moves_everything() {
+        let src = seeded();
+        let visits = src.dump_visits().unwrap();
+        let marks = src.dump_bookmarks().unwrap();
+        assert_eq!(visits.len(), 13);
+        assert_eq!(marks.len(), 4);
+
+        // «чистая машина»: другой store (in-memory), импорт, сверка
+        let dst = HistoryStore::open_in_memory().unwrap();
+        assert_eq!(dst.import_bookmarks(&marks).unwrap(), 4);
+        assert_eq!(dst.import_visits(&visits).unwrap(), 13);
+        assert_eq!(dst.dump_visits().unwrap().len(), 13);
+        assert_eq!(dst.dump_bookmarks().unwrap().len(), 4);
+        // агрегат и поиск работают на импортированном
+        let (entries, total) = dst.list("", 0, 100).unwrap();
+        assert_eq!(total, 13);
+        assert!(entries.iter().all(|e| e.visit_count >= 1));
+        assert!(dst
+            .search("переводчик", 8)
+            .unwrap()
+            .iter()
+            .any(|h| h.url.contains("translate.google")));
+        assert!(dst
+            .search("википедия", 8)
+            .unwrap()
+            .iter()
+            .any(|h| h.source == HistorySource::Bookmark));
+
+        // повторный импорт того же файла — идемпотентен (точные дубликаты скип)
+        assert_eq!(dst.import_visits(&visits).unwrap(), 0);
+        assert_eq!(dst.import_bookmarks(&marks).unwrap(), 0);
+        assert_eq!(dst.dump_visits().unwrap().len(), 13);
+
+        // существующая закладка обновляет заголовок, дата не сбрасывается
+        let mut changed = marks[0].clone();
+        changed.title = "Новое имя".into();
+        assert_eq!(
+            dst.import_bookmarks(std::slice::from_ref(&changed))
+                .unwrap(),
+            0
+        );
+        let (all, _) = dst.bookmark_list("", 0, 100).unwrap();
+        assert_eq!(
+            all.iter().find(|m| m.url == changed.url).unwrap().title,
+            "Новое имя"
+        );
+        // пустые url игнорируются
+        assert_eq!(
+            dst.import_visits(&[VisitRow {
+                url: "  ".into(),
+                title: String::new(),
+                visited_at: 1
+            }])
+            .unwrap(),
+            0
+        );
     }
 
     /// DoD задач 1.3/1.4: поиск omnibox по 10k записей истории — < 50 мс.
