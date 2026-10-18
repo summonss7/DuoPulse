@@ -16,6 +16,7 @@
 //! результат стабильно отсортирован по `start_ms`.
 #![allow(dead_code)] // парсеры — фикстурные тесты (duopulse-022); сервис — задача 3.7
 
+pub mod cache;
 pub mod service;
 pub mod srt;
 pub mod timedtext;

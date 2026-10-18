@@ -37,6 +37,7 @@ import type {
   SubtitlesSetOffsetParams,
   SubtitlesSetStyleParams,
   SubtitlesSetTracksParams,
+  SubtitlesTranslateTrackParams,
   TabSubtitles,
   TabsActivateParams,
   TabsCloseParams,
@@ -164,6 +165,11 @@ export const bridge = {
     /** subtitles.remove_track: снять дорожку из набора (остальные без перезагрузки). */
     removeTrack: (params: SubtitlesRemoveTrackParams) =>
       invoke<void>("subtitles_remove_track", { params }),
+    /** subtitles.translate_track (задача 4.2): запустить облачный перевод
+     *  дорожки набора (источник — trackId или первая непереводная строка);
+     *  прогресс/итог — событие subtitles:translate_progress. */
+    translateTrack: (params: SubtitlesTranslateTrackParams) =>
+      invoke<void>("subtitles_translate_track", { params }),
   },
   translate: {
     /** translate.get_settings: конфиг перевода + наличие ключей в DPAPI (4.1). */
@@ -203,5 +209,8 @@ export const bridge = {
     /** subtitles.set_applied: состояние показа вкладки изменилось (3.7):
      *  кнопка «duo» и панель обновляются событием. */
     subtitlesSetApplied: "subtitles:set_applied",
+    /** subtitles.translate_progress: конвейер облачного перевода дорожки
+     *  (4.2): «Перевод… 12/40», итог (кэш/сеть) и ошибки. */
+    subtitlesTranslateProgress: "subtitles:translate_progress",
   } as const,
 };

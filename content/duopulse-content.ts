@@ -46,6 +46,13 @@
 // сервис состояния Core (subtitles.list_tracks) и события subtitles:* для
 // кнопки «duo» и панели — Core-обвязка задачи 3.7. Alt+D в странице (e.code
 // KeyD) переключает показ, поглощая клавишу, как Alt+[ / Alt+].
+//
+// Облачный перевод (задача 4.2, docs/03 §7): панель → subtitles.translate_track
+// → Core eval'ит duopulse-translate-request {trackId, targetLang}; cues —
+// здесь, конвейер (кэш SQLite, пачки ≤ 2 КБ с контекстом) — в Core
+// (content/adapters/cloud.ts), переведённая дорожка (source "translate")
+// входит в набор после платформенных строк; повторный просмотр отдаётся
+// кэшем — сети нет (DoD 4.2).
 
 import { VideoDetector, type DetectedVideo } from "./detector";
 import { SubtitlesEngine, type ActiveRow } from "./engine/subtitles-engine";
@@ -70,6 +77,7 @@ import {
   langOfFileName,
   type FileLoadResult,
 } from "./adapters/file";
+import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from "./adapters/cloud";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, sameMembers } from "./set-defaults";
 
@@ -130,15 +138,17 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
   // Гашение нативных субтитров платформы, пока активен наш показ (docs/03 §2).
   const blanker = new NativeCaptionsBlanker({ doc: document, href: () => location.href });
 
-  /** Набор текущего видео из двух частей (задача 3.6): платформенная
-   * (адаптер/тест-хук) и файловая (drag&drop/subtitles.load_file). Итог —
-   * платформенные + файловые до 3 строк (docs/03 §1); дроп замещает файловую
-   * часть целиком. Переживает пересоздание <video> с тем же ключом — смена
-   * качества: таймлайн тот же, дорожки те же, docs/03 §4. Память — последние
-   * ключи (LRU): возврат к видео восстанавливает обе части. */
+  /** Набор текущего видео из трёх частей (задачи 3.6+4.2): платформенная
+   * (адаптер/тест-хук), облачные переводы (после платформенных), файловая
+   * (drag&drop/subtitles.load_file). Итог — до 3 строк (docs/03 §1); дроп
+   * замещает файловую часть целиком, перевод — свою. Переживает пересоздание
+   * <video> с тем же ключом — смена качества: таймлайн тот же, дорожки те же,
+   * docs/03 §4. Память — последние ключи (LRU): возврат к видео восстанавливает
+   * все части. */
   let platformTracks: Track[] = [];
+  let translateTracks: Track[] = [];
   let fileTracks: Track[] = [];
-  const setMemory = new Map<string, { platform: Track[]; files: Track[] }>();
+  const setMemory = new Map<string, { platform: Track[]; translate: Track[]; files: Track[] }>();
   const SET_MEMORY_LIMIT = 8;
 
   /** Показ включён (задача 3.7, docs/03 §8 п.2: Alt+D — «выключить, помня
@@ -153,10 +163,11 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     else blanker.restore();
   };
 
-  /** Состав набора как он ляжет на плашку (до 3 строк, платформа затем
-   * файлы); при выключенном показе панели показывается тот же «последний
-   * набор» — гашенность передаёт флаг enabled. */
-  const lastSetTracks = (): Track[] => combinedTracks(platformTracks, fileTracks).tracks;
+  /** Состав набора как он ляжет на плашку (до 3 строк: платформа, облачные
+   * переводы, файлы); при выключенном показе панели показывается тот же
+   * «последний набор» — гашенность передаёт флаг enabled. */
+  const lastSetTracks = (): Track[] =>
+    combinedTracks([...platformTracks, ...translateTracks], fileTracks).tracks;
 
   /** Отчёт состояния в Core (задача 3.7): сервис состояния (subtitles.*
    * IPC) и события subtitles:set_applied для кнопки «duo» и панели.
@@ -179,9 +190,11 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     });
   };
 
-  /** Отображаемое имя дорожки для панели: базовые/переводы — из списка
-   * адаптера, файловые — слаг из id (file:movie_ru → movie_ru). */
+  /** Отображаемое имя дорожки для панели: облачный перевод знает своё имя
+   * («DeepL → ru», задача 4.2); базовые/переводы — из списка адаптера,
+   * файловые — слаг из id (file:movie_ru → movie_ru). */
   const displayNameOf = (t: Track): string => {
+    if (t.name) return t.name;
     if (t.source === "file") return t.id.replace(/^file:/, "");
     if (t.source === "youtube" && trackList) {
       const base = trackList.base.find((b) => b.id === t.id);
@@ -195,7 +208,10 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
 
   /** Применить и запомнить текущее разбиение набора за текущим видео. */
   const applySet = (via: string): void => {
-    const { tracks, droppedFiles } = combinedTracks(platformTracks, fileTracks);
+    const { tracks, droppedFiles } = combinedTracks(
+      [...platformTracks, ...translateTracks],
+      fileTracks,
+    );
     if (droppedFiles > 0) {
       // Файлы сверх лимита набора отброшены — телеметрия для диагностики.
       postToCore({
@@ -209,7 +225,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     if (currentVideo) {
       const key = currentVideo.videoKey;
       setMemory.delete(key); // LRU: освежить порядок
-      setMemory.set(key, { platform: platformTracks, files: fileTracks });
+      setMemory.set(key, { platform: platformTracks, translate: translateTracks, files: fileTracks });
       while (setMemory.size > SET_MEMORY_LIMIT) {
         setMemory.delete(setMemory.keys().next().value as string);
       }
@@ -230,7 +246,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
       return;
     }
     enabled = true;
-    if (platformTracks.length === 0 && fileTracks.length === 0) {
+    if (platformTracks.length === 0 && translateTracks.length === 0 && fileTracks.length === 0) {
       const ids = defaultSetIds(trackList);
       if (ids.length > 0) {
         void selectTracks(ids, via); // применит и отчитает (set-state)
@@ -331,11 +347,12 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
         // уточнённый детект следом её поднимет.
         const mem = setMemory.get(video.videoKey);
         platformTracks = mem ? mem.platform : [];
+        translateTracks = mem ? mem.translate : [];
         fileTracks = mem ? mem.files : [];
         // Список дорожек принадлежит прошлому видео — сброс до свежего
         // (придёт с onYouTubeVideo; дефолт-набор Alt+D не соберётся по чужому).
         trackList = null;
-        applyTracks(enabled ? combinedTracks(platformTracks, fileTracks).tracks : []);
+        applyTracks(enabled ? lastSetTracks() : []);
         engine.attach(video.el);
         reportSetState("video");
         if (adapter.matches(video.url)) onYouTubeVideo(video);
@@ -364,6 +381,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     if (payload === null || typeof payload !== "object") return;
     if ("clear" in payload && (payload as { clear: unknown }).clear === true) {
       platformTracks = [];
+      translateTracks = [];
       fileTracks = [];
       applySet("test");
       return;
@@ -441,17 +459,56 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
   });
 
   // Снять дорожку из набора (панель 3.7: subtitles.remove_track → Core eval):
-  // файловую или платформенную — остальные дорожки без перезагрузки.
+  // файловую, облачный перевод или платформенную — остальные без перезагрузки.
   document.addEventListener("duopulse-remove-track", (e) => {
     const id = (e as CustomEvent<{ id?: unknown }>).detail?.id;
     if (typeof id !== "string" || !id) return;
     if (id.startsWith("file:")) {
       fileTracks = fileTracks.filter((t) => t.id !== id);
       applySet("remove");
+    } else if (id.startsWith("cloud:")) {
+      translateTracks = translateTracks.filter((t) => t.id !== id);
+      applySet("remove");
     } else {
       platformTracks = platformTracks.filter((t) => t.id !== id);
       applySet("remove");
     }
+  });
+
+  // Облачный перевод дорожки (задача 4.2: панель → subtitles.translate_track
+  // → Core eval). Cues — здесь, конвейер — в Core (кэш → пачки → провайдер →
+  // кэш); ответ придёт событием duopulse-translate-track (content/adapters/
+  // cloud.ts). Перевод длинной дорожки — минуты: смена видео за это время —
+  // результат не применяем (набор привязан к videoKey, docs/03 §6).
+  document.addEventListener("duopulse-translate-request", (e) => {
+    const detail = (e as CustomEvent<{ trackId?: unknown; targetLang?: unknown }>).detail;
+    const targetLang = typeof detail?.targetLang === "string" ? detail.targetLang.trim() : "";
+    if (!targetLang) return;
+    const trackId = typeof detail.trackId === "string" ? detail.trackId : "";
+    const source =
+      [...platformTracks, ...fileTracks].find((t) => t.id === trackId) ??
+      platformTracks.find((t) => t.role === "original") ??
+      platformTracks[0] ??
+      fileTracks[0] ??
+      null;
+    if (!source || source.cues.length === 0) return; // устаревший снапшот — Core валидировал состав
+    const sourceLang = source.lang && source.lang !== "und" ? source.lang : "";
+    const videoKeyAtRequest = currentVideo?.videoKey ?? "";
+    void requestCloudTranslation(document, { post: postToCore }, {
+      videoKey: videoKeyAtRequest,
+      trackId: source.id,
+      sourceLang,
+      targetLang,
+      cues: source.cues,
+    }).then((reply) => {
+      if (!reply.ok) return;
+      const track = cloudTrackFrom(targetLang, typeof reply.name === "string" ? reply.name : "", reply.cues ?? []);
+      if (!track) return;
+      if (currentVideo?.videoKey !== videoKeyAtRequest) return; // видео сменилось
+      // Повтор того же языка — замена, разные языки — разные строки набора.
+      translateTracks = [...translateTracks.filter((t) => t.id !== track.id), track];
+      applySet("translate");
+    });
   });
 
   // Выбор дорожек YouTube-адаптера (панель 3.7 / e2e): событие или окно ниже.
@@ -521,7 +578,9 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
       nativeBlanked: boolean;
       offsetHudVisible: boolean;
       dropHintVisible: boolean;
+      translateTracks: { id: string; lang: string; cues: number }[];
       fileTracks: { id: string; lang: string; cues: number }[];
+      cloud: ReturnType<typeof cloudTranslateStatus>;
     } {
       return {
         videoKey: currentVideo?.videoKey ?? null,
@@ -533,7 +592,9 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
         nativeBlanked: blanker.blanked,
         offsetHudVisible: hud.visible,
         dropHintVisible: dropzone.hintVisible(),
+        translateTracks: translateTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
         fileTracks: fileTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
+        cloud: cloudTranslateStatus(),
       };
     },
     /** Список дорожек текущего видео (null — ещё не получен/не YouTube). */

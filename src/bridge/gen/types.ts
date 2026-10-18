@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 3); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 4); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
@@ -79,6 +79,7 @@ export interface DuoPulseBridgeContract {
   SubtitlesSetStyleParams: SubtitlesSetStyleParams;
   SubtitlesStylePatch: SubtitlesStylePatch;
   SubtitlesSetTracksParams: SubtitlesSetTracksParams;
+  SubtitlesTranslateTrackParams: SubtitlesTranslateTrackParams;
   TabsActivateParams: TabsActivateParams;
   TabsListResult: TabsListResult;
   TabInfo: TabInfo;
@@ -104,6 +105,7 @@ export interface DuoPulseBridgeContract {
   PerfTabSwitchMs: PerfTabSwitchMs;
   SubtitlesSetApplied: SubtitlesSetApplied;
   SubtitlesTracksReady: SubtitlesTracksReady;
+  SubtitlesTranslateProgress: SubtitlesTranslateProgress;
   VpnStateChanged: VpnStateChanged;
 }
 /**
@@ -609,6 +611,19 @@ export interface SubtitlesSetTracksParams {
   ids: string[];
 }
 /**
+ * subtitles.translate_track (задача 4.2, docs/03 §7): перевести дорожку набора активной вкладки выбранным облачным провайдером. Cues — у content-слоя: команда диспатчит duopulse-translate-request в активную вкладку (eval), дальше конвейер идёт WebMessage'м «translate-track» (main.rs → src/translate/pipeline.rs: кэш SQLite → батчинг ≤ 2 КБ с контекстом пачки → кэш); панель следит за прогрессом событием subtitles:translate_progress. Команда только запускает — результат асинхронный (перевод длинной дорожки — минуты).
+ */
+export interface SubtitlesTranslateTrackParams {
+  /**
+   * Целевой язык, код («ru», «es», «pt-br»).
+   */
+  targetLang: string;
+  /**
+   * Дорожка-источник (id из набора; по умолчанию — первая строка, не являющаяся облачным переводом, предпочтение оригиналу).
+   */
+  trackId?: string | null;
+}
+/**
  * tabs.activate: сделать вкладку активной (клик по вкладке таб-бара).
  */
 export interface TabsActivateParams {
@@ -811,6 +826,36 @@ export interface SubtitlesTracksReady {
   base: BaseTrackInfo[];
   tabId: string;
   translations: TranslationLangInfo[];
+  videoKey: string;
+}
+/**
+ * Payload события: табл-контекст + фаза конвейера.
+ */
+export interface SubtitlesTranslateProgress {
+  /**
+   * Переведено cue / всего.
+   */
+  done: number;
+  /**
+   * Текст ошибки (phase=error).
+   */
+  error?: string | null;
+  /**
+   * Дорожка отдана из кэша — сети не было.
+   */
+  fromCache: boolean;
+  /**
+   * translating | done | error.
+   */
+  phase: string;
+  /**
+   * Провайдер (deepl/google/libretranslate) — чей ключ/квота в работе.
+   */
+  provider: string;
+  tabId: string;
+  targetLang: string;
+  total: number;
+  trackId: string;
   videoKey: string;
 }
 /**

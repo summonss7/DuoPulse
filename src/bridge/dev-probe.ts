@@ -4,7 +4,8 @@
 // Журналы последних событий (Core → UI, тоже только dev):
 //   __duopulseTabsEvents — tabs:updated (задача 1.2);
 //   __duopulseAdblockEvents — adblock:blocked_count (задача 2.1);
-//   __duopulseSubtitlesEvents — subtitles:tracks_ready/set_applied (задача 3.7).
+//   __duopulseSubtitlesEvents — subtitles:tracks_ready/set_applied (задача 3.7);
+//   __duopulseTranslateEvents — subtitles:translate_progress (задача 4.2).
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "./client";
 
@@ -36,4 +37,12 @@ if (import.meta.env.DEV) {
   });
   (window as unknown as { __duopulseSubtitlesEvents: unknown[] }).__duopulseSubtitlesEvents =
     subtitlesEvents;
+
+  const translateEvents: unknown[] = [];
+  void listen(bridge.events.subtitlesTranslateProgress, (ev) => {
+    translateEvents.push(ev.payload);
+    if (translateEvents.length > 80) translateEvents.shift();
+  });
+  (window as unknown as { __duopulseTranslateEvents: unknown[] }).__duopulseTranslateEvents =
+    translateEvents;
 }

@@ -8,19 +8,22 @@
 //! в settings.json, ключи API — DPAPI, config.rs).
 //!
 //! HTTP изолирован за [`HttpTransport`] — тесты провайдеров подменные, без
-//! сети (mock-ответы http.rs). Батчинг cue, контекст пачек и SQLite-кэш —
-//! задача 4.2; офлайн-деградация и бейдж «перевод недоступен» — 4.3.
+//! сети (mock-ответы http.rs). Конвейер перевода дорожек (батчинг ≤ 2 КБ,
+//! контекст пачек, SQLite-кэш, событие прогресса) — pipeline.rs (задача 4.2);
+//! офлайн-деградация и бейдж «перевод недоступен» — 4.3.
 
 mod config;
 mod deepl;
 mod google;
 mod http;
 mod libre;
+pub(crate) mod pipeline;
 
 pub use config::{
     save_settings, settings_view, test_provider, ProviderId, TranslateConfig, TranslateSettings,
 };
 pub use http::{HttpTransport, UreqTransport};
+pub use pipeline::{handle_translate_request, SubtitlesTranslateProgress};
 
 use std::time::Duration;
 

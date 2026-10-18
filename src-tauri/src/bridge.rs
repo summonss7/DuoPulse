@@ -32,7 +32,7 @@ use crate::proxy;
 /// v2 (задача 2.5, без bump — совместимое расширение): домен perf.* — команды
 /// perf.{snapshot, save_run, list_runs} и события perf:{startup_ms,
 /// tab_switch_ms} (страница «Диагностика», docs/04 §2, docs/05 §2).
-pub const CONTRACT_VERSION: u32 = 3;
+pub const CONTRACT_VERSION: u32 = 4;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -470,6 +470,25 @@ pub struct SubtitlesRemoveTrackParams {
     pub id: String,
 }
 
+/// subtitles.translate_track (задача 4.2, docs/03 §7): перевести дорожку
+/// набора активной вкладки выбранным облачным провайдером. Cues — у
+/// content-слоя: команда диспатчит duopulse-translate-request в активную
+/// вкладку (eval), дальше конвейер идёт WebMessage'м «translate-track»
+/// (main.rs → src/translate/pipeline.rs: кэш SQLite → батчинг ≤ 2 КБ с
+/// контекстом пачки → кэш); панель следит за прогрессом событием
+/// subtitles:translate_progress. Команда только запускает — результат
+/// асинхронный (перевод длинной дорожки — минуты).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitlesTranslateTrackParams {
+    /// Дорожка-источник (id из набора; по умолчанию — первая строка,
+    /// не являющаяся облачным переводом, предпочтение оригиналу).
+    #[serde(default)]
+    pub track_id: Option<String>,
+    /// Целевой язык, код («ru», «es», «pt-br»).
+    pub target_lang: String,
+}
+
 /// Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля
 /// не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -623,6 +642,11 @@ impl BridgeEvent for SubtitlesSetAppliedEvent {
     const NAME: &'static str = "subtitles:set_applied";
     type Payload = SubtitlesSetApplied;
 }
+
+/// subtitles:translate_progress: конвейер перевода дорожки (задача 4.2,
+/// docs/05 §2) — панель показывает «Перевод… 12/40» и итог (кэш/сеть/ошибка).
+/// Тип и эмит — src/translate/pipeline.rs рядом с конвейером.
+pub type SubtitlesTranslateProgress = crate::translate::SubtitlesTranslateProgress;
 
 /// vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1;
 /// начнёт эмититься с локальным роутером M6, docs/02 §6).
@@ -810,6 +834,9 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles.remove_track": { "handler": "subtitles_remove_track",
                                          "params": schema!(SubtitlesRemoveTrackParams),
                                          "result": null },
+            "subtitles.translate_track": { "handler": "subtitles_translate_track",
+                                            "params": schema!(SubtitlesTranslateTrackParams),
+                                            "result": null },
             "translate.get_settings": { "handler": "translate_get_settings", "params": null,
                                          "result": schema!(TranslateGetSettingsResult) },
             "translate.set_settings": { "handler": "translate_set_settings",
@@ -830,6 +857,7 @@ pub fn contract_json() -> serde_json::Value {
             "perf:tab_switch_ms": { "payload": schema!(crate::perf::PerfTabSwitchMs) },
             "subtitles:tracks_ready": { "payload": schema!(SubtitlesTracksReady) },
             "subtitles:set_applied": { "payload": schema!(SubtitlesSetApplied) },
+            "subtitles:translate_progress": { "payload": schema!(SubtitlesTranslateProgress) },
         },
     })
 }
@@ -906,6 +934,10 @@ fn event_names_match_registry() {
             (
                 <SubtitlesSetAppliedEvent as BridgeEvent>::NAME,
                 schema!(SubtitlesSetApplied),
+            ),
+            (
+                <crate::translate::pipeline::SubtitlesTranslateProgressEvent as BridgeEvent>::NAME,
+                schema!(SubtitlesTranslateProgress),
             ),
         ]
         .into_iter()
@@ -1545,6 +1577,58 @@ fn subtitles_remove_track(
     )
 }
 
+/// Языковой код из панели: 2–3 буквы + необязательный подтег («pt-br»).
+fn is_lang_code(lang: &str) -> bool {
+    let mut parts = lang.splitn(2, '-');
+    let primary = parts.next().unwrap_or_default();
+    let sub = parts.next().unwrap_or_default();
+    (2..=3).contains(&primary.len())
+        && primary.bytes().all(|b| b.is_ascii_lowercase())
+        && (sub.is_empty()
+            || (2..=8).contains(&sub.len()) && sub.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// subtitles.translate_track: запустить облачный перевод дорожки набора
+/// активной вкладки (задача 4.2, docs/03 §7). Источник — trackId или лучшая
+/// строка набора по снапшоту сервиса (первая не-переводная, предпочтение
+/// оригиналу); cues в Core нет — eval диспатчит duopulse-translate-request,
+/// content-слой ответит WebMessage'м «translate-track» с cue (конвейер —
+/// src/translate/pipeline.rs). Прогресс/итог — события
+/// subtitles:translate_progress, команда возвращается сразу.
+#[tauri::command]
+fn subtitles_translate_track(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    service: tauri::State<'_, crate::subtitles::service::SubtitlesService>,
+    params: SubtitlesTranslateTrackParams,
+) -> Result<(), String> {
+    let lang = params.target_lang.trim().to_ascii_lowercase();
+    if !is_lang_code(&lang) {
+        return Err("целевой язык — код из 2–3 букв (ru, es, pt-br)".into());
+    }
+    let snap = service.snapshot(&active_tab_id(&manager));
+    let track_id = params
+        .track_id
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .or_else(|| {
+            // Дефолт-источник: оригинал, иначе первая не-облачная строка.
+            snap.tracks
+                .iter()
+                .find(|t| t.source != "translate" && t.role == "original")
+                .or_else(|| snap.tracks.iter().find(|t| t.source != "translate"))
+                .map(|t| t.id.clone())
+        })
+        .filter(|id| snap.tracks.iter().any(|t| &t.id == id))
+        .ok_or_else(|| "в наборе нет дорожки-источника — добавьте дорожку или файл".to_string())?;
+    eval_active_event(
+        &app,
+        &manager,
+        "duopulse-translate-request",
+        &serde_json::json!({ "trackId": track_id, "targetLang": lang }),
+    )
+}
+
 fn proxy_settings(cfg: &proxy::ProxyConfig, dir: &std::path::Path) -> ProxySettings {
     ProxySettings {
         enabled: cfg.enabled,
@@ -1669,6 +1753,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         subtitles_toggle,
         subtitles_set_style,
         subtitles_remove_track,
+        subtitles_translate_track,
         translate_get_settings,
         translate_set_settings,
         translate_test,

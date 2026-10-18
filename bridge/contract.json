@@ -1555,6 +1555,33 @@
       "params": null,
       "result": null
     },
+    "subtitles.translate_track": {
+      "handler": "subtitles_translate_track",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "subtitles.translate_track (задача 4.2, docs/03 §7): перевести дорожку набора активной вкладки выбранным облачным провайдером. Cues — у content-слоя: команда диспатчит duopulse-translate-request в активную вкладку (eval), дальше конвейер идёт WebMessage'м «translate-track» (main.rs → src/translate/pipeline.rs: кэш SQLite → батчинг ≤ 2 КБ с контекстом пачки → кэш); панель следит за прогрессом событием subtitles:translate_progress. Команда только запускает — результат асинхронный (перевод длинной дорожки — минуты).",
+        "properties": {
+          "targetLang": {
+            "description": "Целевой язык, код («ru», «es», «pt-br»).",
+            "type": "string"
+          },
+          "trackId": {
+            "default": null,
+            "description": "Дорожка-источник (id из набора; по умолчанию — первая строка, не являющаяся облачным переводом, предпочтение оригиналу).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "targetLang"
+        ],
+        "title": "SubtitlesTranslateTrackParams",
+        "type": "object"
+      },
+      "result": null
+    },
     "tabs.activate": {
       "handler": "tabs_activate",
       "params": {
@@ -2686,6 +2713,69 @@
         "type": "object"
       }
     },
+    "subtitles:translate_progress": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Payload события: табл-контекст + фаза конвейера.",
+        "properties": {
+          "done": {
+            "description": "Переведено cue / всего.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "error": {
+            "description": "Текст ошибки (phase=error).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fromCache": {
+            "description": "Дорожка отдана из кэша — сети не было.",
+            "type": "boolean"
+          },
+          "phase": {
+            "description": "translating | done | error.",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Провайдер (deepl/google/libretranslate) — чей ключ/квота в работе.",
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "targetLang": {
+            "type": "string"
+          },
+          "total": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "trackId": {
+            "type": "string"
+          },
+          "videoKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "done",
+          "fromCache",
+          "phase",
+          "provider",
+          "tabId",
+          "targetLang",
+          "total",
+          "trackId",
+          "videoKey"
+        ],
+        "title": "SubtitlesTranslateProgress",
+        "type": "object"
+      }
+    },
     "tabs:updated": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -2794,5 +2884,5 @@
       }
     }
   },
-  "version": 3
+  "version": 4
 }

@@ -19,4 +19,7 @@ export interface Track {
   lang: string; // BCP-47
   role: "original" | "translation";
   cues: Cue[]; // могут перекрываться — смёржит таймлайн движка (docs/03 §4)
+  /** Отображаемое имя, если источник его знает (облачный перевод —
+   * «DeepL → ru», задача 4.2); отсутствие — панель выведет из id/языка. */
+  name?: string;
 }

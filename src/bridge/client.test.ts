@@ -101,6 +101,10 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["subtitles", "removeTrack"],
     params: { id: "yt:en+ru" },
   },
+  "subtitles.translate_track": {
+    path: ["subtitles", "translateTrack"],
+    params: { targetLang: "ru" },
+  },
   "translate.get_settings": { path: ["translate", "getSettings"] },
   "translate.set_settings": {
     path: ["translate", "setSettings"],
@@ -143,7 +147,7 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(3);
+    expect(contract.version).toBe(4); // v4: subtitles.translate_track + событие translate_progress (4.2)
   });
 
   it("клиент знает все события контракта (listen по имени из bridge.events)", () => {

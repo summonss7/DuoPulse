@@ -241,7 +241,24 @@ EN-US/PT-BR), Google Translate v2 (ключ в заголовке `x-goog-api-ke
 код с паролем прокси вынесен в `src-tauri/src/secrets.rs`);
 `translate.test` — один живой запрос (кнопка «Проверить», spawn_blocking);
 UI — секция «Перевод» duo-панели (`src/subtitles-panel/translate-settings.ts`).
-Батчинг cue/кэш — задача 4.2, офлайн-деградация — 4.3.
+**Задача 4.2 (duopulse-031, контракт v4):** конвейер перевода дорожек —
+`src-tauri/src/translate/pipeline.rs` (батчинг cue пачками ≤ 2 КБ и лимитов
+провайдера `split_batches`, контекст пачки — последняя строка предыдущей
+(DeepL `context`), `translate_track` — кэш → пачки → провайдер с ретраями →
+кэш; ошибка пачки останавливает конвейер, частичный перевод в кэш не
+пишется) + `src-tauri/src/subtitles/cache.rs` (SQLite-кэш `translated_tracks`
+в duopulse.db: `(videoKey, trackId, targetLang, provider) → cues`, LRU 120
+дорожек, чтение освежает last_used_at). IPC (контракт v4):
+`subtitles.translate_track` (источник — trackId или первая непереводная
+строка набора) + событие `subtitles:translate_progress` (фазы
+translating/done/error, fromCache); cues — у content-слоя: команда eval'ит
+`duopulse-translate-request`, content отвечает WebMessage'м «translate-track»
+(конвейер в spawn_blocking, ответ — document-событие `duopulse-translate-track`,
+паттерн 3.6). Облачная дорожка `cloud:<lang>` (source "translate") входит в
+набор после платформенных строк; content-модуль `content/adapters/cloud.ts`.
+UI — селект «+ перевод в… (облако)» (`src/subtitles-panel/cloud-langs.ts`:
+языки платформы и набора исключены — бесплатный tlang приоритетнее) + статус
+конвейера duoTranslateMeta. Офлайн-деградация с бейджем — 4.3.
 
 ## 3. Эпики → карточки (порядок работ)
 
@@ -300,7 +317,7 @@ Gate-проверки этапов включены в последние кар
 | # | Задача | DoD |
 |---|---|---|
 | 4.1 | **✅ выполнено 18.10.2026 (карточка duopulse-030)** Провайдеры перевода (интерфейс + DeepL/Google/LibreTranslate) | подменные тесты провайдеров зелёные — **достигнуто** (cargo 134/134, из них ~30 по translate: запросы/ответы/ошибки/лимиты/ретраи всех трёх провайдеров на mock-транспорте без сети; e2e/subtitles 87/87 — секция «Перевод» панели, конфиг в settings.json, ключ API в DPAPI-blob). Механика: `src-tauri/src/translate/` — trait `TranslationProvider` (пачка строк: `ProviderLimits` max_texts/max_bytes, `TranslateError` с retryable-таксономией Network/RateLimited/Server/Auth/Quota/TooLarge/UnsupportedLang/BadResponse/Config, `translate_with_retries` — экспоненциальная пауза 400·2ⁿ, до 3 попыток), `HttpTransport` (ureq-агент 10/30 с; HTTP-статусы маппятся провайдерами, транспортные сбои — Network) + MockTransport (очередь ответов + запись запросов); DeepL (хосты free/pro, `Authorization: DeepL-Auth-Key`, `context` предыдущей пачки, цели EN→EN-US/PT→PT-BR, квота 456), Google v2 (`x-goog-api-key` — не в query, ≤128 строк, «API key not valid» из 400 → Auth, daily limit из 403 → Quota), LibreTranslate (base URL + ключ в теле, q-массив + один-строка, `{"error":"…"}`-тела). Ключи API — DPAPI `translate/keys/<id>.bin`, DPAPI-код выделен из proxy.rs в общий `src-tauri/src/secrets.rs`; конфиг — ключ "translate" settings.json (provider/deeplPlan/libretranslateUrl/enabled, инъекция ключей в JSON игнорируется). IPC (контракт v3): `translate.{get_settings, set_settings, test}`; UI — секция «Перевод» duo-панели (провайдер, поля по провайдеру, ключ с placeholder «сохранён», «Проверить» = сохранить + один живой запрос). Использование в конвейере (батчинг ≤2 КБ, контекст, кэш) — 4.2 |
-| 4.2 | Батчинг cue + контекст + кэш SQLite | повторный просмотр — 0 сетевых вызовов перевода |
+| 4.2 | **✅ выполнено 18.10.2026 (карточка duopulse-031)** Батчинг cue + контекст + кэш SQLite | повторный просмотр — 0 сетевых вызовов перевода — **достигнуто** (cargo 146/146, из них 12 новых: пачки по байтовому/строчному потолку, контекст пачки (DeepL `context` = последняя строка предыдущей), кэш-хит с 0 обращений к сети на mock-транспорте, LRU-вытеснение с освежением чтением, персистентность файловой базы; e2e/subtitles 92/92 — мок LibreTranslate на стенде: пачка ушла в провайдера, дорожка cloud:es в наборе с переводом на плашке, повторный запрос того же языка — мок не тронут (кэш SQLite), статус «из кэша», выключенный конвейер — честный отказ без сети). Механика: конвейер `src-tauri/src/translate/pipeline.rs` (пачки ≤ min(2 КБ, ProviderLimits), контекст — последняя строка предыдущей пачки, ретраи translate_with_retries; ошибка пачки останавливает конвейер, частичный перевод в кэш не пишется; прогресс — событие `subtitles:translate_progress` translating/done/fromCache/error) + кэш `src-tauri/src/subtitles/cache.rs` (duopulse.db, таблица translated_tracks, ключ (videoKey, trackId, targetLang, provider), LRU 120 дорожек ~4 МБ); cues — у content-слоя: IPC `subtitles.translate_track` (контракт v4) eval'ит duopulse-translate-request, content шлёт WebMessage «translate-track» с cue, ответ — document-событие duopulse-translate-track (паттерн 3.6), переведённая дорожка `cloud:<lang>` входит в набор после платформенных (source "translate", хранит имя «DeepL → ru»); UI — селект «+ перевод в… (облако)» панели (`src/subtitles-panel/cloud-langs.ts`, исключает языки платформы/набора) + статус конвейера; тайминги кэш-хита выравниваются по свежей сетке cue. Деградация с бейджем — 4.3 |
 | 4.3 | Офлайн-деградация и бейдж «перевод недоступен» | сценарий docs/01 §5.4 проходит |
 
 ### M5 — полировка и релиз

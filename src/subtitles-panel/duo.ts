@@ -16,15 +16,21 @@
 // снапшот subtitles.list_tracks + события subtitles:{tracks_ready,
 // set_applied} и page:video_detected сервис состояния Core (только активная
 // вкладка: события фильтруются по tabId).
+//
+// Задача 4.2: «+ перевод в… (облако)» — запуск subtitles.translate_track
+// (конвейер Core: кэш SQLite → пачки ≤ 2 КБ → провайдер), статус — событие
+// subtitles:translate_progress (duoTranslateMeta: прогресс/кэш/ошибка).
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { bridge } from "../bridge";
 import type {
   AppliedTrackInfo,
   BaseTrackInfo,
+  SubtitlesTranslateProgress,
   TranslationLangInfo,
 } from "../bridge/gen/types";
 import { presetSets, normalizeTrackId } from "./presets";
+import { cloudLangOptions, translateProgressText } from "./cloud-langs";
 
 const err = (e: unknown): void => console.error("duo:", e);
 const btn = document.getElementById("duoBtn") as HTMLButtonElement;
@@ -142,7 +148,9 @@ function renderSet(): void {
   state.tracks.forEach((t, i) => {
     const row = el("div", "duo-row");
     row.dataset.kind = t.source;
-    const movable = t.source !== "file"; // файловая часть — после платформенной (3.6)
+    // Файловая часть — после платформенной (3.6), облачные переводы — тоже
+    // фиксированы: их составом управляет конвейер (4.2), не set_tracks.
+    const movable = t.source !== "file" && t.source !== "translate";
     if (movable) {
       const up = el<HTMLButtonElement>("button", "duo-move", "↑");
       up.type = "button";
@@ -153,7 +161,8 @@ function renderSet(): void {
       const down = el<HTMLButtonElement>("button", "duo-move", "↓");
       down.type = "button";
       down.title = "Ниже";
-      down.disabled = i === state.tracks.length - 1 || state.tracks[i + 1]?.source === "file";
+      const lockedBelow = ["file", "translate"].includes(state.tracks[i + 1]?.source ?? "");
+      down.disabled = i === state.tracks.length - 1 || lockedBelow;
       down.dataset.act = "down";
       down.dataset.idx = String(i);
       row.append(up, down);
@@ -177,7 +186,6 @@ function renderSet(): void {
 function renderAdd(): void {
   const box = document.getElementById("duoAdd") as HTMLElement;
   box.replaceChildren();
-  if (!state.base.length && !state.translations.length) return;
   if (state.tracks.length >= 3) {
     box.append(el("div", "duo-empty", "Набор полон (3 дорожки)"));
     return;
@@ -217,6 +225,17 @@ function renderAdd(): void {
     state.translations
       .filter((t) => !current.has(t.lang))
       .map((t) => ({ id: t.lang, name: `${t.name} (${t.lang})` })),
+  );
+  // Облачный перевод (задача 4.2): языки, которых нет у платформы и в наборе;
+  // источник — первая непереводная строка набора (предпочтение оригиналу).
+  mk(
+    "cloud",
+    "+ перевод в… (облако)",
+    cloudLangOptions(
+      state.translations,
+      state.tracks.map((t) => t.lang),
+      state.tracks.some((t) => t.source !== "translate"),
+    ).map((l) => ({ id: l.code, name: `${l.name} (${l.code})` })),
   );
 }
 
@@ -352,7 +371,10 @@ export function initDuo(): void {
     if (act.dataset.act === "up" || act.dataset.act === "down") {
       // Перестановка платформенной части: тот же состав в новом порядке —
       // content-слой применяет без перезагрузки (fast-path, задача 3.7).
-      const ids = state.tracks.filter((t) => t.source !== "file").map((t) => t.id);
+      // Файловые и облачные строки фиксированы (set_tracks их не резолвит).
+      const ids = state.tracks
+        .filter((t) => t.source !== "file" && t.source !== "translate")
+        .map((t) => t.id);
       const from = idx;
       const to = act.dataset.act === "up" ? idx - 1 : idx + 1;
       if (to < 0 || to >= ids.length) return;
@@ -362,14 +384,49 @@ export function initDuo(): void {
   });
 
   // Добавление дорожки: выбор в селекте сразу применяет (набор ≤ 3).
+  // «+ перевод в… (облако)» — задача 4.2: не входит в набор сразу — конвейер
+  // Core переводит дорожку-источник (кэш → пачки → провайдер), итог придёт
+  // событием subtitles:translate_progress (статус — duoTranslateMeta).
   (document.getElementById("duoAdd") as HTMLElement).addEventListener("change", (e) => {
     const select = e.target as HTMLSelectElement;
     if (!select.value) return;
-    const ids = state.tracks.filter((t) => t.source !== "file").map((t) => t.id);
+    if (select.dataset.kind === "cloud") {
+      const meta = document.getElementById("duoTranslateMeta") as HTMLElement;
+      meta.hidden = false;
+      meta.dataset.phase = "translating";
+      meta.textContent = `Перевод запрошен (${select.value})…`;
+      void bridge.subtitles
+        .translateTrack({ targetLang: select.value })
+        .catch((ex) => err(ex));
+      select.value = "";
+      return;
+    }
+    const ids = state.tracks
+      .filter((t) => t.source !== "file" && t.source !== "translate")
+      .map((t) => t.id);
     if (ids.length >= 3) return;
     ids.push(select.value);
     void bridge.subtitles.setTracks({ ids }).catch(err);
     select.value = ""; // обратно к подсказке; панель перерисует set_applied
+  });
+
+  // Прогресс облачного перевода (subtitles:translate_progress, задача 4.2):
+  // «Перевод… 12/40» по ходу, итог (кэш/сеть) и ошибки — с автоскрытием.
+  let translateStatusTimer = 0;
+  void listen<SubtitlesTranslateProgress>(bridge.events.subtitlesTranslateProgress, (ev) => {
+    if (ev.payload.tabId !== state.tabId) return;
+    const text = translateProgressText(ev.payload);
+    if (!text) return;
+    const meta = document.getElementById("duoTranslateMeta") as HTMLElement;
+    meta.hidden = false;
+    meta.dataset.phase = ev.payload.phase;
+    meta.textContent = text;
+    window.clearTimeout(translateStatusTimer);
+    if (ev.payload.phase !== "translating") {
+      translateStatusTimer = window.setTimeout(() => {
+        meta.hidden = true;
+      }, 6000);
+    }
   });
 
   // «Свои субтитры…»: нативный выбор файла → subtitles.load_file (3.6).

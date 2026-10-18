@@ -71,6 +71,12 @@
 //  46) секция «Перевод» панели: 3 провайдера, поля по провайдеру;
 //  47) сохранение формы: конфиг в settings.json (ключ "translate"),
 //      ключ API — DPAPI-blob (открытого текста нет нигде).
+// Задача 4.2 (батчинг cue + контекст + кэш SQLite, M4; docs/03 §7):
+//  48) селект «+ перевод в… (облако)»: языки набора/платформы исключены;
+//  49) перевод es сквозно: мок-сервер получил пачку, дорожка cloud:es в
+//      наборе, перевод на плашке, фазы события translate_progress;
+//  50) DoD 4.2: повторный запрос — 0 сетевых вызовов (кэш SQLite);
+//  51) выключенный конвейер — честный отказ (статус-ошибка, сети нет).
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -116,8 +122,34 @@ const check = (name, ok, extra = "") => {
 // --- 1. локальный http-стенд: тест-страница + видео (Range обязателен) ------
 const ROOT_WWW = path.join(ROOT, "e2e", "subtitles");
 const MIME = { ".html": "text/html; charset=utf-8", ".mp4": "video/mp4", ".vtt": "text/vtt; charset=utf-8" };
+// Мок LibreTranslate (задача 4.2): POST /lt/translate — эхо строк с префиксом
+// цели; журнал запросов — доказательство DoD «повторный просмотр — 0 сетевых
+// вызовов перевода» (кэш-хит не ходит на сервер).
+const ltRequests = [];
 const httpServer = http.createServer((req, res) => {
   const urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
+  if (req.method === "POST" && urlPath === "/lt/translate") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      let parsed = {};
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        /* битое тело — ответ как обычный перевод одной пустой строки */
+      }
+      const target = String(parsed.target ?? "ru");
+      const q = Array.isArray(parsed.q) ? parsed.q.map(String) : [String(parsed.q ?? "")];
+      ltRequests.push({ target, texts: q.length, source: String(parsed.source ?? "") });
+      const out = JSON.stringify({ translatedText: q.map((s) => `⟪${target}⟫${s}`) });
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(out),
+      });
+      res.end(out);
+    });
+    return;
+  }
   const file = path.join(
     ROOT_WWW,
     path.normalize(urlPath).replace(/^([/\\]|\.\.)+/, "") || "testpage.html",
@@ -1200,6 +1232,150 @@ try {
       trKeyBlob.length > 64 && // DPAPI-blob заметно больше сырого ключа
       !trKeyBlob.includes("lt-e2e-key"),
     JSON.stringify({ provider: trSaved.provider, hasApiKeys: trSaved.hasApiKeys }),
+  );
+
+  // ===== задача 4.2: батчинг cue + контекст + кэш SQLite (docs/03 §7) ======
+  // Мок LibreTranslate на стенде (POST /lt/translate) — полный сквозной путь
+  // панели: селект «+ перевод в…» → subtitles.translate_track → eval
+  // translate-request → WebMessage translate-track → конвейер Core (кэш →
+  // пачки → провайдер) → событие прогресса + дорожка cloud:<lang> в наборе.
+  // DoD 4.2: повторный запрос того же перевода — 0 обращений к серверу.
+
+  // (48) включение облачного перевода (адрес — мок стенда) + селект облака:
+  // в наборе test:ru → «ru» исключён, прочие языки предложены.
+  await evalIn(
+    ui3,
+    `(function () {
+       document.getElementById("trEnabled").checked = true;
+       document.getElementById("trLibreUrl").value = ${JSON.stringify(`http://127.0.0.1:${HTTP_PORT}/lt`)};
+       document.getElementById("trSave").click();
+       return true;
+     })()`,
+  );
+  await sleep(400);
+  const cloudSelectState = await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
+       return {
+         present: !!sel,
+         options: sel ? Array.from(sel.options).map((o) => o.value).filter(Boolean) : [],
+         label: sel ? sel.options[0].textContent : "",
+       };
+     })()`,
+  );
+  check(
+    "(48) панель: «+ перевод в… (облако)» — включённый конфиг сохранён, языки набора исключены (ru нет, es/de есть)",
+    cloudSelectState.present &&
+      !cloudSelectState.options.includes("ru") &&
+      cloudSelectState.options.includes("es") &&
+      cloudSelectState.options.includes("de") &&
+      cloudSelectState.label.includes("облако"),
+    JSON.stringify(cloudSelectState),
+  );
+
+  // (49) перевод es: мок получил пачку (батчинг), дорожка cloud:es вошла в
+  // набор после платформенной, переведённый текст на плашке, статус панели
+  // «готово» (сеть), событие translate_progress прошло фазы translating→done.
+  const requestsBeforeFirst = ltRequests.length;
+  await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
+       sel.value = "es";
+       sel.dispatchEvent(new Event("change", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).some((t) => t.id === "cloud:es")`, 10000, "cloud:es в наборе");
+  await seekTo(tab, 7.0); // cue сайта-3: 6–8 с
+  const cloudMix = await overlayText(tab);
+  const cloudState = await stateOf(tab);
+  const cloudProgress = await evalIn(
+    ui3,
+    `(window.__duopulseTranslateEvents ?? []).map((p) => p.phase + (p.fromCache ? ":cache" : ":net") + ":" + p.done + "/" + p.total)`,
+  );
+  check(
+    "(49) облачный перевод es: пачка ушла в мок, дорожка cloud:es в наборе, на плашке перевод с префиксом цели",
+    ltRequests.length === requestsBeforeFirst + 1 && // 1 cue сайта-3 — одна пачка (≤2 КБ, ≤50 строк)
+      ltRequests[ltRequests.length - 1].target === "es" &&
+      cloudState.translateTracks.length === 1 &&
+      cloudState.engine.trackCount === 2 &&
+      cloudMix.includes("Платформенная реплика") &&
+      cloudMix.includes("⟪es⟫Платформенная реплика"),
+    `мок+${ltRequests.length - requestsBeforeFirst} запросов, треки=${JSON.stringify(cloudState.translateTracks)}, плашка=${JSON.stringify(cloudMix.slice(0, 80))}`,
+  );
+  check(
+    "(49a) событие subtitles:translate_progress: translating… по пачкам, итог done (сеть); статус панели «Перевод готов» без «из кэша»",
+    cloudProgress.some((p) => p.startsWith("translating")) &&
+      cloudProgress.some((p) => p.startsWith("done:net")) &&
+      (await evalIn(ui3, `document.getElementById("duoTranslateMeta").textContent`)).includes("Перевод готов") &&
+      !(await evalIn(ui3, `document.getElementById("duoTranslateMeta").textContent`)).includes("из кэша"),
+    JSON.stringify(cloudProgress),
+  );
+
+  // (50) DoD 4.2: повторный перевод того же языка — 0 сетевых вызовов (кэш
+  // SQLite), дорожка вернулась, статус «из кэша», событие done:cache.
+  await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "cloud:es" })})`);
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).length === 0`, 5000, "cloud:es снята");
+  const requestsBeforeSecond = ltRequests.length;
+  await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
+       sel.value = "es";
+       sel.dispatchEvent(new Event("change", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).some((t) => t.id === "cloud:es")`, 10000, "cloud:es из кэша");
+  const cachedMeta = await evalIn(ui3, `document.getElementById("duoTranslateMeta").textContent`);
+  check(
+    "(50) DoD 4.2: повторный просмотр — 0 сетевых вызовов перевода (мок не тронут), дорожка из кэша, статус «из кэша»",
+    ltRequests.length === requestsBeforeSecond &&
+      cachedMeta.includes("из кэша") &&
+      (await stateOf(tab)).engine.trackCount === 2,
+    `мок Δ=${ltRequests.length - requestsBeforeSecond}, статус=${JSON.stringify(cachedMeta)}`,
+  );
+
+  // (51) выключенный перевод: конвейер отклоняет запрос — статус-ошибка в
+  // панели, content получил отказ, набор не тронут, сети нет (деградация 4.3
+  // с бейджем — отдельная задача; здесь факт честного отказа).
+  await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "cloud:es" })})`);
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).length === 0`, 5000, "cloud:es снята (51)");
+  await evalIn(
+    ui3,
+    `window.__duopulse.translate.setSettings(${JSON.stringify({
+      value: {
+        enabled: false,
+        provider: "libretranslate",
+        deeplPlan: "free",
+        libretranslateUrl: `http://127.0.0.1:${HTTP_PORT}/lt`,
+      },
+      secret: null,
+    })})`,
+  );
+  await sleep(300);
+  const requestsBeforeOff = ltRequests.length;
+  await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
+       sel.value = "de";
+       sel.dispatchEvent(new Event("change", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  await waitForPage(ui3, `(document.getElementById("duoTranslateMeta").textContent ?? "").includes("не удался")`, 10000, "статус-ошибка перевода");
+  const trOffState = await stateOf(tab);
+  check(
+    "(51) перевод выключен: честный отказ (статус-ошибка панели, content получил ошибку), набор не тронут, сети нет",
+    ltRequests.length === requestsBeforeOff &&
+      trOffState.translateTracks.length === 0 &&
+      trOffState.engine.trackCount === 1 &&
+      trOffState.cloud.lastReply?.ok === false &&
+      String(trOffState.cloud.lastReply?.error ?? "").includes("выключен"),
+    `мок Δ=${ltRequests.length - requestsBeforeOff}, lastReply=${JSON.stringify(trOffState.cloud.lastReply)}`,
   );
 
   await evalIn(ui3, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);

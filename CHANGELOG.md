@@ -1986,3 +1986,88 @@
   интерфейса и провайдеров, хранение ключей; батчинг/кэш — 4.2);
   README (статус: старт M4, структура: translate/, secrets.rs).
 - Коммит: см. git log (duopulse-030).
+
+## 18.10.2026, 06:05 — 06:35, задача 4.2 (M4) — Батчинг cue + контекст + кэш SQLite: конвейер облачного перевода дорожек (карточка duopulse-031)
+- Начало: 18.10.2026 06:05 (backup 06:08:01), окончание: 18.10.2026 06:35.
+- Что изменено (docs/05 §3 задача 4.2, docs/03 §7): конвейер перевода
+  дорожек — батчинг cue пачками ≤ 2 КБ с контекстом предыдущей, кэш SQLite
+  (повторный просмотр — без сети), запуск из панели «+ перевод в… (облако)»,
+  прогресс событием subtitles:translate_progress:
+  - src-tauri/src/translate/pipeline.rs (новый) — split_batches (пачки по
+    min(BATCH_MAX_BYTES=2048, ProviderLimits.max_bytes) байт и max_texts
+    строк; строка длиннее потолка — своя пачка), translate_track (кэш →
+    пачки → translate_with_retries → кэш; контекст пачки — последняя строка
+    предыдущей (DeepL context, связность терминов); пустые cue не переводятся
+    и остаются как есть; ошибка пачки останавливает конвейер — частичный
+    перевод в кэш НЕ пишется; кэш-хит выравнивает сетку таймингов по свежей
+    сетке cue при совпадающей длине — asr-дорожки), WebMessage-хендлер
+    handle_translate_request (валидация: trackId/targetLang/cue ≤ 512 КБ;
+    работа в spawn_blocking — COM-поток не блокируется; прогресс — события
+    subtitles:translate_progress {phase translating|done|error, done/total,
+    fromCache, provider}, ответ вкладке — document-событие
+    duopulse-translate-track eval'ом на главном потоке, паттерн 3.6).
+  - src-tauri/src/subtitles/cache.rs (новый) — TranslationsCache: таблица
+    translated_tracks в duopulse.db профиля, ключ (video_key, track_id,
+    target_lang, provider) → cues JSON, UNIQUE + upsert, LRU 120 дорожек
+    (типичный трек ~30 КБ → ~4 МБ; чтение освежает last_used_at, put
+    подрезает старейшие); Mutex над одним Connection (паттерн
+    HistoryStore/PerfStore); повреждённый JSON строки — промах, не паника;
+    ошибки записи не роняют перевод (кэш — оптимизация).
+  - bridge.rs — контракт v4: команда subtitles.translate_track
+    (SubtitlesTranslateTrackParams: trackId? + targetLang; источник по
+    умолчанию — первая непереводная строка набора со snapshot сервиса,
+    предпочтение original; язык — код 2–3 буквы с подтегом) + событие
+    subtitles:translate_progress (тип SubtitlesTranslateProgress в
+    pipeline.rs); main.rs — manage(Arc<TranslationsCache>) + ветка
+    WebMessage «translate-track» (+ комментарий словаря сообщений).
+  - content-слой: content/adapters/cloud.ts (новый) — requestCloudTranslation
+    (WebMessage с cue и reqId, ответ document-событием — промис по reqId,
+    слушатель один на документ через WeakSet), cloudTrackFrom (дорожка
+    cloud:<lang>, source "translate", name «DeepL → ru», битые cue
+    снисходительно пропускаются), cloudTranslateStatus (диагностика
+    __duopulseContent.state().cloud); duopulse-content.ts — набор получил
+    третью часть translateTracks (платформа → облачные → файлы, до 3
+    строк; память набора по videoKey хранит все три), обработчики
+    duopulse-translate-request (источник — trackId из Core, иначе
+    оригинал; смена видео за время перевода — результат не применяется) и
+    duopulse-remove-track для cloud:*; Track.name опционально (панель
+    показывает имя конвейера).
+  - UI панели: src/subtitles-panel/cloud-langs.ts (новый) — 14 языков,
+    cloudLangOptions исключает переводы платформы (бесплатный tlang
+    приоритетнее, docs/03 §7) и языки набора, translateProgressText
+    («Перевод (deepl)… 12/40» / «Перевод готов (из кэша)» / ошибка);
+    duo.ts — селект «+ перевод в… (облако)» в duoAdd (работает и без
+    списка адаптера — файловые дорожки тоже переводимы), статус
+    duoTranslateMeta (index.html) по событию прогресса с автоскрытием
+    итога 6 с; облачные строки набора неперемещаемы (set_tracks их не
+    резолвит — как файловые), «×» снимает. dev-хук __duopulseTranslateEvents
+    (журнал прогресса для e2e).
+  - e2e/subtitles/run.mjs — мок LibreTranslate на стенде (POST /lt/translate:
+    эхо строк с префиксом цели, счётчик запросов — доказательство DoD);
+    +5 проверок (48–51): селект исключает языки набора; перевод es сквозно
+    (пачка в моке, cloud:es в наборе, перевод на плашке, фазы события
+    translating→done); DoD 4.2 — повторный запрос того же языка: мок не
+    тронут (кэш SQLite), статус «из кэша»; выключенный конвейер — честный
+    отказ (статус-ошибка, content получил ошибку, сети нет).
+- Как проверено:
+  - cargo 146/146 (+12: pipeline — пачки по байтам/строкам/потолку, маппинг
+    результатов и прогресс по пачкам, контекст = последняя строка предыдущей
+    пачки, DoD — второй прогон на транспорте без заготовок (0 сетевых),
+    ошибка пачки не пишет частичный перевод, пустые cue, кэш-хит с новой
+    сеткой таймингов; cache — roundtrip/промахи по элементам ключа, замена
+    того же ключа, LRU 120 с освежением чтением, битый JSON — промах,
+    персистентность файловой базы). Тесты прошлой сессии доведены: размеры
+    пачек согласованы с потолком 2048 (2×1022+5), all-empty — на другом
+    trackId (мимо кэша), LRU — на реальном MAX_ROWS.
+  - vitest 160/160 (+11: cloud — reqId-сопоставление запроса/ответа, чужой
+    reqId не резолвит, параллельные запросы, cloudTrackFrom с битыми cue;
+    cloud-langs — исключение языков платформы/набора с подтегами, статусные
+    строки; client.test — v4 + subtitles.translate_track).
+  - e2e/subtitles 92/92 ALL PASS (живое приложение, +5 к 87; регресс
+    3.2–3.7 и 046 — все прежние PASS).
+  - tsc чисто; cargo fmt --check и clippy чисто; content-бандл 78,3 КБ/20,9
+    gzip ≤ 80.
+- Документация: docs/05 §2 (статус: задача 4.2, контракт v4) и §3 (4.2 —
+  выполнено, механика); docs/03 §7 (конвейер реализован) и §8 п.3 (панель:
+  селект облака и статус); README (статус M4). ROADMAP не менялся.
+- Коммит: см. git log (duopulse-031).

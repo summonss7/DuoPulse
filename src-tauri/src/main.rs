@@ -279,6 +279,11 @@ unsafe fn referer_of(
 ///   src/subtitles (задача 3.1) по запросу content-слоя (задача 3.3):
 ///   ответ {duopulse:"subtitles-parsed", reqId, ok, cues, warnings} приходит
 ///   тому же документу PostWebMessageAsString;
+/// - «translate-track» — перевод дорожки облаком (задача 4.2, docs/03 §7):
+///   content-слой владеет cue дорожек, Core прогоняет конвейер
+///   (src/translate/pipeline.rs: батчинг ≤ 2 КБ, контекст пачки, кэш SQLite,
+///   событие subtitles:translate_progress) и отвечает document-событием
+///   duopulse-translate-track eval'ом активной вкладки;
 /// - прочие (IPC tauri обрабатывает свои параллельно) игнорируются.
 #[cfg(windows)]
 unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
@@ -427,6 +432,12 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                     };
                     post_to_page(sender.as_ref(), &reply);
                 }
+            } else if parsed["duopulse"] == "translate-track" {
+                // Перевод дорожки облаком (задача 4.2): cues — у content-слоя,
+                // конвейер (кэш → пачки → провайдер → кэш) — src/translate/.
+                // Обработчик сразу уходит в spawn_blocking ( COM-поток не
+                // блокируем), прогресс — событием subtitles:translate_progress.
+                translate::handle_translate_request(&app, &tab_id, &parsed);
             } else if parsed["duopulse"] == "cosmetic" {
                 if let Some(url) = parsed["url"].as_str() {
                     let res = app
@@ -630,6 +641,12 @@ fn main() {
         .expect("открыть/создать duopulse.db в профиле (docs/02 §8)");
     let perf_store = perf::PerfStore::open(&profile_dir)
         .expect("открыть/создать таблицу perf_runs в duopulse.db (задача 2.5)");
+    // Кэш переведённых дорожек (задача 4.2, docs/03 §7): та же duopulse.db,
+    // таблица translated_tracks — повторный просмотр без сети (DoD 4.2).
+    let translations_cache = std::sync::Arc::new(
+        subtitles::cache::TranslationsCache::open(&profile_dir)
+            .expect("открыть/создать таблицу translated_tracks в duopulse.db"),
+    );
     startup_mark("stores-open");
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
@@ -639,6 +656,7 @@ fn main() {
         .manage(perf_store)
         .manage(adblock_service)
         .manage(subtitles::service::SubtitlesService::new())
+        .manage(translations_cache)
         .setup(move |app| {
             startup_mark("setup");
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и
