@@ -258,7 +258,24 @@ translating/done/error, fromCache); cues — у content-слоя: команда
 набор после платформенных строк; content-модуль `content/adapters/cloud.ts`.
 UI — селект «+ перевод в… (облако)» (`src/subtitles-panel/cloud-langs.ts`:
 языки платформы и набора исключены — бесплатный tlang приоритетнее) + статус
-конвейера duoTranslateMeta. Офлайн-деградация с бейджем — 4.3.
+конвейера duoTranslateMeta.
+**Задача 4.3 (duopulse-032, контракт v5):** офлайн-деградация (сценарий
+docs/01 §5.4) — `src-tauri/src/translate/watcher.rs`: очередь работ
+`TranslationJobs` (ключ (videoKey, trackId, targetLang); повторный запрос
+того же ключа переподчиняет ответ, второй конвейер не поднимается;
+поколения закрывают гонку «финальный ответ ∥ повторный запрос»; работа
+снимается, когда вкладка ушла с видео) + цикл `watch_run`/`watch_loop`
+(попытка конвейера → Network-отказ → бейдж → ожидание `DUOPULSE_TRANSLATE_RETRY_MS`
+(5 с) → TCP-проба эндпоинта текущего конфига → повтор; провайдер
+пересобирается на каждой попытке — настройки могли смениться, пока ждали;
+Config-отказ (выключен/нет ключа) и терминальные ошибки — бейдж/ошибка без
+автоповтора; закрытие гонки probe-vs-настроек: проба строится из текущего
+конфига, а не попытки). Событие `subtitles:translate_unavailable` (reason
+offline|no_provider, willRetry — панель держит бейдж «Перевод недоступен
+(нет сети) — повторим…» в duoTranslateMeta до финального translate_progress);
+набор живёт с оригиналом и кэшем (облачная дорожка не строится, кэш-хит
+работает и без сети — DoD 4.2). Трейт провайдера получил `endpoint()` —
+адрес для пробы связи.
 
 ## 3. Эпики → карточки (порядок работ)
 
@@ -318,7 +335,7 @@ Gate-проверки этапов включены в последние кар
 |---|---|---|
 | 4.1 | **✅ выполнено 18.10.2026 (карточка duopulse-030)** Провайдеры перевода (интерфейс + DeepL/Google/LibreTranslate) | подменные тесты провайдеров зелёные — **достигнуто** (cargo 134/134, из них ~30 по translate: запросы/ответы/ошибки/лимиты/ретраи всех трёх провайдеров на mock-транспорте без сети; e2e/subtitles 87/87 — секция «Перевод» панели, конфиг в settings.json, ключ API в DPAPI-blob). Механика: `src-tauri/src/translate/` — trait `TranslationProvider` (пачка строк: `ProviderLimits` max_texts/max_bytes, `TranslateError` с retryable-таксономией Network/RateLimited/Server/Auth/Quota/TooLarge/UnsupportedLang/BadResponse/Config, `translate_with_retries` — экспоненциальная пауза 400·2ⁿ, до 3 попыток), `HttpTransport` (ureq-агент 10/30 с; HTTP-статусы маппятся провайдерами, транспортные сбои — Network) + MockTransport (очередь ответов + запись запросов); DeepL (хосты free/pro, `Authorization: DeepL-Auth-Key`, `context` предыдущей пачки, цели EN→EN-US/PT→PT-BR, квота 456), Google v2 (`x-goog-api-key` — не в query, ≤128 строк, «API key not valid» из 400 → Auth, daily limit из 403 → Quota), LibreTranslate (base URL + ключ в теле, q-массив + один-строка, `{"error":"…"}`-тела). Ключи API — DPAPI `translate/keys/<id>.bin`, DPAPI-код выделен из proxy.rs в общий `src-tauri/src/secrets.rs`; конфиг — ключ "translate" settings.json (provider/deeplPlan/libretranslateUrl/enabled, инъекция ключей в JSON игнорируется). IPC (контракт v3): `translate.{get_settings, set_settings, test}`; UI — секция «Перевод» duo-панели (провайдер, поля по провайдеру, ключ с placeholder «сохранён», «Проверить» = сохранить + один живой запрос). Использование в конвейере (батчинг ≤2 КБ, контекст, кэш) — 4.2 |
 | 4.2 | **✅ выполнено 18.10.2026 (карточка duopulse-031)** Батчинг cue + контекст + кэш SQLite | повторный просмотр — 0 сетевых вызовов перевода — **достигнуто** (cargo 146/146, из них 12 новых: пачки по байтовому/строчному потолку, контекст пачки (DeepL `context` = последняя строка предыдущей), кэш-хит с 0 обращений к сети на mock-транспорте, LRU-вытеснение с освежением чтением, персистентность файловой базы; e2e/subtitles 92/92 — мок LibreTranslate на стенде: пачка ушла в провайдера, дорожка cloud:es в наборе с переводом на плашке, повторный запрос того же языка — мок не тронут (кэш SQLite), статус «из кэша», выключенный конвейер — честный отказ без сети). Механика: конвейер `src-tauri/src/translate/pipeline.rs` (пачки ≤ min(2 КБ, ProviderLimits), контекст — последняя строка предыдущей пачки, ретраи translate_with_retries; ошибка пачки останавливает конвейер, частичный перевод в кэш не пишется; прогресс — событие `subtitles:translate_progress` translating/done/fromCache/error) + кэш `src-tauri/src/subtitles/cache.rs` (duopulse.db, таблица translated_tracks, ключ (videoKey, trackId, targetLang, provider), LRU 120 дорожек ~4 МБ); cues — у content-слоя: IPC `subtitles.translate_track` (контракт v4) eval'ит duopulse-translate-request, content шлёт WebMessage «translate-track» с cue, ответ — document-событие duopulse-translate-track (паттерн 3.6), переведённая дорожка `cloud:<lang>` входит в набор после платформенных (source "translate", хранит имя «DeepL → ru»); UI — селект «+ перевод в… (облако)» панели (`src/subtitles-panel/cloud-langs.ts`, исключает языки платформы/набора) + статус конвейера; тайминги кэш-хита выравниваются по свежей сетке cue. Деградация с бейджем — 4.3 |
-| 4.3 | Офлайн-деградация и бейдж «перевод недоступен» | сценарий docs/01 §5.4 проходит |
+| 4.3 | **✅ выполнено 18.10.2026 (карточка duopulse-032)** Офлайн-деградация и бейдж «перевод недоступен» | сценарий docs/01 §5.4 проходит — **достигнуто** (e2e/subtitles 97/97: офлайн (мёртвый URL) — набор падает до оригинала, бейдж «Перевод недоступен (нет сети) — повторим…» держится (событие subtitles:translate_unavailable, offline/willRetry=true), перевод es возвращается из кэша при мёртвом провайдере; «сеть появилась» (URL → живой мок) — перевод de завершается сам без действий пользователя, бейдж сменяется статусом «готово»; выключенный конвейер — бейдж no_provider без автоповтора; cargo 153/153 (+7: таксономия отказов, разбор endpoint→host:port, очередь дедупа с переподчинением, офлайн→онлайн сценарий цикла на mock-транспорте, терминальный отказ без ожидания, снятая работа молчит), vitest 163/163 (+3 тексты бейджа)). Механика: `src-tauri/src/translate/watcher.rs` — очередь `TranslationJobs` (ключ (videoKey, trackId, targetLang), повторный запрос переподчиняет ответ, поколения закрывают гонку финала) + цикл с TCP-пробой эндпоинта текущего конфига каждые DUOPULSE_TRANSLATE_RETRY_MS (5 с); провайдер пересобирается на каждой попытке. **Gate M4** — замер перевода cue-таблицы 420 реплик (~33 КБ, 19 пачек) сквозным путём панели на моке с латентностью 400 мс/пачка: **7,9 с ≤ 30 с**; повторный просмотр — из кэша при мёртвом провайдере (0 обращений к живому моку) — отчёт CHANGELOG 18.10. Контракт v5 (событие subtitles:translate_unavailable) |
 
 ### M5 — полировка и релиз
 | # | Задача | DoD |

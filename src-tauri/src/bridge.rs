@@ -32,7 +32,7 @@ use crate::proxy;
 /// v2 (задача 2.5, без bump — совместимое расширение): домен perf.* — команды
 /// perf.{snapshot, save_run, list_runs} и события perf:{startup_ms,
 /// tab_switch_ms} (страница «Диагностика», docs/04 §2, docs/05 §2).
-pub const CONTRACT_VERSION: u32 = 4;
+pub const CONTRACT_VERSION: u32 = 5;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -648,6 +648,12 @@ impl BridgeEvent for SubtitlesSetAppliedEvent {
 /// Тип и эмит — src/translate/pipeline.rs рядом с конвейером.
 pub type SubtitlesTranslateProgress = crate::translate::SubtitlesTranslateProgress;
 
+/// subtitles:translate_unavailable: бейдж «перевод недоступен» (задача 4.3,
+/// docs/01 §5.4, docs/05 §2) — офлайн или нет провайдера; will_retry=true —
+/// Core повторит сам при появлении сети (финал — обычный translate_progress).
+/// Тип и эмит — src/translate/watcher.rs.
+pub type SubtitlesTranslateUnavailable = crate::translate::SubtitlesTranslateUnavailable;
+
 /// vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1;
 /// начнёт эмититься с локальным роутером M6, docs/02 §6).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -858,6 +864,7 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles:tracks_ready": { "payload": schema!(SubtitlesTracksReady) },
             "subtitles:set_applied": { "payload": schema!(SubtitlesSetApplied) },
             "subtitles:translate_progress": { "payload": schema!(SubtitlesTranslateProgress) },
+            "subtitles:translate_unavailable": { "payload": schema!(SubtitlesTranslateUnavailable) },
         },
     })
 }
@@ -938,6 +945,10 @@ fn event_names_match_registry() {
             (
                 <crate::translate::pipeline::SubtitlesTranslateProgressEvent as BridgeEvent>::NAME,
                 schema!(SubtitlesTranslateProgress),
+            ),
+            (
+                <crate::translate::watcher::SubtitlesTranslateUnavailableEvent as BridgeEvent>::NAME,
+                schema!(SubtitlesTranslateUnavailable),
             ),
         ]
         .into_iter()

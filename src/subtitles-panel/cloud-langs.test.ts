@@ -1,9 +1,15 @@
 // Юнит-тесты языков облачного перевода панели (задача 4.2, docs/03 §7–8):
 // селект «+ перевод в…» исключает переводы платформы (tlang бесплатный и
-// приоритетнее) и языки, уже стоящие в наборе; статус прогресса — строки для
-// duoTranslateMeta.
+// приоритетнее) и языки, уже стоящие в наборе; статус прогресса и бейдж
+// «перевод недоступен» (4.3) — строки для duoTranslateMeta.
 import { describe, expect, it } from "vitest";
-import { CLOUD_LANGS, baseLang, cloudLangOptions, translateProgressText } from "./cloud-langs";
+import {
+  CLOUD_LANGS,
+  baseLang,
+  cloudLangOptions,
+  translateProgressText,
+  translateUnavailableText,
+} from "./cloud-langs";
 
 describe("cloudLangOptions (селект «+ перевод в…»)", () => {
   it("без источника в наборе переводить нечего — пусто", () => {
@@ -58,5 +64,32 @@ describe("translateProgressText (статус панели)", () => {
       "Перевод не удался: ошибка",
     );
     expect(translateProgressText({ ...base, phase: "?" })).toBe("");
+  });
+});
+
+describe("translateUnavailableText (бейдж «перевод недоступен», 4.3)", () => {
+  it("офлайн — с обещанием автоповтора (бейдж держится)", () => {
+    expect(
+      translateUnavailableText({ reason: "offline", detail: "сеть недоступна", willRetry: true }),
+    ).toBe("Перевод недоступен (нет сети) — повторим, когда сеть появится");
+  });
+
+  it("willRetry=true всегда читается как ожидание сети, даже с чужим reason", () => {
+    expect(translateUnavailableText({ reason: "x", detail: "", willRetry: true })).toBe(
+      "Перевод недоступен (нет сети) — повторим, когда сеть появится",
+    );
+  });
+
+  it("нет провайдера (выключен/нет ключа) — подсказка без автоповтора", () => {
+    expect(
+      translateUnavailableText({
+        reason: "no_provider",
+        detail: "нет ключа DeepL — сохраните в панели «Перевод»",
+        willRetry: false,
+      }),
+    ).toBe("Перевод недоступен: нет ключа DeepL — сохраните в панели «Перевод»");
+    expect(translateUnavailableText({ reason: "no_provider", detail: "", willRetry: false })).toBe(
+      "Перевод недоступен: нет провайдера",
+    );
   });
 });

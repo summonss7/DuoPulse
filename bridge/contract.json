@@ -2776,6 +2776,49 @@
         "type": "object"
       }
     },
+    "subtitles:translate_unavailable": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Бейдж «перевод недоступен» (задача 4.3, docs/03 §7): панель показывает его в строке статуса конвейера; will_retry=true — Core повторяет сам, финал придёт обычным subtitles:translate_progress.",
+        "properties": {
+          "detail": {
+            "description": "Человекочитаемое описание (журнал/подсказка бейджа).",
+            "type": "string"
+          },
+          "reason": {
+            "description": "offline | no_provider (выключен/нет ключа).",
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "targetLang": {
+            "type": "string"
+          },
+          "trackId": {
+            "type": "string"
+          },
+          "videoKey": {
+            "type": "string"
+          },
+          "willRetry": {
+            "description": "true — Core повторит сам при появлении сети (бейдж держится).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "detail",
+          "reason",
+          "tabId",
+          "targetLang",
+          "trackId",
+          "videoKey",
+          "willRetry"
+        ],
+        "title": "SubtitlesTranslateUnavailable",
+        "type": "object"
+      }
+    },
     "tabs:updated": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -2884,5 +2927,5 @@
       }
     }
   },
-  "version": 4
+  "version": 5
 }

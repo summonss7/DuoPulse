@@ -78,6 +78,10 @@ impl TranslationProvider for GoogleProvider {
         }
     }
 
+    fn endpoint(&self) -> String {
+        ENDPOINT.to_string()
+    }
+
     fn translate_batch(
         &self,
         transport: &dyn HttpTransport,

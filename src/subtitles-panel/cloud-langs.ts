@@ -64,3 +64,17 @@ export function translateProgressText(p: {
   if (p.phase === "error") return `Перевод не удался: ${p.error || "ошибка"}`;
   return "";
 }
+
+/** Текст бейджа «перевод недоступен» (событие subtitles:translate_unavailable,
+ * задача 4.3, docs/01 §5.4): офлайн — с обещанием автоповтора, нет провайдера
+ * (выключен/нет ключа) — с подсказкой панели «Перевод». */
+export function translateUnavailableText(p: {
+  reason: string;
+  detail: string;
+  willRetry: boolean;
+}): string {
+  if (p.reason === "offline" || p.willRetry) {
+    return "Перевод недоступен (нет сети) — повторим, когда сеть появится";
+  }
+  return `Перевод недоступен: ${p.detail || "нет провайдера"}`;
+}

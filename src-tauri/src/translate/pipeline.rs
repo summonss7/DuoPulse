@@ -12,21 +12,25 @@
 //! не зовём. Перевод — минуты на длинном видео: обработчик сразу отдаёт
 //! поток COM-хендлера, работа в spawn_blocking, прогресс летит событиями.
 //!
+//! Офлайн-деградация и бейдж «перевод недоступен» (событие
+//! `subtitles:translate_unavailable`, автоповтор при появлении сети) —
+//! задача 4.3, цикл-исполнитель в `watcher.rs`.
+//!
 //! Наружу уходят только тексты субтитров (docs/02 §9); тайминги не переводим
 //! и не меняем — переведённая дорожка наследует сетку cue оригинала.
 
-use std::sync::Arc;
-
 use tauri::Manager;
 
-use super::config::{build_provider, load_config, ApiKeys, ProviderId};
-use super::{
-    translate_with_retries, HttpTransport, ProviderLimits, RetryPolicy, TranslateError,
-    TranslateRequest, TranslationProvider, UreqTransport,
-};
-use crate::bridge::{self, BridgeEvent};
+use crate::bridge::BridgeEvent;
 use crate::subtitles::cache::{now_ms, TranslationsCache};
 use crate::subtitles::Cue;
+
+use super::config::ProviderId;
+use super::watcher::{watch_run, JobKey, ReplyTarget, TranslationJobs};
+use super::{
+    translate_with_retries, HttpTransport, ProviderLimits, RetryPolicy, TranslateError,
+    TranslateRequest, TranslationProvider,
+};
 
 /// Потолок пачки батчера, байт: docs/03 §7 «пачками ≤ 2 КБ текста» — меньше
 /// лимитов провайдеров, сверху ещё режется их `ProviderLimits`.
@@ -231,7 +235,7 @@ impl BridgeEvent for SubtitlesTranslateProgressEvent {
 }
 
 /// Человекочитаемое имя дорожки для панели: «DeepL → ru».
-fn provider_label(id: ProviderId) -> &'static str {
+pub(crate) fn provider_label(id: ProviderId) -> &'static str {
     match id {
         ProviderId::Deepl => "DeepL",
         ProviderId::Google => "Google",
@@ -243,7 +247,7 @@ fn provider_label(id: ProviderId) -> &'static str {
 /// duopulse-translate-track eval'ом на главном потоке (паттерн задачи 3.6 —
 /// из фоновой нити COM не зовём). Вкладка могла закрыться/уйти навигацией —
 /// ошибка доставки не критична.
-fn reply_to_tab(app: &tauri::AppHandle, tab_id: &str, detail: &serde_json::Value) {
+pub(crate) fn reply_to_tab(app: &tauri::AppHandle, tab_id: &str, detail: &serde_json::Value) {
     let Some(wv) = app.get_webview(tab_id) else {
         return;
     };
@@ -263,46 +267,10 @@ fn reply_to_tab(app: &tauri::AppHandle, tab_id: &str, detail: &serde_json::Value
     }
 }
 
-/// Контекст одного запроса для эмитов прогресса (не клонируем по кругу).
-struct ProgressCtx {
-    app: tauri::AppHandle,
-    tab_id: String,
-    video_key: String,
-    track_id: String,
-    target_lang: String,
-    provider: String,
-}
-
-impl ProgressCtx {
-    fn emit(&self, done: u32, total: u32, from_cache: bool, phase: &str, error: Option<String>) {
-        let _ = bridge::emit::<SubtitlesTranslateProgressEvent>(
-            &self.app,
-            &SubtitlesTranslateProgress {
-                tab_id: self.tab_id.clone(),
-                video_key: self.video_key.clone(),
-                track_id: self.track_id.clone(),
-                target_lang: self.target_lang.clone(),
-                provider: self.provider.clone(),
-                done,
-                total,
-                from_cache,
-                phase: phase.to_string(),
-                error,
-            },
-        );
-    }
-
-    fn fail(&self, error: String, req_id: u64) {
-        eprintln!("[translate] ошибка: {error}");
-        self.emit(0, 0, false, "error", Some(error.clone()));
-        let detail = serde_json::json!({ "reqId": req_id, "ok": false, "error": error });
-        reply_to_tab(&self.app, &self.tab_id, &detail);
-    }
-}
-
 /// WebMessage «translate-track» (main.rs): снисходительный разбор, валидация,
-/// фоновый прогон конвейера. Вызывается на потоке COM-хендлера — ничего
-/// блокирующего: тяжёлая работа уходит в spawn_blocking.
+/// регистрация в очереди задач (задача 4.3 — дедуп по ключу, офлайн-цикл —
+/// watcher::watch_run). Вызывается на потоке COM-хендлера — ничего
+/// блокирующего: конвейер уходит в spawn_blocking.
 pub fn handle_translate_request(app: &tauri::AppHandle, tab_id: &str, msg: &serde_json::Value) {
     let Some(req_id) = msg["reqId"].as_u64() else {
         return;
@@ -352,102 +320,30 @@ pub fn handle_translate_request(app: &tauri::AppHandle, tab_id: &str, msg: &serd
         target_lang,
         cues,
     };
+    let key = JobKey {
+        video_key: request.video_key.clone(),
+        track_id: request.track_id.clone(),
+        target_lang: request.target_lang.clone(),
+    };
+    let jobs: std::sync::Arc<TranslationJobs> = app
+        .state::<std::sync::Arc<TranslationJobs>>()
+        .inner()
+        .clone();
+    let (spawn, gen) = jobs.submit(
+        key.clone(),
+        request.clone(),
+        ReplyTarget {
+            tab_id: tab_id.to_string(),
+            req_id,
+        },
+    );
+    if !spawn {
+        eprintln!("[translate] ключ {key:?} уже в работе — ответ переподчинён");
+        return;
+    }
     let app = app.clone();
-    let tab_owned = tab_id.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let dir = crate::proxy::profile_dir();
-        let cfg = load_config(&dir);
-        let ctx = ProgressCtx {
-            app: app.clone(),
-            tab_id: tab_owned,
-            video_key: request.video_key.clone(),
-            track_id: request.track_id.clone(),
-            target_lang: request.target_lang.clone(),
-            provider: cfg.provider.as_str().to_string(),
-        };
-        if !cfg.enabled {
-            ctx.fail(
-                "облачный перевод выключен — включите в панели «Перевод»".into(),
-                req_id,
-            );
-            return;
-        }
-        let provider = match build_provider(&cfg, &ApiKeys::load(&dir)) {
-            Ok(p) => p,
-            Err(e) => {
-                ctx.fail(e.message(), req_id);
-                return;
-            }
-        };
-        let cache = app.state::<Arc<TranslationsCache>>();
-        let transport = UreqTransport::new();
-        let policy = RetryPolicy::default();
-        let ctx_for_progress = ProgressCtx {
-            app: ctx.app.clone(),
-            tab_id: ctx.tab_id.clone(),
-            video_key: ctx.video_key.clone(),
-            track_id: ctx.track_id.clone(),
-            target_lang: ctx.target_lang.clone(),
-            provider: ctx.provider.clone(),
-        };
-        let mut on_progress = |r: ProgressReport| {
-            ctx_for_progress.emit(
-                r.done as u32,
-                r.total.max(r.done) as u32,
-                r.from_cache,
-                "translating",
-                None,
-            );
-        };
-        match translate_track(
-            provider.as_ref(),
-            &transport,
-            &cache,
-            &request,
-            &policy,
-            &mut on_progress,
-        ) {
-            Err(e) => ctx.fail(e.message(), req_id),
-            Ok(outcome) => {
-                let name = format!(
-                    "{} → {}",
-                    provider_label(provider.id()),
-                    request.target_lang
-                );
-                eprintln!(
-                    "[translate] готово: {} cue, {} пачек, {}",
-                    outcome.cues.len(),
-                    outcome.batches,
-                    if outcome.from_cache {
-                        "из кэша (сети не было)"
-                    } else {
-                        "сеть"
-                    },
-                );
-                ctx.emit(
-                    outcome.cues.len() as u32,
-                    outcome.cues.len() as u32,
-                    outcome.from_cache,
-                    "done",
-                    None,
-                );
-                let cues_json: Vec<serde_json::Value> = outcome
-                    .cues
-                    .iter()
-                    .map(|c| {
-                        serde_json::json!({ "startMs": c.start_ms, "endMs": c.end_ms, "text": c.text })
-                    })
-                    .collect();
-                let detail = serde_json::json!({
-                    "reqId": req_id,
-                    "ok": true,
-                    "cues": cues_json,
-                    "name": name,
-                    "fromCache": outcome.from_cache,
-                });
-                reply_to_tab(&ctx.app, &ctx.tab_id, &detail);
-            }
-        }
+        watch_run(app, jobs, key, request, gen);
     });
 }
 

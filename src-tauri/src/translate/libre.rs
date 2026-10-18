@@ -35,10 +35,6 @@ impl LibreProvider {
             api_key,
         }
     }
-
-    fn endpoint(&self) -> String {
-        format!("{}/translate", self.base_url)
-    }
 }
 
 impl TranslationProvider for LibreProvider {
@@ -52,6 +48,10 @@ impl TranslationProvider for LibreProvider {
             max_texts: 50,
             max_bytes: 50_000,
         }
+    }
+
+    fn endpoint(&self) -> String {
+        format!("{}/translate", self.base_url)
     }
 
     fn translate_batch(

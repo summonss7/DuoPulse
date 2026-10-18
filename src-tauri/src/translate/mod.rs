@@ -10,7 +10,8 @@
 //! HTTP изолирован за [`HttpTransport`] — тесты провайдеров подменные, без
 //! сети (mock-ответы http.rs). Конвейер перевода дорожек (батчинг ≤ 2 КБ,
 //! контекст пачек, SQLite-кэш, событие прогресса) — pipeline.rs (задача 4.2);
-//! офлайн-деградация и бейдж «перевод недоступен» — 4.3.
+//! офлайн-деградация, бейдж «перевод недоступен» и автоповтор при появлении
+//! сети — watcher.rs (задача 4.3).
 
 mod config;
 mod deepl;
@@ -18,12 +19,14 @@ mod google;
 mod http;
 mod libre;
 pub(crate) mod pipeline;
+pub(crate) mod watcher;
 
 pub use config::{
     save_settings, settings_view, test_provider, ProviderId, TranslateConfig, TranslateSettings,
 };
 pub use http::{HttpTransport, UreqTransport};
 pub use pipeline::{handle_translate_request, SubtitlesTranslateProgress};
+pub use watcher::SubtitlesTranslateUnavailable;
 
 use std::time::Duration;
 
@@ -120,6 +123,9 @@ pub trait TranslationProvider: Send + Sync {
     fn id(&self) -> ProviderId;
     /// Лимиты пачки для батчера.
     fn limits(&self) -> ProviderLimits;
+    /// Полный URL эндпоинта — проба связи офлайн-детектором задачи 4.3
+    /// (хост:порт из него; сам перевод ходит через translate_batch).
+    fn endpoint(&self) -> String;
     /// Перевести пачку — один HTTP-запрос без ретраев (обёртка — ниже).
     fn translate_batch(
         &self,
@@ -259,6 +265,9 @@ mod tests {
                 max_texts: 50,
                 max_bytes: 100_000,
             }
+        }
+        fn endpoint(&self) -> String {
+            "http://scripted.test".into()
         }
         fn translate_batch(
             &self,

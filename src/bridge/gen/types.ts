@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 4); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 5); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
@@ -106,6 +106,7 @@ export interface DuoPulseBridgeContract {
   SubtitlesSetApplied: SubtitlesSetApplied;
   SubtitlesTracksReady: SubtitlesTracksReady;
   SubtitlesTranslateProgress: SubtitlesTranslateProgress;
+  SubtitlesTranslateUnavailable: SubtitlesTranslateUnavailable;
   VpnStateChanged: VpnStateChanged;
 }
 /**
@@ -857,6 +858,27 @@ export interface SubtitlesTranslateProgress {
   total: number;
   trackId: string;
   videoKey: string;
+}
+/**
+ * Бейдж «перевод недоступен» (задача 4.3, docs/03 §7): панель показывает его в строке статуса конвейера; will_retry=true — Core повторяет сам, финал придёт обычным subtitles:translate_progress.
+ */
+export interface SubtitlesTranslateUnavailable {
+  /**
+   * Человекочитаемое описание (журнал/подсказка бейджа).
+   */
+  detail: string;
+  /**
+   * offline | no_provider (выключен/нет ключа).
+   */
+  reason: string;
+  tabId: string;
+  targetLang: string;
+  trackId: string;
+  videoKey: string;
+  /**
+   * true — Core повторит сам при появлении сети (бейдж держится).
+   */
+  willRetry: boolean;
 }
 /**
  * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).

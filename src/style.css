@@ -1468,6 +1468,11 @@ body.internal-page {
   color: var(--text-muted);
   font-size: 11px;
 }
+/* Бейдж «перевод недоступен» (задача 4.3, docs/01 §5.4): амбер-акцент,
+   отличим от обычного статуса конвейера. */
+.duo-file-meta[data-phase="unavailable"] {
+  color: var(--warn);
+}
 .duo-offset {
   display: flex;
   align-items: center;

@@ -35,14 +35,6 @@ impl DeeplProvider {
     pub fn new(plan: DeeplPlan, key: String) -> Self {
         Self { plan, key }
     }
-
-    fn endpoint(&self) -> String {
-        let host = match self.plan {
-            DeeplPlan::Free => FREE_HOST,
-            DeeplPlan::Pro => PRO_HOST,
-        };
-        format!("{host}/v2/translate")
-    }
 }
 
 #[derive(Deserialize)]
@@ -67,6 +59,14 @@ impl TranslationProvider for DeeplProvider {
             max_texts: 50,
             max_bytes: 100_000,
         }
+    }
+
+    fn endpoint(&self) -> String {
+        let host = match self.plan {
+            DeeplPlan::Free => FREE_HOST,
+            DeeplPlan::Pro => PRO_HOST,
+        };
+        format!("{host}/v2/translate")
     }
 
     fn translate_batch(

@@ -212,5 +212,9 @@ export const bridge = {
     /** subtitles.translate_progress: конвейер облачного перевода дорожки
      *  (4.2): «Перевод… 12/40», итог (кэш/сеть) и ошибки. */
     subtitlesTranslateProgress: "subtitles:translate_progress",
+    /** subtitles.translate_unavailable: бейдж «перевод недоступен» (4.3,
+     *  docs/01 §5.4): офлайн или нет провайдера; willRetry — Core повторит
+     *  сам при появлении сети. */
+    subtitlesTranslateUnavailable: "subtitles:translate_unavailable",
   } as const,
 };

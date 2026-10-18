@@ -647,6 +647,9 @@ fn main() {
         subtitles::cache::TranslationsCache::open(&profile_dir)
             .expect("открыть/создать таблицу translated_tracks в duopulse.db"),
     );
+    // Очередь переводов в работе (задача 4.3): дедуп запросов по ключу и
+    // офлайн-цикл автоповтора (watcher.rs, docs/01 §5.4).
+    let translation_jobs = std::sync::Arc::new(translate::watcher::TranslationJobs::default());
     startup_mark("stores-open");
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
@@ -657,6 +660,7 @@ fn main() {
         .manage(adblock_service)
         .manage(subtitles::service::SubtitlesService::new())
         .manage(translations_cache)
+        .manage(translation_jobs)
         .setup(move |app| {
             startup_mark("setup");
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и

@@ -76,7 +76,17 @@
 //  49) перевод es сквозно: мок-сервер получил пачку, дорожка cloud:es в
 //      наборе, перевод на плашке, фазы события translate_progress;
 //  50) DoD 4.2: повторный запрос — 0 сетевых вызовов (кэш SQLite);
-//  51) выключенный конвейер — честный отказ (статус-ошибка, сети нет).
+//  51) выключенный конвейер — честный отказ (бейдж «недоступен» без повтора).
+// Задача 4.3 (офлайн-деградация + бейдж, M4; docs/01 §5.4, docs/03 §7):
+//  52) офлайн (мёртвый URL): набор падает до оригинала, бейдж «перевод
+//      недоступен» (событие translate_unavailable, willRetry), перевод из
+//      кэша работает без сети (es из кэша при мёртвом провайдере);
+//  53) автоповтор: «сеть появилась» (URL → живой мок) — перевод de
+//      завершается сам, без действий пользователя;
+//  54) gate M4: повторный просмотр — из кэша без сети (мёртвый URL, 0
+//      обращений к живому моку, статус «из кэша»);
+//  55) gate M4: перевод cue-таблицы 420 реплик ≤ 30 с (мок с латентностью
+//      400 мс/пачка — верхняя оценка реального API).
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -124,7 +134,10 @@ const ROOT_WWW = path.join(ROOT, "e2e", "subtitles");
 const MIME = { ".html": "text/html; charset=utf-8", ".mp4": "video/mp4", ".vtt": "text/vtt; charset=utf-8" };
 // Мок LibreTranslate (задача 4.2): POST /lt/translate — эхо строк с префиксом
 // цели; журнал запросов — доказательство DoD «повторный просмотр — 0 сетевых
-// вызовов перевода» (кэш-хит не ходит на сервер).
+// вызовов перевода» (кэш-хит не ходит на сервер). Задача 4.3 (gate M4):
+// каждый запрос задерживается LT_DELAY_MS — латентность реального API,
+// замер «перевод cue-таблицы ≤ 30 с» на стенде честно её учитывает.
+const LT_DELAY_MS = 400;
 const ltRequests = [];
 const httpServer = http.createServer((req, res) => {
   const urlPath = decodeURIComponent(new URL(req.url, "http://x").pathname);
@@ -141,12 +154,14 @@ const httpServer = http.createServer((req, res) => {
       const target = String(parsed.target ?? "ru");
       const q = Array.isArray(parsed.q) ? parsed.q.map(String) : [String(parsed.q ?? "")];
       ltRequests.push({ target, texts: q.length, source: String(parsed.source ?? "") });
-      const out = JSON.stringify({ translatedText: q.map((s) => `⟪${target}⟫${s}`) });
-      res.writeHead(200, {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(out),
-      });
-      res.end(out);
+      setTimeout(() => {
+        const out = JSON.stringify({ translatedText: q.map((s) => `⟪${target}⟫${s}`) });
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(out),
+        });
+        res.end(out);
+      }, LT_DELAY_MS);
     });
     return;
   }
@@ -202,6 +217,7 @@ const app = spawn(EXE, [], {
     DUOPULSE_START_URL: pageUrl,
     DUOPULSE_ADBLOCK_LISTS: "", // без списков: стенду не нужна сеть
     DUOPULSE_SLEEP_AFTER_SECS: "0", // отладчик на вкладке + сон несовместимы
+    DUOPULSE_TRANSLATE_RETRY_MS: "700", // задача 4.3: офлайн-повтор — быстро на стенде
     WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, "webview2-data"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT} --autoplay-policy=no-user-gesture-required`,
   },
@@ -1338,9 +1354,9 @@ try {
     `мок Δ=${ltRequests.length - requestsBeforeSecond}, статус=${JSON.stringify(cachedMeta)}`,
   );
 
-  // (51) выключенный перевод: конвейер отклоняет запрос — статус-ошибка в
-  // панели, content получил отказ, набор не тронут, сети нет (деградация 4.3
-  // с бейджем — отдельная задача; здесь факт честного отказа).
+  // (51) выключенный перевод: конвейер отклоняет запрос — бейдж «недоступен»
+  // без автоповтора (no_provider, willRetry=false), content получил отказ,
+  // набор не тронут, сети нет (задача 4.3 перевела отказ в бейдж).
   await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "cloud:es" })})`);
   await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).length === 0`, 5000, "cloud:es снята (51)");
   await evalIn(
@@ -1357,6 +1373,10 @@ try {
   );
   await sleep(300);
   const requestsBeforeOff = ltRequests.length;
+  const unavailableBeforeOff = await evalIn(
+    ui3,
+    `(window.__duopulseTranslateUnavailableEvents ?? []).length`,
+  );
   await evalIn(
     ui3,
     `(function () {
@@ -1366,17 +1386,266 @@ try {
        return true;
      })()`,
   );
-  await waitForPage(ui3, `(document.getElementById("duoTranslateMeta").textContent ?? "").includes("не удался")`, 10000, "статус-ошибка перевода");
+  await waitForPage(ui3, `(document.getElementById("duoTranslateMeta").textContent ?? "").includes("недоступен")`, 10000, "бейдж «перевод недоступен»");
   const trOffState = await stateOf(tab);
+  const offBadge = await evalIn(
+    ui3,
+    `(function () {
+       const m = document.getElementById("duoTranslateMeta");
+       return { text: m.textContent, phase: m.dataset.phase,
+                events: (window.__duopulseTranslateUnavailableEvents ?? [])
+                  .map((p) => p.reason + ":" + p.willRetry) };
+     })()`,
+  );
   check(
-    "(51) перевод выключен: честный отказ (статус-ошибка панели, content получил ошибку), набор не тронут, сети нет",
+    "(51) перевод выключен: бейдж «недоступен» (no_provider, без автоповтора), content получил отказ, набор не тронут, сети нет",
     ltRequests.length === requestsBeforeOff &&
       trOffState.translateTracks.length === 0 &&
       trOffState.engine.trackCount === 1 &&
       trOffState.cloud.lastReply?.ok === false &&
-      String(trOffState.cloud.lastReply?.error ?? "").includes("выключен"),
-    `мок Δ=${ltRequests.length - requestsBeforeOff}, lastReply=${JSON.stringify(trOffState.cloud.lastReply)}`,
+      String(trOffState.cloud.lastReply?.error ?? "").includes("выключен") &&
+      offBadge.text.includes("недоступен") &&
+      offBadge.text.includes("выключен") &&
+      offBadge.phase === "unavailable" &&
+      offBadge.events.length === unavailableBeforeOff + 1 &&
+      offBadge.events[offBadge.events.length - 1] === "no_provider:false",
+    `мок Δ=${ltRequests.length - requestsBeforeOff}, бейдж=${JSON.stringify(offBadge.text)}, lastReply=${JSON.stringify(trOffState.cloud.lastReply)}`,
   );
+
+  // ===== задача 4.3: офлайн-деградация + бейдж (docs/01 §5.4) ============
+  // Мёртвый URL (порт 9 — отказ соединения мгновенный) изображает «нет сети».
+
+  // (52) офлайн: набор падает до оригинала, бейдж «перевод недоступен»
+  // держится (willRetry=true, Phase unavailable), а перевод из кэша (es)
+  // работает и без сети — весь сценарий §5.4 без краха просмотра.
+  await evalIn(
+    ui3,
+    `window.__duopulse.translate.setSettings(${JSON.stringify({
+      value: {
+        enabled: true,
+        provider: "libretranslate",
+        deeplPlan: "free",
+        libretranslateUrl: "http://127.0.0.1:9/lt",
+      },
+      secret: null,
+    })})`,
+  );
+  await sleep(300);
+  const unavailableBeforeOffline = await evalIn(
+    ui3,
+    `(window.__duopulseTranslateUnavailableEvents ?? []).length`,
+  );
+  await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
+       sel.value = "de";
+       sel.dispatchEvent(new Event("change", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  // первая попытка: 3 ретрая политики (паузы 400+800) → Network → бейдж
+  await waitForPage(
+    ui3,
+    `(document.getElementById("duoTranslateMeta").dataset.phase ?? "") === "unavailable"`,
+    15000,
+    "офлайн-бейдж",
+  );
+  const offlineState = await stateOf(tab);
+  const offlineBadge = await evalIn(
+    ui3,
+    `(function () {
+       const m = document.getElementById("duoTranslateMeta");
+       return { text: m.textContent, phase: m.dataset.phase, hidden: m.hidden,
+                events: (window.__duopulseTranslateUnavailableEvents ?? [])
+                  .slice(${unavailableBeforeOffline})
+                  .map((p) => p.reason + ":" + p.willRetry) };
+     })()`,
+  );
+  check(
+    "(52) офлайн: бейдж «Перевод недоступен (нет сети) — повторим…» держится (offline:true), набор пал до оригинала, просмотра ничего не мешает",
+    offlineBadge.text.includes("нет сети") &&
+      offlineBadge.text.includes("повторим") &&
+      offlineBadge.phase === "unavailable" &&
+      offlineBadge.hidden === false &&
+      offlineBadge.events.length >= 1 &&
+      offlineBadge.events.every((e) => e === "offline:true") &&
+      offlineState.translateTracks.length === 0 &&
+      offlineState.engine.trackCount === 1,
+    `бейдж=${JSON.stringify(offlineBadge.text)}, события=${JSON.stringify(offlineBadge.events)}, треки=${offlineState.engine.trackCount}`,
+  );
+
+  // из кэша без сети: es переводился в (49) — при мёртвом провайдере
+  // дорожка возвращается из кэша SQLite (сценарий §5.4 «перевод из кэша,
+  // где он есть»), статус «из кэша».
+  await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
+       sel.value = "es";
+       sel.dispatchEvent(new Event("change", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).some((t) => t.id === "cloud:es")`, 10000, "cloud:es из кэша при мёртвом URL");
+  const cachedOfflineMeta = await evalIn(ui3, `document.getElementById("duoTranslateMeta").textContent`);
+  check(
+    "(52a) офлайн, перевод из кэша: es вернулся из кэша SQLite при мёртвом провайдере, статус «из кэша», сети нет",
+    cachedOfflineMeta.includes("из кэша") && (await stateOf(tab)).engine.trackCount === 2,
+    `статус=${JSON.stringify(cachedOfflineMeta)}`,
+  );
+
+  // (53) автоповтор при появлении сети: работа de ещё ждёт (бейдж активен) —
+  // «сеть появилась» (URL → живой мок): перевод de завершается САМ, без
+  // действий пользователя; бейдж сменяется обычным статусом «готово».
+  const requestsBeforeRecover = ltRequests.length;
+  await evalIn(
+    ui3,
+    `window.__duopulse.translate.setSettings(${JSON.stringify({
+      value: {
+        enabled: true,
+        provider: "libretranslate",
+        deeplPlan: "free",
+        libretranslateUrl: `http://127.0.0.1:${HTTP_PORT}/lt`,
+      },
+      secret: null,
+    })})`,
+  );
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).some((t) => t.id === "cloud:de")`, 15000, "cloud:de после автоповтора");
+  const recoveredMeta = await evalIn(
+    ui3,
+    `(function () {
+       const m = document.getElementById("duoTranslateMeta");
+       return { text: m.textContent, phase: m.dataset.phase };
+     })()`,
+  );
+  check(
+    "(53) автоповтор: сеть появилась (URL → живой мок) — перевод de дошёл сам (мок получил пачку), бейдж сменился на «Перевод готов» (сеть)",
+    ltRequests.length > requestsBeforeRecover &&
+      ltRequests.slice(requestsBeforeRecover).some((r) => r.target === "de") &&
+      recoveredMeta.text.includes("Перевод готов") &&
+      !recoveredMeta.text.includes("из кэша") &&
+      recoveredMeta.phase === "done",
+    `мок +${ltRequests.length - requestsBeforeRecover}, статус=${JSON.stringify(recoveredMeta.text)}`,
+  );
+
+  // (54) gate M4 «повторный просмотр — из кэша без сети»: de убираем, URL —
+  // мёртвый порт, повторный запрос — кэш SQLite, 0 обращений к живому моку.
+  await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "cloud:de" })})`);
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).every((t) => t.id !== "cloud:de")`, 5000, "cloud:de снята (54)");
+  await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "cloud:es" })})`);
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).length === 0`, 5000, "набор без облачных (54)");
+  await evalIn(
+    ui3,
+    `window.__duopulse.translate.setSettings(${JSON.stringify({
+      value: {
+        enabled: true,
+        provider: "libretranslate",
+        deeplPlan: "free",
+        libretranslateUrl: "http://127.0.0.1:9/lt",
+      },
+      secret: null,
+    })})`,
+  );
+  await sleep(300);
+  const requestsBeforeCacheRun = ltRequests.length;
+  await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
+       sel.value = "de";
+       sel.dispatchEvent(new Event("change", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).some((t) => t.id === "cloud:de")`, 10000, "cloud:de из кэша без сети");
+  const gateCacheMeta = await evalIn(ui3, `document.getElementById("duoTranslateMeta").textContent`);
+  check(
+    "(54) gate M4: повторный просмотр — из кэша БЕЗ сети (мёртвый URL, живой мок не тронут), статус «из кэша»",
+    ltRequests.length === requestsBeforeCacheRun &&
+      gateCacheMeta.includes("из кэша") &&
+      (await stateOf(tab)).translateTracks.some((t) => t.id === "cloud:de"),
+    `мок Δ=${ltRequests.length - requestsBeforeCacheRun}, статус=${JSON.stringify(gateCacheMeta)}`,
+  );
+
+  // (55) gate M4 «перевод cue-таблицы видео ≤ 30 с»: большая дорожка
+  // (420 cue ≈ 33 КБ → ~17 пачек) через полный путь панели; мок держит
+  // ответ 400 мс — латентность реального API, замер честный.
+  await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "cloud:de" })})`);
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).length === 0`, 5000, "набор чист (55)");
+  const bigCueCount = 420;
+  await evalIn(
+    tab,
+    `(function () {
+       const cues = [];
+       for (let i = 0; i < ${bigCueCount}; i++) {
+         cues.push({ startMs: i * 3000, endMs: i * 3000 + 2800,
+                     text: "Line " + i + ": the quick brown fox jumps over the lazy dog near the riverbank at dawn, take " + i });
+       }
+       window.__DUOPULSE_TEST_TRACK__ = { id: "test:big", source: "test", lang: "en",
+                                          role: "original", name: "Big", cues };
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return cues.length;
+     })()`,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 1`, 5000, "большая дорожка в наборе");
+  await evalIn(
+    ui3,
+    `window.__duopulse.translate.setSettings(${JSON.stringify({
+      value: {
+        enabled: true,
+        provider: "libretranslate",
+        deeplPlan: "free",
+        libretranslateUrl: `http://127.0.0.1:${HTTP_PORT}/lt`,
+      },
+      secret: null,
+    })})`,
+  );
+  await sleep(300);
+  const requestsBeforeGate = ltRequests.length;
+  const gateStart = Date.now();
+  await evalIn(
+    ui3,
+    `(function () {
+       const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
+       sel.value = "pl";
+       sel.dispatchEvent(new Event("change", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).some((t) => t.id === "cloud:pl")`, 60000, "cloud:pl переведена (gate)");
+  const gateElapsedMs = Date.now() - gateStart;
+  const gateBatches = ltRequests.slice(requestsBeforeGate).filter((r) => r.target === "pl").length;
+  const gateBig = await stateOf(tab);
+  check(
+    "(55) gate M4: перевод cue-таблицы 420 реплик ≤ 30 с (мок 400 мс/пачка — латентность реального API)",
+    gateElapsedMs <= 30_000 &&
+      gateBatches >= 10 &&
+      gateBig.translateTracks.some((t) => t.id === "cloud:pl" && t.cues === bigCueCount),
+    `${(gateElapsedMs / 1000).toFixed(1)} с, пачек ${gateBatches}, cue в дорожке ${gateBig.translateTracks.find((t) => t.id === "cloud:pl")?.cues ?? 0}`,
+  );
+
+  // чистим за 4.3: облачные дорожки прочь, платформенную часть сайта-3
+  // возвращаем исходной test:ru (следующие проверки 046 и Alt+D/remove_track
+  // опираются на неё; большая дорожка была только материалом gate-замера).
+  await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "cloud:pl" })})`);
+  await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).length === 0`, 5000, "облачные сняты (чистка 4.3)");
+  await evalIn(
+    tab,
+    `(function () {
+       window.__DUOPULSE_TEST_TRACK__ = ${JSON.stringify({
+         id: "test:ru",
+         source: "test",
+         lang: "ru",
+         role: "original",
+         name: "Русский (тест)",
+         cues: [{ startMs: 6000, endMs: 8000, text: "Платформенная реплика (6–8 с)" }],
+       })};
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `(window.__duopulseContent?.state().engine.trackCount ?? 0) === 1`, 5000, "исходная дорожка сайта-3 возвращена");
 
   await evalIn(ui3, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
   await sleep(150);
@@ -1686,7 +1955,10 @@ try {
 } finally {
   app.kill("SIGKILL");
   await killOurExes();
-  const subLog = appLog.join("").split("\n").filter((l) => l.includes("[subtitles]"));
+  const subLog = appLog
+    .join("")
+    .split("\n")
+    .filter((l) => l.includes("[subtitles]") || l.includes("[translate]"));
   if (subLog.length) console.log("\n--- журнал приложения ([subtitles]) ---\n" + subLog.slice(-8).join("\n"));
   // vite.kill() на Windows убивает только npm-оболочку — дерево npm→node
   // переживает скрипт и держит порт 5173 (strictPort) для следующих прогонов

@@ -147,7 +147,7 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(4); // v4: subtitles.translate_track + событие translate_progress (4.2)
+    expect(contract.version).toBe(5); // v5: событие subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
   });
 
   it("клиент знает все события контракта (listen по имени из bridge.events)", () => {

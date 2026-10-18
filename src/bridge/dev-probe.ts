@@ -5,7 +5,8 @@
 //   __duopulseTabsEvents — tabs:updated (задача 1.2);
 //   __duopulseAdblockEvents — adblock:blocked_count (задача 2.1);
 //   __duopulseSubtitlesEvents — subtitles:tracks_ready/set_applied (задача 3.7);
-//   __duopulseTranslateEvents — subtitles:translate_progress (задача 4.2).
+//   __duopulseTranslateEvents — subtitles:translate_progress (задача 4.2);
+//   __duopulseTranslateUnavailableEvents — subtitles:translate_unavailable (4.3).
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "./client";
 
@@ -45,4 +46,12 @@ if (import.meta.env.DEV) {
   });
   (window as unknown as { __duopulseTranslateEvents: unknown[] }).__duopulseTranslateEvents =
     translateEvents;
+
+  const unavailableEvents: unknown[] = [];
+  void listen(bridge.events.subtitlesTranslateUnavailable, (ev) => {
+    unavailableEvents.push(ev.payload);
+    if (unavailableEvents.length > 40) unavailableEvents.shift();
+  });
+  (window as unknown as { __duopulseTranslateUnavailableEvents: unknown[] })
+    .__duopulseTranslateUnavailableEvents = unavailableEvents;
 }

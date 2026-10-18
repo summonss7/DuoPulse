@@ -20,6 +20,9 @@
 // Задача 4.2: «+ перевод в… (облако)» — запуск subtitles.translate_track
 // (конвейер Core: кэш SQLite → пачки ≤ 2 КБ → провайдер), статус — событие
 // subtitles:translate_progress (duoTranslateMeta: прогресс/кэш/ошибка).
+// Задача 4.3 (docs/01 §5.4): офлайн/нет провайдера — бейдж «перевод
+// недоступен» (subtitles:translate_unavailable), при willRetry Core повторяет
+// сам и бейдж живёт до финального translate_progress.
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { bridge } from "../bridge";
@@ -27,10 +30,11 @@ import type {
   AppliedTrackInfo,
   BaseTrackInfo,
   SubtitlesTranslateProgress,
+  SubtitlesTranslateUnavailable,
   TranslationLangInfo,
 } from "../bridge/gen/types";
 import { presetSets, normalizeTrackId } from "./presets";
-import { cloudLangOptions, translateProgressText } from "./cloud-langs";
+import { cloudLangOptions, translateProgressText, translateUnavailableText } from "./cloud-langs";
 
 const err = (e: unknown): void => console.error("duo:", e);
 const btn = document.getElementById("duoBtn") as HTMLButtonElement;
@@ -412,6 +416,7 @@ export function initDuo(): void {
 
   // Прогресс облачного перевода (subtitles:translate_progress, задача 4.2):
   // «Перевод… 12/40» по ходу, итог (кэш/сеть) и ошибки — с автоскрытием.
+  // Снимает и бейдж 4.3: translating/done возвращают строке обычный статус.
   let translateStatusTimer = 0;
   void listen<SubtitlesTranslateProgress>(bridge.events.subtitlesTranslateProgress, (ev) => {
     if (ev.payload.tabId !== state.tabId) return;
@@ -423,6 +428,23 @@ export function initDuo(): void {
     meta.textContent = text;
     window.clearTimeout(translateStatusTimer);
     if (ev.payload.phase !== "translating") {
+      translateStatusTimer = window.setTimeout(() => {
+        meta.hidden = true;
+      }, 6000);
+    }
+  });
+
+  // Бейдж «перевод недоступен» (задача 4.3, docs/01 §5.4): офлайн или нет
+  // провайдера. willRetry=true — Core повторяет сам, бейдж держится до
+  // финального translate_progress; иначе автоскрытие как у ошибок.
+  void listen<SubtitlesTranslateUnavailable>(bridge.events.subtitlesTranslateUnavailable, (ev) => {
+    if (ev.payload.tabId !== state.tabId) return;
+    const meta = document.getElementById("duoTranslateMeta") as HTMLElement;
+    meta.hidden = false;
+    meta.dataset.phase = "unavailable";
+    meta.textContent = translateUnavailableText(ev.payload);
+    window.clearTimeout(translateStatusTimer);
+    if (!ev.payload.willRetry) {
       translateStatusTimer = window.setTimeout(() => {
         meta.hidden = true;
       }, 6000);
