@@ -172,11 +172,23 @@ pub fn bypass_list() -> String {
     list
 }
 
-/// Аргументы браузера для WebView2. Явные аргументы замещают дефолтные флаги
-/// wry, поэтому дефолт повторяется здесь (wry-0.57: отключение msWebOOUI/
-/// msPdfOOUI/msSmartScreenProtection).
+/// Дефолтные флаги wry, которые замещаются явными additional_browser_args
+/// (wry-0.57: отключение msWebOOUI/msPdfOOUI/msSmartScreenProtection).
+const WRY_DEFAULTS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+/// Аргументы браузера для постоянного направления WebView2 на локальный
+/// SOCKS5-роутер (задача 6.1, docs/02 §6.1): режимом управляет роутер,
+/// тумблер прокси не требует перезапуска.
+pub fn router_browser_args(port: u16) -> String {
+    format!(
+        "{WRY_DEFAULTS} --proxy-server=socks5://127.0.0.1:{port} --proxy-bypass-list={}",
+        bypass_list()
+    )
+}
+
+/// Фолбэк без роутера (роутер не поднялся на старте): старое поведение
+/// инкремента A — внешний прокси напрямую или без прокси.
 pub fn browser_args(cfg: Option<&ProxyConfig>) -> String {
-    const WRY_DEFAULTS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
     match cfg.filter(|c| c.enabled) {
         None => WRY_DEFAULTS.to_string(),
         Some(c) => format!(
@@ -328,6 +340,19 @@ mod tests {
         assert!(
             !off.contains("--proxy-server"),
             "выключенный прокси не применяется"
+        );
+    }
+
+    #[test]
+    fn args_router_points_webview_to_loopback() {
+        // Задача 6.1: с роутером WebView2 ПОСТОЯННО смотрит на 127.0.0.1 —
+        // независимо от режима прокси (режимом управляет роутер).
+        let a = router_browser_args(49171);
+        assert!(a.contains("--proxy-server=socks5://127.0.0.1:49171"), "{a}");
+        assert!(a.contains("--proxy-bypass-list="), "{a}");
+        assert!(
+            a.contains("--disable-features=msWebOOUI"),
+            "дефолтные флаги wry сохранены: {a}"
         );
     }
 

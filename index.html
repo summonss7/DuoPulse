@@ -27,7 +27,7 @@
       <div id="proxyMenu" class="proxy-menu" hidden>
         <div class="proxy-row proxy-head">
           <span class="proxy-title">Прокси</span>
-          <label class="switch" title="Вкл/выкл прокси (применяется после перезапуска)">
+          <label class="switch" title="Вкл/выкл прокси (применяется сразу, без перезапуска)">
             <input type="checkbox" id="proxyEnabled" />
             <span class="slider"></span>
           </label>
@@ -66,10 +66,6 @@
         <div class="proxy-actions">
           <button id="proxyCheck" class="ghost">Проверить</button>
           <button id="proxySave" class="primary">Сохранить</button>
-        </div>
-        <div class="proxy-restart" id="proxyRestartBlock" hidden>
-          <span>Применяется после перезапуска браузера.</span>
-          <button id="proxyRestart" class="primary">Перезапустить сейчас</button>
         </div>
         <div class="proxy-foot">
           Пароль хранится в DPAPI (не в settings.json). localhost и локальные адреса

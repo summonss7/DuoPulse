@@ -154,15 +154,17 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Итог импорта: отчёт + нужен ли перезапуск (прокси применяется аргументами
-/// WebView2 только на старте — docs/02 §6.1).
+/// Итог импорта: отчёт о применённом. Поле needs_restart зарезервировано
+/// (было «прокси применится со следующего старта»); с локальным роутером
+/// (задача 6.1, docs/02 §6.1) переехавший прокси применяется сразу —
+/// bridge::settings_import дёргает роутер после записи файла.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ImportOutcome {
     pub counts: ProfileCounts,
     /// Файл содержал секреты (применены в DPAPI).
     pub has_secrets: bool,
-    /// Импортирован раздел proxy — аргументы применятся со следующего старта.
+    /// Зарезервировано; всегда false — перезапуск импорту не нужен.
     pub needs_restart: bool,
 }
 
@@ -177,7 +179,6 @@ pub fn apply(
 ) -> Result<ImportOutcome, String> {
     // 1) валидация переносимых разделов до любых записей
     let mut sections = 0u32;
-    let mut has_proxy = false;
     for key in PORTABLE_SETTINGS_KEYS {
         let Some(value) = file.settings.get(key) else {
             continue;
@@ -189,7 +190,6 @@ pub fn apply(
                 if cfg.enabled {
                     cfg.validate().map_err(|e| format!("proxy в файле: {e}"))?;
                 }
-                has_proxy = true;
             }
             "translate" => {
                 let cfg: translate::TranslateConfig = serde_json::from_value(value.clone())
@@ -271,7 +271,7 @@ pub fn apply(
     Ok(ImportOutcome {
         counts,
         has_secrets,
-        needs_restart: has_proxy,
+        needs_restart: false,
     })
 }
 
@@ -373,7 +373,10 @@ mod tests {
         assert_eq!(outcome.counts.bookmarks, 1);
         assert_eq!(outcome.counts.visits, 1);
         assert_eq!(outcome.counts.translated_tracks, 1);
-        assert!(outcome.needs_restart, "proxy переехал — нужен перезапуск");
+        assert!(
+            !outcome.needs_restart,
+            "прокси применяется роутером сразу (задача 6.1)"
+        );
         #[cfg(windows)]
         {
             assert_eq!(outcome.counts.secrets, 2, "пароль + ключ DeepL");

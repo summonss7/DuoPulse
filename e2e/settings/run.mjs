@@ -280,9 +280,10 @@ try {
       `hist=${freshHist?.total}, marks=${freshMarks?.total}`);
 
     const imp = await evalIn(b.ws, `window.__duopulse.settings.import({ path: ${JSON.stringify(profilePath)} })`);
-    check("B2 импорт: отчёт counts, секреты, перезапуск прокси", !!imp && imp.counts?.bookmarks === 2 &&
+    check("B2 импорт: отчёт counts, секреты, прокси применён роутером без перезапуска",
+      !!imp && imp.counts?.bookmarks === 2 &&
       imp.counts?.visits === 4 && imp.counts?.secrets === 2 && imp.hasSecrets === true &&
-      imp.needsRestart === true, JSON.stringify(imp));
+      imp.needsRestart === false, JSON.stringify(imp));
 
     const after = await evalIn(b.ws, `window.__duopulse.settings.getAll()`);
     const hist = await evalIn(b.ws, `window.__duopulse.history.list({ query: null, offset: 0, limit: 100 })`);

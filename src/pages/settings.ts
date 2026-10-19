@@ -334,7 +334,7 @@ export function initSettingsPage(): void {
   // --- 5. Прокси / VPN --------------------------------------------------------
   const proxy = section(
     "Прокси / VPN",
-    "Внешний прокси SOCKS5/HTTP(S); применяется аргументами WebView2 — после перезапуска. Пароль — в DPAPI.",
+    "Внешний прокси SOCKS5/HTTP(S); применяется сразу — через локальный роутер, без перезапуска. Пароль — в DPAPI.",
   );
   const proxyEnabled = document.createElement("input");
   proxyEnabled.type = "checkbox";
@@ -383,15 +383,6 @@ export function initSettingsPage(): void {
   proxyCheck.textContent = "Проверить";
   const proxyRow = el("div", "set-row");
   proxyRow.append(proxySave, proxyCheck, proxyStatus);
-  const proxyRestartBlock = el("div", "set-restart");
-  proxyRestartBlock.hidden = true;
-  const proxyRestartNote = el("span");
-  proxyRestartNote.textContent = "Применяется после перезапуска браузера.";
-  const proxyRestart = document.createElement("button");
-  proxyRestart.type = "button";
-  proxyRestart.className = "primary";
-  proxyRestart.textContent = "Перезапустить сейчас";
-  proxyRestartBlock.append(proxyRestartNote, proxyRestart);
   proxy.body.append(
     proxyEnabledLabel,
     field("Тип", proxyProto),
@@ -400,12 +391,7 @@ export function initSettingsPage(): void {
     field("Логин", proxyLogin),
     proxyPassField,
     proxyRow,
-    proxyRestartBlock,
   );
-  /** Стартовые аргументы приложения: их смена требует перезапуска. */
-  let appliedProxy: string | null = null;
-  const proxyArgsOf = (s: { enabled: boolean; proto: string; host: string; port: number }): string =>
-    JSON.stringify([s.enabled, s.proto, s.host, s.port]);
   const proxySaveForm = async (): Promise<boolean> => {
     const port = parseInt(proxyPort.value, 10) || 0;
     const cfg = {
@@ -464,9 +450,6 @@ export function initSettingsPage(): void {
       })
       .then(() => loadProxy())
       .catch((e2) => (proxyStatus.textContent = String(e2)));
-  });
-  proxyRestart.addEventListener("click", () => {
-    void bridge.app.restart().catch(err);
   });
 
   // --- 6. Приватность ---------------------------------------------------------
@@ -658,7 +641,6 @@ export function initSettingsPage(): void {
           `${c.bookmarks ?? 0} закл., ${c.visits ?? 0} визитов, ` +
           `${c.translatedTracks ?? 0} дорожек кэша` +
           ((c.secrets ?? 0) > 0 ? `, ${c.secrets} секретов` : "");
-        if (res.needsRestart) proxyRestartBlock.hidden = false;
         await reload();
       } catch (e) {
         profileStatus.textContent = String(e);
@@ -694,8 +676,6 @@ export function initSettingsPage(): void {
     proxyPassword.value = "";
     proxyPassword.placeholder = s.hasPassword ? "сохранён — пусто = не менять" : "пароль";
     proxyPassClear.hidden = !s.hasPassword;
-    if (appliedProxy === null) appliedProxy = proxyArgsOf(s);
-    proxyRestartBlock.hidden = proxyArgsOf(s) === appliedProxy;
   };
 
   const reload = async (): Promise<void> => {

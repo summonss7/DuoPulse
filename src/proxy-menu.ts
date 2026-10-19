@@ -1,22 +1,14 @@
 // DuoPulse — меню «Прокси» (задача 1.8, VPN-инкремент A, карточка duopulse-009;
-// задача 1.1 — переведено на контракт bridge).
+// задача 1.1 — переведено на контракт bridge; задача 6.1 — миграция на роутер).
 // Настройки внешнего прокси SOCKS5/HTTP(S) ходят в Core командами словаря
-// (settings.get/set, vpn.set_enabled/status/test_connection, app.restart —
-// docs/05 §2): хранятся в Rust (settings.json + пароль в DPAPI), применяются
-// аргументами окружения WebView2 — после перезапуска, который предлагается явно.
+// (settings.get/set, vpn.set_enabled/status/test_connection — docs/05 §2):
+// хранятся в Rust (settings.json + пароль в DPAPI). Применение — мгновенное:
+// WebView2 постоянно направлен на локальный SOCKS5-роутер Core, режим
+// переключает роутер, перезапуск не нужен (docs/02 §6.1, карточка duopulse-037).
 import { bridge } from "./bridge";
 import type { ProxyConfig, ProxySettings, VpnStatusResult } from "./bridge";
 
 const IP_ECHO_URL = "https://api.ipify.org/";
-
-// Поля, влияющие на аргументы WebView2: их смена требует перезапуска
-// (login читается обработчиком аутентификации на лету — перезапуска не требует).
-interface ProxyArgs {
-  enabled: boolean;
-  proto: string;
-  host: string;
-  port: number;
-}
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const btn = $("proxyBtn");
@@ -31,9 +23,6 @@ const passClearEl = $("proxyPassClear");
 const statusEl = $("proxyStatus");
 const statusDetailEl = $("proxyStatusDetail");
 const errorEl = $("proxyError");
-const restartBlock = $("proxyRestartBlock");
-
-let appliedArgs: ProxyArgs | null = null; // конфиг на старте приложения
 
 /** Конфиг из формы + порт отдельным числом (в схеме ProxyConfig.port опционален). */
 function readConfig(): { cfg: ProxyConfig; port: number } {
@@ -69,20 +58,12 @@ function showError(message: string | null): void {
 async function refresh(): Promise<ProxySettings> {
   const s = await bridge.settings.get({ key: "proxy" });
   fillForm(s);
-  if (appliedArgs === null) {
-    appliedArgs = { enabled: s.enabled, proto: s.proto, host: s.host, port: s.port };
-  }
   return s;
 }
 
-function argsOf(s: { enabled: boolean; proto: string; host: string; port: number }): ProxyArgs {
-  return { enabled: s.enabled, proto: s.proto, host: s.host, port: s.port };
-}
-
-/** Показать предложение перезапуска, если сохранённый конфиг отличается от стартового. */
+/** После сохранения: форма/статус по свежим данным (роутер уже применил режим). */
 async function afterSave(): Promise<void> {
-  const saved = await refresh();
-  restartBlock.hidden = JSON.stringify(argsOf(saved)) === JSON.stringify(appliedArgs);
+  await refresh();
   await refreshStatus();
 }
 
@@ -172,10 +153,6 @@ $("proxyCheck").addEventListener("click", () => {
     .testConnection()
     .then((st) => refreshStatus(st))
     .catch((e) => showError(String(e)));
-});
-
-$("proxyRestart").addEventListener("click", () => {
-  void bridge.app.restart().catch(console.error);
 });
 
 // Пароль сохранён только в DPAPI: «удалить» стирает blob, поле оставляет как есть.

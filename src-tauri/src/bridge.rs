@@ -407,8 +407,8 @@ pub struct SettingsExportResult {
 
 /// settings.import: применить файл профиля (path — нативный диалог выбора).
 /// Импорт идемпотентен (дубликаты визитов скипаются, закладки/кэш — upsert);
-/// переехавший прокси применяется аргументами WebView2 со следующего старта
-/// (needs_restart, docs/02 §6.1).
+/// переехавший прокси применяется роутером сразу — без перезапуска
+/// (задача 6.1; needs_restart зарезервировано и всегда false).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsImportParams {
@@ -1366,9 +1366,9 @@ fn settings_get(params: SettingsGetParams) -> Result<ProxySettings, String> {
 }
 
 #[tauri::command]
-fn settings_set(params: SettingsSetParams) -> Result<(), String> {
+fn settings_set(app: tauri::AppHandle, params: SettingsSetParams) -> Result<(), String> {
     match params.key {
-        SettingsKey::Proxy => save_proxy(&params.value, params.secret),
+        SettingsKey::Proxy => save_proxy(&app, &params.value, params.secret),
     }
 }
 
@@ -1450,28 +1450,33 @@ fn settings_export(
 
 /// settings.import: применить файл профиля (настройки, секреты, закладки,
 /// история, кэш переводов). Импорт идемпотентен; переехавший прокси
-/// применяется аргументами WebView2 со следующего старта (needs_restart).
+/// применяется роутером сразу — без перезапуска (задача 6.1).
 #[tauri::command]
 fn settings_import(
+    app: tauri::AppHandle,
     history: tauri::State<'_, crate::history::HistoryStore>,
     cache: tauri::State<'_, std::sync::Arc<crate::subtitles::cache::TranslationsCache>>,
     params: SettingsImportParams,
 ) -> Result<SettingsImportResult, String> {
     let raw = std::fs::read_to_string(&params.path)
-        .map_err(|e| format!("прочитать {}: {e}", params.path))?;
+        .map_err(|e| format!("прочитать {}: {}", params.path, e))?;
     let file = crate::settings::profile::parse_file(&raw)?;
-    crate::settings::profile::apply(&proxy::profile_dir(), &file, &history, &cache)
+    let dir = proxy::profile_dir();
+    let result = crate::settings::profile::apply(&dir, &file, &history, &cache)?;
+    // Задача 6.1: роутер подхватывает импортированный прокси на лету.
+    crate::vpn::router::apply_saved(&app, &dir);
+    Ok(result)
 }
 
 /// vpn.set_enabled: переключить флаг прокси в сохранённом конфиге.
 /// Включение валидирует сохранённый адрес (не форму UI — форма сохраняется
-/// отдельной командой settings.set).
+/// отдельной командой settings.set). Действует сразу — роутером (задача 6.1).
 #[tauri::command]
-fn vpn_set_enabled(params: VpnSetEnabledParams) -> Result<(), String> {
+fn vpn_set_enabled(app: tauri::AppHandle, params: VpnSetEnabledParams) -> Result<(), String> {
     let dir = proxy::profile_dir();
     let mut cfg = proxy::load_config(&dir);
     cfg.enabled = params.on;
-    save_proxy(&cfg, None)
+    save_proxy(&app, &cfg, None)
 }
 
 #[tauri::command]
@@ -1964,7 +1969,11 @@ fn translate_clear_cache(
     }
 }
 
-fn save_proxy(cfg: &proxy::ProxyConfig, secret: Option<String>) -> Result<(), String> {
+fn save_proxy(
+    app: &tauri::AppHandle,
+    cfg: &proxy::ProxyConfig,
+    secret: Option<String>,
+) -> Result<(), String> {
     if cfg.enabled {
         cfg.validate()?;
     }
@@ -1975,6 +1984,8 @@ fn save_proxy(cfg: &proxy::ProxyConfig, secret: Option<String>) -> Result<(), St
         Some("") => proxy::clear_password(&dir),
         Some(p) => proxy::save_password(&dir, p)?,
     }
+    // Задача 6.1: режим применяет роутер — сразу, без перезапуска.
+    crate::vpn::router::apply_saved(app, &dir);
     Ok(())
 }
 

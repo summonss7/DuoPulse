@@ -134,7 +134,7 @@ export const bridge = {
     export: (params: SettingsExportParams) =>
       invoke<SettingsExportResult>("settings_export", { params }),
     /** settings.import (задача 5.1): применить файл профиля (идемпотентен;
-     * переехавший прокси — needsRestart). */
+     * переехавший прокси применяется роутером сразу — задача 6.1). */
     import: (params: SettingsImportParams) => invoke<ImportOutcome>("settings_import", { params }),
   },
   vpn: {

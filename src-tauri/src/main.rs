@@ -19,10 +19,13 @@
 //   3) перехват сетевых запросов (WebResourceRequested):
 //      запросы с путём /duopulse_block_test_probe получают 403 + X-DuoPulse-Block: 1.
 //
-// Прокси (duopulse-009, docs/02 §6.3 «A»): конфиг читается ДО создания webview —
-// аргументы окружения WebView2 (--proxy-server/--proxy-bypass-list) задаются только
-// на старте, смена настроек применяется перезапуском приложения. Аргументы старта
-// фиксируются в STARTUP_PROXY_ARGS — новые вкладки создаются с теми же.
+// Прокси/роутер (docs/02 §6): WebView2 ПОСТОЯННО направлен на локальный
+// SOCKS5-роутер Core (задача 6.1) — аргументы --proxy-server задаются на
+// старте и указывают на 127.0.0.1:<port>; режим (direct/upstream) роутер
+// меняет на лету, тумблер прокси перезапуска не требует. Креденшалы внешнего
+// прокси (задача 1.8) подставляет роутер из DPAPI — обработчик
+// BasicAuthenticationRequested больше не нужен. Если роутер не поднялся —
+// деградация к поведению инкремента A (внешний прокси напрямую / без прокси).
 
 // schemars schema!-макросы в contract_json (bridge.rs) вложены в один json!:
 // с ростом словаря (v2: subtitles.load_file) глубина экспансии превысила
@@ -43,6 +46,7 @@ mod subtitles;
 mod tabs;
 mod translate;
 mod updater;
+mod vpn;
 
 use std::sync::OnceLock;
 
@@ -76,45 +80,12 @@ pub(crate) const CONTENT_INIT_SCRIPT_SUBTITLES: &str =
 
 /// Аргументы окружения WebView2, зафиксированные на старте приложения:
 /// каждая новая вкладка наследует их (сменить можно только перезапуском).
+/// С роутером (задача 6.1) здесь всегда socks5://127.0.0.1:<port> — режим
+/// переключает роутер, аргументы от режима не зависят.
 static STARTUP_PROXY_ARGS: OnceLock<String> = OnceLock::new();
 
 pub(crate) fn startup_proxy_args() -> &'static str {
     STARTUP_PROXY_ARGS.get().map(String::as_str).unwrap_or("")
-}
-
-/// Аутентификация прокси: WebView2 не принимает логин/пароль внутри --proxy-server,
-/// на вызов 407 (basic challenge) отвечает событие BasicAuthenticationRequested —
-/// подставляем сохранённые креденшалы (логин из settings.json, пароль из DPAPI).
-#[cfg(windows)]
-unsafe fn install_proxy_auth(core: &ICoreWebView2) {
-    use webview2_com::BasicAuthenticationRequestedEventHandler;
-    use windows_core::{Interface, HSTRING};
-
-    let core10: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_10 = core
-        .cast()
-        .expect("ICoreWebView2_10 (BasicAuthentication, WebView2 SDK 1.0.1155+)");
-    core10
-        .add_BasicAuthenticationRequested(
-            &BasicAuthenticationRequestedEventHandler::create(Box::new(|_sender, args| {
-                let Some(args) = args else {
-                    return Ok(());
-                };
-                // Читаем при каждом вызове: настройки могли сохранить уже после старта.
-                let dir = proxy::profile_dir();
-                let cfg = proxy::load_config(&dir);
-                let login = cfg.login.clone().unwrap_or_default();
-                let password = proxy::load_password(&dir).unwrap_or_default();
-                if login.is_empty() && password.is_empty() {
-                    return Ok(()); // креденшалов нет — не отвечаем на вызов
-                }
-                let response = args.Response()?;
-                response.SetUserName(&HSTRING::from(&login))?;
-                response.SetPassword(&HSTRING::from(&password))?;
-                Ok(())
-            })),
-            std::ptr::null_mut(),
-        )
-        .expect("add_BasicAuthenticationRequested");
 }
 
 /// Критерий M0: сетевой перехват через WebView2 WebResourceRequested.
@@ -613,7 +584,6 @@ pub(crate) unsafe fn install_content_handlers(
     let core: ICoreWebView2 = controller.CoreWebView2().expect("CoreWebView2 вкладки");
     let env: ICoreWebView2Environment = wv.environment();
     install_request_blocker(&core, &env, app, tab_id);
-    install_proxy_auth(&core);
     install_content_messaging(&core, app, tab_id);
 }
 
@@ -661,6 +631,23 @@ fn main() {
     // Очередь переводов в работе (задача 4.3): дедуп запросов по ключу и
     // офлайн-цикл автоповтора (watcher.rs, docs/01 §5.4).
     let translation_jobs = std::sync::Arc::new(translate::watcher::TranslationJobs::default());
+    // Локальный SOCKS5-роутер (задача 6.1, docs/02 §6.1): WebView2 постоянно
+    // направлен на 127.0.0.1:<port>, режим (direct/upstream) переключается
+    // на лету — перезапуск для смены прокси больше не нужен. Не поднялся —
+    // деградация к поведению инкремента A (аргументы по конфигу напрямую).
+    let router = match vpn::router::Router::start() {
+        Ok(router) => {
+            router.apply_config(&proxy::load_config(&profile_dir), &profile_dir);
+            Some(router)
+        }
+        Err(e) => {
+            eprintln!(
+                "[vpn] SOCKS5-роутер не поднялся: {e} — трафик по старой схеме, прокси без роутера"
+            );
+            None
+        }
+    };
+    let router_port = router.as_ref().map(vpn::router::Router::port);
     startup_mark("stores-open");
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
@@ -676,6 +663,7 @@ fn main() {
         .manage(translations_cache)
         .manage(translation_jobs)
         .manage(updater::UpdaterService::new())
+        .manage(router)
         .setup(move |app| {
             startup_mark("setup");
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и
@@ -687,11 +675,15 @@ fn main() {
             // Прогрев топ-сайтов (задача 2.4, docs/04 §1.4): preconnect/
             // dns-prefetch частых хостов истории при простое UI.
             prefetch::start(app.handle().clone());
-            // Прокси задаётся аргументами окружения WebView2 только на старте
-            // (docs/02 §6.1) — конфиг читаем ДО создания webview; аргументы
-            // фиксируем для всех будущих вкладок (STARTUP_PROXY_ARGS).
-            let proxy_cfg = proxy::load_config(&proxy::profile_dir());
-            let proxy_args = proxy::browser_args(Some(&proxy_cfg));
+            // Аргументы WebView2 задаются только на старте (docs/02 §6.1).
+            // С роутером (задача 6.1) — ПОСТОЯННО socks5://127.0.0.1:<port>,
+            // от режима не зависят; фолбэк без роутера — поведение инкремента
+            // A (внешний прокси напрямую / без прокси). Фиксируем для всех
+            // будущих вкладок (STARTUP_PROXY_ARGS).
+            let proxy_args = match router_port {
+                Some(port) => proxy::router_browser_args(port),
+                None => proxy::browser_args(Some(&proxy::load_config(&proxy::profile_dir()))),
+            };
             STARTUP_PROXY_ARGS
                 .set(proxy_args.clone())
                 .expect("STARTUP_PROXY_ARGS инициализируется один раз");

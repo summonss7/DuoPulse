@@ -9,18 +9,19 @@
 ```
 DuoPulse/
 ├── src-tauri/                      # Core + Shell (Rust)
-│   ├── Cargo.toml                  # deps: tauri 2, adblock, rusqlite, reqwest, serde,
-│   │                               #   boringtun + fast-socks5 (vpn, этап M6)
+│   ├── Cargo.toml                  # deps: tauri 2, adblock, rusqlite, serde
+│   │                               #   (vpn-роутер — std::net, без fast-socks5; boringtun — 6.2)
 │   ├── src/
 │   │   ├── main.rs                 # точка входа, сборка приложения
 │   │   ├── bridge.rs               # регистрация IPC-команд/событий (контракт §3)
 │   │   ├── tabs/                   # менеджер вкладок, спящий режим, восстановление сессии
 │   │   ├── adblock/                # обёртка adblock-rs, загрузка списков, cosmetic-правила
 │   │   ├── vpn/                    # маршрутизация сети (docs/02 §6): локальный SOCKS5-роутер,
-│   │   │   ├── mod.rs              #   сервис-менеджер: состояния, события в UI
-│   │   │   ├── router.rs           #   fail-closed роутер direct|proxy|wg, kill-switch
-│   │   │   ├── upstream.rs         #   исходящие транcпорты: внешний SOCKS5/HTTP (1.8)
-│   │   │   ├── wg.rs               #   WireGuard-сессия (boringtun): handshake, keepalive
+│   │   │   ├── mod.rs              #   этап M6
+│   │   │   ├── router.rs           #   fail-closed роутер direct|upstream (6.1): loopback-листенер,
+│   │   │   │                       #     SOCKS5-клиент WebView2, upstream SOCKS5(RFC 1929)/HTTP CONNECT,
+│   │   │   │                       #     смена маршрута на лету, kill-switch (разрыв тоннелей — 6.4)
+│   │   │   ├── wg.rs               #   WireGuard-сессия (boringtun): handshake, keepalive (6.2)
 │   │   │   ├── rules.rs            #   split-tunnel: домен → маршрут, персист правил
 │   │   │   └── dns.rs              #   резолв только через маршрут, без утечек
 │   │   ├── subtitles/
@@ -437,7 +438,7 @@ Gate-проверки этапов включены в последние кар
 
 | # | Задача | DoD |
 |---|---|---|
-| 6.1 | Локальный SOCKS5-роутер в Core (`vpn/router.rs`): WebView2 постоянно направлен на `127.0.0.1:<port>`, маршруты direct/upstream | с роутером в режиме off страницы грузятся как без него; отказ upstream → ошибка клиенту, а не прямой ход (fail-closed) |
+| 6.1 | **✅ выполнено 20.10.2026 (карточка duopulse-037)** Локальный SOCKS5-роутер в Core (`vpn/router.rs`): WebView2 постоянно направлен на `127.0.0.1:<port>`, маршруты direct/upstream | режим off «страницы как без роутера» и fail-closed — **достигнуты** (e2e/proxy-a/run.mjs 26/26: аргументы WebView2 всегда `socks5://127.0.0.1:<port>`, от режима не зависят; off — внешние страницы грузятся напрямую, CONNECT-лог прокси пуст; вкл — трафик WebView2 → роутер → внешний прокси, DNS на стороне маршрута (ATYP=domain); тумблер переключает режим роутером БЕЗ перезапуска — миграция инкремента A: выкл → страницы напрямую → вкл тем же процессом, блок «перезапустить» убран из меню и настроек, needs_restart импорта всегда false; пароль — RFC 1929 через роутер из DPAPI (стенд с обязательной аутентификацией: AUTH ok); fail-closed — двойное подтверждение: уровень роутера (проба SOCKS5-клиентом при битом upstream: REP=01, целевой сервер соединений не получил) и уровень страницы (ERR_SOCKS_CONNECTION_FAILED); после перезапуска приложения роутер и режим на месте). Механика: `src-tauri/src/vpn/router.rs` — loopback-листенер, только CONNECT/no-auth, маршруты Direct/Upstream (RwLock, смена на лету; битый включённый конфиг даёт Upstream — отказ у каждого соединения, не «протекает» в прямые), upstream — SOCKS5 с RFC 1929 или HTTP CONNECT с Basic, домены уходят в upstream неразрешёнными; `proxy::router_browser_args(port)` — постоянные аргументы WebView2 (фолббек при отказе роутера — прежняя схема инкремента A); bridge: settings.set / vpn.set_enabled / settings.import дёргают `vpn::router::apply_saved` — режим применяется сразу; BasicAuthenticationRequested-обработчик снят (креденшалы подставляет роутер). Тесты: cargo 183 passed/1 ignored (+11 роутера: direct-флоу, upstream SOCKS5 домен+креденшлы, HTTP CONNECT+Basic+403, fail-closed на мёртвом upstream, смена маршрута на лету, unsupported-команды, apply_config), vitest 169/169, tsc чисто, e2e/bridge 14/14 + e2e/settings 17/17 (B2: needsRestart=false) |
 | 6.2 | Клиент WireGuard (`vpn/wg.rs`, boringtun): импорт `.conf`, handshake, keepalive, roaming | подключение к серверу пользователя стабильно ≥ 30 мин; пропускная способность ≥ 100 Мбит/с на эталонной машине; ключ — в DPAPI |
 | 6.3 | Split-tunnel (`vpn/rules.rs` + `vpn/dns.rs`): правила домен → маршрут, режимы off/global/split, DNS только через маршрут | заблокированный домен открывается через туннель, YouTube — напрямую, одновременно; правила переживают перезапуск; DNS-утечек нет (трассировка) |
 | 6.4 | Kill-switch: разрыв туннеля не выпускает туннельный трафик в открытую | автотест: обрыв upstream при загрузке страницы — соединение закрывается, не уходит напрямую |

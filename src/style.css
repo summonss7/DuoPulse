@@ -529,8 +529,7 @@ body {
   gap: 8px;
   margin-top: 12px;
 }
-.proxy-actions button,
-.proxy-restart button {
+.proxy-actions button {
   width: auto;
   height: 28px;
   padding: 0 12px;
@@ -541,37 +540,18 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
-.proxy-actions button:hover,
-.proxy-restart button:hover {
+.proxy-actions button:hover {
   background: var(--hover-neutral);
 }
 /* Главная кнопка — неон-кромка, не заливка (§8: не заливать неоном кнопки) */
-.proxy-actions button.primary,
-.proxy-restart button.primary {
+.proxy-actions button.primary {
   border-color: var(--accent-neon);
   color: var(--accent-neon);
   font-weight: 700;
 }
-.proxy-actions button.primary:hover,
-.proxy-restart button.primary:hover {
+.proxy-actions button.primary:hover {
   background: color-mix(in srgb, var(--accent-neon) 10%, transparent);
   box-shadow: var(--focus-ring-soft); /* «включено» — мягкое свечение, §3 */
-}
-.proxy-restart {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius-control);
-  background: var(--bg-warm); /* тёплая «полка» — внутренняя мебель, §2 */
-  border: 1px solid var(--line-soft);
-  color: var(--text-primary);
-  font-size: 12px;
-}
-.proxy-restart[hidden] {
-  display: none;
 }
 .proxy-foot {
   margin-top: 10px;
@@ -1815,23 +1795,4 @@ input[type="range"] {
   color: var(--warn, #e6b450);
   font-size: 11px;
   line-height: 1.45;
-}
-.set-restart {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.set-restart button {
-  width: auto;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--accent-neon);
-  border-radius: var(--radius-control);
-  background: none;
-  color: var(--accent-neon);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
 }
