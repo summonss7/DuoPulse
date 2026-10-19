@@ -14,7 +14,7 @@
 // неон — акценты; секции по образцу страницы «Диагностика».
 import { invoke } from "@tauri-apps/api/core";
 import { bridge } from "../bridge";
-import type { SettingsAll } from "../bridge/gen/types";
+import type { SettingsAll, UpdaterCheckResult, UpdaterStatusResult } from "../bridge/gen/types";
 
 const err = (e: unknown): void => console.error("settings-page:", e);
 
@@ -506,7 +506,94 @@ export function initSettingsPage(): void {
   privacyRow.append(clearHistNow, clearCache, privacyStatus);
   privacy.body.append(clearHistLabel, privacyRow);
 
-  // --- 7. Профиль: экспорт/импорт одним файлом --------------------------------
+  // --- 7. Обновления (задача 5.2) ----------------------------------------------
+  const upd = section(
+    "Обновления",
+    "Подписанные пакеты установщика; проверка — по кнопке или тихо на старте, установка всегда вручную.",
+  );
+  const updChannel = document.createElement("select");
+  for (const [value, text] of [
+    ["stable", "Стабильный"],
+    ["canary", "Канарейка (ранние сборки)"],
+  ] as const) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = text;
+    updChannel.append(opt);
+  }
+  const updAuto = document.createElement("input");
+  updAuto.type = "checkbox";
+  const updAutoLabel = el("label", "set-check");
+  updAutoLabel.append(updAuto, Object.assign(el("span"), { textContent: " Проверять обновления на старте (тихо)" }));
+  const updVersionLine = el("div", "set-status");
+  updVersionLine.dataset.upd = "version";
+  const updStatus = el("div", "set-status");
+  updStatus.dataset.upd = "status";
+  const updCheckBtn = document.createElement("button");
+  updCheckBtn.type = "button";
+  updCheckBtn.className = "primary";
+  updCheckBtn.textContent = "Проверить сейчас";
+  updCheckBtn.dataset.upd = "check";
+  const updInstallBtn = document.createElement("button");
+  updInstallBtn.type = "button";
+  updInstallBtn.className = "primary";
+  updInstallBtn.hidden = true;
+  updInstallBtn.dataset.upd = "install";
+  const updRow = el("div", "set-row");
+  updRow.append(updCheckBtn, updInstallBtn, updStatus);
+  upd.body.append(field("Канал", updChannel, "канарейка — ранние сборки на тестовые машины"), updAutoLabel, updVersionLine, updRow);
+
+  /** Канал/автопроверка → раздел настроек updater. */
+  const updApply = (): void => {
+    void bridge.settings
+      .apply({ updater: { channel: updChannel.value as "stable" | "canary", autoCheck: updAuto.checked } })
+      .catch((e) => (updStatus.textContent = String(e)));
+  };
+  updChannel.addEventListener("change", updApply);
+  updAuto.addEventListener("change", updApply);
+
+  /** Итог проверки/статуса → кнопки и тексты. */
+  const renderUpdateState = (st: UpdaterStatusResult | null, res: UpdaterCheckResult | null): void => {
+    const pending = res?.available
+      ? { version: res.version ?? "?", notes: res.notes ?? null, dateUnix: res.dateUnix }
+      : st?.pending ?? null;
+    if (st) {
+      updVersionLine.textContent = `Текущая версия: ${st.currentVersion} · канал: ${st.channel === "canary" ? "канарейка" : "стабильный"}`;
+      if (!res) {
+        if (pending) updStatus.textContent = `Доступна версия ${pending.version} (найдена ранее).`;
+        else if (st.lastCheck) {
+          updStatus.textContent = st.lastCheck.error
+            ? `Последняя проверка: ${st.lastCheck.error}`
+            : `Последняя проверка: обновлений нет.`;
+        }
+      }
+    }
+    if (res) {
+      if (res.available) {
+        const when = res.dateUnix > 0 ? ` от ${new Date(res.dateUnix * 1000).toLocaleDateString("ru-RU")}` : "";
+        updStatus.textContent = `Доступна версия ${res.version}${when}${res.notes ? ` — ${res.notes}` : ""}`;
+      } else {
+        updStatus.textContent = res.error ? res.error : "У вас последняя версия.";
+      }
+    }
+    updInstallBtn.hidden = !pending;
+    if (pending) updInstallBtn.textContent = `Установить ${pending.version} и перезапустить`;
+  };
+  updCheckBtn.addEventListener("click", () => {
+    updStatus.textContent = "Проверяю…";
+    void bridge.updater
+      .check()
+      .then((res) => renderUpdateState(null, res))
+      .catch((e) => (updStatus.textContent = String(e)));
+  });
+  updInstallBtn.addEventListener("click", () => {
+    // Windows: установщик пассивно ставит пакет и сам перезапускает
+    // приложение — ответ команды при успехе не приходит.
+    updStatus.textContent = "Скачиваю пакет и устанавливаю — приложение перезапустится…";
+    void bridge.updater.install().catch((e) => (updStatus.textContent = String(e)));
+  });
+
+  // --- 8. Профиль: экспорт/импорт одним файлом --------------------------------
   const profile = section(
     "Профиль",
     "Переезд на другую машину одним файлом: настройки, закладки, история, кэш переводов.",
@@ -582,7 +669,7 @@ export function initSettingsPage(): void {
   profileRow.append(exportBtn, importBtn, profileStatus);
   profile.body.append(secretsLabel, secretsWarn, profileRow);
 
-  root.append(appearance.root, search.root, subs.root, tr.root, proxy.root, privacy.root, profile.root);
+  root.append(appearance.root, search.root, subs.root, tr.root, proxy.root, privacy.root, upd.root, profile.root);
 
   // --- загрузка ---------------------------------------------------------------
 
@@ -635,12 +722,20 @@ export function initSettingsPage(): void {
       opacity.value = String(st.plateOpacity ?? 0.78);
       opacityVal.textContent = pct((st.plateOpacity ?? 0.78) * 100);
       clearHist.checked = all.privacy.clearHistoryOnExit ?? false;
+      const up = all.updater;
+      updChannel.value = up.channel ?? "stable";
+      updAuto.checked = up.autoCheck ?? true;
       subsStatus.textContent = "";
     } catch (e) {
       err(e);
     }
     await loadTranslate().catch(err);
     await loadProxy().catch(err);
+    // Обновления (задача 5.2): версия/канал/последняя проверка из Core
+    await bridge.updater
+      .status()
+      .then((st) => renderUpdateState(st, null))
+      .catch(err);
   };
 
   void reload();

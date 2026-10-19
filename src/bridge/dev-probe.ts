@@ -1,7 +1,9 @@
-// e2e-хук: bridge-клиент в window.__duopulse — только в dev-сборке vite
-// (import.meta.env.DEV), в прод-бандле отсутствует. Используется CDP-стендами
+// e2e-хук: bridge-клиент в window.__duopulse. Экспонируется и в прод-бандле —
+// стенд обновлений (e2e/update) гоняет установленное release-приложение без
+// vite и зовёт контракт updater.* из CDP; контекст UI-окна веб-страницам
+// недоступен, клиент и так в бандле. Используется CDP-стендами
 // (e2e/bridge/run.mjs, e2e/tabs/run.mjs) для сквозных проверок UI → Core → ответ.
-// Журналы последних событий (Core → UI, тоже только dev):
+// Журналы последних событий (Core → UI, только dev — import.meta.env.DEV):
 //   __duopulseTabsEvents — tabs:updated (задача 1.2);
 //   __duopulseAdblockEvents — adblock:blocked_count (задача 2.1);
 //   __duopulseSubtitlesEvents — subtitles:tracks_ready/set_applied (задача 3.7);
@@ -10,8 +12,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "./client";
 
+(window as unknown as { __duopulse: typeof bridge }).__duopulse = bridge;
+
 if (import.meta.env.DEV) {
-  (window as unknown as { __duopulse: typeof bridge }).__duopulse = bridge;
   const events: unknown[] = [];
   void listen("tabs:updated", (ev) => {
     events.push(ev.payload);

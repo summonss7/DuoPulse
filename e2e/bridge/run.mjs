@@ -149,7 +149,7 @@ try {
 
   // (1) bridge.version
   const version = await evalIn(uiWs, `window.__duopulse.bridge.version()`);
-  check("bridge.version: приложение отдаёт версию контракта", version?.version === 6, JSON.stringify(version)); // v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1)
+  check("bridge.version: приложение отдаёт версию контракта", version?.version === 7, JSON.stringify(version)); // v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} (5.1)
 
   // (2) tabs.list — СКВОЗНОЙ DoD-тест: UI → Core → ответ
   const tabs = await evalIn(uiWs, `window.__duopulse.tabs.list()`);

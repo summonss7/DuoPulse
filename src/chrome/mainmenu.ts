@@ -69,6 +69,11 @@ menu.addEventListener("click", (e) => {
       // «Настройки» (задача 5.1): полные настройки + экспорт/импорт профиля
       void bridge.tabs.open({ url: "duopulse://settings" }).catch(err);
       break;
+    case "updates":
+      // «Обновления» (задача 5.2): раздел «Обновления» страницы настроек —
+      // там канал/автопроверка и кнопки проверки/установки.
+      void bridge.tabs.open({ url: "duopulse://settings" }).catch(err);
+      break;
     case "proxy":
       // переиспользуем обработчик кнопки навбара: тумблер/статус обновятся сами
       document.getElementById("proxyBtn")?.click();

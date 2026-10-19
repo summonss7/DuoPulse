@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 6); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 7); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
@@ -9,6 +9,10 @@ export type HistorySource = "history" | "bookmark";
  * Поисковые системы omnibox (задача 5.1): выбор по умолчанию — настройка «Поиск». Префикс — шаблон ссылки с encoded-запросом в конце (omnibox.rs).
  */
 export type SearchEngine = ("google" | "bing" | "duckduckgo") | "youtube";
+/**
+ * Канал обновлений (задача 5.2): stable — релизы, canary — ранние сборки для тестовых машин (DoD 5.2 — обновление канарейки). Канал — сегмент пути фида: <база>/<канал>/{{target}}/{{arch}}/{{current_version}}.
+ */
+export type UpdateChannel = "stable" | "canary";
 /**
  * settings.get / settings.set: ключи настроек профиля. M1: один ключ.
  */
@@ -71,6 +75,8 @@ export interface DuoPulseBridgeContract {
   SearchEngine: SearchEngine;
   SubtitlesConfig: SubtitlesConfig;
   SubtitlesStyleDefaults: SubtitlesStyleDefaults;
+  UpdateChannel: UpdateChannel;
+  UpdaterConfig: UpdaterConfig;
   SettingsExportParams: SettingsExportParams;
   SettingsExportResult: SettingsExportResult;
   ProfileCounts: ProfileCounts;
@@ -115,6 +121,9 @@ export interface DuoPulseBridgeContract {
   TranslateConfig: TranslateConfig;
   TranslateTestParams: TranslateTestParams;
   TranslateTestResult: TranslateTestResult;
+  UpdaterCheckResult: UpdaterCheckResult;
+  UpdaterStatusResult: UpdaterStatusResult;
+  UpdateInfo: UpdateInfo;
   VpnSetEnabledParams: VpnSetEnabledParams;
   VpnStatusResult: VpnStatusResult;
   ProxyState: ProxyState;
@@ -429,6 +438,7 @@ export interface SettingsPatch {
   privacy?: PrivacyConfig | null;
   search?: SearchConfig | null;
   subtitles?: SubtitlesConfig | null;
+  updater?: UpdaterConfig | null;
 }
 /**
  * Раздел "privacy" settings.json (задача 5.1).
@@ -475,6 +485,19 @@ export interface SubtitlesStyleDefaults {
    * Позиция плашки: bottom|top.
    */
   position?: string;
+}
+/**
+ * Раздел "updater" settings.json (задача 5.2). Появился после v2 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).
+ */
+export interface UpdaterConfig {
+  /**
+   * Тихая автопроверка на старте (установка — всегда руками, из настроек).
+   */
+  autoCheck?: boolean;
+  /**
+   * Канал фида обновлений (stable/canary).
+   */
+  channel?: UpdateChannel & string;
 }
 /**
  * settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на чистую машину за 1 файл). path — абсолютный путь из нативного диалога сохранения (UI); include_secrets — явный выбор пользователя (UI предупреждает: пароль прокси и ключи API попадут в файл открытым текстом).
@@ -548,6 +571,10 @@ export interface SettingsAll {
    */
   subtitles: SubtitlesConfig;
   translate: TranslateSettings;
+  /**
+   * Автообновление (задача 5.2): канал и автопроверка.
+   */
+  updater: UpdaterConfig;
 }
 /**
  * Раздел "appearance" settings.json. v1 — только тёмная фирменная тема (docs/01 F-10, ROADMAP M5): светлая — за пределами карточки 5.1, значение фиксировано, селект страницы показывает её единственной активной опцией.
@@ -917,6 +944,74 @@ export interface TranslateTestResult {
    * Перевод пробной фразы (ok=true).
    */
   translated?: string | null;
+}
+/**
+ * Итог проверки фида: что нашли (или почему не смогли посмотреть).
+ */
+export interface UpdaterCheckResult {
+  /**
+   * Есть пакет новее текущей версии.
+   */
+  available: boolean;
+  /**
+   * Время проверки, unix-мс.
+   */
+  checkedAtUnix: number;
+  /**
+   * Дата публикации пакета, unix-секунды (available=true).
+   */
+  dateUnix: number;
+  /**
+   * Отказ проверки (сеть/фид/подпись манифеста): available=false.
+   */
+  error?: string | null;
+  /**
+   * Заметки о релизу (available=true, фид указал).
+   */
+  notes?: string | null;
+  /**
+   * Версия найденного пакета (available=true).
+   */
+  version?: string | null;
+}
+/**
+ * updater.status: состояние автообновления для страницы «Настройки».
+ */
+export interface UpdaterStatusResult {
+  autoCheck: boolean;
+  /**
+   * Канал и автопроверка — раздел "updater" настроек.
+   */
+  channel: UpdateChannel;
+  /**
+   * Версия работающего приложения (package_info).
+   */
+  currentVersion: string;
+  /**
+   * Последняя проверка (ручная или автопроверка старта).
+   */
+  lastCheck?: UpdaterCheckResult | null;
+  /**
+   * Обновление, найденное последней удачной проверкой (ждёт решения).
+   */
+  pending?: UpdateInfo | null;
+}
+/**
+ * Доступное обновление (найдено проверкой, ждёт решения пользователя).
+ */
+export interface UpdateInfo {
+  /**
+   * Дата публикации пакета, unix-секунды (0 — фид не указал).
+   */
+  dateUnix: number;
+  /**
+   * Заметки о релизе (notes/body манифеста).
+   */
+  notes?: string | null;
+  /**
+   * Версия пакета на фиде (semver, новее текущей).
+   */
+  version: string;
 }
 /**
  * vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется.

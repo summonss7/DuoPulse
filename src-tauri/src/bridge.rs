@@ -36,7 +36,9 @@ use crate::proxy;
 /// export, import} (полные настройки + перенос профиля одним файлом) и
 /// translate.clear_cache (приватность); settings.{get, set} (прокси-инкремент
 /// M1) не изменились. По словарю docs/05 §2 экспорт/импорт ложатся сюда же.
-pub const CONTRACT_VERSION: u32 = 6;
+/// v7 (задача 5.2): домен updater — команды updater.{status, check, install}
+/// (автообновление: канал stable/canary, подписанные NSIS-пакеты).
+pub const CONTRACT_VERSION: u32 = 7;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -359,6 +361,8 @@ pub struct SettingsAll {
     /// Дефолты субтитров (язык перевода набора Alt+D, стиль новых вкладок).
     pub subtitles: crate::settings::SubtitlesConfig,
     pub privacy: crate::settings::PrivacyConfig,
+    /// Автообновление (задача 5.2): канал и автопроверка.
+    pub updater: crate::settings::UpdaterConfig,
     pub proxy: ProxySettings,
     /// Глобальный тумблер блокировщика (исключения сайтов — adblock.status).
     pub adblock_enabled: bool,
@@ -377,6 +381,8 @@ pub struct SettingsPatch {
     pub subtitles: Option<crate::settings::SubtitlesConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub privacy: Option<crate::settings::PrivacyConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updater: Option<crate::settings::UpdaterConfig>,
 }
 
 /// settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на
@@ -953,6 +959,12 @@ pub fn contract_json() -> serde_json::Value {
                                  "result": schema!(TranslateTestResult) },
             "translate.clear_cache": { "handler": "translate_clear_cache", "params": null,
                                         "result": schema!(TranslateClearCacheResult) },
+            "updater.status": { "handler": "updater_status", "params": null,
+                                "result": schema!(crate::updater::UpdaterStatusResult) },
+            "updater.check": { "handler": "updater_check", "params": null,
+                               "result": schema!(crate::updater::UpdaterCheckResult) },
+            "updater.install": { "handler": "updater_install", "params": null,
+                                 "result": null },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -1382,6 +1394,7 @@ fn settings_get_all(
             .collect(),
         subtitles: crate::settings::load_subtitles(&dir),
         privacy: crate::settings::load_privacy(&dir),
+        updater: crate::settings::load_updater(&dir),
         proxy: proxy_settings(&proxy_cfg, &dir),
         adblock_enabled: adblock.status().enabled,
         translate: crate::translate::settings_view(&dir),
@@ -1402,6 +1415,9 @@ fn settings_apply(params: SettingsPatch) -> Result<(), String> {
     }
     if let Some(privacy) = params.privacy {
         crate::settings::save_privacy(&dir, &privacy)?;
+    }
+    if let Some(updater) = params.updater {
+        crate::settings::save_updater(&dir, &updater)?;
     }
     Ok(())
 }
@@ -1488,6 +1504,45 @@ async fn check_vpn() -> Result<VpnStatusResult, String> {
 #[tauri::command]
 fn app_restart(app: AppHandle) {
     app.restart();
+}
+
+// --- задача 5.2: автообновление (src/updater.rs) ----------------------------
+
+/// updater.status: снапшот автообновления — текущая версия, канал/автопроверка
+/// (раздел настроек), последняя проверка и ожидающее обновление.
+#[tauri::command]
+fn updater_status(
+    app: AppHandle,
+    updater: tauri::State<'_, crate::updater::UpdaterService>,
+) -> crate::updater::UpdaterStatusResult {
+    let cfg = crate::settings::load_updater(&proxy::profile_dir());
+    updater.status(
+        app.package_info().version.to_string(),
+        cfg.channel,
+        cfg.auto_check,
+    )
+}
+
+/// updater.check: проверить фид канала из настроек (async — сеть плагина);
+/// найденный пакет запоминается в сервисе до install/следующей проверки.
+/// Отказ — в поле error результата (не Err): UI показывает причину.
+#[tauri::command]
+async fn updater_check(
+    app: AppHandle,
+    updater: tauri::State<'_, crate::updater::UpdaterService>,
+) -> Result<crate::updater::UpdaterCheckResult, String> {
+    let channel = crate::settings::load_updater(&proxy::profile_dir()).channel;
+    Ok(crate::updater::run_check(&app, &updater, channel).await)
+}
+
+/// updater.install: скачать подписанный пакет последней проверки и установить.
+/// Windows: плагин запускает NSIS (/P /UPDATE /R) и завершает процесс — при
+/// успехе команда не возвращается, приложение поднимет установщик.
+#[tauri::command]
+async fn updater_install(
+    updater: tauri::State<'_, crate::updater::UpdaterService>,
+) -> Result<(), String> {
+    crate::updater::install_pending(&updater).await
 }
 
 /// adblock.set_enabled: глобальный тумблер или исключение сайта (задача 2.1).
@@ -1978,6 +2033,9 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         translate_set_settings,
         translate_test,
         translate_clear_cache,
+        updater_status,
+        updater_check,
+        updater_install,
         app_restart
     ])
 }

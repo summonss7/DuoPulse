@@ -20,11 +20,25 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"],
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
         "languages": ["Russian", "English"],
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI1MzhGMTE1QjdBMkVBM0QKUldROTZxSzNGZkU0SmZQUWk5S3ROeUJVZklzeGoxUmJpa0dLNFRBbkNDNmVsSDJyYzUyWjN5ZlEK",
+      "endpoints": [
+        "https://updates.duopulse.dev/stable/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "passive"
+      },
+      "dangerousInsecureTransportProtocol": true
     }
   }
 }

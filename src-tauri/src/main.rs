@@ -42,6 +42,7 @@ mod settings;
 mod subtitles;
 mod tabs;
 mod translate;
+mod updater;
 
 use std::sync::OnceLock;
 
@@ -664,6 +665,9 @@ fn main() {
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
         .plugin(tauri_plugin_dialog::init())
+        // Автообновление (задача 5.2): конфиг plugins.updater (pubkey/фид) и
+        // состояние UpdaterExt::updater_builder — драйвится из src/updater.rs.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(tabs::TabManager::new())
         .manage(history_store)
         .manage(perf_store)
@@ -671,6 +675,7 @@ fn main() {
         .manage(subtitles::service::SubtitlesService::new())
         .manage(translations_cache)
         .manage(translation_jobs)
+        .manage(updater::UpdaterService::new())
         .setup(move |app| {
             startup_mark("setup");
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и
@@ -754,6 +759,19 @@ fn main() {
                 // страницу «Диагностика» (событие perf:startup_ms + срез
                 // perf.snapshot); фазы — в [startup]-логе stderr.
                 perf::emit_startup(app);
+                // Автопроверка обновлений (задача 5.2): тихая, отложена на
+                // 20 с — не мешает метрикам старта; найденное обновление
+                // ждёт решения на странице «Настройки» (установка — руками).
+                // Отказы (фид ещё не поднят) — только журнал.
+                let updater_app = app.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                    let service = updater_app.state::<updater::UpdaterService>();
+                    tauri::async_runtime::block_on(updater::auto_check_if_enabled(
+                        &updater_app,
+                        &service,
+                    ));
+                });
                 // Восстановление сессии (задача 1.6): webview активной вкладки
                 // создаётся только когда цикл событий гарантированно качает
                 // сообщения (в setup и первые его мгновения — гонка с дедлоком

@@ -57,6 +57,8 @@ import type {
   TranslateTestParams,
   TranslateTestResult,
   TranslateClearCacheResult,
+  UpdaterCheckResult,
+  UpdaterStatusResult,
   VpnSetEnabledParams,
   VpnStatusResult,
 } from "./gen/types";
@@ -207,6 +209,18 @@ export const bridge = {
     /** translate.clear_cache (задача 5.1, приватность): очистить кэш
      *  переведённых дорожек — повторные просмотры снова в провайдер. */
     clearCache: () => invoke<TranslateClearCacheResult>("translate_clear_cache"),
+  },
+  updater: {
+    /** updater.status (задача 5.2): текущая версия, канал/автопроверка,
+     *  последняя проверка и ожидающее обновление. */
+    status: () => invoke<UpdaterStatusResult>("updater_status"),
+    /** updater.check (задача 5.2): проверить фид канала из настроек;
+     *  отказ — в поле error результата. */
+    check: () => invoke<UpdaterCheckResult>("updater_check"),
+    /** updater.install (задача 5.2): скачать подписанный пакет последней
+     *  проверки и установить; Windows: приложение перезапускает установщик —
+     *  обещание команды при успехе не разрешается. */
+    install: () => invoke<void>("updater_install"),
   },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */

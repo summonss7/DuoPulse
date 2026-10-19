@@ -78,6 +78,7 @@ const PORTABLE_SETTINGS_KEYS: &[&str] = &[
     "subtitles",
     "appearance",
     "privacy",
+    "updater",
 ];
 
 /// Прочитать файл профиля (снисходительно к неизвестным полям).
@@ -201,6 +202,10 @@ pub fn apply(
             "search" => {
                 serde_json::from_value::<super::SearchConfig>(value.clone())
                     .map_err(|e| format!("раздел search в файле не читается: {e}"))?;
+            }
+            "updater" => {
+                serde_json::from_value::<super::UpdaterConfig>(value.clone())
+                    .map_err(|e| format!("раздел updater в файле не читается: {e}"))?;
             }
             "subtitles" => {
                 serde_json::from_value::<super::SubtitlesConfig>(value.clone())

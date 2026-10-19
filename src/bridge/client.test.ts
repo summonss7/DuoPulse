@@ -128,6 +128,9 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   },
   "translate.test": { path: ["translate", "test"], params: { text: null, targetLang: "ru" } },
   "translate.clear_cache": { path: ["translate", "clearCache"] },
+  "updater.status": { path: ["updater", "status"] },
+  "updater.check": { path: ["updater", "check"] },
+  "updater.install": { path: ["updater", "install"] },
   "app.restart": { path: ["app", "restart"] },
 };
 
@@ -161,7 +164,7 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(6); // v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
+    expect(contract.version).toBe(7); // v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
   });
 
   it("клиент знает все события контракта (listen по имени из bridge.events)", () => {

@@ -340,6 +340,58 @@ pub fn save_privacy(dir: &Path, cfg: &PrivacyConfig) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Автообновление (задача 5.2): канал и автопроверка
+// ---------------------------------------------------------------------------
+
+/// Канал обновлений (задача 5.2): stable — релизы, canary — ранние сборки
+/// для тестовых машин (DoD 5.2 — обновление канарейки). Канал — сегмент пути
+/// фида: <база>/<канал>/{{target}}/{{arch}}/{{current_version}}.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    Stable,
+    Canary,
+}
+
+impl UpdateChannel {
+    /// Сегмент пути фида обновлений.
+    pub fn path(self) -> &'static str {
+        match self {
+            UpdateChannel::Stable => "stable",
+            UpdateChannel::Canary => "canary",
+        }
+    }
+}
+
+/// Раздел "updater" settings.json (задача 5.2). Появился после v2 —
+/// сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct UpdaterConfig {
+    /// Канал фида обновлений (stable/canary).
+    pub channel: UpdateChannel,
+    /// Тихая автопроверка на старте (установка — всегда руками, из настроек).
+    pub auto_check: bool,
+}
+
+impl Default for UpdaterConfig {
+    fn default() -> Self {
+        Self {
+            channel: UpdateChannel::Stable,
+            auto_check: true,
+        }
+    }
+}
+
+pub fn load_updater(dir: &Path) -> UpdaterConfig {
+    load_section(dir, "updater")
+}
+
+pub fn save_updater(dir: &Path, cfg: &UpdaterConfig) -> Result<(), String> {
+    save_section(dir, "updater", cfg)
+}
+
+// ---------------------------------------------------------------------------
 // Тесты
 // ---------------------------------------------------------------------------
 
@@ -509,6 +561,41 @@ mod tests {
         )
         .unwrap();
         assert!(load_privacy(&dir).clear_history_on_exit);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn updater_config_roundtrip_and_defaults() {
+        // отсутствие/битый раздел — дефолт (stable, автопроверка вкл)
+        let dir = tmp_dir("updater");
+        assert_eq!(
+            load_updater(&dir),
+            UpdaterConfig {
+                channel: UpdateChannel::Stable,
+                auto_check: true,
+            }
+        );
+        write_key(&dir, "updater", &serde_json::json!("мусор")).unwrap();
+        assert_eq!(load_updater(&dir), UpdaterConfig::default());
+
+        save_updater(
+            &dir,
+            &UpdaterConfig {
+                channel: UpdateChannel::Canary,
+                auto_check: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            load_updater(&dir),
+            UpdaterConfig {
+                channel: UpdateChannel::Canary,
+                auto_check: false,
+            }
+        );
+        // каналы знают сегмент пути фида (подписи селекта — в UI)
+        assert_eq!(UpdateChannel::Canary.path(), "canary");
+        assert_eq!(UpdateChannel::Stable.path(), "stable");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

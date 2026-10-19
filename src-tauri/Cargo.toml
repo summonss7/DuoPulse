@@ -15,6 +15,10 @@ tauri = { version = "2", features = ["unstable"] }
 # subtitles.load_file нужен абсолютный путь — HTML input в WebView2 даёт
 # fakepath). Вызов — напрямую invoke("plugin:dialog|open"), без npm-пакета.
 tauri-plugin-dialog = "2"
+# Автообновление (задача 5.2): подписанные артефакты (minisign), каналы
+# stable/canary, установка NSIS-пакета. Драйвится из Rust (src/updater.rs)
+# по командам контракта updater.* — JS-API плагина не используется.
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # JSON Schema из Rust-типов: единый источник IPC-контракта bridge (задача 1.1,
@@ -55,6 +59,9 @@ rmp = "=0.8.14"
 # рантайма — обновление списков идёт в фоновой нити. tls — rustls с корнями
 # webpki-roots (системное хранилище не требуется).
 ureq = { version = "2", features = ["tls"], default-features = false }
+# Разбор адресов фида обновлений (задача 5.2): url::Url требуется плагину
+# апдейтера при подстановке канала в endpoints.
+url = "2"
 # Потоковое чтение XML (задача 3.1): YouTube timedtext <transcript>/<timedtext>
 # в src/subtitles/timedtext.rs; на битых документах возвращает ошибку события,
 # а не паникует — парсер продолжает с диагностику (карточка duopulse-022).

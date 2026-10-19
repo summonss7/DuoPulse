@@ -2220,3 +2220,78 @@
   выполнено); README (статус M5, стенд в списке e2e); ROADMAP (задача 5.1
   выполнена, M5 начат, план не сдвигается).
 - Коммит: см. git log (duopulse-033).
+
+## 19.10.2026 (начало 18.10.2026 23:22, окончание 19.10.2026 04:05) — задача 5.2:
+установщик NSIS + автообновление (карточка duopulse-034, этап M5)
+
+Сеанс 18.10 (23:22) написал основной код; прервался до верификации. Этот сеанс
+(19.10 03:20–04:05) сверил всё с фактом, долечил найденное и прогнал стенды.
+Перед работой — backup.bat (backup_2026-10-19_03-31-14).
+
+- Автообновление: tauri-plugin-updater (конфиг plugins.updater tauri.conf.json —
+  pubkey minisign, эндпоинт stable, installMode passive, createUpdaterArtifacts)
+  + src-tauri/src/updater.rs — UpdaterService (книга проверок last_check/pending,
+  пакет последней удачной проверки; install одноразово забирает пакет — повторный
+  требует новой проверки; отказ проверки очищает устаревший pending). Каналы
+  stable/canary — раздел updater настроек (settings/mod.rs, дефолт stable +
+  автопроверка; в PORTABLE_SETTINGS_KEYS профиля). Фид
+  <база>/<канал>/{{target}}/{{arch}}/{{current_version}}: база
+  https://updates.duopulse.dev (хостинг — 5.3), env DUOPULSE_UPDATE_BASE
+  перекрывает (стенды, тестовые машины канарейки; для локальных http-фидов
+  включён dangerousInsecureTransportProtocol — пакет в любом случае проверяется
+  minisign-подписью, прод-эндпоинты зашиты https). Установка Windows — плагин
+  запускает NSIS-пакет (/P /UPDATE /R: passive, авто-перезапуск) и завершает
+  процесс. Тихая автопроверка на старте — через 20 с после метрик (main.rs),
+  установка всегда руками. Подпись: ключ
+  %USERPROFILE%\.tauri\duopulse-updater.key (пустой пароль).
+- Контракт v7: команды updater.{status, check, install} (contract.json/types.ts
+  перегенерированы, e2e/bridge ждёт v7); SettingsAll/Patch + раздел updater;
+  client.ts + тесты 3 команд.
+- UI: секция «Обновления» страницы настроек (канал, автопроверка, «Проверить
+  сейчас»/«Установить N и перезапустить», последняя проверка/ожидающее
+  обновление) + пункт меню «Проверить обновления…» (mainmenu.ts, index.html).
+  dev-probe.ts: window.__duopulse (bridge-клиент) теперь экспонируется и в
+  прод-бандле — стенд обновлений гоняет установленное release-приложение по CDP
+  (журналы событий — по-прежнему только dev).
+- Сборка/дистрибуция: scripts/release.mjs (npm run release) — npx tauri build
+  + подпись TAURI_SIGNING_PRIVATE_KEY (дефолт — ключ проекта), артефакты в
+  builds/duopulse_<версия>_<тип>/: DuoPulse_<в>_x64-setup.exe (4,4 МБ) + .sig
+  (base64-блоб bundler'а) + latest.json (манифест фида, собирается скриптом —
+  bundler его не порождает; url — имя пакета, хостинг подставит базу). Копирует
+  только артефакты текущей версии (в bundle/nsis лежат и синтетические версии
+  стендов). Установщик: currentUser, языки ru/en, иконка, ярлыки рабочего
+  стола и «Пуска», деинсталлятор; /S — тихо (и у uninstall.exe).
+- Стенд e2e/update/run.mjs (новый, DoD 5.2): фаза A «чистая установка»
+  (деинсталляция прежнего → setup.exe /S → реестр HKCU Uninstall (версия/
+  каталог), duopulse.exe+uninstall.exe, ярлыки, запуск с изолированным APPDATA →
+  контракт v7, updater.status 0.1.0/stable/автопроверка-вкл); фаза B «обновление
+  канарейки» (синтетический подписанный 0.1.1 — tauri build --config override,
+  кэш в %TEMP%; локальный фид на 8898 → DUOPULSE_UPDATE_BASE; профиль: canary,
+  автопроверка выкл → updater.check нашёл 0.1.1 по подписи, pending ждёт,
+  install → приложение завершено, установщик пассивно обновил и перезапустил →
+  версия 0.1.1, профиль выжил, реестр 0.1.1); фаза C — деинсталляция /S без
+  следов. Уроки стенда (биты прошлой итерации): тихий запуск — execFile напрямую
+  (Start-Process -Wait -PassThu гоняется с NSIS на ExitCode; execFile «/S» не
+  мутирует — это делает только Git Bash); InstallLocation в реестре — в
+  кавычках; ярлык «Пуска» — Programs/DuoPulse.lnk без подпапки; killInstalled —
+  бэкслеши в single-quoted PS-строке удваивать нельзя (иначе taskkill никого
+  не находит и фаза B коннектится к живому A-приложению без env фида).
+- Как проверено:
+  - e2e/update 17/17 ALL PASS (DoD 5.2 достигнут на этой машине как «чистой»:
+    свежая установка → обновление канарейки → чистая деинсталляция).
+  - cargo 171 тест: 170 passed + 1 ignored (генератор контракта by design;
+    +6 к 5.1: updater-раздел roundtrip/дефолты/мусор, каналы-пути, endpoints
+    по базе/каналу, книга found/failed, take_package одноразовый); fmt --check
+    и clippy -D warnings чисто.
+  - vitest 169/169 (client.test: контракт v7 + 3 команды updater); tsc чисто.
+  - e2e/bridge 14/14 ALL PASS (контракт v7 на живом приложении); e2e/settings
+    17/17 ALL PASS (регресс страницы — новая секция не сломала ни перенос
+    профиля, ни остальные).
+  - Сборки: builds/duopulse_0.1.0_release/ (setup.exe 4,4 МБ + .sig +
+    latest.json), корневая копия DuoPulse-0.1.0-setup-release.exe для сканера
+    Aila обновлена подписанной версией.
+- Документация: docs/05 §2 (задача 5.2, контракт v7) и §3 (5.2 выполнено);
+  README (сборка npm run release + структура builds/, автообновление, стенд
+  e2e/update в списке, статус); ROADMAP (задача 5.2 выполнена, план M5 не
+  сдвигается: далее 5.3, 5.4).
+- Коммит: см. git log (duopulse-034).
