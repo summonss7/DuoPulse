@@ -21,7 +21,8 @@ import { startSocks5 } from "./socks5.mjs";
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const EXE = process.argv[2] || path.join(ROOT, "src-tauri", "target", "debug", "duopulse.exe");
 const CDP_PORT = 9223;
-const HTTP_PORT = 8899;
+// env-переопределение: 8899 на машине автора занял сервис Aila (aila-service)
+const HTTP_PORT = Number(process.env.E2E_PROXY_A_PORT || 8899);
 const PROBE_URL = "http://example.com/";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

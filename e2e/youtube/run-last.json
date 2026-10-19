@@ -1,5 +1,5 @@
 {
- "at": "2026-10-17T15:50:06.181Z",
+ "at": "2026-10-19T21:25:22.899Z",
  "paths": {
   "player-api": 10
  },
@@ -7,7 +7,7 @@
   {
    "videoId": "iG9CE55wbtY",
    "path": "player-api",
-   "baseLang": "65 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0)",
+   "baseLang": "65 баз / 156 перев. (путь player-api; плеер ad=false state=-1 paused=false t=0)",
    "set": "yt:af(af) + yt:af+ru + yt:af+es",
    "cues": [
     "yt:af:417",
@@ -20,7 +20,7 @@
   {
    "videoId": "dQw4w9WgXcQ",
    "path": "player-api",
-   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.136898)",
+   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.136101)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:61",
@@ -33,7 +33,7 @@
   {
    "videoId": "jNQXAC9IVRw",
    "path": "player-api",
-   "baseLang": "2 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.049299)",
+   "baseLang": "2 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.018813)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:6",
@@ -46,7 +46,7 @@
   {
    "videoId": "9bZkp7q19f0",
    "path": "player-api",
-   "baseLang": "1 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.019281)",
+   "baseLang": "1 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.129288)",
    "set": "yt:ko:asr(ko) + yt:ko:asr+ru + yt:ko:asr+es",
    "cues": [
     "yt:ko:asr:67",
@@ -59,7 +59,7 @@
   {
    "videoId": "kJQP7kiw5Fk",
    "path": "player-api",
-   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.015412)",
+   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.012555)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:90",
@@ -72,7 +72,7 @@
   {
    "videoId": "JGwWNGJdvx8",
    "path": "player-api",
-   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.018645)",
+   "baseLang": "6 баз / 156 перев. (путь player-api; плеер ad=false state=-1 paused=false t=0)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:92",
@@ -85,7 +85,7 @@
   {
    "videoId": "fJ9rUzIMcZQ",
    "path": "player-api",
-   "baseLang": "18 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.017091)",
+   "baseLang": "18 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.014419)",
    "set": "yt:ar(ar) + yt:ar+ru + yt:ar+es",
    "cues": [
     "yt:ar:65",
@@ -98,7 +98,7 @@
   {
    "videoId": "hT_nvWreIhg",
    "path": "player-api",
-   "baseLang": "1 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.014888)",
+   "baseLang": "1 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.017645)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:83",
@@ -111,7 +111,7 @@
   {
    "videoId": "kXYiU_JCYtU",
    "path": "player-api",
-   "baseLang": "11 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.01331)",
+   "baseLang": "11 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.11985)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:35",
@@ -124,7 +124,7 @@
   {
    "videoId": "YQHsXMglC9A",
    "path": "player-api",
-   "baseLang": "2 баз / 156 перев. (путь player-api; плеер ad=false state=3 paused=false t=0.014247)",
+   "baseLang": "2 баз / 156 перев. (путь player-api; плеер ad=false state=1 paused=false t=0.012314)",
    "set": "yt:en(en) + yt:en+ru + yt:en+es",
    "cues": [
     "yt:en:74",
