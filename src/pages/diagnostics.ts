@@ -33,7 +33,7 @@ const METRICS: MetricDef[] = [
   { id: "p02_ms", name: "P-02 Тёплый старт", budget: "≤ 500 мс", budgetMax: 500, unit: "мс", short: "P-02" },
   { id: "p03_mb", name: "P-03 RAM оболочки", budget: "≤ 250 МБ", budgetMax: 250, unit: "МБ", short: "P-03" },
   { id: "p04_cpu_pct", name: "P-04 CPU фоновой вкладки", budget: "≈ 0 %", budgetMax: 1, unit: "%", short: "P-04" },
-  { id: "p05_drops_per_min", name: "P-05 Дропы кадров 1080p60", budget: "0 / мин", budgetMax: 0, unit: "дропов/мин", short: "P-05" },
+  { id: "p05_drops_per_min", name: "P-05 Дропы кадров 1080p60", budget: "не хуже Chrome/Edge", budgetMax: null, unit: "дропов/мин", short: "P-05" },
   { id: "p06_max_block_ms", name: "P-06 Отклик UI (макс. блокировка)", budget: "нет задач > 16 мс", budgetMax: 16, unit: "мс", short: "P-06" },
   { id: "p07_ratio_pct", name: "P-07 Запросы YouTube до видео", budget: "≤ 60 %", budgetMax: 60, unit: "%", short: "P-07" },
   { id: "p08_ms", name: "P-08 Первый кадр (повторный просмотр)", budget: "≤ Chrome+uBO", budgetMax: null, unit: "мс", short: "P-08" },

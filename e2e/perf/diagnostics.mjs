@@ -4,8 +4,9 @@
 //   2) история прогонов читается из SQLite: сеем 2 прогона с p01_ms →
 //      на графике строка P-01 с двумя точками;
 //   3) «Снять срез» сохраняет живой прогон (P-02 тёплый старт) в историю;
-//   4) выход за бюджет подсвечен: сеем p05_drops_per_min=5 (бюджет 0) →
-//      точка .over и последнее значение красное.
+//   4) бюджеты: сеем p07_ratio_pct=79 (бюджет ≤ 60) → точка .over и последнее
+//      значение красное; p05_drops_per_min=5 — сравнительная метрика без
+//      порога (трактовка P-05 от 20.10.2026, docs/04 §2) → подсветки нет;
 // Запуск: node e2e/perf/diagnostics.mjs [путь-к-duopulse.exe]
 // Требует release-сборку: npx tauri build (cargo build --release без tauri-CLI даёт dev-режим — UI грузится с vite).
 import { execFile, spawn } from "node:child_process";
@@ -136,7 +137,8 @@ let failures = 0;
 const profile = mkProfile("run");
 let app = null;
 try {
-  // сеем историю: два прогона с p01 (первый — вне бюджета), один с p05 вне бюджета
+  // сеем историю: два прогона с p01 (первый — вне бюджета), один с p07 вне
+  // бюджета + p05 (сравнительная — без порога)
   const seed = (label, metrics) =>
     run(process.execPath, [
       path.join(ROOT, "e2e", "perf", "save-run.mjs"),
@@ -149,7 +151,7 @@ try {
     ]);
   await seed("стенд-1", { p01_ms: 1600, p02_ms: 480 });
   await seed("стенд-2", { p01_ms: 402, p02_ms: 365, p03_mb: 48 });
-  await seed("стенд-дропы", { p05_drops_per_min: 5 });
+  await seed("стенд-дропы", { p05_drops_per_min: 5, p07_ratio_pct: 79 });
 
   app = launch(profile);
   const t0 = Date.now();
@@ -190,12 +192,28 @@ try {
   );
   check("график: строка P-01 с 2 точками прогонов", p01dots === 2, `точек: ${p01dots}`);
 
-  // вне бюджета: p05=5 при бюджете 0 — последнее значение красное (.over)
-  const p05over = await evalIn(
+  // вне бюджета: p07=79 при бюджете ≤ 60 — последнее значение красное (.over)
+  const p07over = await evalIn(
     pageWs,
-    `document.querySelector(".diag-row-last[data-metric='p05_drops_per_min']")?.classList.contains("over") ?? false`,
+    `document.querySelector(".diag-row-last[data-metric='p07_ratio_pct']")?.classList.contains("over") ?? false`,
   );
-  check("график: выход за бюджет подсвечен (P-05 вне бюджета)", p05over === true);
+  check("график: выход за бюджет подсвечен (P-07 вне бюджета)", p07over === true);
+
+  // P-05 — сравнительная метрика (budgetMax null): значение есть, подсветки
+  // «вне бюджета» нет (порог — контрольный браузер, docs/04 §2 от 20.10.2026)
+  const p05row = await evalIn(
+    pageWs,
+    `(function () {
+      const last = document.querySelector(".diag-row-last[data-metric='p05_drops_per_min']");
+      const dots = document.querySelectorAll(".diag-row[data-metric='p05_drops_per_min'] .diag-spark-dot").length;
+      return { dots, text: last?.textContent ?? "", over: last?.classList.contains("over") ?? true };
+    })()`,
+  );
+  check(
+    "график: P-05 без числового порога (строка есть, подсветки нет)",
+    p05row.dots === 1 && p05row.over === false && /5/.test(p05row.text),
+    `точек: ${p05row.dots}, значение: «${p05row.text}», over: ${p05row.over}`,
+  );
 
   // «Снять срез»: клик по кнопке → в истории появился 4-й прогон
   const before = await evalIn(pageWs, `document.querySelectorAll(".diag-runs .diag-run").length`);

@@ -33,7 +33,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI1MzhGMTE1QjdBMkVBM0QKUldROTZxSzNGZkU0SmZQUWk5S3ROeUJVZklzeGoxUmJpa0dLNFRBbkNDNmVsSDJyYzUyWjN5ZlEK",
       "endpoints": [
-        "https://updates.duopulse.dev/stable/{{target}}/{{arch}}/{{current_version}}"
+        "https://summonss7.github.io/duopulse-updates/stable/{{target}}/{{arch}}/{{current_version}}"
       ],
       "windows": {
         "installMode": "passive"

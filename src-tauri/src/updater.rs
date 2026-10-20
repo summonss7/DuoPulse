@@ -25,8 +25,9 @@ use crate::settings::UpdateChannel;
 
 /// Сервер фида обновлений по умолчанию (совпадает с plugins.updater.endpoints
 /// tauri.conf.json — канал там зашит stable; сюда канал подставляет Rust).
-/// Реальный хостинг поднимается задачей 5.3 (релизный конвейер).
-pub const DEFAULT_FEED_BASE: &str = "https://updates.duopulse.dev";
+/// Хостинг — GitHub Pages репозитория duopulse-updates (решение автора
+/// 20.10.2026, вопрос duopulse_035_hosting_20261019).
+pub const DEFAULT_FEED_BASE: &str = "https://summonss7.github.io/duopulse-updates";
 
 /// Таймаут запросов к фиду/файлу обновления.
 const FEED_TIMEOUT_SECS: u64 = 20;
