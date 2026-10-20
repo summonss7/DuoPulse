@@ -7,10 +7,14 @@
 //!   - `Direct`   — напрямую (режим off; DNS — системный резолвер, как без
 //!     роутера);
 //!   - `Upstream` — через внешний прокси задачи 1.8: SOCKS5 с логином/паролем
-//!     (RFC 1929) или HTTP(S) CONNECT с Proxy-Authorization. Креденшалы
+//!     (RFC 1929) или HTTP(S) CONNECT с Proxy-Authorization. Креденшлы
 //!     подставляет роутер (логин — settings.json, пароль — DPAPI): WebView2
 //!     наружу их больше не отдаёт, обработчик BasicAuthenticationRequested
-//!     не нужен.
+//!     не нужен;
+//!   - `Wg` — туннель WireGuard задачи 6.2 (`vpn/wg.rs`, boringtun): TCP
+//!     терминируется userspace-стеком smoltcp, IP-пакеты идут через туннель,
+//!     DNS — сервером профиля тоже в туннеле (к системному резолверу
+//!     туннельный маршрут не обращается).
 //!
 //! Fail-closed / kill-switch (docs/02 §6.1): отказ маршрута `Upstream`
 //! (upstream не отвечает, рукопожатие отклонено, битый конфиг) — клиенту
@@ -55,9 +59,9 @@ impl std::fmt::Display for Target {
     }
 }
 
-/// Маршрут соединений (docs/02 §6.1–6.2). Туннель WireGuard добавит вариант
-/// в задаче 6.2; split-правила по домену — задача 6.3.
-#[derive(Debug, Clone, PartialEq)]
+/// Маршрут соединений (docs/02 §6.1–6.2). Split-правила по домену — задача
+/// 6.3 (тогда маршрут станет решаться на соединение).
+#[derive(Debug, Clone)]
 pub enum Route {
     /// Напрямую (режим off).
     Direct,
@@ -67,6 +71,8 @@ pub enum Route {
         cfg: ProxyConfig,
         password: Option<String>,
     },
+    /// Через туннель WireGuard (задача 6.2): сессия `vpn/wg.rs`.
+    Wg { session: crate::vpn::wg::WgSession },
 }
 
 /// Запущенный роутер: слушатель живёт в своей нити до конца процесса.
@@ -234,14 +240,16 @@ fn serve_client(mut client: TcpStream, route: &Route) -> Result<(), String> {
     };
 
     // Маршрутизация. Любой отказ — ошибка клиенту (fail-closed): в режим
-    // Upstream прямой ход запрещён, в Direct отказ цели — обычная ошибка сети.
-    // (preamble — ранние данные тоннеля, приехавшие в одном сегменте с
+    // Upstream/Wg прямой ход запрещён, в Direct отказ цели — обычная ошибка
+    // сети. (preamble — ранние данные тоннеля, приехавшие в одном сегменте с
     // заголовками ответа HTTP-прокси.)
-    let (mut upstream, preamble) = match route {
-        Route::Direct => connect_direct(&target).map(|s| (s, Vec::new())),
+    let (upstream, preamble) = match &route {
+        Route::Direct => connect_direct(&target).map(|s| (Conn::Tcp(s), Vec::new())),
         Route::Upstream { cfg, password } => {
             connect_upstream(cfg, password.as_deref().unwrap_or(""), &target)
+                .map(|(s, p)| (Conn::Tcp(s), p))
         }
+        Route::Wg { session } => connect_wg(session, &target).map(|s| (Conn::Wg(s), Vec::new())),
     }
     .inspect_err(|e| {
         let _ = reply(&mut client, 0x01);
@@ -258,9 +266,7 @@ fn serve_client(mut client: TcpStream, route: &Route) -> Result<(), String> {
     // Рукопожатия окончены — тоннель живёт без таймаутов (keep-alive, стримы).
     let _ = client.set_read_timeout(None);
     let _ = client.set_write_timeout(None);
-    let _ = upstream.set_read_timeout(None);
-    let _ = upstream.set_write_timeout(None);
-    pipe(client, &mut upstream);
+    pipe(client, upstream);
     Ok(())
 }
 
@@ -495,21 +501,80 @@ fn push_target(req: &mut Vec<u8>, target: &Target) {
     req.extend_from_slice(&target.port.to_be_bytes());
 }
 
-/// Двунаправленный тоннель: обе стороны до EOF; завершение любого направления
-/// закрывает соединение целиком (shutdown на всех клонах), чтобы второе не
-/// висело на чтении мёртвого пира.
-fn pipe(mut client: TcpStream, upstream: &mut TcpStream) {
-    let to_upstream = match (client.try_clone(), upstream.try_clone()) {
-        (Ok(mut c), Ok(mut u)) => std::thread::spawn(move || {
-            let _ = std::io::copy(&mut c, &mut u);
-            let _ = c.shutdown(Shutdown::Both);
-            let _ = u.shutdown(Shutdown::Both);
-        }),
-        _ => return,
+/// Поток тоннеля со стороны маршрута: системный TCP или виртуальный сокет
+/// туннеля WireGuard (одинаковая блокирующая семантика Read/Write).
+enum Conn {
+    Tcp(TcpStream),
+    Wg(crate::vpn::wg::WgStream),
+}
+
+/// Половины потока маршрута для двух нитей pipe (чтение и запись — Send).
+type ConnHalfs = (Box<dyn Read + Send>, Box<dyn Write + Send>);
+
+impl Conn {
+    /// Половины чтения/записи для двух нитей pipe (обе Send). Drop записи
+    /// закрывает соединение: TcpStream — целиком (shutdown клонов), Wg — FIN
+    /// виртуального сокета.
+    fn split(self) -> Result<ConnHalfs, String> {
+        match self {
+            Conn::Tcp(stream) => {
+                let read = stream
+                    .try_clone()
+                    .map_err(|e| format!("клон потока upstream: {e}"))?;
+                // Рукопожатия окончены — дальше тоннель живёт без таймаутов
+                // (в connect_upstream стоял HANDSHAKE_TIMEOUT).
+                let _ = read.set_read_timeout(None);
+                let _ = read.set_write_timeout(None);
+                let _ = stream.set_read_timeout(None);
+                let _ = stream.set_write_timeout(None);
+                Ok((Box::new(read), Box::new(stream)))
+            }
+            Conn::Wg(stream) => {
+                let (read, write) = stream.split();
+                Ok((Box::new(read), Box::new(write)))
+            }
+        }
+    }
+}
+
+/// Маршрут Wg: домен резолвится DNS-сервером профиля ВНУТРИ туннеля (утечек
+/// к системному резолверу нет, docs/02 §6.1), затем TCP — через туннель.
+/// Любой отказ — ошибка наверх (fail-closed), прямой ход исключён.
+fn connect_wg(
+    session: &crate::vpn::wg::WgSession,
+    target: &Target,
+) -> Result<crate::vpn::wg::WgStream, String> {
+    let ip = match target.host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => v4,
+        Ok(IpAddr::V6(_)) => return Err(format!("{target}: IPv6 через туннель не поддержан (v1)")),
+        Err(_) => session
+            .resolve(&target.host)
+            .map_err(|e| format!("резолв {target} DNS-сервером туннеля: {e}"))?,
     };
-    let _ = std::io::copy(upstream, &mut client);
-    let _ = client.shutdown(Shutdown::Both);
-    let _ = upstream.shutdown(Shutdown::Both);
+    session
+        .tcp_connect(SocketAddr::new(IpAddr::V4(ip), target.port))
+        .map_err(|e| format!("туннель к {target}: {e}"))
+}
+
+/// Двунаправленный тоннель: обе стороны до EOF; завершение любого направления
+/// закрывает соединение целиком (shutdown клонов клиента + закрытие потока
+/// маршрута), чтобы второе не висело на чтении мёртвого пира.
+fn pipe(client: TcpStream, upstream: Conn) {
+    let Ok((mut up_read, mut up_write)) = upstream.split() else {
+        return;
+    };
+    let Ok(mut client_read) = client.try_clone() else {
+        return;
+    };
+    let mut client_write = client;
+    let to_upstream = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut client_read, &mut up_write);
+        // Полузакрытие не моделируем: направление кончилось — соединение
+        // закрывается (drop up_write шлёт FIN/закрытие маршруту).
+    });
+    let _ = std::io::copy(&mut up_read, &mut client_write);
+    let _ = client_write.shutdown(Shutdown::Both); // будит и встречную нить
+    drop(up_read);
     let _ = to_upstream.join();
 }
 
@@ -782,7 +847,10 @@ mod tests {
     #[test]
     fn direct_route_connects_and_flows() {
         let router = Router::start().unwrap();
-        assert_eq!(router.route(), Route::Direct, "стартовый маршрут — off");
+        assert!(
+            matches!(router.route(), Route::Direct),
+            "стартовый маршрут — off"
+        );
         let (port, hits, _t) = echo_target();
 
         let s = socks5_connect(router.port(), "127.0.0.1", port).expect("REP=00");
@@ -984,7 +1052,7 @@ mod tests {
         let mut off = proxy_cfg(ProxyProto::Socks5, "p.example", 1080, None);
         off.enabled = false;
         router.apply_config(&off, &dir);
-        assert_eq!(router.route(), Route::Direct);
+        assert!(matches!(router.route(), Route::Direct));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

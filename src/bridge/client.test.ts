@@ -85,6 +85,13 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "vpn.set_enabled": { path: ["vpn", "setEnabled"], params: { on: true } },
   "vpn.status": { path: ["vpn", "status"] },
   "vpn.test_connection": { path: ["vpn", "testConnection"] },
+  "vpn.import_profile": {
+    path: ["vpn", "importProfile"],
+    params: { path: "C:\wg\my.conf" },
+  },
+  "vpn.list_profiles": { path: ["vpn", "listProfiles"] },
+  "vpn.remove_profile": { path: ["vpn", "removeProfile"], params: { id: "abc123" } },
+  "vpn.use_profile": { path: ["vpn", "useProfile"], params: { id: null } },
   "adblock.set_enabled": { path: ["adblock", "setEnabled"], params: { site: null, on: true } },
   "adblock.status": { path: ["adblock", "status"] },
   "adblock.update_lists": { path: ["adblock", "updateLists"], params: { force: true } },
@@ -164,7 +171,7 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(7); // v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
+    expect(contract.version).toBe(8); // v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
   });
 
   it("клиент знает все события контракта (listen по имени из bridge.events)", () => {

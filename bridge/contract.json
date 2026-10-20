@@ -3174,11 +3174,144 @@
         "type": "object"
       }
     },
+    "vpn.import_profile": {
+      "handler": "vpn_import_profile",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "vpn.import_profile: путь к `.conf` (нативный диалог выбора, UI — задача 6.5; e2e/диагностика — путь напрямую). Приватный ключ уходит в DPAPI, в wg-profiles.json — только открытые поля.",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "VpnImportProfileParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Профиль WireGuard для списка UI (секретов нет).",
+        "properties": {
+          "active": {
+            "description": "Активен сейчас (туннель поднят этим профилем).",
+            "type": "boolean"
+          },
+          "address": {
+            "type": "string"
+          },
+          "dns": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "keepalive": {
+            "format": "uint16",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active",
+          "address",
+          "endpoint",
+          "id",
+          "name"
+        ],
+        "title": "VpnProfileInfo",
+        "type": "object"
+      }
+    },
+    "vpn.list_profiles": {
+      "handler": "vpn_list_profiles",
+      "params": null,
+      "result": {
+        "items": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "description": "Профиль WireGuard для списка UI (секретов нет).",
+          "properties": {
+            "active": {
+              "description": "Активен сейчас (туннель поднят этим профилем).",
+              "type": "boolean"
+            },
+            "address": {
+              "type": "string"
+            },
+            "dns": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "keepalive": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "active",
+            "address",
+            "endpoint",
+            "id",
+            "name"
+          ],
+          "title": "VpnProfileInfo",
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "vpn.remove_profile": {
+      "handler": "vpn_remove_profile",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "VpnRemoveProfileParams",
+        "type": "object"
+      },
+      "result": null
+    },
     "vpn.set_enabled": {
       "handler": "vpn_set_enabled",
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется.",
+        "description": "vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется. Взаимно исключаем с туннелем WireGuard: vpn.use_profile при включении гасит прокси.",
         "properties": {
           "on": {
             "type": "boolean"
@@ -3222,19 +3355,91 @@
                 "type": "string"
               }
             ]
+          },
+          "VpnWgState": {
+            "description": "Живое состояние туннеля WireGuard (vpn/wg.rs).",
+            "properties": {
+              "endpoint": {
+                "type": "string"
+              },
+              "lastHandshakeMs": {
+                "description": "Сколько мс назад был последний handshake (null — не было).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "profileId": {
+                "type": "string"
+              },
+              "profileName": {
+                "type": "string"
+              },
+              "rxBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sinceMs": {
+                "description": "Unix-ms запуска сессии.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "state": {
+                "description": "connecting | connected | error.",
+                "type": "string"
+              },
+              "txBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "endpoint",
+              "profileId",
+              "profileName",
+              "rxBytes",
+              "sinceMs",
+              "state",
+              "txBytes"
+            ],
+            "type": "object"
           }
         },
-        "description": "vpn.status / vpn.test_connection: состояние маршрутизации. state — словарь M1 (off/on/error); в M6 при WireGuard контракт расширится состояниями из docs/05 §2 (connecting/connected) с bump версии.",
+        "description": "vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
         "properties": {
           "detail": {
             "type": "string"
           },
+          "mode": {
+            "description": "off | proxy | wg.",
+            "type": "string"
+          },
           "state": {
-            "$ref": "#/definitions/ProxyState"
+            "allOf": [
+              {
+                "$ref": "#/definitions/ProxyState"
+              }
+            ],
+            "description": "Словарь M1 (off/on/error) в рамках текущего mode."
+          },
+          "wg": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/VpnWgState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "detail",
+          "mode",
           "state"
         ],
         "title": "VpnStatusResult",
@@ -3271,19 +3476,226 @@
                 "type": "string"
               }
             ]
+          },
+          "VpnWgState": {
+            "description": "Живое состояние туннеля WireGuard (vpn/wg.rs).",
+            "properties": {
+              "endpoint": {
+                "type": "string"
+              },
+              "lastHandshakeMs": {
+                "description": "Сколько мс назад был последний handshake (null — не было).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "profileId": {
+                "type": "string"
+              },
+              "profileName": {
+                "type": "string"
+              },
+              "rxBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sinceMs": {
+                "description": "Unix-ms запуска сессии.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "state": {
+                "description": "connecting | connected | error.",
+                "type": "string"
+              },
+              "txBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "endpoint",
+              "profileId",
+              "profileName",
+              "rxBytes",
+              "sinceMs",
+              "state",
+              "txBytes"
+            ],
+            "type": "object"
           }
         },
-        "description": "vpn.status / vpn.test_connection: состояние маршрутизации. state — словарь M1 (off/on/error); в M6 при WireGuard контракт расширится состояниями из docs/05 §2 (connecting/connected) с bump версии.",
+        "description": "vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
         "properties": {
           "detail": {
             "type": "string"
           },
+          "mode": {
+            "description": "off | proxy | wg.",
+            "type": "string"
+          },
           "state": {
-            "$ref": "#/definitions/ProxyState"
+            "allOf": [
+              {
+                "$ref": "#/definitions/ProxyState"
+              }
+            ],
+            "description": "Словарь M1 (off/on/error) в рамках текущего mode."
+          },
+          "wg": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/VpnWgState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "detail",
+          "mode",
+          "state"
+        ],
+        "title": "VpnStatusResult",
+        "type": "object"
+      }
+    },
+    "vpn.use_profile": {
+      "handler": "vpn_use_profile",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "vpn.use_profile: включить туннель с профилем (Some) или выключить (None). Включение мгновенно гасит режим прокси (маршруты взаимоисключимы до split-правил задачи 6.3) и поднимает роутер на Route::Wg; выключение возвращает маршрут по конфигу прокси (off/upstream). Повторное включение того же профиля — перезапуск туннеля (применение свежего импорта).",
+        "properties": {
+          "id": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "VpnUseProfileParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProxyState": {
+            "oneOf": [
+              {
+                "description": "Прокси выключен — все соединения прямые.",
+                "enum": [
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён и отвечает.",
+                "enum": [
+                  "on"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён, но недоступен — показываем сигнальный цвет ошибки.",
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "VpnWgState": {
+            "description": "Живое состояние туннеля WireGuard (vpn/wg.rs).",
+            "properties": {
+              "endpoint": {
+                "type": "string"
+              },
+              "lastHandshakeMs": {
+                "description": "Сколько мс назад был последний handshake (null — не было).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "profileId": {
+                "type": "string"
+              },
+              "profileName": {
+                "type": "string"
+              },
+              "rxBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sinceMs": {
+                "description": "Unix-ms запуска сессии.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "state": {
+                "description": "connecting | connected | error.",
+                "type": "string"
+              },
+              "txBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "endpoint",
+              "profileId",
+              "profileName",
+              "rxBytes",
+              "sinceMs",
+              "state",
+              "txBytes"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "mode": {
+            "description": "off | proxy | wg.",
+            "type": "string"
+          },
+          "state": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/ProxyState"
+              }
+            ],
+            "description": "Словарь M1 (off/on/error) в рамках текущего mode."
+          },
+          "wg": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/VpnWgState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "detail",
+          "mode",
           "state"
         ],
         "title": "VpnStatusResult",
@@ -3813,19 +4225,86 @@
                 "type": "string"
               }
             ]
+          },
+          "VpnWgState": {
+            "description": "Живое состояние туннеля WireGuard (vpn/wg.rs).",
+            "properties": {
+              "endpoint": {
+                "type": "string"
+              },
+              "lastHandshakeMs": {
+                "description": "Сколько мс назад был последний handshake (null — не было).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "profileId": {
+                "type": "string"
+              },
+              "profileName": {
+                "type": "string"
+              },
+              "rxBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sinceMs": {
+                "description": "Unix-ms запуска сессии.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "state": {
+                "description": "connecting | connected | error.",
+                "type": "string"
+              },
+              "txBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "endpoint",
+              "profileId",
+              "profileName",
+              "rxBytes",
+              "sinceMs",
+              "state",
+              "txBytes"
+            ],
+            "type": "object"
           }
         },
-        "description": "vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).",
+        "description": "vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; реально эмитится с M6 — смена режима роутера и переходы туннеля WG connecting/connected/error, задача 6.2).",
         "properties": {
           "detail": {
             "type": "string"
           },
+          "mode": {
+            "description": "off | proxy | wg.",
+            "type": "string"
+          },
           "state": {
             "$ref": "#/definitions/ProxyState"
+          },
+          "wg": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/VpnWgState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "detail",
+          "mode",
           "state"
         ],
         "title": "VpnStateChanged",
@@ -3833,5 +4312,5 @@
       }
     }
   },
-  "version": 7
+  "version": 8
 }

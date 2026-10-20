@@ -18,10 +18,12 @@ DuoPulse/
 │   │   ├── adblock/                # обёртка adblock-rs, загрузка списков, cosmetic-правила
 │   │   ├── vpn/                    # маршрутизация сети (docs/02 §6): локальный SOCKS5-роутер,
 │   │   │   ├── mod.rs              #   этап M6
-│   │   │   ├── router.rs           #   fail-closed роутер direct|upstream (6.1): loopback-листенер,
+│   │   │   ├── router.rs           #   fail-closed роутер direct|upstream|wg (6.1/6.2): loopback-листенер,
 │   │   │   │                       #     SOCKS5-клиент WebView2, upstream SOCKS5(RFC 1929)/HTTP CONNECT,
 │   │   │   │                       #     смена маршрута на лету, kill-switch (разрыв тоннелей — 6.4)
-│   │   │   ├── wg.rs               #   WireGuard-сессия (boringtun): handshake, keepalive (6.2)
+│   │   │   ├── wg.rs               #   клиент WireGuard (boringtun 0.7 + стек smoltcp medium-ip, задача
+│   │   │   │                       #     6.2): импорт .conf (ключи — DPAPI), handshake/keepalive/roaming,
+│   │   │   │                       #     виртуальные TCP через туннель, DNS только сервером профиля
 │   │   │   ├── rules.rs            #   split-tunnel: домен → маршрут, персист правил
 │   │   │   └── dns.rs              #   резолв только через маршрут, без утечек
 │   │   ├── subtitles/
@@ -363,6 +365,39 @@ e2e/settings 17/17; e2e/update 17/17 — прогнан в сеансе 5.2 на
 (код не менялся). Хостинг фида обновлений (updates.duopulse.dev) — вопрос
 хозяину (Aila duopulse_035_hosting_20261019).
 
+**Задача 6.2 (duopulse-038, контракт v8):** клиент WireGuard — `src-tauri/src/vpn/wg.rs`
+(boringtun 0.7 + TCP/IP-стек smoltcp medium-ip, userspace, без TUN-драйвера
+и прав администратора). Схема: роутер терминирует TCP-соединения WebView2 в
+виртуальных сокетах стека, их IP-пакеты идут через boringtun-туннель UDP на
+сервер пользователя. Импорт `.conf` (формат wg-quick, снисходительный парсер:
+несколько `[Peer]` → первый, MTU/SaveConfig игнорируются, IPv6-only Address
+честно отклоняется): профили в `wg-profiles.json` (id детерминирован публичным
+ключом пира — повторный импорт upsert), приватный ключ + PSK — единым
+DPAPI-blob `vpn/wg/<id>.bin` (открытым текстом нигде, тест проверяет файлы).
+Handshake — первый initiation явно (update_timers ретраит только после
+первого), keepalive/rekey — таймерами протокола; roaming — `network_changed()`:
+сокет и сессия пересоздаются, established-соединения стека переживают переход
+(сервер WG принимает с любого адреса). DNS без утечек: домены туннельного
+маршрута резолвит DNS-сервер профиля через UDP-сокет стека (внутри туннеля),
+endpoint самого сервера — системно (как любой WG-клиент). Тактование нити
+туннеля: nonblock-дрен UDP + poll дважды за такт + блокирующее ожидание
+датаграммы в конце итерации (пробуждение по приходу датаграммы, не по тику
+Windows ~15,6 мс); wake-датаграммы от WgStream/команд будят нить мгновенно;
+ACK без задержки (set_ack_delay(None)) — иначе RTT виртуального канала
+убивал пропускную способность (замер: было ~9 Мбит/с → стало гигабиты
+loopback-стенда). IPC (контракт v8): `vpn.{import_profile, list_profiles,
+remove_profile, use_profile}` + расширение `vpn.{status, test_connection}`
+(mode off/proxy/wg + снапшот туннеля; проба через туннель, DUOPULSE_WG_PROBE,
+default one.one.one.one:80) и события `vpn:state_changed` (переходы
+connecting/connected/error с полем mode/wg); включение WG гасит прокси-режим
+(маршруты взаимоисключимы до split-правил 6.3), активный профиль поднимается
+на старте (main.rs → `bridge::apply_wg_saved`). Стенд в cargo-тестах: loopback
+WireGuard-сервер (Tunn boringtun + smoltcp: TCP-echo/генератор, DNS-ответчик,
+roaming-ответы последнему адресу клиента) — handshake, echo, DNS, keepalive
+при простое, roaming с сохранением соединения, fail-closed на мёртвом
+endpoint, сквозной SOCKS5→роутер→туннель→echo; throughput (ignored-тест,
+release + DUOPULSE_WG_TPUT_MIN_MBPS) и soak (DUOPULSE_WG_SOAK_SECS).
+
 ## 3. Эпики → карточки (порядок работ)
 
 Каждая строка — кандидат в карточку CARDS/ (создаётся диспетчером/разработчиком при
@@ -439,7 +474,7 @@ Gate-проверки этапов включены в последние кар
 | # | Задача | DoD |
 |---|---|---|
 | 6.1 | **✅ выполнено 20.10.2026 (карточка duopulse-037)** Локальный SOCKS5-роутер в Core (`vpn/router.rs`): WebView2 постоянно направлен на `127.0.0.1:<port>`, маршруты direct/upstream | режим off «страницы как без роутера» и fail-closed — **достигнуты** (e2e/proxy-a/run.mjs 26/26: аргументы WebView2 всегда `socks5://127.0.0.1:<port>`, от режима не зависят; off — внешние страницы грузятся напрямую, CONNECT-лог прокси пуст; вкл — трафик WebView2 → роутер → внешний прокси, DNS на стороне маршрута (ATYP=domain); тумблер переключает режим роутером БЕЗ перезапуска — миграция инкремента A: выкл → страницы напрямую → вкл тем же процессом, блок «перезапустить» убран из меню и настроек, needs_restart импорта всегда false; пароль — RFC 1929 через роутер из DPAPI (стенд с обязательной аутентификацией: AUTH ok); fail-closed — двойное подтверждение: уровень роутера (проба SOCKS5-клиентом при битом upstream: REP=01, целевой сервер соединений не получил) и уровень страницы (ERR_SOCKS_CONNECTION_FAILED); после перезапуска приложения роутер и режим на месте). Механика: `src-tauri/src/vpn/router.rs` — loopback-листенер, только CONNECT/no-auth, маршруты Direct/Upstream (RwLock, смена на лету; битый включённый конфиг даёт Upstream — отказ у каждого соединения, не «протекает» в прямые), upstream — SOCKS5 с RFC 1929 или HTTP CONNECT с Basic, домены уходят в upstream неразрешёнными; `proxy::router_browser_args(port)` — постоянные аргументы WebView2 (фолббек при отказе роутера — прежняя схема инкремента A); bridge: settings.set / vpn.set_enabled / settings.import дёргают `vpn::router::apply_saved` — режим применяется сразу; BasicAuthenticationRequested-обработчик снят (креденшалы подставляет роутер). Тесты: cargo 183 passed/1 ignored (+11 роутера: direct-флоу, upstream SOCKS5 домен+креденшлы, HTTP CONNECT+Basic+403, fail-closed на мёртвом upstream, смена маршрута на лету, unsupported-команды, apply_config), vitest 169/169, tsc чисто, e2e/bridge 14/14 + e2e/settings 17/17 (B2: needsRestart=false) |
-| 6.2 | Клиент WireGuard (`vpn/wg.rs`, boringtun): импорт `.conf`, handshake, keepalive, roaming | подключение к серверу пользователя стабильно ≥ 30 мин; пропускная способность ≥ 100 Мбит/с на эталонной машине; ключ — в DPAPI |
+| 6.2 | **✅ выполнено 20.10.2026 (карточка duopulse-038)** Клиент WireGuard (`vpn/wg.rs`, boringtun): импорт `.conf`, handshake, keepalive, roaming | handshake/keepalive/roaming/DNS/fail-closed — **достигнуты** автотестами с loopback WG-сервером (boringtun+smoltcp in-process: 11 тестов модуля, включая сквозной SOCKS5→роутер→туннель→echo и keepalive при простое); пропускная способность ≥ 100 Мбит/с — **с запасом**: release-замер 16 МиБ download через туннель 1,4–1,9 Гбит/с (замеры двух прогонов), RTT ~0,2 мс (после починки тактования нити: nonblock-дрен + wake-датаграммы + no-delay ACK; до — ~9 Мбит/с); стабильность ≥ 30 мин — soak DUOPULSE_WG_SOAK_SECS=1800 (30 мин, keepalive 15 с, rekey-циклы ~120 с, отчёт CHANGELOG); ключ — в DPAPI (`vpn/wg/<id>.bin`, тесты подтверждают отсутствие открытого ключа в файлах). Ограничение v1: стек proto-ipv4 (IPv6-only конфиги отклоняются честной ошибкой), UI-панель — задача 6.5; живой сервер пользователя для приёмки — вопрос автору (Aila) |
 | 6.3 | Split-tunnel (`vpn/rules.rs` + `vpn/dns.rs`): правила домен → маршрут, режимы off/global/split, DNS только через маршрут | заблокированный домен открывается через туннель, YouTube — напрямую, одновременно; правила переживают перезапуск; DNS-утечек нет (трассировка) |
 | 6.4 | Kill-switch: разрыв туннеля не выпускает туннельный трафик в открытую | автотест: обрыв upstream при загрузке страницы — соединение закрывается, не уходит напрямую |
 | 6.5 | UI VPN: индикатор-щит в Navbar, панель (тумблер, режим, сервер, правила, статистика), дисклеймер | сверка с гайдом 06; сценарий docs/01 §5.6 проходит руками |

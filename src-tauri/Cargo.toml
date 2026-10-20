@@ -66,6 +66,25 @@ url = "2"
 # в src/subtitles/timedtext.rs; на битых документах возвращает ошибку события,
 # а не паникует — парсер продолжает с диагностику (карточка duopulse-022).
 quick-xml = "0.36"
+# Клиент WireGuard (задача 6.2, docs/02 §6.3-B): boringtun — Noise IK
+# handshake и ChaCha20-Poly1305-шифрование пакетов userspace, без TUN-драйвера
+# и прав администратора (изоляция — src/vpn/wg.rs, смена реализации не трогает
+# остальное; план Б — системный WireGuard/Wintun, ROADMAP).
+boringtun = "0.7"
+# TCP/IP-стек userspace поверх сессии WireGuard: роутер терминирует TCP-
+# соединения WebView2 в smoltcp-сокетах, IP-пакеты ходят через туннель
+# (medium-ip, без Ethernet; UDP-сокет — DNS через маршрут). Лицензия 0BSD.
+smoltcp = { version = "0.14", default-features = false, features = [
+    "std",
+    "medium-ip",
+    "socket-tcp",
+    "socket-udp",
+    "proto-ipv4",
+] }
+# Настройка буферов UDP-сокета туннеля (SO_RCVBUF): дефолтных 64 КБ Windows
+# не хватает на пачки сегментов TCP-окна — потери и ретрансмиссии (задача 6.2,
+# замер пропускной способности). Уже в дереве (транзитивно), без новых загрузок.
+socket2 = "0.6"
 
 [profile.release]
 panic = "abort"

@@ -688,6 +688,11 @@ fn main() {
                 .set(proxy_args.clone())
                 .expect("STARTUP_PROXY_ARGS инициализируется один раз");
 
+            // Туннель WireGuard (задача 6.2): активный профиль wg-profiles.json
+            // поднимается на старте и переключает маршрут роутера на Wg
+            // (события vpn:state_changed — из bridge::apply_wg_saved).
+            bridge::apply_wg_saved(app.handle());
+
             // Окно создаётся кодом (не из tauri.conf.json), чтобы подставить
             // аргументы: UI-webview и дочерние webview вкладок делят одно
             // окружение WebView2 — прокси действует на все (localhost обходит).

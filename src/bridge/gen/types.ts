@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 7); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 8); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
@@ -124,9 +124,14 @@ export interface DuoPulseBridgeContract {
   UpdaterCheckResult: UpdaterCheckResult;
   UpdaterStatusResult: UpdaterStatusResult;
   UpdateInfo: UpdateInfo;
+  VpnImportProfileParams: VpnImportProfileParams;
+  VpnProfileInfo: VpnProfileInfo;
+  VpnRemoveProfileParams: VpnRemoveProfileParams;
   VpnSetEnabledParams: VpnSetEnabledParams;
   VpnStatusResult: VpnStatusResult;
   ProxyState: ProxyState;
+  VpnWgState: VpnWgState;
+  VpnUseProfileParams: VpnUseProfileParams;
   AdblockBlockedCount: AdblockBlockedCount;
   AdblockSiteException: AdblockSiteException;
   PageLoaded: PageLoaded;
@@ -1014,17 +1019,77 @@ export interface UpdateInfo {
   version: string;
 }
 /**
- * vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется.
+ * vpn.import_profile: путь к `.conf` (нативный диалог выбора, UI — задача 6.5; e2e/диагностика — путь напрямую). Приватный ключ уходит в DPAPI, в wg-profiles.json — только открытые поля.
+ */
+export interface VpnImportProfileParams {
+  path: string;
+}
+/**
+ * Профиль WireGuard для списка UI (секретов нет).
+ */
+export interface VpnProfileInfo {
+  /**
+   * Активен сейчас (туннель поднят этим профилем).
+   */
+  active: boolean;
+  address: string;
+  dns?: string[];
+  endpoint: string;
+  id: string;
+  keepalive?: number | null;
+  name: string;
+}
+export interface VpnRemoveProfileParams {
+  id: string;
+}
+/**
+ * vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется. Взаимно исключаем с туннелем WireGuard: vpn.use_profile при включении гасит прокси.
  */
 export interface VpnSetEnabledParams {
   on: boolean;
 }
 /**
- * vpn.status / vpn.test_connection: состояние маршрутизации. state — словарь M1 (off/on/error); в M6 при WireGuard контракт расширится состояниями из docs/05 §2 (connecting/connected) с bump версии.
+ * vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.
  */
 export interface VpnStatusResult {
   detail: string;
+  /**
+   * off | proxy | wg.
+   */
+  mode: string;
+  /**
+   * Словарь M1 (off/on/error) в рамках текущего mode.
+   */
   state: ProxyState;
+  wg?: VpnWgState | null;
+}
+/**
+ * Живое состояние туннеля WireGuard (vpn/wg.rs).
+ */
+export interface VpnWgState {
+  endpoint: string;
+  /**
+   * Сколько мс назад был последний handshake (null — не было).
+   */
+  lastHandshakeMs?: number | null;
+  profileId: string;
+  profileName: string;
+  rxBytes: number;
+  /**
+   * Unix-ms запуска сессии.
+   */
+  sinceMs: number;
+  /**
+   * connecting | connected | error.
+   */
+  state: string;
+  txBytes: number;
+}
+/**
+ * vpn.use_profile: включить туннель с профилем (Some) или выключить (None). Включение мгновенно гасит режим прокси (маршруты взаимоисключимы до split-правил задачи 6.3) и поднимает роутер на Route::Wg; выключение возвращает маршрут по конфигу прокси (off/upstream). Повторное включение того же профиля — перезапуск туннеля (применение свежего импорта).
+ */
+export interface VpnUseProfileParams {
+  id?: string | null;
 }
 /**
  * adblock:blocked_count: прирост блокировок (батчинг ~400 мс в Core, задача 2.1) — счётчик в главном меню.
@@ -1149,9 +1214,14 @@ export interface SubtitlesTranslateUnavailable {
   willRetry: boolean;
 }
 /**
- * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; начнёт эмититься с локальным роутером M6, docs/02 §6).
+ * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; реально эмитится с M6 — смена режима роутера и переходы туннеля WG connecting/connected/error, задача 6.2).
  */
 export interface VpnStateChanged {
   detail: string;
+  /**
+   * off | proxy | wg.
+   */
+  mode: string;
   state: ProxyState;
+  wg?: VpnWgState | null;
 }

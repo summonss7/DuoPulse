@@ -16,6 +16,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
 use tauri::{AppHandle, Emitter, Manager, Url};
 
 use crate::proxy;
@@ -38,7 +39,11 @@ use crate::proxy;
 /// M1) не изменились. По словарю docs/05 §2 экспорт/импорт ложатся сюда же.
 /// v7 (задача 5.2): домен updater — команды updater.{status, check, install}
 /// (автообновление: канал stable/canary, подписанные NSIS-пакеты).
-pub const CONTRACT_VERSION: u32 = 7;
+/// v8 (задача 6.2): домен vpn вырос — команды vpn.{import_profile,
+/// list_profiles, remove_profile, use_profile} (клиент WireGuard, boringtun),
+/// vpn.status/test_connection расширились полями mode/wg, событие
+/// vpn:state_changed — полями mode/wg (переходы туннеля).
+pub const CONTRACT_VERSION: u32 = 8;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -428,20 +433,84 @@ pub struct TranslateClearCacheResult {
 
 /// vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси
 /// (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6).
-/// Включение с невалидным конфигом — ошибка, конфиг не меняется.
+/// Включение с невалидным конфигом — ошибка, конфиг не меняется. Взаимно
+/// исключаем с туннелем WireGuard: vpn.use_profile при включении гасит прокси.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct VpnSetEnabledParams {
     pub on: bool,
 }
 
-/// vpn.status / vpn.test_connection: состояние маршрутизации.
-/// state — словарь M1 (off/on/error); в M6 при WireGuard контракт расширится
-/// состояниями из docs/05 §2 (connecting/connected) с bump версии.
+/// vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации.
+/// mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено
+/// поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VpnStatusResult {
+    /// off | proxy | wg.
+    pub mode: String,
+    /// Словарь M1 (off/on/error) в рамках текущего mode.
     pub state: proxy::ProxyState,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wg: Option<VpnWgState>,
+}
+
+/// Живое состояние туннеля WireGuard (vpn/wg.rs).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnWgState {
+    pub profile_id: String,
+    pub profile_name: String,
+    /// connecting | connected | error.
+    pub state: String,
+    pub endpoint: String,
+    /// Сколько мс назад был последний handshake (null — не было).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_handshake_ms: Option<u64>,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    /// Unix-ms запуска сессии.
+    pub since_ms: i64,
+}
+
+/// vpn.import_profile: путь к `.conf` (нативный диалог выбора, UI — задача
+/// 6.5; e2e/диагностика — путь напрямую). Приватный ключ уходит в DPAPI,
+/// в wg-profiles.json — только открытые поля.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnImportProfileParams {
+    pub path: String,
+}
+
+/// Профиль WireGuard для списка UI (секретов нет).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnProfileInfo {
+    pub id: String,
+    pub name: String,
+    pub endpoint: String,
+    pub address: String,
+    #[serde(default)]
+    pub dns: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keepalive: Option<u16>,
+    /// Активен сейчас (туннель поднят этим профилем).
+    pub active: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnRemoveProfileParams {
+    pub id: String,
+}
+
+/// vpn.use_profile: включить туннель с профилем (Some) или выключить (None).
+/// Включение мгновенно гасит режим прокси (маршруты взаимоисключимы до
+/// split-правил задачи 6.3) и поднимает роутер на Route::Wg; выключение
+/// возвращает маршрут по конфигу прокси (off/upstream). Повторное включение
+/// того же профиля — перезапуск туннеля (применение свежего импорта).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnUseProfileParams {
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 // --- задача 2.1: блокировщик рекламы (src/adblock/) ------------------------
@@ -752,13 +821,18 @@ pub type SubtitlesTranslateProgress = crate::translate::SubtitlesTranslateProgre
 pub type SubtitlesTranslateUnavailable = crate::translate::SubtitlesTranslateUnavailable;
 
 /// vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1;
-/// начнёт эмититься с локальным роутером M6, docs/02 §6).
+/// реально эмитится с M6 — смена режима роутера и переходы туннеля WG
+/// connecting/connected/error, задача 6.2).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct VpnStateChanged {
+    /// off | proxy | wg.
+    pub mode: String,
     pub state: proxy::ProxyState,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wg: Option<VpnWgState>,
 }
 
 impl BridgeEvent for VpnStateChanged {
@@ -910,6 +984,18 @@ pub fn contract_json() -> serde_json::Value {
                             "result": schema!(VpnStatusResult) },
             "vpn.test_connection": { "handler": "vpn_test_connection", "params": null,
                                      "result": schema!(VpnStatusResult) },
+            "vpn.import_profile": { "handler": "vpn_import_profile",
+                                    "params": schema!(VpnImportProfileParams),
+                                    "result": schema!(VpnProfileInfo) },
+            "vpn.list_profiles": { "handler": "vpn_list_profiles", "params": null,
+                                   "result": { "type": "array",
+                                               "items": schema!(VpnProfileInfo) } },
+            "vpn.remove_profile": { "handler": "vpn_remove_profile",
+                                    "params": schema!(VpnRemoveProfileParams),
+                                    "result": null },
+            "vpn.use_profile": { "handler": "vpn_use_profile",
+                                 "params": schema!(VpnUseProfileParams),
+                                 "result": schema!(VpnStatusResult) },
             "adblock.set_enabled": { "handler": "adblock_set_enabled",
                                       "params": schema!(AdblockSetEnabledParams),
                                       "result": schema!(AdblockStatusResult) },
@@ -1480,28 +1566,278 @@ fn vpn_set_enabled(app: tauri::AppHandle, params: VpnSetEnabledParams) -> Result
 }
 
 #[tauri::command]
-async fn vpn_status() -> Result<VpnStatusResult, String> {
-    check_vpn().await
+async fn vpn_status(app: AppHandle) -> Result<VpnStatusResult, String> {
+    tauri::async_runtime::spawn_blocking(move || collect_vpn_status(&app))
+        .await
+        .map_err(|e| e.to_string())
 }
 
-/// vpn.test_connection: та же проверка достижимости, что и в vpn.status —
-/// по явному запросу пользователя (кнопка «Проверить»); в M6 дополнится
-/// пингом/IP-эхом через маршрут.
+/// vpn.test_connection: явная проверка маршрута пользователем (кнопка
+/// «Проверить»). Wg-режим — живая проба через туннель (DUOPULSE_WG_PROBE,
+/// default one.one.one.one:80: DNS туннелем + TCP + байт ответа, замер мс);
+/// иначе — достижимость прокси задачи 1.8.
 #[tauri::command]
-async fn vpn_test_connection() -> Result<VpnStatusResult, String> {
-    check_vpn().await
+async fn vpn_test_connection(app: AppHandle) -> Result<VpnStatusResult, String> {
+    tauri::async_runtime::spawn_blocking(move || test_vpn_route(&app))
+        .await
+        .map_err(|e| e.to_string())
 }
 
-async fn check_vpn() -> Result<VpnStatusResult, String> {
-    let status = tauri::async_runtime::spawn_blocking(|| {
-        proxy::check(&proxy::load_config(&proxy::profile_dir()))
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    Ok(VpnStatusResult {
-        state: status.state,
-        detail: status.detail,
-    })
+/// Маршрут роутера приложения, если роутер поднялся.
+fn router_route(app: &AppHandle) -> Option<crate::vpn::router::Route> {
+    app.try_state::<Option<crate::vpn::router::Router>>()
+        .and_then(|state| state.inner().clone())
+        .map(|router| router.route())
+}
+
+/// Снапшот VPN: фактический маршрут роутера (off/proxy/wg) + состояние.
+/// Блокирующая (прокси-режим делает сетевую пробу) — только из spawn_blocking.
+fn collect_vpn_status(app: &AppHandle) -> VpnStatusResult {
+    let dir = proxy::profile_dir();
+    match router_route(app) {
+        Some(crate::vpn::router::Route::Wg { session }) => {
+            let s = session.status();
+            let name = crate::vpn::wg::list_profiles(&dir)
+                .into_iter()
+                .find(|p| p.id == session.profile_id())
+                .map(|p| p.name)
+                .unwrap_or_default();
+            let state = match s.state {
+                crate::vpn::wg::WgLiveState::Error => proxy::ProxyState::Error,
+                _ => proxy::ProxyState::On,
+            };
+            VpnStatusResult {
+                mode: "wg".into(),
+                state,
+                detail: s.detail.clone(),
+                wg: Some(VpnWgState {
+                    profile_id: session.profile_id().to_string(),
+                    profile_name: name,
+                    state: s.state.as_str().into(),
+                    endpoint: s.endpoint,
+                    last_handshake_ms: s.last_handshake_ms,
+                    rx_bytes: s.rx_bytes,
+                    tx_bytes: s.tx_bytes,
+                    since_ms: s.since_ms,
+                }),
+            }
+        }
+        route => {
+            let is_proxy = matches!(route, Some(crate::vpn::router::Route::Upstream { .. }));
+            let cfg = proxy::load_config(&dir);
+            let status = proxy::check(&cfg);
+            VpnStatusResult {
+                mode: if is_proxy {
+                    "proxy".into()
+                } else {
+                    "off".into()
+                },
+                state: status.state,
+                detail: status.detail,
+                wg: None,
+            }
+        }
+    }
+}
+
+/// Проба маршрута целиком (кнопка «Проверить»): wg — через туннель, прокси —
+/// как в collect_vpn_status (check уже включает TCP-пробу).
+fn test_vpn_route(app: &AppHandle) -> VpnStatusResult {
+    let mut status = collect_vpn_status(app);
+    if status.mode != "wg" {
+        return status;
+    }
+    let probe = std::env::var("DUOPULSE_WG_PROBE").unwrap_or_else(|_| "one.one.one.one:80".into());
+    let Some(crate::vpn::router::Route::Wg { session }) = router_route(app) else {
+        return status;
+    };
+    let started = std::time::Instant::now();
+    let verdict = (|| -> Result<usize, String> {
+        let (host, port) = probe
+            .rsplit_once(':')
+            .ok_or_else(|| format!("DUOPULSE_WG_PROBE «{probe}» без порта"))?;
+        let ip = session.resolve(host)?;
+        let stream = session.tcp_connect(std::net::SocketAddr::new(
+            std::net::IpAddr::V4(ip),
+            port.parse().map_err(|_| "порт пробы не число")?,
+        ))?;
+        let (mut reply_reader, mut request_writer) = stream.split();
+        request_writer
+            .write_all(format!("HEAD / HTTP/1.0\r\nHost: {host}\r\n\r\n").as_bytes())
+            .map_err(|e| format!("запрос: {e}"))?;
+        let mut first = [0u8; 1];
+        reply_reader
+            .read_exact(&mut first)
+            .map(|_| 1)
+            .map_err(|e| format!("ответ: {e}"))
+    })();
+    match verdict {
+        Ok(_) => {
+            status.state = proxy::ProxyState::On;
+            status.detail = format!(
+                "туннель: ответ от {probe} за {} мс",
+                started.elapsed().as_millis()
+            );
+        }
+        Err(e) => {
+            status.state = proxy::ProxyState::Error;
+            status.detail = format!("туннель до {probe}: {e}");
+        }
+    }
+    status
+}
+
+/// vpn.import_profile: `.conf` с диска → профиль (ключи — в DPAPI).
+#[tauri::command]
+fn vpn_import_profile(params: VpnImportProfileParams) -> Result<VpnProfileInfo, String> {
+    let path = std::path::PathBuf::from(&params.path);
+    let raw =
+        std::fs::read_to_string(&path).map_err(|e| format!("прочитать {}: {e}", path.display()))?;
+    let text = raw.trim_start_matches('\u{feff}').to_string();
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "profile.conf".into());
+    let dir = proxy::profile_dir();
+    let profile = crate::vpn::wg::import_profile(&dir, &text, &file_name)?;
+    let active = crate::vpn::wg::active_id(&dir).as_deref() == Some(profile.id.as_str());
+    Ok(profile_info(&profile, active))
+}
+
+/// vpn.list_profiles: профили для UI (секретов нет — только открытые поля).
+#[tauri::command]
+fn vpn_list_profiles() -> Vec<VpnProfileInfo> {
+    let dir = proxy::profile_dir();
+    let active = crate::vpn::wg::active_id(&dir);
+    crate::vpn::wg::list_profiles(&dir)
+        .into_iter()
+        .map(|p| {
+            let is_active = active.as_deref() == Some(p.id.as_str());
+            profile_info(&p, is_active)
+        })
+        .collect()
+}
+
+fn profile_info(p: &crate::vpn::wg::WgProfile, active: bool) -> VpnProfileInfo {
+    VpnProfileInfo {
+        id: p.id.clone(),
+        name: p.name.clone(),
+        endpoint: format!("{}:{}", p.endpoint_host, p.endpoint_port),
+        address: format!("{}/{}", p.address, p.prefix),
+        dns: p.dns.iter().map(|d| d.to_string()).collect(),
+        keepalive: p.keepalive,
+        active,
+    }
+}
+
+/// vpn.remove_profile: удалить профиль и секрет. Активный — сначала гасим
+/// туннель (маршрут возвращается к конфигу прокси).
+#[tauri::command]
+fn vpn_remove_profile(app: AppHandle, params: VpnRemoveProfileParams) -> Result<(), String> {
+    let dir = proxy::profile_dir();
+    if crate::vpn::wg::active_id(&dir).as_deref() == Some(params.id.as_str()) {
+        stop_wg_tunnel(&app, &dir);
+    }
+    crate::vpn::wg::remove_profile(&dir, &params.id)?;
+    Ok(())
+}
+
+/// Поднять сессию WG с событиями vpn:state_changed (общее для включения
+/// пользователем и автозапуска на старте).
+fn start_wg_session(
+    app: &AppHandle,
+    profile: &crate::vpn::wg::WgProfile,
+    private_key: [u8; 32],
+    psk: Option<[u8; 32]>,
+) -> Result<crate::vpn::wg::WgSession, String> {
+    let app_for_events = app.clone();
+    let on_state: crate::vpn::wg::OnStateChange = std::sync::Arc::new(move |s| {
+        let state = match s.state {
+            crate::vpn::wg::WgLiveState::Error => proxy::ProxyState::Error,
+            _ => proxy::ProxyState::On,
+        };
+        let _ = emit::<VpnStateChanged>(
+            &app_for_events,
+            &VpnStateChanged {
+                mode: "wg".into(),
+                state,
+                detail: s.detail.clone(),
+                wg: None,
+            },
+        );
+    });
+    crate::vpn::wg::WgSession::start(profile, private_key, psk, Some(on_state))
+        .map_err(|e| format!("поднять туннель: {e}"))
+}
+
+/// Старт приложения: поднять активный WG-профиль из wg-profiles.json (задача
+/// 6.2). Ошибка поднятия — деградация к маршруту по конфигу прокси с записью
+/// в журнал (полный kill-switch при недоступном туннеле — задача 6.4).
+pub fn apply_wg_saved(app: &AppHandle) {
+    let dir = proxy::profile_dir();
+    let Some((profile, private_key, psk)) = crate::vpn::wg::active_profile(&dir) else {
+        return;
+    };
+    match start_wg_session(app, &profile, private_key, psk) {
+        Ok(session) => {
+            if let Some(router) = app
+                .try_state::<Option<crate::vpn::router::Router>>()
+                .and_then(|state| state.inner().clone())
+            {
+                router.set_route(crate::vpn::router::Route::Wg { session });
+            }
+        }
+        Err(e) => eprintln!(
+            "[vpn] WG-туннель «{}» не поднялся: {e} — маршрут по конфигу прокси",
+            profile.name
+        ),
+    }
+}
+
+/// vpn.use_profile: включить туннель (Some) или выключить (None). Маршруты
+/// взаимоисключимы до split-правил (6.3): включение WG гасит прокси-режим.
+#[tauri::command]
+fn vpn_use_profile(app: AppHandle, params: VpnUseProfileParams) -> Result<VpnStatusResult, String> {
+    let dir = proxy::profile_dir();
+    // Текущий туннель (если есть) гасим в любом случае: смена профиля —
+    // перезапуск сессии, выключение — снятие маршрута.
+    stop_wg_tunnel(&app, &dir);
+    if let Some(id) = &params.id {
+        let (profile, private_key, psk) =
+            crate::vpn::wg::profile_with_keys(&dir, id).ok_or_else(|| {
+                format!(
+                    "профиль {id} не найден или его ключи не читаются (импортируйте .conf заново)"
+                )
+            })?;
+        let session = start_wg_session(&app, &profile, private_key, psk)?;
+        crate::vpn::wg::set_active(&dir, Some(id))?;
+        // Прокси-режим гасим в сохранённом конфиге (маршрут уже сменился).
+        let mut cfg = proxy::load_config(&dir);
+        if cfg.enabled {
+            cfg.enabled = false;
+            proxy::save_config(&dir, &cfg).map_err(|e| format!("выключить прокси-режим: {e}"))?;
+        }
+        if let Some(router) = app
+            .try_state::<Option<crate::vpn::router::Router>>()
+            .and_then(|state| state.inner().clone())
+        {
+            router.set_route(crate::vpn::router::Route::Wg { session });
+        }
+    } else {
+        crate::vpn::wg::set_active(&dir, None)?;
+        // Маршрут — по конфигу прокси (off/upstream), как до туннеля.
+        crate::vpn::router::apply_saved(&app, &dir);
+    }
+    Ok(collect_vpn_status(&app))
+}
+
+/// Погасить туннель, если маршрут роутера — Wg (сессия останавливается,
+/// wg-profiles.json активность не трогаем — её выставляет вызывающий).
+fn stop_wg_tunnel(app: &AppHandle, dir: &std::path::Path) {
+    if let Some(crate::vpn::router::Route::Wg { session }) = router_route(app) {
+        session.shutdown();
+    }
+    let _ = crate::vpn::wg::set_active(dir, None);
 }
 
 /// app.restart: перезапуск приложения (применение аргументов прокси WebView2 —
@@ -2025,6 +2361,10 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         vpn_set_enabled,
         vpn_status,
         vpn_test_connection,
+        vpn_import_profile,
+        vpn_list_profiles,
+        vpn_remove_profile,
+        vpn_use_profile,
         adblock_set_enabled,
         adblock_status,
         adblock_update_lists,

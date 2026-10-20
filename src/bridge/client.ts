@@ -59,8 +59,12 @@ import type {
   TranslateClearCacheResult,
   UpdaterCheckResult,
   UpdaterStatusResult,
+  VpnImportProfileParams,
+  VpnProfileInfo,
+  VpnRemoveProfileParams,
   VpnSetEnabledParams,
   VpnStatusResult,
+  VpnUseProfileParams,
 } from "./gen/types";
 
 export const bridge = {
@@ -140,10 +144,19 @@ export const bridge = {
   vpn: {
     /** vpn.set_enabled: включить/выключить маршрутизацию (внешний прокси). */
     setEnabled: (params: VpnSetEnabledParams) => invoke<void>("vpn_set_enabled", { params }),
-    /** vpn.status: состояние маршрутизации (с проверкой достижимости). */
+    /** vpn.status: состояние маршрутизации (mode off/proxy/wg + снапшот туннеля). */
     status: () => invoke<VpnStatusResult>("vpn_status"),
-    /** vpn.test_connection: явная проверка соединения (кнопка «Проверить»). */
+    /** vpn.test_connection: явная проверка соединения (кнопка «Проверить»);
+     * wg-режим — живая проба через туннель. */
     testConnection: () => invoke<VpnStatusResult>("vpn_test_connection"),
+    /** vpn.import_profile (задача 6.2): `.conf` с диска → профиль (ключи в DPAPI). */
+    importProfile: (params: VpnImportProfileParams) => invoke<VpnProfileInfo>("vpn_import_profile", { params }),
+    /** vpn.list_profiles (задача 6.2): профили WireGuard (секретов нет). */
+    listProfiles: () => invoke<VpnProfileInfo[]>("vpn_list_profiles"),
+    /** vpn.remove_profile (задача 6.2): удалить профиль и секрет. */
+    removeProfile: (params: VpnRemoveProfileParams) => invoke<void>("vpn_remove_profile", { params }),
+    /** vpn.use_profile (задача 6.2): включить туннель (id) или выключить (null). */
+    useProfile: (params: VpnUseProfileParams) => invoke<VpnStatusResult>("vpn_use_profile", { params }),
   },
   adblock: {
     /** adblock.set_enabled: глобальный тумблер (site=null) или исключение сайта. */
