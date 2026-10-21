@@ -2,6 +2,7 @@
 name = "duopulse"
 version = "0.1.0"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
+license = "GPL-3.0-only"
 edition = "2021"
 
 [build-dependencies]
