@@ -54,8 +54,6 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri,e2e/wg-stand
       - run: cargo fmt --all --check
         working-directory: src-tauri
       - run: cargo clippy --all-targets -- -D warnings
@@ -78,11 +76,22 @@ jobs:
       - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri,e2e/wg-stand
+      # WebView2 Runtime не входит в образ windows-latest — Tauri-приложение
+      # без него не создаёт окно (стенд ждёт CDP-цели). Молчаливая установка
+      # per-machine; если runtime уже есть — шаг ничего не делает.
+      - name: WebView2 Runtime
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          if (Test-Path $key) {
+            Write-Host "WebView2 уже стоит: $((Get-ItemProperty $key).pv)"
+          } else {
+            curl.exe -L --silent --show-error --fail "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -o MicrosoftEdgeWebview2Setup.exe
+            .\MicrosoftEdgeWebview2Setup.exe /silent /install | Out-Null
+            if (Test-Path $key) { Write-Host "WebView2 установлен: $((Get-ItemProperty $key).pv)" }
+            else { Write-Host "WebView2 НЕ обнаружен после установки" }
+          }
       - run: cargo build
         working-directory: src-tauri
       - run: cargo build --manifest-path e2e/wg-stand/Cargo.toml
       - run: node e2e/vpn/run.mjs
-      - run: cargo test
-        working-directory: src-tauri

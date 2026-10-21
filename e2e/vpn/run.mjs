@@ -287,11 +287,19 @@ const startApp = async (deadMs) => {
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
   };
   if (deadMs) appEnv.DUOPULSE_WG_DEAD_MS = String(deadMs);
-  app = spawn(EXE, [], { stdio: "ignore", env: appEnv });
+  app = spawn(EXE, [], { stdio: ["ignore", "ignore", "pipe"], env: appEnv });
+  let appErr = "";
+  app.stderr?.on("data", (d) => {
+    appErr = (appErr + String(d)).slice(-8000);
+  });
+  app.on("exit", (code) => console.error(`приложение завершилось (код ${code})`));
+  globalThis.__duopulseAppErr = () => appErr;
 
-  /** Подождать CDP-цели (content — страница стенда, ui — localhost:5173). */
+  /** Подождать CDP-цели (content — страница стенда, ui — localhost:5173).
+   *  Холодный CI-раннер стартует медленно — 150 с; на таймауте печатаем
+   *  диагностику (живы ли процессы, WebView2-runtime, vite). */
   const waitForTargets = async () => {
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 150; i++) {
       try {
         const targets = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
         const content = targets.find((t) => t.type === "page" && t.url.includes(`:${HTTP_PORT}`));
@@ -301,6 +309,19 @@ const startApp = async (deadMs) => {
         /* приложение ещё поднимается */
       }
       await sleep(1000);
+    }
+    try {
+      const procs = await run("tasklist", ["/FI", "IMAGENAME eq duopulse.exe", "/FO", "CSV"]).catch(() => "");
+      const wv2 = await run("tasklist", ["/FI", "IMAGENAME eq msedgewebview2.exe", "/FO", "CSV"]).catch(() => "");
+      const vite = await fetch("http://localhost:5173/").then(() => "жив").catch((e) => `нет (${e.cause?.code ?? e.message})`);
+      console.error(
+        `CDP-диагностика: duopulse=${procs.includes("duopulse.exe") ? "жив" : "НЕТ"}, ` +
+          `msedgewebview2=${wv2.includes("msedgewebview2.exe") ? wv2.split("\n").length - 2 : 0} шт, vite=${vite}`,
+      );
+      const err = globalThis.__duopulseAppErr?.();
+      if (err) console.error(`stderr приложения (хвост):\n${err.slice(-1500)}`);
+    } catch {
+      /* диагностика не должна ломать путь отказа */
     }
     throw new Error("CDP-цели не найдены");
   };
