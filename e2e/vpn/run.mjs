@@ -264,7 +264,7 @@ const httpHits = (stand, statusOk = true) =>
 const vite = spawn("npm", ["run", "dev"], { cwd: ROOT, shell: true, stdio: "ignore" });
 for (let i = 0; i < 60; i++) {
   try {
-    await fetch("http://localhost:5173/");
+    await fetch("http://127.0.0.1:5173/");
     break;
   } catch {
     await sleep(500);
@@ -301,9 +301,9 @@ const startApp = async (deadMs) => {
   const waitForTargets = async () => {
     for (let i = 0; i < 150; i++) {
       try {
-        const targets = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
+        const targets = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json();
         const content = targets.find((t) => t.type === "page" && t.url.includes(`:${HTTP_PORT}`));
-        const ui = targets.find((t) => t.type === "page" && /localhost:5173/.test(t.url));
+        const ui = targets.find((t) => t.type === "page" && /127.0.0.1:5173/.test(t.url));
         if (content && ui) return { content, ui };
       } catch {
         /* приложение ещё поднимается */
@@ -313,11 +313,23 @@ const startApp = async (deadMs) => {
     try {
       const procs = await run("tasklist", ["/FI", "IMAGENAME eq duopulse.exe", "/FO", "CSV"]).catch(() => "");
       const wv2 = await run("tasklist", ["/FI", "IMAGENAME eq msedgewebview2.exe", "/FO", "CSV"]).catch(() => "");
-      const vite = await fetch("http://localhost:5173/").then(() => "жив").catch((e) => `нет (${e.cause?.code ?? e.message})`);
+      const vite = await fetch("http://127.0.0.1:5173/").then(() => "жив").catch((e) => `нет (${e.cause?.code ?? e.message})`);
+      const cdp4 = await fetch(`http://127.0.0.1:${CDP_PORT}/json`).then(() => "ok").catch((e) => `нет (${e.cause?.code ?? e.message})`);
+      const cdp6 = await fetch(`http://[::1]:${CDP_PORT}/json`).then(() => "ok").catch((e) => `нет (${e.cause?.code ?? e.message})`);
+      const wvCmd = await webViewCmdlines();
+      const net = await run("netstat", ["-ano"]).catch(() => "");
+      const port9225 = net
+        .split("\n")
+        .filter((l) => l.includes(`:${CDP_PORT}`))
+        .join(" | ")
+        .slice(0, 300);
       console.error(
         `CDP-диагностика: duopulse=${procs.includes("duopulse.exe") ? "жив" : "НЕТ"}, ` +
-          `msedgewebview2=${wv2.includes("msedgewebview2.exe") ? wv2.split("\n").length - 2 : 0} шт, vite=${vite}`,
+          `msedgewebview2=${wv2.includes("msedgewebview2.exe") ? wv2.split("\n").length - 2 : 0} шт, vite=${vite}, ` +
+          `cdp[127.0.0.1]=${cdp4}, cdp[[::1]]=${cdp6}, CDP-флаг в cmdline=${wvCmd.includes("remote-debugging-port") ? "есть" : "НЕТ"}`,
       );
+      if (wvCmd) console.error(`cmdline webview (хвост): …${wvCmd.replace(/\r?\n/g, " ").slice(-700)}`);
+      console.error(`netstat :${CDP_PORT}: ${port9225 || "пусто (никто не слушает)"}`);
       const err = globalThis.__duopulseAppErr?.();
       if (err) console.error(`stderr приложения (хвост):\n${err.slice(-1500)}`);
     } catch {
