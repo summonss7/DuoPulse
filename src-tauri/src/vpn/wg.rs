@@ -43,6 +43,10 @@ use boringtun::noise::{Tunn, TunnResult};
 use boringtun::x25519;
 use smoltcp::iface::{Config as IfaceConfig, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{self, Device, DeviceCapabilities, Medium};
+use smoltcp::socket::icmp::{
+    Endpoint as IcmpEndpoint, PacketBuffer as IcmpBuffer, PacketMetadata as IcmpPacketMetadata,
+    Socket as IcmpSocket,
+};
 use smoltcp::socket::tcp::{Socket as TcpSocket, SocketBuffer as TcpBuffer, State as TcpState};
 use smoltcp::socket::udp::{PacketBuffer as UdpBuffer, PacketMetadata, Socket as UdpSocket};
 use smoltcp::time::Instant as SmolInstant;
@@ -103,6 +107,18 @@ const TX_BATCH: usize = 128;
 /// UDP-датаграмм, вычитываемых за одну итерацию (батч сопоставим с пачками
 /// сегментов TCP-окна).
 const RX_BATCH: usize = 256;
+/// Ритм ICMP-пинга туннеля (статистика задачи 6.5): echo DNS-серверу профиля
+/// — он всегда внутри туннеля, RTT честный «до сервера через туннель».
+const PING_EVERY: Duration = Duration::from_secs(1);
+/// Столько ждём echo-ответ; дольше — ping_ms=None (не показываем старое
+/// число, сервер может не отвечать на ICMP).
+const PING_TIMEOUT: Duration = Duration::from_secs(3);
+/// ICMP-идентификатор нашей пары echo request/reply (фильтр входящих
+/// smoltcp; чексумму smoltcp считает сам на отправке).
+const PING_IDENT: u16 = 0x0D0D;
+/// Ритм события vpn:stats (задача 6.5): панель VPN ведёт rx/tx и ping без
+/// опроса; между эмитами числа могут летать, интерфейс не топит.
+const STATS_EVERY: Duration = Duration::from_millis(1000);
 
 // ---------------------------------------------------------------------------
 // Base64 (RFC 4648): ключи .conf и идентификаторы профилей.
@@ -536,6 +552,9 @@ pub struct WgLiveStatus {
     pub last_handshake_ms: Option<u64>,
     pub rx_bytes: u64,
     pub tx_bytes: u64,
+    /// RTT ICMP-эхом до DNS-сервера профиля через туннель (задача 6.5;
+    /// None — ответа нет дольше [`PING_TIMEOUT`] или сервер не отвечает).
+    pub ping_ms: Option<u64>,
     /// Unix-ms запуска сессии.
     pub since_ms: i64,
 }
@@ -574,6 +593,8 @@ enum Cmd {
     StreamClose(u32),
     /// Смена сети/адреса: пересоздать сокет и сессию, handshake заново.
     NetworkChanged,
+    /// Подписчик статистики (vpn:stats, задача 6.5) — после старта сессии.
+    StatsSink(OnStatsChange),
     Shutdown,
 }
 
@@ -716,6 +737,11 @@ impl std::fmt::Debug for WgSession {
 /// vpn:state_changed контракта. Вызывается нитью туннеля только при переходах.
 pub type OnStateChange = Arc<dyn Fn(&WgLiveStatus) + Send + Sync>;
 
+/// Подписчик статистики туннеля (задача 6.5) — событие vpn:stats контракта:
+/// rx/tx и ICMP-RTT пинга, не чаще раза в [`STATS_EVERY`] и только при
+/// изменении чисел. Подключается после старта сессии (`set_stats_sink`).
+pub type OnStatsChange = Arc<dyn Fn(&WgLiveStatus) + Send + Sync>;
+
 impl WgSession {
     /// Поднять туннель: нить с UDP-сокетом, boringtun-сессией и smoltcp-стеком.
     /// Возврат — сразу; готовность видна в [`WgSession::status`]
@@ -740,6 +766,7 @@ impl WgSession {
             last_handshake_ms: None,
             rx_bytes: 0,
             tx_bytes: 0,
+            ping_ms: None,
             since_ms: now_ms(),
         }));
         let runtime = Runtime::new(
@@ -766,6 +793,15 @@ impl WgSession {
 
     pub fn profile_id(&self) -> &str {
         &self.profile_id
+    }
+
+    /// Подключить подписчика статистики (vpn:stats, задача 6.5): rx/tx и
+    /// ICMP-RTT пинга, троттлинг и дедуп — нитью туннеля. Вызывается после
+    /// [`WgSession::start`]; нить просыпается будильником сразу.
+    pub fn set_stats_sink(&self, cb: OnStatsChange) {
+        if self.to_thread.send(Cmd::StatsSink(cb)).is_ok() {
+            self.wake.ping();
+        }
     }
 
     /// Снапшот состояния (IPC/статус).
@@ -915,6 +951,17 @@ struct DnsWaiter {
     created: Instant,
 }
 
+/// ICMP-пинг туннеля (задача 6.5): один долгоживущий echo-сокет; не более
+/// одного ожидающего запроса — seq однозначно указывает на момент отправки.
+struct PingProbe {
+    handle: SocketHandle,
+    seq: u16,
+    /// Момент отправки ожидающего echo (None — ответ получен/просрочен).
+    sent_at: Option<Instant>,
+    /// Когда отправлять следующий (ритм [`PING_EVERY`]).
+    next_due: Instant,
+}
+
 /// Нить туннеля: UDP-сокет + boringtun + smoltcp. Живёт до Shutdown или
 /// потери отправителя команд; цикл такт TICK мс (при трафике крутится без
 /// дополнительного сна — recv_to UDP сам pacing).
@@ -951,6 +998,16 @@ struct Runtime {
     last_emitted: Option<WgLiveState>,
     /// Kill-switch эпизод уже отпечатан событием (сброс при восстановлении).
     kill_emitted: bool,
+    /// Подписчик статистики vpn:stats (задача 6.5; None — не подключён).
+    on_stats: Option<OnStatsChange>,
+    /// Следующий разрешённый эмит статистики (троттлинг STATS_EVERY).
+    next_stats_at: Instant,
+    /// Последний эмит (rx, tx, ping) — без изменений молчим (панель держит
+    /// последние числа; пустой туннель не топит интерфейс).
+    last_stats: Option<(u64, u64, Option<u64>)>,
+    /// ICMP-пинг туннеля (задача 6.5): None — DNS-сервера в профиле нет
+    /// (пинг не ведём) или сокет ещё не создан.
+    ping: Option<PingProbe>,
 }
 
 impl Runtime {
@@ -1046,6 +1103,10 @@ impl Runtime {
             on_state,
             last_emitted: None,
             kill_emitted: false,
+            on_stats: None,
+            next_stats_at: Instant::now(),
+            last_stats: None,
+            ping: None,
         })
     }
 
@@ -1068,6 +1129,7 @@ impl Runtime {
                     Ok(Cmd::StreamData(id, data)) => self.queue_stream(id, data),
                     Ok(Cmd::StreamClose(id)) => self.close_stream(id),
                     Ok(Cmd::NetworkChanged) => self.network_changed(),
+                    Ok(Cmd::StatsSink(cb)) => self.on_stats = Some(cb),
                     Ok(Cmd::Shutdown) => return,
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => return,
@@ -1100,6 +1162,9 @@ impl Runtime {
             if let TunnResult::WriteToNetwork(wg) = self.tunn.update_timers(&mut wg_buf) {
                 self.send_endpoint(wg);
             }
+
+            // (5.5) пинг туннеля ICMP-эхом (статистика задачи 6.5).
+            self.ping_tick();
 
             // (6) статус.
             self.publish_status();
@@ -1446,6 +1511,9 @@ impl Runtime {
                 self.dns.remove(&id);
             }
         }
+
+        // ICMP echo-ответ пинга туннеля (задача 6.5): RTT в статус.
+        self.ping_reply_rtt();
     }
 
     /// Roaming: пересоздать сокет и boringtun-сессию (endpoint перерезолвить —
@@ -1537,6 +1605,113 @@ impl Runtime {
         }
     }
 
+    /// Пинг туннеля (задача 6.5): раз в [`PING_EVERY`] ICMP-echo DNS-серверу
+    /// профиля — он всегда внутри туннеля, RTT честный «до сервера».
+    /// Ответа нет дольше [`PING_TIMEOUT`] — ping_ms=None: не показываем
+    /// старое число (сервер может не отвечать на ICMP — трафик жив и без
+    /// этого). Мёртвый/поднимающийся туннель не пингуем (ключей нет).
+    fn ping_tick(&mut self) {
+        let Some(dst) = self.profile.dns.first().copied() else {
+            return; // DNS-сервера нет — пинг не ведём
+        };
+        if self.ping.is_none() {
+            let mut socket = IcmpSocket::new(
+                IcmpBuffer::new(vec![IcmpPacketMetadata::EMPTY; 2], vec![0u8; 32]),
+                IcmpBuffer::new(vec![IcmpPacketMetadata::EMPTY; 2], vec![0u8; 32]),
+            );
+            if socket.bind(IcmpEndpoint::Ident(PING_IDENT)).is_err() {
+                return;
+            }
+            let handle = self.sockets.add(socket);
+            self.ping = Some(PingProbe {
+                handle,
+                seq: 0,
+                sent_at: None,
+                next_due: Instant::now(),
+            });
+        }
+        let connected = {
+            let s = self.status.lock().unwrap_or_else(|p| p.into_inner());
+            s.state == WgLiveState::Connected
+        };
+        let now = Instant::now();
+        // Решения — без пересечения заимствований: просрочка/отправка.
+        let mut expired = false;
+        let mut due = false;
+        if let Some(p) = self.ping.as_ref() {
+            if p.sent_at
+                .is_some_and(|t| now.duration_since(t) > PING_TIMEOUT)
+            {
+                expired = true;
+            } else {
+                due = p.sent_at.is_none() && connected && now >= p.next_due;
+            }
+        }
+        if expired {
+            if let Some(p) = self.ping.as_mut() {
+                p.sent_at = None;
+            }
+            self.status
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .ping_ms = None;
+        }
+        if !due {
+            return;
+        }
+        let (handle, seq) = {
+            let Some(p) = self.ping.as_mut() else { return };
+            p.seq = p.seq.wrapping_add(1).max(1);
+            p.sent_at = Some(now);
+            p.next_due = now + PING_EVERY;
+            (p.handle, p.seq)
+        };
+        let packet = icmp_echo_request(PING_IDENT, seq);
+        let socket = self.sockets.get_mut::<IcmpSocket>(handle);
+        if socket.send_slice(&packet, IpAddress::Ipv4(dst)).is_err() {
+            // Буфер отправки полон (прошлый echo не уехал) — попробуем позже.
+            if let Some(p) = self.ping.as_mut() {
+                p.sent_at = None;
+            }
+        }
+    }
+
+    /// ICMP echo-заголовок + 8 байт метки (чексумму дописывает smoltcp при
+    /// отправке — Icmpv4Repr::emit).
+    fn ping_reply_rtt(&mut self) {
+        let Some((handle, want_seq, sent)) = self.ping.as_ref().map(|p| {
+            (
+                p.handle, p.seq,
+                p.sent_at, // borrow ок: копируем, не держим ссылку
+            )
+        }) else {
+            return;
+        };
+        let Some(sent) = sent else { return };
+        let socket = self.sockets.get_mut::<IcmpSocket>(handle);
+        let mut buf = [0u8; 64];
+        let mut rtt: Option<u64> = None;
+        while socket.can_recv() {
+            let Ok((n, _src)) = socket.recv_slice(&mut buf) else {
+                break;
+            };
+            // Echo reply: type 0; ident уже отфильтрован сокетом (Ident).
+            if n >= 8 && buf[0] == 0 && u16::from_be_bytes([buf[6], buf[7]]) == want_seq {
+                rtt = Some(sent.elapsed().as_millis() as u64);
+                break;
+            }
+        }
+        if let Some(ms) = rtt {
+            if let Some(p) = self.ping.as_mut() {
+                p.sent_at = None;
+            }
+            self.status
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .ping_ms = Some(ms);
+        }
+    }
+
     fn publish_status(&mut self) {
         let (hs_ago, tx, rx, _, _) = self.tunn.stats();
         // Порог мёртвости от старта сессии — тот же, что у handshake:
@@ -1597,6 +1772,35 @@ impl Runtime {
             self.kill_emitted = false; // туннель ожил — новый эпизод
         }
         self.emit_state_change();
+        self.emit_stats();
+    }
+
+    /// Статистика туннеля (задача 6.5): vpn:stats — rx/tx и ping не чаще
+    /// раза в [`STATS_EVERY`] и только при изменении тройки (rx, tx, ping).
+    /// Числа имеют смысл при живом туннеле — Connecting/Error отдаются только
+    /// переходами vpn:state_changed, панель их знает.
+    fn emit_stats(&mut self) {
+        let snapshot = self
+            .status
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        if snapshot.state != WgLiveState::Connected {
+            return;
+        }
+        let now = Instant::now();
+        if now < self.next_stats_at {
+            return;
+        }
+        let triple = (snapshot.rx_bytes, snapshot.tx_bytes, snapshot.ping_ms);
+        if self.last_stats == Some(triple) {
+            return; // простой без трафика и джиттера пинга — молчим
+        }
+        self.last_stats = Some(triple);
+        self.next_stats_at = now + STATS_EVERY;
+        if let Some(cb) = &self.on_stats {
+            cb(&snapshot);
+        }
     }
 }
 
@@ -1654,6 +1858,18 @@ fn default_gateway(our: Ipv4Addr) -> Ipv4Addr {
 }
 
 // --- DNS: минимальный резолвер A-записей через туннель ----------------------
+
+/// ICMP echo request для пинга туннеля (задача 6.5): 8-байтовый заголовок
+/// (type/code/checksum/ident/seq) + 8 байт метки; чексумму при отправке
+/// досчитывает smoltcp (Icmpv4Repr::emit).
+fn icmp_echo_request(ident: u16, seq: u16) -> [u8; 16] {
+    let mut pkt = [0u8; 16];
+    pkt[0] = 8; // ICMP echo request
+    pkt[4..6].copy_from_slice(&ident.to_be_bytes());
+    pkt[6..8].copy_from_slice(&seq.to_be_bytes());
+    pkt[8..16].copy_from_slice(b"DUOPULSE");
+    pkt
+}
 
 fn dns_query_packet(id: u16, host: &str) -> Result<Vec<u8>, String> {
     let labels: Vec<&str> = host.trim_end_matches('.').split('.').collect();
@@ -2386,6 +2602,91 @@ mod tests {
         session.shutdown();
     }
 
+    /// Пинг туннеля (задача 6.5): ICMP-эхо DNS-серверу профиля (в стенде это
+    /// SERVER_IP — серверный стек smoltcp отвечает на echo сам); RTT
+    /// оказывается в WgLiveStatus::ping_ms, туннель остаётся живым.
+    #[test]
+    fn ping_measures_rtt_through_tunnel() {
+        let server = TestWgServer::start(None);
+        let profile = client_profile(server.port, None);
+        let session = start_client(&profile);
+        wait_connected(&session, 10);
+
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let ms = loop {
+            let st = session.status();
+            if let Some(ms) = st.ping_ms {
+                break ms;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "пинг не пришёл (статус: {:?})",
+                st.detail
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        assert!(ms < 2_000, "RTT loopback-стенда не бывает таким: {ms} мс");
+        // Пинг не мешает данным: echo TCP по-прежнему ходит.
+        let stream = session
+            .tcp_connect(SocketAddr::new(
+                std::net::IpAddr::V4(SERVER_IP),
+                SERVER_PORT,
+            ))
+            .unwrap();
+        let (mut read, mut write) = stream.split();
+        write.write_all(b"pong").unwrap();
+        assert_eq!(read_n(&mut read, 4, Duration::from_secs(10)), b"pong");
+        session.shutdown();
+    }
+
+    /// Статистика туннеля (задача 6.5): событие vpn:stats несёт rx/tx и ping
+    /// (троттлинг ~1 с, только при изменении) — панель VPN ведёт числа без
+    /// опроса; после TCP-эха rx_bytes в событии больше нуля.
+    #[test]
+    fn stats_event_reports_ping_and_bytes() {
+        let server = TestWgServer::start(None);
+        let profile = client_profile(server.port, None);
+        let session = start_client(&profile);
+        wait_connected(&session, 10);
+
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<WgLiveStatus>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink_seen = std::sync::Arc::clone(&seen);
+        session.set_stats_sink(std::sync::Arc::new(move |s| {
+            sink_seen.lock().unwrap().push(s.clone());
+        }));
+
+        // Трафик: TCP-эхо 4 байта — событие с rx>0 обязано прийти.
+        let stream = session
+            .tcp_connect(SocketAddr::new(
+                std::net::IpAddr::V4(SERVER_IP),
+                SERVER_PORT,
+            ))
+            .unwrap();
+        let (mut read, mut write) = stream.split();
+        write.write_all(b"pong").unwrap();
+        assert_eq!(read_n(&mut read, 4, Duration::from_secs(10)), b"pong");
+
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let with_numbers = seen
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|s| s.ping_ms.is_some() && s.rx_bytes > 0);
+            if with_numbers {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "vpn:stats не принёс ping+rx (события: {:?})",
+                seen.lock().unwrap().last()
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        session.shutdown();
+    }
+
     /// Keepalive: при полном простое TCP сервер продолжает получать пакеты
     /// (PersistentKeepalive клиента гонит пустые датаграммы).
     #[test]
@@ -2745,6 +3046,19 @@ mod tests {
         let router = crate::vpn::router::Router::start().unwrap();
         router.set_split(session.clone(), store.handle());
 
+        // Журнал маршрутных решений (задача 6.5, событие vpn:route_changed):
+        // шаги (1)/(2)/(4) сверяются с ним в конце теста — туннель/прямой
+        // как шли, повтор домена — без второго события (дедуп).
+        let routes_log: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let routes_log_own = std::sync::Arc::clone(&routes_log);
+        router.set_event_sink(std::sync::Arc::new(move |domain, route| {
+            routes_log_own
+                .lock()
+                .unwrap()
+                .push((domain.to_string(), route.to_string()));
+        }));
+
         // (1) Заблокированный домен (поддомен правила) — через туннель:
         // резолв DNS-сервером туннеля (*.tun → SERVER_IP), TCP — echo сервера.
         let dns0 = server
@@ -2852,6 +3166,31 @@ mod tests {
                 .load(std::sync::atomic::Ordering::Relaxed),
             tcp0 + 2,
             "правило сработало без пересборки роутера"
+        );
+
+        // (5) Журнал маршрутных решений (vpn:route_changed): решения шагов
+        // (1)/(2)/(4) отражены, повторное соединение с доменом шага (1) —
+        // без второго события (дедуп по домену).
+        let repeat = connect_socks5(router.port(), "www.blocked.tun", SERVER_PORT);
+        drop(repeat);
+        std::thread::sleep(Duration::from_millis(200));
+        let log = routes_log.lock().unwrap().clone();
+        assert!(
+            log.contains(&("www.blocked.tun".to_string(), "tunnel".to_string())),
+            "туннельное решение в журнале: {log:?}"
+        );
+        assert!(
+            log.contains(&("127.0.0.1".to_string(), "direct".to_string())),
+            "прямое решение в журнале: {log:?}"
+        );
+        assert!(
+            log.contains(&("extra.tun".to_string(), "tunnel".to_string())),
+            "живое правило — туннельное решение: {log:?}"
+        );
+        assert_eq!(
+            log.iter().filter(|(d, _)| d == "www.blocked.tun").count(),
+            1,
+            "повтор домена — без второго события (дедуп): {log:?}"
         );
 
         session.shutdown();

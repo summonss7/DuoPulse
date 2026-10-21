@@ -7,6 +7,7 @@ import { initTabBar, onTabsChanged } from "./chrome/tabbar";
 import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
 import "./chrome/mainmenu";
 import "./proxy-menu";
+import "./vpn-panel/vpn-panel";
 import { initDuo } from "./subtitles-panel/duo";
 import { initTranslateSettings } from "./subtitles-panel/translate-settings";
 

@@ -699,6 +699,24 @@ fn main() {
             // bridge::apply_wg_saved).
             bridge::apply_wg_saved(app.handle());
 
+            // События маршрутных решений (задача 6.5, vpn:route_changed):
+            // роутер сообщает первый маршрут домена и его смену — панель VPN
+            // видит, как split-правила ложатся на живые соединения.
+            if let Some(router) = app.try_state::<Option<vpn::router::Router>>() {
+                if let Some(router) = router.inner().as_ref() {
+                    let app_for_events = app.handle().clone();
+                    router.set_event_sink(std::sync::Arc::new(move |domain, route| {
+                        let _ = bridge::emit::<bridge::VpnRouteChangedEvent>(
+                            &app_for_events,
+                            &bridge::VpnRouteChanged {
+                                domain: domain.to_string(),
+                                route: route.to_string(),
+                            },
+                        );
+                    }));
+                }
+            }
+
             // Окно создаётся кодом (не из tauri.conf.json), чтобы подставить
             // аргументы: UI-webview и дочерние webview вкладок делят одно
             // окружение WebView2 — прокси действует на все (localhost обходит).

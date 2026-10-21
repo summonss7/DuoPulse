@@ -80,6 +80,11 @@ smoltcp = { version = "0.14", default-features = false, features = [
     "medium-ip",
     "socket-tcp",
     "socket-udp",
+    "socket-icmp",
+    # Автоответ echo reply стека: серверная сторона (тестовый WG-стенд стенда
+    # cargo-тестов) отвечает на ICMP-эхо пинга туннеля (задача 6.5) без
+    # собственного ICMP-сокета; реальные WG-серверы отвечает их ОС.
+    "auto-icmp-echo-reply",
     "proto-ipv4",
 ] }
 # Настройка буферов UDP-сокета туннеля (SO_RCVBUF): дефолтных 64 КБ Windows

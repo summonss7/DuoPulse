@@ -122,6 +122,46 @@ impl Policy {
 pub struct Router {
     port: u16,
     policy: Arc<RwLock<Policy>>,
+    events: Arc<RouteEvents>,
+}
+
+/// Подписчик маршрутных решений (vpn:route_changed, задача 6.5) —
+/// (домен, tunnel|direct|proxy).
+pub type RouteEventSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
+/// События маршрутных решений (задача 6.5, docs/05 §2): дедуп по домену —
+/// событие уходит при ПЕРВОМ решении домена и смене маршрута (правило
+/// изменили — новый маршрут следующего соединения виден в UI). Прямой режим
+/// off вообще не шлёт событий (решений нет — весь трафик напрямую).
+#[derive(Default)]
+struct RouteEvents {
+    sink: RwLock<Option<RouteEventSink>>,
+    seen: std::sync::Mutex<std::collections::HashMap<String, String>>,
+}
+
+impl RouteEvents {
+    /// Зафиксировать решение (нить соединения): событие — при новом домене
+    /// или смене маршрута. Каталог сеанса ограничен (переполнение — сброс:
+    /// события повторятся, это только телеметрия панели).
+    fn note(&self, domain: &str, route: &str) {
+        let sink = self.sink.read().unwrap_or_else(|p| p.into_inner()).clone();
+        let Some(sink) = sink else { return };
+        let fire = {
+            let mut seen = self.seen.lock().unwrap_or_else(|p| p.into_inner());
+            if seen.len() > 4096 {
+                seen.clear();
+            }
+            if seen.get(domain).map(String::as_str) == Some(route) {
+                false
+            } else {
+                seen.insert(domain.to_string(), route.to_string());
+                true
+            }
+        };
+        if fire {
+            sink(domain, route);
+        }
+    }
 }
 
 impl Router {
@@ -136,15 +176,28 @@ impl Router {
         let port = listener.local_addr()?.port();
         let policy = Arc::new(RwLock::new(Policy::Single(Route::Direct)));
         let policy_loop = Arc::clone(&policy);
+        let events = Arc::new(RouteEvents::default());
+        let events_loop = Arc::clone(&events);
         std::thread::Builder::new()
             .name("vpn-router-accept".into())
-            .spawn(move || accept_loop(listener, policy_loop))?;
+            .spawn(move || accept_loop(listener, policy_loop, events_loop))?;
         eprintln!("[vpn] SOCKS5-роутер слушает 127.0.0.1:{port}");
-        Ok(Router { port, policy })
+        Ok(Router {
+            port,
+            policy,
+            events,
+        })
     }
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Подключить подписчика маршрутных решений (vpn:route_changed, задача
+    /// 6.5) — панель VPN видит, как split-правила ложатся на живые
+    /// соединения. Вызывается приложением на старте (эмит тauri-события).
+    pub fn set_event_sink(&self, sink: RouteEventSink) {
+        *self.events.sink.write().unwrap_or_else(|p| p.into_inner()) = Some(sink);
     }
 
     /// Доминирующий маршрут (клонирование — для тестов и статуса vpn; панель
@@ -214,11 +267,12 @@ pub fn apply_saved(app: &tauri::AppHandle, profile_dir: &Path) {
     }
 }
 
-fn accept_loop(listener: TcpListener, policy: Arc<RwLock<Policy>>) {
+fn accept_loop(listener: TcpListener, policy: Arc<RwLock<Policy>>, events: Arc<RouteEvents>) {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 let policy = policy.read().unwrap_or_else(|p| p.into_inner()).clone();
+                let events = Arc::clone(&events);
                 let _ = std::thread::Builder::new()
                     .name("vpn-router-conn".into())
                     .spawn(move || {
@@ -226,7 +280,7 @@ fn accept_loop(listener: TcpListener, policy: Arc<RwLock<Policy>>) {
                             .peer_addr()
                             .map(|a| a.to_string())
                             .unwrap_or_else(|_| "?".into());
-                        if let Err(e) = serve_client(stream, &policy) {
+                        if let Err(e) = serve_client(stream, &policy, &events) {
                             eprintln!("[vpn] {peer}: {e}");
                         }
                     });
@@ -237,7 +291,11 @@ fn accept_loop(listener: TcpListener, policy: Arc<RwLock<Policy>>) {
 }
 
 /// Одно клиентское соединение WebView2 → роутер (RFC 1928, только CONNECT).
-fn serve_client(mut client: TcpStream, policy: &Policy) -> Result<(), String> {
+fn serve_client(
+    mut client: TcpStream,
+    policy: &Policy,
+    events: &RouteEvents,
+) -> Result<(), String> {
     let _ = client.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
     let _ = client.set_write_timeout(Some(HANDSHAKE_TIMEOUT));
 
@@ -322,6 +380,18 @@ fn serve_client(mut client: TcpStream, policy: &Policy) -> Result<(), String> {
             Some(RuleAction::Direct) | None => Route::Direct,
         },
     };
+    // Событие маршрутного решения (задача 6.5, vpn:route_changed): панель
+    // VPN видит, как режим/правила ложатся на живые соединения. Прямой
+    // off-режим молчит — решений там нет (всё напрямую и без роутера так же).
+    let off = matches!(&policy, Policy::Single(Route::Direct));
+    if !off {
+        let label = match &route {
+            Route::Direct => "direct",
+            Route::Upstream { .. } => "proxy",
+            Route::Wg { .. } => "tunnel",
+        };
+        events.note(&target.host, label);
+    }
     let (upstream, preamble) = match &route {
         Route::Direct => connect_direct(&target).map(|s| (Conn::Tcp(s), Vec::new())),
         Route::Upstream { cfg, password } => {
@@ -1132,5 +1202,61 @@ mod tests {
         assert_eq!(base64(b"foob"), "Zm9vYg==");
         assert_eq!(base64(b"fooba"), "Zm9vYmE=");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    /// События маршрутных решений (задача 6.5, vpn:route_changed): решение
+    /// домена — событием, повтор того же маршрута — молчание, прямой off —
+    /// решений не сообщает. Прокси-маршрут с мёртвым upstream: событие о
+    /// решении уходит даже когда соединение дальше отказало (fail-closed —
+    /// дело роутера, решение было).
+    #[test]
+    fn route_events_first_decision_and_dedup() {
+        let (echo_port, _hits, _t) = echo_target();
+        let router = Router::start().unwrap();
+        let seen: Arc<std::sync::Mutex<Vec<(String, String)>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_own = Arc::clone(&seen);
+        router.set_event_sink(Arc::new(move |domain, route| {
+            seen_own
+                .lock()
+                .unwrap()
+                .push((domain.to_string(), route.to_string()));
+        }));
+
+        // Off (всё напрямую) — событие не уходит: решений нет. (Цель —
+        // IP-литерал: без DNS, прямой путь заведомо работает.)
+        socks5_connect(router.port(), "127.0.0.1", echo_port).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "off-режим решений не сообщает: {:?}",
+            seen.lock().unwrap()
+        );
+
+        // Прокси-маршрут (мёртвый upstream): первый домен — «proxy», отказ
+        // соединения (fail-closed) события не отменяет, повтор — молчание.
+        router.set_route(Route::Upstream {
+            cfg: proxy_cfg(ProxyProto::Socks5, "127.0.0.1", dead_port(), None),
+            password: None,
+        });
+        assert!(
+            socks5_connect(router.port(), "blocked.example", 80).is_err(),
+            "мёртвый upstream — fail-closed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(
+            seen.lock().unwrap().as_slice(),
+            &[("blocked.example".into(), "proxy".into())]
+        );
+        assert!(
+            socks5_connect(router.port(), "blocked.example", 80).is_err(),
+            "мёртвый upstream — fail-closed (повтор)"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "повтор домена — без второго события (дедуп)"
+        );
     }
 }

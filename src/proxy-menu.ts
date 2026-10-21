@@ -104,9 +104,11 @@ btn.addEventListener("click", async (e) => {
     const mainMenu = document.getElementById("mainMenu") as HTMLElement | null;
     const tabMenu = document.getElementById("tabMenu") as HTMLElement | null;
     const duoPanel = document.getElementById("duoPanel") as HTMLElement | null;
+    const vpnPanel = document.getElementById("vpnPanel") as HTMLElement | null;
     if (mainMenu) mainMenu.hidden = true;
     if (tabMenu) tabMenu.hidden = true;
     if (duoPanel) duoPanel.hidden = true;
+    if (vpnPanel) vpnPanel.hidden = true;
   }
   menu.hidden = !open;
   if (!menu.hidden) {

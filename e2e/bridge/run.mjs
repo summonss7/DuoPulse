@@ -11,6 +11,8 @@
 //   5) vpn.{get_rules,add_rule,remove_rule,set_mode} — split-tunnel (6.3):
 //      upsert-правила домен→маршрут, персист vpn/split-rules.json, отказ
 //      global/split без профиля WireGuard (fail-closed), поле routing.
+//   6) UI-панель VPN (6.5): кнопка-щит в Navbar открывает панель (статус/
+//      тумблер/режим/дисклеймер), правило из панели доходит до Core.
 // Изоляция: APPDATA и WEBVIEW2_USER_DATA_FOLDER — во временном каталоге,
 // реальный профиль пользователя не затрагивается.
 //
@@ -152,7 +154,7 @@ try {
 
   // (1) bridge.version
   const version = await evalIn(uiWs, `window.__duopulse.bridge.version()`);
-  check("bridge.version: приложение отдаёт версию контракта", version?.version === 9, JSON.stringify(version)); // v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} (5.1)
+  check("bridge.version: приложение отдаёт версию контракта", version?.version === 10, JSON.stringify(version)); // v10: события vpn:stats + vpn:route_changed, VpnWgState.pingMs (6.5); v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} (5.1)
 
   // (2) tabs.list — СКВОЗНОЙ DoD-тест: UI → Core → ответ
   const tabs = await evalIn(uiWs, `window.__duopulse.tabs.list()`);
@@ -283,6 +285,92 @@ try {
 
   const rules3 = await evalIn(uiWs, `window.__duopulse.vpn.removeRule({ domain: "blocked.example" })`);
   check("vpn.remove_rule: правило удалено", rules3?.rules?.length === 0, JSON.stringify(rules3));
+
+  // (6) UI-панель VPN (задача 6.5): кнопка-щит в Navbar открывает панель —
+  // статус/тумблер/режим/дисклеймер из живого приложения; добавление правила
+  // из панели доходит до Core (общий стор IPC ↔ роутер).
+  const btnExists = await evalIn(uiWs, `!!document.getElementById("vpnBtn")`);
+  check("панель VPN: кнопка-щит в Navbar", btnExists === true);
+
+  await evalIn(uiWs, `document.getElementById("vpnBtn").click()`);
+  // Панель открывается мгновенно, но снапшоты (статус/серверы) догружаются
+  // асинхронно — ждём заполнения строки статуса.
+  let panelState;
+  for (let i = 0; i < 16; i++) {
+    panelState = await evalIn(
+      uiWs,
+      `(() => {
+        const p = document.getElementById("vpnPanel");
+        return {
+          open: p && !p.hidden,
+          state: p?.querySelector("#vpnPanelStatus")?.dataset.state,
+          label: p?.querySelector("#vpnPanelStatus .state")?.textContent,
+          toggle: p?.querySelector("#vpnEnabled")?.checked,
+          mode: p?.querySelectorAll("#vpnMode button.on")?.[0]?.dataset.mode,
+          profilesDisabled: p?.querySelector("#vpnProfile")?.disabled,
+          disclaimer: p?.querySelector("#vpnDisclaimer")?.textContent ?? "",
+        };
+      })()`,
+    );
+    if (panelState?.label) break;
+    await sleep(300);
+  }
+  check(
+    "панель VPN: открыта, статус «Выключен» (data-state=off), тумблер снят",
+    panelState?.open === true &&
+      panelState?.state === "off" &&
+      panelState?.label === "Выключен" &&
+      panelState?.toggle === false,
+    JSON.stringify(panelState).slice(0, 140),
+  );
+  check(
+    "панель VPN: режим off активен (свежий профиль), серверов нет — селект заблокирован",
+    panelState?.mode === "off" && panelState?.profilesDisabled === true,
+    JSON.stringify(panelState).slice(0, 140),
+  );
+  check(
+    "панель VPN: дисклеймер — DuoPulse только VPN-клиент (docs/01 F-12)",
+    /только VPN-клиент/.test(panelState?.disclaimer ?? "") &&
+      /серверы принадлежат вам|серверы пользователя/i.test(panelState?.disclaimer ?? ""),
+    (panelState?.disclaimer ?? "").slice(0, 120),
+  );
+
+  const uiRule = await evalIn(
+    uiWs,
+    `(() => {
+      const input = document.getElementById("vpnRuleDomain");
+      input.value = "panel.example";
+      document.getElementById("vpnRuleTunnel").click();
+      return "clicked";
+    })()`,
+  );
+  await sleep(600);
+  const uiRuleState = await evalIn(
+    uiWs,
+    `(() => ({
+      inList: document.querySelector("#vpnRules .vpn-rule .vpn-mono")?.textContent,
+      inCore: null,
+    }))()`,
+  );
+  const uiRuleCore = await evalIn(uiWs, `window.__duopulse.vpn.getRules()`);
+  check(
+    "панель VPN: правило из панели дошло до Core и отрисовано в списке",
+    uiRule === "clicked" &&
+      uiRuleState?.inList === "panel.example" &&
+      uiRuleCore?.rules?.some((r) => r.domain === "panel.example" && r.route === "tunnel"),
+    JSON.stringify({ list: uiRuleState?.inList, core: uiRuleCore?.rules }),
+  );
+
+  const closedByEsc = await evalIn(
+    uiWs,
+    `(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      return document.getElementById("vpnPanel").hidden;
+    })()`,
+  );
+  check("панель VPN: Escape закрывает", closedByEsc === true);
+
+  await evalIn(uiWs, `window.__duopulse.vpn.removeRule({ domain: "panel.example" })`);
 
   uiWs.close();
 } catch (e) {

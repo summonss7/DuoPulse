@@ -47,7 +47,11 @@ use crate::proxy;
 /// add_rule, remove_rule} (режимы off/global/split, правила домен →
 /// tunnel/direct, персист vpn/split-rules.json), vpn.status расширен полем
 /// routing (vpn-режим, отличим от фактического маршрута mode).
-pub const CONTRACT_VERSION: u32 = 9;
+/// v10 (задача 6.5): события vpn:stats (rx/tx/ping туннеля — живая
+/// статистика панели VPN, эмит нитью туннеля при изменении) и
+/// vpn:route_changed (решение роутера домен → tunnel|direct|proxy, дедуп);
+/// VpnWgState расширен полем pingMs (ICMP-RTT до DNS-сервера туннеля).
+pub const CONTRACT_VERSION: u32 = 10;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -478,6 +482,11 @@ pub struct VpnWgState {
     pub last_handshake_ms: Option<u64>,
     pub rx_bytes: u64,
     pub tx_bytes: u64,
+    /// RTT ICMP-эхом до DNS-сервера профиля через туннель, мс (задача 6.5;
+    /// null — ответа нет дольше 3 с: сервер может не отвечать на ICMP,
+    /// трафик при этом жив).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ping_ms: Option<u64>,
     /// Unix-ms запуска сессии.
     pub since_ms: i64,
 }
@@ -881,6 +890,8 @@ pub type SubtitlesTranslateUnavailable = crate::translate::SubtitlesTranslateUna
 /// реально эмитится с M6 — смена режима роутера и переходы туннеля WG
 /// connecting/connected/error, задача 6.2; kill-switch задачи 6.4 — Error
 /// «туннель мёртв» при обрыве upstream и Off «выключен» при остановке).
+/// Задача 6.5: переходы туннеля несут снапшот wg (профиль + rx/tx/ping) —
+/// панель VPN и индикатор-щит обновляются одним событием.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -896,6 +907,58 @@ pub struct VpnStateChanged {
 impl BridgeEvent for VpnStateChanged {
     const NAME: &'static str = "vpn:state_changed";
     type Payload = Self;
+}
+
+/// vpn:stats (задача 6.5, docs/05 §2): живая статистика туннеля — rx/tx и
+/// ICMP-RTT до DNS-сервера туннеля; панель VPN и индикатор-щит ведут числа
+/// без опроса. Эмит — нитью туннеля не чаще раза в секунду и только при
+/// изменении (простой без трафика — молчание, панель держит последние числа).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnStats {
+    /// connecting | connected | error — эпоха чисел (переходы — отдельным
+    /// событием vpn:state_changed).
+    pub state: String,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    /// RTT ICMP-эхом, мс (null — ответа нет дольше 3 с; сервер может не
+    /// отвечать на ICMP — трафик жив и без этого).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ping_ms: Option<u64>,
+    /// Сколько мс назад последний handshake (null — не было).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_handshake_ms: Option<u64>,
+}
+
+/// Marker-тип события (дженерик emit).
+#[derive(Debug, Clone)]
+pub struct VpnStatsEvent;
+
+impl BridgeEvent for VpnStatsEvent {
+    const NAME: &'static str = "vpn:stats";
+    type Payload = VpnStats;
+}
+
+/// vpn:route_changed (задача 6.5, docs/05 §2): роутер решил маршрут домена —
+/// панель VPN видит, как режим и split-правила ложатся на живые соединения.
+/// Событие уходит при ПЕРВОМ решении домена и смене маршрута (дедуп в
+/// роутере); прямой off-режим решений не сообщает (весь трафик напрямую).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnRouteChanged {
+    /// Домен (или IP-литерал) соединения.
+    pub domain: String,
+    /// tunnel | direct | proxy.
+    pub route: String,
+}
+
+/// Marker-тип события (дженерик emit).
+#[derive(Debug, Clone)]
+pub struct VpnRouteChangedEvent;
+
+impl BridgeEvent for VpnRouteChangedEvent {
+    const NAME: &'static str = "vpn:route_changed";
+    type Payload = VpnRouteChanged;
 }
 
 /// adblock:blocked_count: прирост блокировок (батчинг ~400 мс в Core,
@@ -1125,6 +1188,8 @@ pub fn contract_json() -> serde_json::Value {
             "page:loaded": { "payload": schema!(PageLoaded) },
             "page:video_detected": { "payload": schema!(PageVideoDetected) },
             "vpn:state_changed": { "payload": schema!(VpnStateChanged) },
+            "vpn:stats": { "payload": schema!(VpnStats) },
+            "vpn:route_changed": { "payload": schema!(VpnRouteChanged) },
             "adblock:blocked_count": { "payload": schema!(AdblockBlockedCount) },
             "adblock:site_exception_changed": { "payload": schema!(AdblockSiteException) },
             "perf:startup_ms": { "payload": schema!(crate::perf::PerfStartupMs) },
@@ -1184,6 +1249,11 @@ fn event_names_match_registry() {
             (
                 <VpnStateChanged as BridgeEvent>::NAME,
                 schema!(VpnStateChanged),
+            ),
+            (<VpnStatsEvent as BridgeEvent>::NAME, schema!(VpnStats)),
+            (
+                <VpnRouteChangedEvent as BridgeEvent>::NAME,
+                schema!(VpnRouteChanged),
             ),
             (<TabsUpdated as BridgeEvent>::NAME, schema!(TabsListResult)),
             (
@@ -1695,6 +1765,7 @@ fn collect_vpn_status(app: &AppHandle) -> VpnStatusResult {
                     last_handshake_ms: s.last_handshake_ms,
                     rx_bytes: s.rx_bytes,
                     tx_bytes: s.tx_bytes,
+                    ping_ms: s.ping_ms,
                     since_ms: s.since_ms,
                 }),
             }
@@ -1832,18 +1903,35 @@ fn start_wg_session(
     psk: Option<[u8; 32]>,
 ) -> Result<crate::vpn::wg::WgSession, String> {
     let app_for_events = app.clone();
+    let (profile_id, profile_name, profile_endpoint) = (
+        profile.id.clone(),
+        profile.name.clone(),
+        format!("{}:{}", profile.endpoint_host, profile.endpoint_port),
+    );
     let on_state: crate::vpn::wg::OnStateChange = std::sync::Arc::new(move |s| {
         let state = match s.state {
             crate::vpn::wg::WgLiveState::Error => proxy::ProxyState::Error,
             _ => proxy::ProxyState::On,
         };
+        // Снапшот wg в событии (задача 6.5): панель VPN и индикатор-щит
+        // получают профиль/статистику сразу, без догрузки vpn.status.
         let _ = emit::<VpnStateChanged>(
             &app_for_events,
             &VpnStateChanged {
                 mode: "wg".into(),
                 state,
                 detail: s.detail.clone(),
-                wg: None,
+                wg: Some(VpnWgState {
+                    profile_id: profile_id.clone(),
+                    profile_name: profile_name.clone(),
+                    state: s.state.as_str().into(),
+                    endpoint: profile_endpoint.clone(),
+                    last_handshake_ms: s.last_handshake_ms,
+                    rx_bytes: s.rx_bytes,
+                    tx_bytes: s.tx_bytes,
+                    ping_ms: s.ping_ms,
+                    since_ms: s.since_ms,
+                }),
             },
         );
     });
@@ -1857,6 +1945,23 @@ fn start_wg_session(
         crate::vpn::wg::tunnel_dead_after(),
     )
     .map_err(|e| format!("поднять туннель: {e}"))
+    .inspect(|session| {
+        // Статистика туннеля (задача 6.5): vpn:stats — rx/tx и ICMP-RTT пинга,
+        // троттлинг/дедуп — нитью туннеля (см. wg.rs emit_stats).
+        let app_for_stats = app.clone();
+        session.set_stats_sink(std::sync::Arc::new(move |s| {
+            let _ = emit::<VpnStatsEvent>(
+                &app_for_stats,
+                &VpnStats {
+                    state: s.state.as_str().into(),
+                    rx_bytes: s.rx_bytes,
+                    tx_bytes: s.tx_bytes,
+                    ping_ms: s.ping_ms,
+                    last_handshake_ms: s.last_handshake_ms,
+                },
+            );
+        }));
+    })
 }
 
 /// Старт приложения: поднять активный WG-профиль из wg-profiles.json (задача

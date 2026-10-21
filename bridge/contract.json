@@ -3571,6 +3571,15 @@
                   "null"
                 ]
               },
+              "pingMs": {
+                "description": "RTT ICMP-эхом до DNS-сервера профиля через туннель, мс (задача 6.5; null — ответа нет дольше 3 с: сервер может не отвечать на ICMP, трафик при этом жив).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "profileId": {
                 "type": "string"
               },
@@ -3697,6 +3706,15 @@
                   "null"
                 ]
               },
+              "pingMs": {
+                "description": "RTT ICMP-эхом до DNS-сервера профиля через туннель, мс (задача 6.5; null — ответа нет дольше 3 с: сервер может не отвечать на ICMP, трафик при этом жив).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "profileId": {
                 "type": "string"
               },
@@ -3816,6 +3834,15 @@
               },
               "lastHandshakeMs": {
                 "description": "Сколько мс назад был последний handshake (null — не было).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "pingMs": {
+                "description": "RTT ICMP-эхом до DNS-сервера профиля через туннель, мс (задача 6.5; null — ответа нет дольше 3 с: сервер может не отвечать на ICMP, трафик при этом жив).",
                 "format": "uint64",
                 "minimum": 0.0,
                 "type": [
@@ -3956,6 +3983,15 @@
               },
               "lastHandshakeMs": {
                 "description": "Сколько мс назад был последний handshake (null — не было).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "pingMs": {
+                "description": "RTT ICMP-эхом до DNS-сервера профиля через туннель, мс (задача 6.5; null — ответа нет дольше 3 с: сервер может не отвечать на ICMP, трафик при этом жив).",
                 "format": "uint64",
                 "minimum": 0.0,
                 "type": [
@@ -4538,6 +4574,28 @@
         "type": "object"
       }
     },
+    "vpn:route_changed": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "vpn:route_changed (задача 6.5, docs/05 §2): роутер решил маршрут домена — панель VPN видит, как режим и split-правила ложатся на живые соединения. Событие уходит при ПЕРВОМ решении домена и смене маршрута (дедуп в роутере); прямой off-режим решений не сообщает (весь трафик напрямую).",
+        "properties": {
+          "domain": {
+            "description": "Домен (или IP-литерал) соединения.",
+            "type": "string"
+          },
+          "route": {
+            "description": "tunnel | direct | proxy.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "route"
+        ],
+        "title": "VpnRouteChanged",
+        "type": "object"
+      }
+    },
     "vpn:state_changed": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -4575,6 +4633,15 @@
               },
               "lastHandshakeMs": {
                 "description": "Сколько мс назад был последний handshake (null — не было).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "pingMs": {
+                "description": "RTT ICMP-эхом до DNS-сервера профиля через туннель, мс (задача 6.5; null — ответа нет дольше 3 с: сервер может не отвечать на ICMP, трафик при этом жив).",
                 "format": "uint64",
                 "minimum": 0.0,
                 "type": [
@@ -4620,7 +4687,7 @@
             "type": "object"
           }
         },
-        "description": "vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; реально эмитится с M6 — смена режима роутера и переходы туннеля WG connecting/connected/error, задача 6.2; kill-switch задачи 6.4 — Error «туннель мёртв» при обрыве upstream и Off «выключен» при остановке).",
+        "description": "vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; реально эмитится с M6 — смена режима роутера и переходы туннеля WG connecting/connected/error, задача 6.2; kill-switch задачи 6.4 — Error «туннель мёртв» при обрыве upstream и Off «выключен» при остановке). Задача 6.5: переходы туннеля несут снапшот wg (профиль + rx/tx/ping) — панель VPN и индикатор-щит обновляются одним событием.",
         "properties": {
           "detail": {
             "type": "string"
@@ -4651,7 +4718,54 @@
         "title": "VpnStateChanged",
         "type": "object"
       }
+    },
+    "vpn:stats": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "vpn:stats (задача 6.5, docs/05 §2): живая статистика туннеля — rx/tx и ICMP-RTT до DNS-сервера туннеля; панель VPN и индикатор-щит ведут числа без опроса. Эмит — нитью туннеля не чаще раза в секунду и только при изменении (простой без трафика — молчание, панель держит последние числа).",
+        "properties": {
+          "lastHandshakeMs": {
+            "description": "Сколько мс назад последний handshake (null — не было).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pingMs": {
+            "description": "RTT ICMP-эхом, мс (null — ответа нет дольше 3 с; сервер может не отвечать на ICMP — трафик жив и без этого).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "rxBytes": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "state": {
+            "description": "connecting | connected | error — эпоха чисел (переходы — отдельным событием vpn:state_changed).",
+            "type": "string"
+          },
+          "txBytes": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rxBytes",
+          "state",
+          "txBytes"
+        ],
+        "title": "VpnStats",
+        "type": "object"
+      }
     }
   },
-  "version": 9
+  "version": 10
 }

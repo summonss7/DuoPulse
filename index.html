@@ -22,6 +22,7 @@
         <button id="go" class="go">Перейти</button>
         <button id="libBtn" class="icon-btn" title="История и закладки"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></button>
         <button id="proxyBtn" class="icon-btn" title="Прокси (VPN-инкремент A)"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l5.2 2v3.5c0 3.2-2.2 5.5-5.2 7-3-1.5-5.2-3.8-5.2-7V3.8z"/></svg></button>
+        <button id="vpnBtn" class="icon-btn vpn-btn" title="VPN — туннель WireGuard (задача 6.5)" aria-haspopup="dialog"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M8 1.8l5.2 2v3.5c0 3.2-2.2 5.5-5.2 7-3-1.5-5.2-3.8-5.2-7V3.8z"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/></svg><i class="vpn-dot" aria-hidden="true"></i></button>
         <button id="mainBtn" class="icon-btn" title="Меню браузера"><svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><circle cx="8" cy="3.4" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="8" cy="12.6" r="1.3"/></svg></button>
       </div>
       <div id="proxyMenu" class="proxy-menu" hidden>
@@ -153,6 +154,58 @@
               <button type="button" data-pos="top">Верх</button>
             </div>
           </div>
+        </div>
+      </div>
+      <div id="vpnPanel" class="vpn-panel" hidden role="dialog" aria-label="Панель VPN">
+        <div class="vpn-row vpn-head">
+          <span class="vpn-title">VPN</span>
+          <label class="switch" title="Вкл/выкл туннель WireGuard (нужен импортированный профиль)">
+            <input type="checkbox" id="vpnEnabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="vpn-status" id="vpnPanelStatus" data-state="off">
+          <span class="dot"></span><span class="state"></span>
+          <span class="detail" id="vpnPanelDetail"></span>
+        </div>
+        <div class="vpn-section-title">Сервер</div>
+        <div class="vpn-server">
+          <select id="vpnProfile" data-vpn="profile"></select>
+          <button type="button" id="vpnImport" class="ghost" data-vpn="import">Импорт .conf…</button>
+          <button type="button" id="vpnProfileRemove" class="link" data-vpn="remove" hidden>удалить</button>
+        </div>
+        <div class="vpn-section-title">Режим</div>
+        <div class="vpn-seg" id="vpnMode" data-vpn="mode">
+          <button type="button" data-mode="off" title="Весь трафик напрямую, туннель не поднимается">Выключен</button>
+          <button type="button" data-mode="global" title="Весь трафик браузера через туннель">Глобальный</button>
+          <button type="button" data-mode="split" title="Только правила «через туннель» — в туннель, остальное напрямую (целевой)">Split</button>
+        </div>
+        <div class="vpn-stats" id="vpnStats" data-vpn="stats" hidden>
+          <span class="vpn-mono" data-stat="rx">↓ —</span>
+          <span class="vpn-mono" data-stat="tx">↑ —</span>
+          <span class="vpn-mono" data-stat="ping" title="RTT ICMP-эхом до DNS-сервера туннеля">ping —</span>
+          <span class="vpn-mono" data-stat="hs" title="Сколько назад был последний handshake WireGuard">hs —</span>
+        </div>
+        <div class="vpn-section-title">Правила split-tunnel <span class="vpn-hint">домен и его поддомены</span></div>
+        <div class="vpn-rules" id="vpnRules" data-vpn="rules"></div>
+        <div class="vpn-rule-add">
+          <input id="vpnRuleDomain" data-vpn="rule-domain" type="text" placeholder="example.com" spellcheck="false" autocomplete="off" />
+          <button type="button" id="vpnRuleTunnel" class="primary" data-vpn="rule-tunnel" title="Добавить правило: домен — через туннель">Через туннель</button>
+          <button type="button" id="vpnRuleDirect" class="ghost" data-vpn="rule-direct" title="Добавить правило: домен — напрямую">Напрямую</button>
+        </div>
+        <div class="vpn-site" id="vpnSiteRow" data-vpn="site-row" hidden>
+          <span class="vpn-mono" id="vpnSiteHost" data-vpn="site-host"></span>
+          <button type="button" id="vpnSiteTunnel" class="link" data-vpn="site-tunnel">этот сайт — через туннель</button>
+        </div>
+        <div class="vpn-routes" id="vpnRoutes" data-vpn="routes" hidden>
+          <div class="vpn-section-title">Маршруты сеанса</div>
+          <div id="vpnRoutesList" class="vpn-routes-list" data-vpn="routes-list"></div>
+        </div>
+        <div class="vpn-foot" id="vpnDisclaimer" data-vpn="disclaimer">
+          DuoPulse — только VPN-клиент: серверы принадлежат вам или вашему
+          провайдеру VPN; собственных серверов и списков обхода нет. Законность
+          использования VPN зависит от юрисдикции и остаётся вашей ответственностью.
+          <button type="button" id="vpnSettingsLink" class="link">Настройки VPN &rarr;</button>
         </div>
       </div>
       <div id="tabMenu" class="tab-menu" hidden>

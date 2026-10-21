@@ -573,6 +573,375 @@ body {
 .proxy-foot .link:hover {
   color: var(--text-primary);
 }
+
+/* --- Кнопка-щит VPN + индикатор (задача 6.5; сигнальные — гайд 06 §2) --- */
+.vpn-btn {
+  position: relative; /* точка-индикатор — в углу щита */
+}
+.vpn-btn .vpn-dot {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  pointer-events: none;
+}
+.vpn-btn[data-vpn="off"] .vpn-dot {
+  background: var(--text-muted);
+}
+.vpn-btn[data-vpn="connecting"] .vpn-dot {
+  background: var(--warn);
+  animation: vpn-dot-pulse 1.2s ease-in-out infinite; /* «пульс» ожидания, §3 */
+}
+.vpn-btn[data-vpn="connecting"] {
+  color: var(--warn); /* контур щита повторяет статус */
+}
+.vpn-btn[data-vpn="connected"] .vpn-dot {
+  background: var(--ok);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ok) 60%, transparent);
+}
+.vpn-btn[data-vpn="connected"] {
+  color: var(--ok);
+}
+.vpn-btn[data-vpn="error"] .vpn-dot {
+  background: var(--err);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--err) 60%, transparent);
+}
+.vpn-btn[data-vpn="error"] {
+  color: var(--err);
+}
+@keyframes vpn-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* --- Панель VPN (задача 6.5, docs/02 §6.2; панель 12px, контролы 8px) --- */
+.vpn-panel {
+  position: absolute;
+  top: var(--chrome-h);
+  right: 10px;
+  z-index: 110; /* поверх панели прокси — открыто позже */
+  width: 396px;
+  max-height: calc(100vh - var(--chrome-h) - 16px);
+  overflow-y: auto;
+  padding: 14px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.vpn-panel[hidden] {
+  display: none;
+}
+.vpn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vpn-head {
+  justify-content: space-between;
+}
+.vpn-title {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.vpn-status {
+  gap: 6px;
+  margin: 8px 0 12px;
+  color: var(--text-muted);
+}
+.vpn-status .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+.vpn-status .state {
+  font-weight: 700;
+  flex: none;
+}
+.vpn-status[data-state="connecting"] .dot {
+  background: var(--warn);
+  animation: vpn-dot-pulse 1.2s ease-in-out infinite;
+}
+.vpn-status[data-state="connecting"] .state {
+  color: var(--warn);
+}
+.vpn-status[data-state="connected"] .dot {
+  background: var(--ok);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ok) 60%, transparent);
+}
+.vpn-status[data-state="connected"] .state {
+  color: var(--ok);
+}
+.vpn-status[data-state="error"] .dot {
+  background: var(--err);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--err) 60%, transparent);
+}
+.vpn-status[data-state="error"] .state {
+  color: var(--err);
+}
+.vpn-status .detail {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.vpn-section-title {
+  margin: 12px 0 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.vpn-section-title .vpn-hint {
+  margin-left: 6px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.vpn-server {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vpn-server select {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 8px;
+  font-size: 12px;
+  outline: none;
+}
+.vpn-server select:focus {
+  border-color: var(--accent-neon);
+  box-shadow: var(--focus-ring-soft);
+}
+.vpn-panel button.ghost,
+.vpn-panel button.primary {
+  width: auto;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vpn-panel button.ghost:hover,
+.vpn-panel button.primary:hover {
+  background: var(--hover-neutral);
+}
+.vpn-panel button.primary {
+  border-color: var(--accent-neon); /* неон-кромка, не заливка (§8) */
+  color: var(--accent-neon);
+  font-weight: 700;
+}
+.vpn-panel button.link {
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vpn-panel button.link:hover {
+  color: var(--text-primary);
+}
+/* Сегмент режима off/global/split и мини-сегмент правила на строке */
+.vpn-seg {
+  display: flex;
+  gap: 4px;
+}
+#vpnMode {
+  margin-bottom: 4px;
+}
+#vpnMode button {
+  flex: 1;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+#vpnMode button:hover {
+  background: var(--hover-neutral);
+  color: var(--text-primary);
+}
+#vpnMode button.on {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent-neon) 8%, transparent);
+}
+.vpn-stats {
+  display: flex;
+  gap: 12px;
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--bg-base); /* числа — на тёмной полке, слоистость §5 */
+  color: var(--text-muted);
+}
+.vpn-stats[hidden] {
+  display: none; /* display:flex перебивает hidden — гасим явно */
+}
+.vpn-mono {
+  font-family: var(--font-mono); /* домены/адреса/числа — моно, §4 */
+  font-size: 12px;
+}
+.vpn-stats .vpn-mono {
+  white-space: nowrap;
+}
+.vpn-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.vpn-rule > .vpn-mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vpn-rule .vpn-seg button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vpn-rule .vpn-seg button.on {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+}
+.vpn-rule-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.vpn-rule-add input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 0 8px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  outline: none;
+}
+.vpn-rule-add input:focus {
+  border-color: var(--accent-neon);
+  box-shadow: var(--focus-ring-soft);
+}
+.vpn-empty {
+  padding: 4px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: var(--lh-ui);
+}
+/* «Этот сайт — через туннель»: хост активной вкладки + действие */
+.vpn-site {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-control);
+  background: var(--bg-warm); /* тёплая полка — «внутренняя мебель», §2 */
+}
+.vpn-site[hidden] {
+  display: none; /* display:flex перебивает hidden — гасим явно */
+}
+.vpn-site .vpn-mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* «Маршруты сеанса» — телеметрия решений роутера */
+.vpn-route {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.vpn-route .vpn-mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vpn-route-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--radius-control);
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--line-soft);
+}
+.vpn-route-tag[data-route="tunnel"] {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+}
+.vpn-route-tag[data-route="proxy"] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.vpn-routes-list {
+  max-height: 132px;
+  overflow-y: auto;
+}
+/* Дисклеймер: DuoPulse — только VPN-клиент (docs/01 F-12) */
+.vpn-foot {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: var(--lh-ui);
+}
+.vpn-foot .link {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
 /* Тумблер (скругление контролов, неон — активное состояние) */
 .switch {
   position: relative;

@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 9); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 10); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
@@ -147,7 +147,9 @@ export interface DuoPulseBridgeContract {
   SubtitlesTracksReady: SubtitlesTracksReady;
   SubtitlesTranslateProgress: SubtitlesTranslateProgress;
   SubtitlesTranslateUnavailable: SubtitlesTranslateUnavailable;
+  VpnRouteChanged: VpnRouteChanged;
   VpnStateChanged: VpnStateChanged;
+  VpnStats: VpnStats;
 }
 /**
  * adblock.set_enabled: site=None — глобальный тумблер; Some — исключение сайта (white-list, docs/04 §1.2). on=true снимает исключение.
@@ -1130,6 +1132,10 @@ export interface VpnWgState {
    * Сколько мс назад был последний handshake (null — не было).
    */
   lastHandshakeMs?: number | null;
+  /**
+   * RTT ICMP-эхом до DNS-сервера профиля через туннель, мс (задача 6.5; null — ответа нет дольше 3 с: сервер может не отвечать на ICMP, трафик при этом жив).
+   */
+  pingMs?: number | null;
   profileId: string;
   profileName: string;
   rxBytes: number;
@@ -1272,7 +1278,20 @@ export interface SubtitlesTranslateUnavailable {
   willRetry: boolean;
 }
 /**
- * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; реально эмитится с M6 — смена режима роутера и переходы туннеля WG connecting/connected/error, задача 6.2; kill-switch задачи 6.4 — Error «туннель мёртв» при обрыве upstream и Off «выключен» при остановке).
+ * vpn:route_changed (задача 6.5, docs/05 §2): роутер решил маршрут домена — панель VPN видит, как режим и split-правила ложатся на живые соединения. Событие уходит при ПЕРВОМ решении домена и смене маршрута (дедуп в роутере); прямой off-режим решений не сообщает (весь трафик напрямую).
+ */
+export interface VpnRouteChanged {
+  /**
+   * Домен (или IP-литерал) соединения.
+   */
+  domain: string;
+  /**
+   * tunnel | direct | proxy.
+   */
+  route: string;
+}
+/**
+ * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; реально эмитится с M6 — смена режима роутера и переходы туннеля WG connecting/connected/error, задача 6.2; kill-switch задачи 6.4 — Error «туннель мёртв» при обрыве upstream и Off «выключен» при остановке). Задача 6.5: переходы туннеля несут снапшот wg (профиль + rx/tx/ping) — панель VPN и индикатор-щит обновляются одним событием.
  */
 export interface VpnStateChanged {
   detail: string;
@@ -1282,4 +1301,23 @@ export interface VpnStateChanged {
   mode: string;
   state: ProxyState;
   wg?: VpnWgState | null;
+}
+/**
+ * vpn:stats (задача 6.5, docs/05 §2): живая статистика туннеля — rx/tx и ICMP-RTT до DNS-сервера туннеля; панель VPN и индикатор-щит ведут числа без опроса. Эмит — нитью туннеля не чаще раза в секунду и только при изменении (простой без трафика — молчание, панель держит последние числа).
+ */
+export interface VpnStats {
+  /**
+   * Сколько мс назад последний handshake (null — не было).
+   */
+  lastHandshakeMs?: number | null;
+  /**
+   * RTT ICMP-эхом, мс (null — ответа нет дольше 3 с; сервер может не отвечать на ICMP — трафик жив и без этого).
+   */
+  pingMs?: number | null;
+  rxBytes: number;
+  /**
+   * connecting | connected | error — эпоха чисел (переходы — отдельным событием vpn:state_changed).
+   */
+  state: string;
+  txBytes: number;
 }

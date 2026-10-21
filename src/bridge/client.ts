@@ -262,8 +262,15 @@ export const bridge = {
     pageLoaded: "page:loaded",
     /** page.video_detected: на странице найден <video> (M3; каркас с 1.1). */
     pageVideoDetected: "page:video_detected",
-    /** vpn.state_changed: состояние маршрутизации изменилось (M6; каркас). */
+    /** vpn.state_changed: состояние маршрутизации изменилось (M6; переходы
+     *  туннеля несут снапшот wg — задача 6.5). */
     vpnStateChanged: "vpn:state_changed",
+    /** vpn.stats (задача 6.5): живая статистика туннеля — rx/tx и ICMP-RTT;
+     *  эмит не чаще раза в секунду и только при изменении. */
+    vpnStats: "vpn:stats",
+    /** vpn.route_changed (задача 6.5): роутер решил маршрут домена
+     *  (tunnel|direct|proxy) — первый раз и при смене; off-режим молчит. */
+    vpnRouteChanged: "vpn:route_changed",
     /** adblock.blocked_count: прирост блокировок (батчинг ~400 мс, задача 2.1). */
     adblockBlockedCount: "adblock:blocked_count",
     /** adblock.site_exception_changed: исключение сайта включено/снято (2.1). */
