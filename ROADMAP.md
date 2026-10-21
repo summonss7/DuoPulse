@@ -337,3 +337,20 @@
   fail-closed на мёртвом туннеле). Контракт v9 (vpn.{set_mode,get_rules,
   add_rule,remove_rule} + routing в статусе). План не меняется: далее 6.4
   (kill-switch).
+
+- 2026-10-21 — **контроль метрик P-05/P-08 заменён по решению автора (карточка
+  duopulse-047): DuoPulse с выключенным блокировщиком вместо Chrome**.
+  Причина: с 21.10 YouTube-сервер не attachит видеопоток свежим (без cookies)
+  профилям Chrome И Edge (playerState 3, readyState 0 при playability OK,
+  200-ответы yt-ump при этом приходят; WebView2/DuoPulse играет) — зондами CDP
+  локальный обход не найден (профиль/куки/host-resolver/DoH/QUIC/no-proxy/
+  SOCKS5-роутер/X-Client-Data/lang отброшены, движки и публичный IP
+  идентичны), решение автора duopulse_047_control_20261021 (21.10 03:48):
+  «Контроль = DuoPulse с выключенным блокировщиком». Проведено: стенды
+  e2e/perf/p05.mjs и p08.mjs переведены на новый контроль (settings.json
+  adblock.enabled=false в профиле контроля, отказ контроля = провал прогона,
+  DUOPULSE_P05_REQUIRE_CONTROL упразднён), «Диагностика» — подписи бюджетов
+  P-05/P-08 без привязки к Chrome, docs/04 §2 — решение и плата (потеря
+  независимости движка). План M6 не меняется; возврат к Chrome-контролю —
+  если YouTube восстановит выдачу свежим профилям (справочный критерий
+  «не хуже Chrome/Edge» сохранён в docs/04 §2).

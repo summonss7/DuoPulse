@@ -1,17 +1,23 @@
 // Замер метрики P-08 (задача 2.5/gate M2, docs/04 §2): «Время до первого
-// кадра видео (повторный просмотр) ≤ времени в Chrome+uBO (не хуже)».
+// кадра видео (повторный просмотр) ≤ контрольного браузера (не хуже)».
 // Повторный просмотр = тёплый кэш профиля (2 прогрев-просмотра), затем
-// 3 замеренных запуска на браузер, медиана; отсчёт — запуск процесса →
+// 3 замеренных запуска на прогон, медиана; отсчёт — запуск процесса →
 // первый кадр КОНТЕНТА (currentTime > 0.5, не пауза, не реклама; реклама
-// детектируется и репортится, но в DuoPulse её нет — скриптлеты).
+// детектируется и репортится: в DuoPulse её нет — скриптлеты, в контроле
+// без блокировщика преролл ждём честно, он входит в число контроля).
 //
-// Трактовка «Chrome+uBO» (описана в отчёте gate): DuoPulse блокирует теми же
-// списками EasyList/uBO, что и uBO; сравнение с ЧИСТЫМ Chrome — без блокировки
-// (Chrome грузит больше ad-запросов, на повторном просмотре с частотным капом
-// реклама обычно не показывается). Если DuoPulse ≤ чистого Chrome, планка
-// «не хуже Chrome+uBO» выполняется с запасом на накладные расходы uBO.
+// Контроль (решение автора 21.10.2026 03:48, duopulse_047_control_20261021):
+// DuoPulse с ВЫКЛЮЧЕННЫМ блокировщиком — тот же движок WebView2 и та же
+// машина, разница только в блокировщике; независимость движка теряется
+// (зафиксировано в docs/04 §2). Исходный контроль «Chrome+uBO» и консервативная
+// замена «чистый Chrome» отпали: с 21.10.2026 YouTube-сервер не attachит поток
+// свежим Chrome/Edge-профилям (playerState 3, readyState 0 при playability OK —
+// расследование CARDS/047). Смысл сравнения: блокировщик не должен ухудшать
+// старт видео относительно «как без нас» (убранный преролл — часть выигрыша).
+// Блокировщик выключается settings.json {"adblock":{"enabled":false}} в профиле
+// контроля ДО первого запуска (ключ читается на старте, adblock/mod.rs).
 // Запуск:  node e2e/perf/p08.mjs [url-видео]
-// Требует release-сборку DuoPulse (npx tauri build) и установленный Chrome.
+// Требует release-сборку DuoPulse (npx tauri build).
 import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -19,18 +25,14 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const DUO_EXE = path.join(ROOT, "src-tauri", "target", "release", "duopulse.exe");
-const CHROME_EXE =
-  process.env.CHROME_EXE || path.join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe");
 const VIDEO = process.argv[2] || "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 const RUNS = 3;
 const WARMUPS = 2;
+const DUO_CDP = 9232;
+const CTL_CDP = 9233;
 
 if (!fs.existsSync(DUO_EXE)) {
   console.error(`FAIL  не найден exe: ${DUO_EXE} (нужна release-сборка)`);
-  process.exit(1);
-}
-if (!fs.existsSync(CHROME_EXE)) {
-  console.error(`FAIL  не найден Chrome: ${CHROME_EXE} (переопредели CHROME_EXE)`);
   process.exit(1);
 }
 
@@ -128,29 +130,27 @@ async function killTree(pid) {
 
 // --- DuoPulse (релизная сборка, тёплый профиль) ------------------------------
 const duoProfile = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-p08-duo-"));
-const launchDuo = () =>
+// --- контроль: DuoPulse с выключенным блокировщиком (тёплый профиль) ---------
+const ctlProfile = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-p08-ctl-"));
+// settings.json контроля: ключ читается на старте Core, до подъёма движка
+fs.mkdirSync(path.join(ctlProfile, "DuoPulse", "profile"), { recursive: true });
+fs.writeFileSync(
+  path.join(ctlProfile, "DuoPulse", "profile", "settings.json"),
+  JSON.stringify({ adblock: { enabled: false } }),
+);
+const launchAt = (profile, port) => () =>
   spawn(DUO_EXE, [], {
     stdio: "ignore",
     env: {
       ...process.env,
-      APPDATA: duoProfile,
+      APPDATA: profile,
       DUOPULSE_START_URL: VIDEO,
-      WEBVIEW2_USER_DATA_FOLDER: path.join(duoProfile, "webview2-data"),
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=9232",
+      WEBVIEW2_USER_DATA_FOLDER: path.join(profile, "webview2-data"),
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
     },
   });
-
-// --- Chrome (чистый профиль, тёплый) -----------------------------------------
-const chromeProfile = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-p08-chrome-"));
-const launchChrome = () =>
-  spawn(CHROME_EXE, [
-    `--user-data-dir=${chromeProfile}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--remote-debugging-port=9233",
-    "--window-size=1360,860",
-    VIDEO,
-  ], { stdio: "ignore" });
+const launchDuo = launchAt(duoProfile, DUO_CDP);
+const launchCtl = launchAt(ctlProfile, CTL_CDP);
 
 /** Дождаться смерти процессов WebView2 профиля DuoPulse: осиротевший браузер
  *  держит user-data-folder и порт CDP — следующий прогон получит зомби-цели
@@ -184,7 +184,7 @@ async function waitWebViewDown(prof) {
   }
 }
 
-/** Прогрев+замеры одного браузера: launch → ждём кадр → kill; возвращает
+/** Прогрев+замеры одного прогона: launch → ждём кадр → kill; возвращает
  *  массив { ms, adSeen } замеренных прогонов. settle — ждать полной смерти
  *  процессов профиля (DuoPulse/WebView2), чтобы порт и папка освободились. */
 async function measureBrowser(name, launch, cdpPort, settle) {
@@ -211,30 +211,39 @@ async function measureBrowser(name, launch, cdpPort, settle) {
 
 let failures = 0;
 let duoMedian = NaN;
-let chromeMedian = NaN;
+let ctlMedian = NaN;
 try {
   console.log("DuoPulse (блокировщик включён):");
-  const duo = await measureBrowser("DuoPulse", launchDuo, 9232, () => waitWebViewDown(duoProfile));
-  console.log("Chrome (чистый, без расширений):");
-  const chrome = await measureBrowser("Chrome", launchChrome, 9233, null);
+  const duo = await measureBrowser("DuoPulse", launchDuo, DUO_CDP, () => waitWebViewDown(duoProfile));
+  console.log("Контроль — DuoPulse (блокировщик выключен, решение 21.10.2026 duopulse_047_control):");
+  const ctl = await measureBrowser("контроль", launchCtl, CTL_CDP, () => waitWebViewDown(ctlProfile));
   duoMedian = median(duo.map((r) => r.ms));
-  chromeMedian = median(chrome.map((r) => r.ms));
-  const ok = duoMedian <= chromeMedian;
+  ctlMedian = median(ctl.map((r) => r.ms));
+  const ok = duoMedian <= ctlMedian;
   console.log(
-    `\nP-08: DuoPulse медиана ${duoMedian} мс vs Chrome ${chromeMedian} мс — ${ok ? "НЕ ХУЖЕ" : "хуже"} (цель: не хуже Chrome+uBO)`,
+    `\nP-08: DuoPulse медиана ${duoMedian} мс vs контроль без блокировщика ${ctlMedian} мс — ${ok ? "НЕ ХУЖЕ" : "хуже"} (docs/04 §2: контроль с 21.10.2026 — DuoPulse без блокировщика)`,
   );
-  console.log(`      прогоны: DuoPulse=${JSON.stringify(duo.map((r) => r.ms))} Chrome=${JSON.stringify(chrome.map((r) => r.ms))}`);
-  console.log(`      реклама: DuoPulse=${JSON.stringify(duo.map((r) => r.adSeen))} Chrome=${JSON.stringify(chrome.map((r) => r.adSeen))}`);
+  console.log(`      прогоны: DuoPulse=${JSON.stringify(duo.map((r) => r.ms))} контроль=${JSON.stringify(ctl.map((r) => r.ms))}`);
+  console.log(`      реклама: DuoPulse=${JSON.stringify(duo.map((r) => r.adSeen))} контроль=${JSON.stringify(ctl.map((r) => r.adSeen))}`);
   if (!ok) failures++;
 } catch (e) {
   failures++;
   console.error("E2E ERROR:", e.message);
 } finally {
+  // контроль шёл с выключенным блокировщиком по settings.json — убедимся,
+  // что приложение не перезаписало ключ (санити подложенного конфига)
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(ctlProfile, "DuoPulse", "profile", "settings.json"), "utf8"));
+    if (s?.adblock?.enabled !== false) {
+      failures++;
+      console.error(`FAIL  контроль: settings.json не держит adblock.enabled=false (${JSON.stringify(s?.adblock)})`);
+    }
+  } catch {}
   try {
     fs.rmSync(duoProfile, { recursive: true, force: true });
   } catch {}
   try {
-    fs.rmSync(chromeProfile, { recursive: true, force: true });
+    fs.rmSync(ctlProfile, { recursive: true, force: true });
   } catch {}
   await sleep(1000);
 }

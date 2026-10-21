@@ -1,22 +1,32 @@
 // Замер метрики P-05 (задача 2.5/gate M2, docs/04 §2): «Дропы кадров 1080p60 —
-// не хуже контрольного браузера (Chrome/Edge) на той же машине». Трактовка
-// установлена автором 20.10.2026 (приёмка 5.3, вопрос duopulse_035_p05_20261019):
+// не хуже контрольного браузера на той же машине». Трактовка установлена
+// автором 20.10.2026 (приёмка 5.3, вопрос duopulse_035_p05_20261019):
 // YouTube перевёл выдачу 1080p60 на AV1 (itag 399), на машинах без аппаратного
-// AV1-декода софт-декод дропает кадры одинаково у DuoPulse и Chrome — прежний
+// AV1-декода софт-декод дропает кадры одинаково у DuoPulse и контроля — прежний
 // абсолютный бюджет «0 дропов/мин» недостижим платформенно и остаётся целью
 // только при аппаратном декодировании играющего кодека (замер приёмки 19–20.10:
-// DuoPulse 16,5% против Chrome 16,7%). Методика — как M0
-// (e2e/m0-results/PROTOCOL.md): getVideoPlaybackQuality, дельта
-// droppedVideoFrames за 60 с; качество форсируем hd1080 через player API,
-// ждём первый кадр контента (в DuoPulse преролл убирают скриптлеты, в Chrome —
-// дожидаемся конца рекламы), 5 с на разгон декодера. Оба браузера — тёплый
+// DuoPulse 16,5% против Chrome 16,7%).
+//
+// Контроль (решение автора 21.10.2026 03:48, duopulse_047_control_20261021):
+// DuoPulse с ВЫКЛЮЧЕННЫМ блокировщиком — тот же движок WebView2 и та же машина,
+// разница только в блокировщике; независимость движка теряется (зафиксировано
+// в docs/04 §2). Причина замены: с 21.10.2026 YouTube-сервер не attachит поток
+// свежим Chrome/Edge-профилям (playerState 3, readyState 0 при playability OK —
+// расследование CARDS/047), внешний Chrome-контроль невозможен. Блокировщик
+// выключается settings.json {"adblock":{"enabled":false}} в профиле контроля
+// ДО первого запуска (ключ читается на старте, adblock/mod.rs load_persisted).
+// Отказ контроля = провал прогона: движок тот же, «пропустить контроль»
+// (DUOPULSE_P05_REQUIRE_CONTROL эпохи Chrome-гейта) больше не предусмотрен.
+//
+// Методика — как M0 (e2e/m0-results/PROTOCOL.md): getVideoPlaybackQuality,
+// дельта droppedVideoFrames за 60 с; качество форсируем hd1080 через player API,
+// ждём первый кадр контента (в DuoPulse преролл убирают скриптлеты, в контроле —
+// дожидаемся конца рекламы), 5 с на разгон декодера. Оба прогона — тёплый
 // профиль (прогрев-просмотр качает списки блокировщика/кэш видео), затем
-// по одному замерному прогону. Если YouTube не даёт контролю поток (свежие
-// Chrome/Edge-профили гейтятся сервером — CARDS/047), сравнение пропускается
-// с явной пометкой (DUOPULSE_P05_REQUIRE_CONTROL=1 — сделать провалом).
+// по одному замерному прогону.
 //
 // Запуск:  node e2e/perf/p05.mjs [url-видео]
-// Требует release-сборку (npx tauri build) и установленный Chrome (CHROME_EXE).
+// Требует release-сборку (npx tauri build).
 // Сеть: YouTube + списки блокировщика (первый запуск профиля качает EasyList/uBO).
 import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -25,19 +35,13 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const EXE = path.join(ROOT, "src-tauri", "target", "release", "duopulse.exe");
-const CHROME_EXE =
-  process.env.CHROME_EXE || path.join(process.env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe");
 const VIDEO = process.argv[2] || "https://www.youtube.com/watch?v=aqz-KE-bpKQ"; // Big Buck Bunny 60fps — как M0
 const MEASURE_MS = 60_000; // окно замера: дропы за минуту
 const DUO_CDP = 9229;
-const CHROME_CDP = 9231;
+const CTL_CDP = 9231;
 
 if (!fs.existsSync(EXE)) {
   console.error(`FAIL  не найден exe: ${EXE} (нужна release-сборка)`);
-  process.exit(1);
-}
-if (!fs.existsSync(CHROME_EXE)) {
-  console.error(`FAIL  не найден Chrome: ${CHROME_EXE} (переопредели CHROME_EXE)`);
   process.exit(1);
 }
 
@@ -183,30 +187,29 @@ async function waitHd1080(ws) {
 }
 
 // --- браузеры ----------------------------------------------------------------
+// Оба прогона — DuoPulse (release): основной с блокировщиком (по умолчанию),
+// контроль — отдельный профиль с заранее выключенным блокировщиком.
 const duoProfile = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-p05-duo-"));
-const launchDuo = () =>
+const ctlProfile = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-p05-ctl-"));
+// settings.json контроля: ключ читается на старте Core, до подъёма движка
+fs.mkdirSync(path.join(ctlProfile, "DuoPulse", "profile"), { recursive: true });
+fs.writeFileSync(
+  path.join(ctlProfile, "DuoPulse", "profile", "settings.json"),
+  JSON.stringify({ adblock: { enabled: false } }),
+);
+const launchAt = (profile, port) => () =>
   spawn(EXE, [], {
     stdio: "ignore",
     env: {
       ...process.env,
-      APPDATA: duoProfile,
+      APPDATA: profile,
       DUOPULSE_START_URL: VIDEO,
-      WEBVIEW2_USER_DATA_FOLDER: path.join(duoProfile, "webview2-data"),
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${DUO_CDP}`,
+      WEBVIEW2_USER_DATA_FOLDER: path.join(profile, "webview2-data"),
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
     },
   });
-
-const chromeProfile = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-p05-chrome-"));
-const launchChrome = () =>
-  spawn(CHROME_EXE, [
-    `--user-data-dir=${chromeProfile}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--autoplay-policy=no-user-gesture-required",
-    `--remote-debugging-port=${CHROME_CDP}`,
-    "--window-size=1360,860",
-    VIDEO,
-  ], { stdio: "ignore" });
+const launchDuo = launchAt(duoProfile, DUO_CDP);
+const launchCtl = launchAt(ctlProfile, CTL_CDP);
 
 /** Один прогон браузера: запуск → режим → kill. mode=warmup — дождаться
  *  играющего контента (без рекламы) и закрыть (кэш/списки); mode=measure —
@@ -222,8 +225,8 @@ async function runOnce(name, mode, launch, port, settle) {
       let warmed = false;
       let adSeen = false;
       for (let i = 0; i < 150 && !warmed; i++) {
-        // как p08.mjs: muted-play — иначе свежий профиль Chrome не стартует
-        // автоплей и прогрев не дождётся кадра
+        // muted-play — иначе свежий профиль не стартует автоплей и прогрев
+        // не дождётся кадра
         await evalIn(ws, `(function () {
           const v = document.querySelector('video');
           if (v && v.paused) { v.muted = true; v.play().catch(() => {}); }
@@ -263,52 +266,43 @@ async function runOnce(name, mode, launch, port, settle) {
 
 let failures = 0;
 let duo = null;
-let chrome = null;
+let ctl = null;
 try {
   console.log("DuoPulse (блокировщик включён):");
   await runOnce("DuoPulse", "warmup", launchDuo, DUO_CDP, () => waitWebViewDown(duoProfile));
   duo = await runOnce("DuoPulse", "measure", launchDuo, DUO_CDP, () => waitWebViewDown(duoProfile));
   check("P-05 сценарий: DuoPulse играет 1080p контент", duo.height >= 1080, `${duo.width}×${duo.height}`);
 
-  console.log("Chrome (чистый, без расширений):");
-  try {
-    await runOnce("Chrome", "warmup", launchChrome, CHROME_CDP, null);
-    chrome = await runOnce("Chrome", "measure", launchChrome, CHROME_CDP, null);
-  } catch (e) {
-    // YouTube-сервер периодически не attachит поток свежим Chrome/Edge-
-    // профилям (playerState 3, readyState 0, playability OK, без ошибок
-    // игрока; DuoPulse/WebView2 в то же время играет) — факты и расследование
-    // в карточке CARDS/047. Контроль пропускаем с явной пометкой, абсолют
-    // DuoPulse остаётся в отчёте; DUOPULSE_P05_REQUIRE_CONTROL=1 делает
-    // отсутствие контроля провалом (CI после починки 047).
-    const note = `КОНТРОЛЬ НЕДОСТУПЕН: Chrome не начал воспроизведение (${e.message}) — сравнение пропущено, карточка 047`;
-    if (process.env.DUOPULSE_P05_REQUIRE_CONTROL === "1") {
-      check("P-05 контроль Chrome доступен", false, note);
-      failures++;
-    } else {
-      console.log(`  ${note}`);
-    }
-  }
-  if (chrome) {
-    check("P-05 сценарий: Chrome играет 1080p контент", chrome.height >= 1080, `${chrome.width}×${chrome.height}`);
+  console.log("Контроль — DuoPulse (блокировщик выключен, решение 21.10.2026 duopulse_047_control):");
+  await runOnce("контроль", "warmup", launchCtl, CTL_CDP, () => waitWebViewDown(ctlProfile));
+  ctl = await runOnce("контроль", "measure", launchCtl, CTL_CDP, () => waitWebViewDown(ctlProfile));
+  check("P-05 сценарий: контроль (без блокировщика) играет 1080p контент", ctl.height >= 1080, `${ctl.width}×${ctl.height}`);
 
-    const ok = duo.drops <= chrome.drops;
-    check(
-      `P-05 дропы DuoPulse ≤ Chrome (${duo.drops} vs ${chrome.drops} за минуту)`,
-      ok,
-      `цель — не хуже контрольного браузера (docs/04 §2, трактовка 20.10.2026); абсолют «0/мин» — только при аппаратном декоде кодека`,
-    );
-    if (!ok) failures++;
-  }
+  const ok = duo.drops <= ctl.drops;
+  check(
+    `P-05 дропы DuoPulse ≤ контроль без блокировщика (${duo.drops} vs ${ctl.drops} за минуту)`,
+    ok,
+    `цель — не хуже контроля (docs/04 §2: трактовка 20.10.2026, контроль с 21.10.2026 — DuoPulse без блокировщика); абсолют «0/мин» — только при аппаратном декоде кодека`,
+  );
+  if (!ok) failures++;
 } catch (e) {
   failures++;
   console.error("E2E ERROR:", e.message);
 } finally {
+  // контроль шёл с выключенным блокировщиком по settings.json — убедимся,
+  // что приложение не перезаписало ключ (санити подложенного конфига)
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(ctlProfile, "DuoPulse", "profile", "settings.json"), "utf8"));
+    if (s?.adblock?.enabled !== false) {
+      failures++;
+      console.error(`FAIL  контроль: settings.json не держит adblock.enabled=false (${JSON.stringify(s?.adblock)})`);
+    }
+  } catch {}
   try {
     fs.rmSync(duoProfile, { recursive: true, force: true });
   } catch {}
   try {
-    fs.rmSync(chromeProfile, { recursive: true, force: true });
+    fs.rmSync(ctlProfile, { recursive: true, force: true });
   } catch {}
   await sleep(1000);
 }

@@ -127,7 +127,7 @@ node e2e/perf/run.mjs --prefetch   # P-01..P-03 (старт, RAM)
 node e2e/perf/diagnostics.mjs      # duopulse://diagnostics
 node e2e/perf/p05.mjs              # дропы кадров 1080p60
 node e2e/perf/p06.mjs              # отклик UI
-node e2e/perf/p08.mjs              # первый кадр vs Chrome
+node e2e/perf/p08.mjs              # первый кадр vs контроль (DuoPulse без блокировщика)
 node e2e/subtitles/run.mjs    # субтитры: оверлей, .srt, перевод, офлайн (97)
 node e2e/youtube/run.mjs      # живой прогон «10 случайных видео» (52)
 node e2e/settings/run.mjs     # перенос профиля одним файлом
