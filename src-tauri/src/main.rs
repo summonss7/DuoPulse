@@ -684,10 +684,21 @@ fn main() {
             // от режима не зависят; фолбэк без роутера — поведение инкремента
             // A (внешний прокси напрямую / без прокси). Фиксируем для всех
             // будущих вкладок (STARTUP_PROXY_ARGS).
-            let proxy_args = match router_port {
+            let mut proxy_args = match router_port {
                 Some(port) => proxy::router_browser_args(port),
                 None => proxy::browser_args(Some(&proxy::load_config(&proxy::profile_dir()))),
             };
+            // CDP e2e-стендов (задача 6.6): WebView2 Runtime ≥150 игнорирует
+            // WEBVIEW2_*-переменные окружения в elevated-процессах (шаги
+            // GitHub Actions — администратор; WebView2Feedback #5645), поэтому
+            // порт прокидываем аргументом через API — его elevated не режет.
+            if let Some(port) = std::env::var("DUOPULSE_CDP_PORT")
+                .ok()
+                .and_then(|v| v.trim().parse::<u16>().ok())
+                .filter(|p| *p > 0)
+            {
+                proxy_args.push_str(&format!(" --remote-debugging-port={port}"));
+            }
             STARTUP_PROXY_ARGS
                 .set(proxy_args.clone())
                 .expect("STARTUP_PROXY_ARGS инициализируется один раз");

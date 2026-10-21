@@ -261,13 +261,27 @@ const httpHits = (stand, statusOk = true) =>
 
 // --- 2. vite dev + приложение (сеанс 1) ----------------------------------------
 
-const vite = spawn("npm", ["run", "dev"], { cwd: ROOT, shell: true, stdio: "ignore" });
-for (let i = 0; i < 60; i++) {
+const vite = spawn(
+  "npm",
+  // --host 127.0.0.1: на CI-раннере vite мог слушать только ::1 (резолв
+  // localhost), а стенд и devUrl приложения ходят по IPv4.
+  ["run", "dev", "--", "--host", "127.0.0.1", "--port", "5173", "--strictPort"],
+  { cwd: ROOT, shell: true, stdio: ["ignore", "pipe", "pipe"] },
+);
+let viteLog = "";
+vite.stdout?.on("data", (d) => {
+  viteLog = (viteLog + String(d)).slice(-4000);
+});
+vite.stderr?.on("data", (d) => {
+  viteLog = (viteLog + String(d)).slice(-4000);
+});
+vite.on("exit", (code) => console.error(`vite завершился (код ${code})`));
+for (let i = 0; i < 90; i++) {
   try {
     await fetch("http://127.0.0.1:5173/");
     break;
   } catch {
-    await sleep(500);
+    await sleep(1000);
   }
 }
 
@@ -284,7 +298,10 @@ const startApp = async (deadMs) => {
     DUOPULSE_START_URL: `http://127.0.0.1:${HTTP_PORT}/start`,
     DUOPULSE_ADBLOCK_LISTS: "", // без списков: стенду не нужна сеть (задача 2.1)
     WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, "webview2-data"), // изоляция WebView2
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
+    // CDP-порт — ЧЕРЕЗ ПРИЛОЖЕНИЕ (DUOPULSE_CDP_PORT → additional_browser_args
+    // API): WebView2 Runtime ≥150 игнорирует WEBVIEW2_ADDITIONAL_BROWSER_
+    // ARGUMENTS в elevated-процессах (GitHub Actions — админ; #5645).
+    DUOPULSE_CDP_PORT: String(CDP_PORT),
   };
   if (deadMs) appEnv.DUOPULSE_WG_DEAD_MS = String(deadMs);
   app = spawn(EXE, [], { stdio: ["ignore", "ignore", "pipe"], env: appEnv });
@@ -303,7 +320,11 @@ const startApp = async (deadMs) => {
       try {
         const targets = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json();
         const content = targets.find((t) => t.type === "page" && t.url.includes(`:${HTTP_PORT}`));
-        const ui = targets.find((t) => t.type === "page" && /127.0.0.1:5173/.test(t.url));
+        // devUrl приложения — localhost:5173 (как в tauri.conf), а vite может
+        // слушать и 127.0.0.1 — матчим оба написания.
+        const ui = targets.find(
+          (t) => t.type === "page" && /(?:localhost|127\.0\.0\.1):5173/.test(t.url),
+        );
         if (content && ui) return { content, ui };
       } catch {
         /* приложение ещё поднимается */
@@ -330,6 +351,7 @@ const startApp = async (deadMs) => {
       );
       if (wvCmd) console.error(`cmdline webview (хвост): …${wvCmd.replace(/\r?\n/g, " ").slice(-700)}`);
       console.error(`netstat :${CDP_PORT}: ${port9225 || "пусто (никто не слушает)"}`);
+      if (viteLog) console.error(`vite (хвост):\n${viteLog.slice(-1200)}`);
       const err = globalThis.__duopulseAppErr?.();
       if (err) console.error(`stderr приложения (хвост):\n${err.slice(-1500)}`);
     } catch {
