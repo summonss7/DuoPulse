@@ -882,6 +882,7 @@ version = "0.1.0"
 dependencies = [
  "adblock",
  "boringtun",
+ "duopulse-wg-stand",
  "quick-xml 0.36.2",
  "rmp",
  "rusqlite",
@@ -899,6 +900,16 @@ dependencies = [
  "webview2-com",
  "windows",
  "windows-core",
+]
+
+[[package]]
+name = "duopulse-wg-stand"
+version = "0.1.0"
+dependencies = [
+ "boringtun",
+ "serde_json",
+ "smoltcp",
+ "socket2",
 ]
 
 [[package]]

@@ -6,7 +6,13 @@
 #         (e2e/fixtures/youtube, без обращения к сети) и парсеры Core
 #         на фикстурах e2e/fixtures/subtitles (cargo-часть ниже);
 #   rust: cargo fmt --check + clippy -D warnings + test (контракт bridge
-#         актуален: тест contract_file_is_up_to_date).
+#         актуален: тест contract_file_is_up_to_date). Сюда же входят
+#         маршрутные автотесты уровня Core — loopback WG-стенд в cargo-тестах
+#         vpn (задача 6.6): direct/tunnel/kill-switch/split без сети;
+#   e2e-vpn: приёмочный E2E реального приложения без внешней сети (задача
+#         6.6, карточка duopulse-042): debug-exe + wg-stand.exe (loopback
+#         WG-сервер, e2e/wg-stand) + стенд e2e/vpn — сценарии direct/tunnel/
+#         1080p-видео/split/kill-switch, весь трафик — 127.0.0.1.
 # Релизные артефакты (NSIS/portable) собираются локально в builds/ по правилу
 # проекта (карточка duopulse-045) — в CI не собираются и не публикуются.
 
@@ -33,7 +39,7 @@ jobs:
       - run: npm test
 
   rust:
-    name: Rust — fmt + clippy + test
+    name: Rust — fmt + clippy + test (включая loopback WG-стенд)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,10 +55,34 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: src-tauri,e2e/wg-stand
       - run: cargo fmt --all --check
         working-directory: src-tauri
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
+      - run: cargo test
+        working-directory: src-tauri
+
+  e2e-vpn:
+    name: E2E VPN — маршрутные сценарии реального приложения (offline)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # content/gen + dist — нужны для cargo (include_str!/generate_context!)
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri,e2e/wg-stand
+      - run: cargo build
+        working-directory: src-tauri
+      - run: cargo build --manifest-path e2e/wg-stand/Cargo.toml
+      - run: node e2e/vpn/run.mjs
       - run: cargo test
         working-directory: src-tauri

@@ -1,0 +1,27 @@
+[package]
+name = "duopulse-wg-stand"
+version = "0.1.0"
+description = "Loopback-стенд WireGuard для маршрутных тестов DuoPulse (задача 6.6, карточка duopulse-042)"
+license = "GPL-3.0-only"
+edition = "2021"
+
+# Те же крейты, что у клиента в src-tauri (vpn/wg.rs): сервер стенда —
+# boringtun-сессия (та же реализация протокола) + smoltcp-стек с TCP/UDP/ICMP
+# внутри туннеля. auto-icmp-echo-reply — ответы на ICMP-пинг туннеля (6.5).
+[dependencies]
+boringtun = "0.7"
+smoltcp = { version = "0.14", default-features = false, features = [
+    "std",
+    "medium-ip",
+    "socket-tcp",
+    "socket-udp",
+    "socket-icmp",
+    "auto-icmp-echo-reply",
+    "proto-ipv4",
+] }
+socket2 = "0.6"
+serde_json = "1"
+
+[[bin]]
+name = "wg-stand"
+path = "src/main.rs"

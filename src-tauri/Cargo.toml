@@ -92,6 +92,13 @@ smoltcp = { version = "0.14", default-features = false, features = [
 # замер пропускной способности). Уже в дереве (транзитивно), без новых загрузок.
 socket2 = "0.6"
 
+[dev-dependencies]
+# Loopback-стенд WireGuard для маршрутных тестов (задача 6.6, карточка
+# duopulse-042): сервер boringtun+smoltcp — один и тот же в cargo-тестах
+# wg.rs и отдельным процессом wg-stand.exe в e2e/vpn (ранер его убивает —
+# это «обрыв upstream» для kill-switch).
+duopulse-wg-stand = { path = "../e2e/wg-stand" }
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

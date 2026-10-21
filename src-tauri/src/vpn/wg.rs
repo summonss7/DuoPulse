@@ -1961,13 +1961,12 @@ fn skip_dns_name(msg: &[u8], mut pos: usize) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use boringtun::x25519;
-
-    const CLIENT_IP: Ipv4Addr = Ipv4Addr::new(10, 66, 77, 2);
-    const SERVER_IP: Ipv4Addr = Ipv4Addr::new(10, 66, 77, 1);
-    const SERVER_PORT: u16 = 5000;
-    /// А-запись тестового DNS-ответчика.
-    const DNS_ANSWER: Ipv4Addr = Ipv4Addr::new(203, 0, 113, 7);
+    // Loopback-стенд (задача 6.6): WG-сервер boringtun+smoltcp живёт в пакете
+    // e2e/wg-stand — один и тот же для cargo-тестов здесь и для процесса
+    // wg-stand.exe в e2e/vpn (ранер убивает его — «обрыв upstream» kill-switch).
+    use duopulse_wg_stand::{
+        key_pair, LoopbackWgServer, CLIENT_IP, DNS_ANSWER, ECHO_PORT as SERVER_PORT, SERVER_IP,
+    };
 
     fn temp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("duopulse-wg-{}-{tag}", std::process::id()));
@@ -2146,344 +2145,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // --- loopback-стенд: WG-сервер boringtun + smoltcp ------------------------
-
-    /// Пара ключей клиента и сервера (детерминированные).
-    fn key_pair() -> ([u8; 32], [u8; 32], [u8; 32], [u8; 32]) {
-        let client_secret = [1u8; 32];
-        let server_secret = [2u8; 32];
-        let client_pub =
-            *x25519::PublicKey::from(&x25519::StaticSecret::from(client_secret)).as_bytes();
-        let server_pub =
-            *x25519::PublicKey::from(&x25519::StaticSecret::from(server_secret)).as_bytes();
-        (client_pub, client_secret, server_pub, server_secret)
-    }
-
-    /// События с серверверной стороны для статистики теста.
-    #[derive(Default)]
-    struct ServerStats {
-        /// Внутренних IP-пакетов от клиента (включая пустые keepalive).
-        rx_packets: std::sync::atomic::AtomicU64,
-        dns_hits: std::sync::atomic::AtomicU64,
-        tcp_connects: std::sync::atomic::AtomicU64,
-    }
-
-    /// Тестовый WG-сервер: boringtun-сессия + smoltcp-стек c TCP-echo и
-    /// DNS-ответчиком. Отвечает последнему адресу клиента (roaming).
-    struct TestWgServer {
-        port: u16,
-        stats: Arc<ServerStats>,
-        stop: Arc<std::sync::atomic::AtomicBool>,
-        thread: Option<std::thread::JoinHandle<()>>,
-    }
-
-    impl TestWgServer {
-        /// Поднять сервер; psk должен совпасть с клиентским.
-        fn start(psk: Option<[u8; 32]>) -> TestWgServer {
-            let sock = StdUdp::bind("127.0.0.1:0").unwrap();
-            let _ = socket2::SockRef::from(&sock).set_recv_buffer_size(2 * 1024 * 1024);
-            let _ = socket2::SockRef::from(&sock).set_send_buffer_size(2 * 1024 * 1024);
-            let port = sock.local_addr().unwrap().port();
-            let (client_pub, _, _, server_secret) = key_pair();
-            let tunn = make_tunn(&server_secret, &client_pub, &psk, None);
-            let stats = Arc::new(ServerStats::default());
-            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let stats_loop = Arc::clone(&stats);
-            let stop_loop = Arc::clone(&stop);
-            let thread = std::thread::Builder::new()
-                .name("test-wg-server".into())
-                .spawn(move || server_loop(sock, tunn, stats_loop, stop_loop))
-                .unwrap();
-            TestWgServer {
-                port,
-                stats,
-                stop,
-                thread: Some(thread),
-            }
-        }
-    }
-
-    impl Drop for TestWgServer {
-        fn drop(&mut self) {
-            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
-            if let Some(t) = self.thread.take() {
-                let _ = t.join();
-            }
-        }
-    }
-
-    /// Серверное соединение echo/генератора.
-    struct SrvConn {
-        handle: SocketHandle,
-        out: VecDeque<Vec<u8>>,
-        /// Сколько байт ещё догенерировать (режим gen:N).
-        gen_left: usize,
-    }
-
-    fn server_loop(
-        sock: StdUdp,
-        mut tunn: Tunn,
-        stats: Arc<ServerStats>,
-        stop: Arc<std::sync::atomic::AtomicBool>,
-    ) {
-        let mut device = IpDevice {
-            rx: VecDeque::new(),
-            tx: VecDeque::new(),
-        };
-        let mut iface = Interface::new(
-            IfaceConfig::new(HardwareAddress::Ip),
-            &mut device,
-            SmolInstant::now(),
-        );
-        iface.update_ip_addrs(|addrs| {
-            let _ = addrs.push(IpCidr::new(IpAddress::from(SERVER_IP), 24));
-        });
-        let _ = iface
-            .routes_mut()
-            .add_default_ipv4_route(default_gateway(SERVER_IP));
-
-        let mut sockets = SocketSet::new(Vec::new());
-        let mut listeners = Vec::new();
-        for _ in 0..4 {
-            let mut l = TcpSocket::new(
-                TcpBuffer::new(vec![0u8; TCP_BUF]),
-                TcpBuffer::new(vec![0u8; TCP_BUF]),
-            );
-            l.listen(SERVER_PORT).unwrap();
-            listeners.push(sockets.add(l));
-        }
-        let mut dns_socket = UdpSocket::new(
-            UdpBuffer::new(vec![PacketMetadata::EMPTY; 4], vec![0u8; UDP_BUF]),
-            UdpBuffer::new(vec![PacketMetadata::EMPTY; 4], vec![0u8; UDP_BUF]),
-        );
-        dns_socket.bind(53u16).unwrap();
-        let dns_handle = sockets.add(dns_socket);
-
-        let mut conns: Vec<SrvConn> = Vec::new();
-        let mut last_client: Option<SocketAddr> = None;
-        let mut udp_buf = [0u8; 65536];
-        let mut wg_buf = vec![0u8; 65536 + 96];
-        sock.set_read_timeout(Some(TICK)).unwrap();
-
-        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-            // UDP → decapsulate; ответы — последнему адресу клиента (roaming).
-            match sock.recv_from(&mut udp_buf) {
-                Ok((n, src)) => {
-                    // Keepalive — DATA-датаграмма с пустым inner (decapsulate
-                    // за него отдаёт Done) — считаем пакеты по типу: 4 = DATA.
-                    if n >= 4
-                        && u32::from_le_bytes([udp_buf[0], udp_buf[1], udp_buf[2], udp_buf[3]]) == 4
-                    {
-                        stats
-                            .rx_packets
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    last_client = Some(src);
-                    let mut src_opt = Some(src.ip());
-                    let mut data_opt = Some(&udp_buf[..n]);
-                    loop {
-                        let result = match data_opt.take() {
-                            Some(d) => tunn.decapsulate(src_opt.take(), d, &mut wg_buf),
-                            None => tunn.decapsulate(None, &[], &mut wg_buf),
-                        };
-                        match result {
-                            TunnResult::WriteToNetwork(wg) => {
-                                if let Some(peer) = last_client {
-                                    let _ = sock.send_to(wg, peer);
-                                }
-                            }
-                            TunnResult::WriteToTunnelV4(pkt, _) => {
-                                stats
-                                    .rx_packets
-                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                if !pkt.is_empty() {
-                                    device.rx.push_back(pkt.to_vec());
-                                }
-                            }
-                            TunnResult::Done
-                            | TunnResult::Err(_)
-                            | TunnResult::WriteToTunnelV6(..) => break,
-                        }
-                    }
-                }
-                Err(ref e) if is_would_block(e) => {}
-                Err(_) => return,
-            }
-
-            let _ = iface.poll(SmolInstant::now(), &mut device, &mut sockets);
-
-            // Новые соединения: слушающий сокет стал Established — он
-            // превращается в соединение, на его место встаёт свежий listener.
-            let mut i = 0;
-            while i < listeners.len() {
-                let handle = listeners[i];
-                let socket = sockets.get_mut::<TcpSocket>(handle);
-                if socket.state() == TcpState::Established {
-                    stats
-                        .tcp_connects
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    conns.push(SrvConn {
-                        handle,
-                        out: VecDeque::new(),
-                        gen_left: 0,
-                    });
-                    let mut l = TcpSocket::new(
-                        TcpBuffer::new(vec![0u8; TCP_BUF]),
-                        TcpBuffer::new(vec![0u8; TCP_BUF]),
-                    );
-                    l.listen(SERVER_PORT).unwrap();
-                    listeners[i] = sockets.add(l); // слот занят — замещаем
-                } else {
-                    i += 1;
-                }
-            }
-
-            // Echo/генератор.
-            let mut chunk = [0u8; 16 * 1024];
-            for conn in &mut conns {
-                let socket = sockets.get_mut::<TcpSocket>(conn.handle);
-                while socket.can_recv() {
-                    match socket.recv_slice(&mut chunk) {
-                        Ok(n) if n > 0 => {
-                            if conn.gen_left == 0 {
-                                if let Some(rest) = chunk[..n].strip_prefix(b"gen:") {
-                                    let gen: usize = std::str::from_utf8(rest)
-                                        .ok()
-                                        .and_then(|s| s.trim().parse().ok())
-                                        .unwrap_or(0);
-                                    conn.gen_left = gen;
-                                } else {
-                                    conn.out.push_back(chunk[..n].to_vec());
-                                }
-                            }
-                        }
-                        _ => break,
-                    }
-                }
-                // Догенерация блоками.
-                if conn.gen_left > 0 && conn.out.len() < 4 {
-                    let block = conn.gen_left.min(16 * 1024);
-                    conn.out.push_back(vec![b'A'; block]);
-                    conn.gen_left -= block;
-                }
-                while let Some(head) = conn.out.front() {
-                    match socket.send_slice(head) {
-                        Ok(n) if n > 0 => {
-                            if n >= head.len() {
-                                conn.out.pop_front();
-                            } else {
-                                let rest = head[n..].to_vec();
-                                conn.out[0] = rest;
-                                break;
-                            }
-                        }
-                        _ => break,
-                    }
-                }
-            }
-            conns.retain(|conn| {
-                let socket = sockets.get_mut::<TcpSocket>(conn.handle);
-                if socket.state() == TcpState::Closed {
-                    sockets.remove(conn.handle);
-                    false
-                } else {
-                    true
-                }
-            });
-
-            // DNS-ответчик: имена *.tun — SERVER_IP (echo за туннелем; сплит-
-            // тесты задачи 6.3 резолвят туннельные домены сюда), прочие —
-            // DNS_ANSWER (необслуживаемый адрес).
-            let dns = sockets.get_mut::<UdpSocket>(dns_handle);
-            if dns.can_recv() {
-                let mut buf = [0u8; UDP_BUF];
-                if let Ok((n, meta)) = dns.recv_slice(&mut buf) {
-                    stats
-                        .dns_hits
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let name = dns_query_name(&buf[..n]).unwrap_or_default();
-                    let answer = if name.ends_with(".tun") {
-                        SERVER_IP
-                    } else {
-                        DNS_ANSWER
-                    };
-                    if let Some(reply) = dns_echo_reply(&buf[..n], answer) {
-                        let _ = dns.send_slice(&reply, meta.endpoint);
-                    }
-                }
-            }
-
-            // Доразгон попал в tx-буферы сокетов ПОСЛЕ poll — откачать сразу,
-            // не дожидаясь следующего тика (RTT виртуального канала).
-            let _ = iface.poll(SmolInstant::now(), &mut device, &mut sockets);
-
-            // Стек → туннель.
-            while let Some(packet) = device.tx.pop_front() {
-                match tunn.encapsulate(&packet, &mut wg_buf) {
-                    TunnResult::WriteToNetwork(wg) => {
-                        if let Some(peer) = last_client {
-                            let _ = sock.send_to(wg, peer);
-                        }
-                    }
-                    _ => break,
-                }
-            }
-            if let TunnResult::WriteToNetwork(wg) = tunn.update_timers(&mut wg_buf) {
-                if let Some(peer) = last_client {
-                    let _ = sock.send_to(wg, peer);
-                }
-            }
-        }
-    }
-
-    /// DNS-ответ: копия вопроса + одна A-запись.
-    fn dns_echo_reply(query: &[u8], answer: Ipv4Addr) -> Option<Vec<u8>> {
-        if query.len() < 12 {
-            return None;
-        }
-        let q_end = skip_dns_name(query, 12).ok()? + 4;
-        let mut out = query[..q_end].to_vec();
-        out[2] |= 0x80; // QR=1
-        out[3] &= 0xF0; // rcode 0
-        out[7] = 1; // ANCOUNT
-        out.extend_from_slice(&[
-            0xC0, 0x0C, // имя — указатель на вопрос
-            0x00, 0x01, 0x00, 0x01, // A IN
-            0x00, 0x00, 0x00, 0x3C, // TTL 60
-            0x00, 0x04, // RDLEN
-        ]);
-        out.extend_from_slice(&answer.octets());
-        Some(out)
-    }
-
-    /// Имя из вопроса DNS-запроса (стенд выбирает ответ по имени; сжатие
-    /// указателей в question-секции не бывает).
-    fn dns_query_name(query: &[u8]) -> Option<String> {
-        if query.len() < 12 {
-            return None;
-        }
-        let mut pos = 12usize;
-        let mut labels = Vec::new();
-        loop {
-            if pos >= query.len() {
-                return None;
-            }
-            let len = query[pos] as usize;
-            if len == 0 {
-                break;
-            }
-            if len & 0xC0 != 0 {
-                return None;
-            }
-            pos += 1;
-            if pos + len > query.len() {
-                return None;
-            }
-            labels.push(String::from_utf8_lossy(&query[pos..pos + len]).into_owned());
-            pos += len;
-        }
-        Some(labels.join("."))
-    }
+    // loopback-сервер стенда (ключи, stats, server_loop, DNS/echo) — в пакете
+    // e2e/wg-stand (lib) — см. импорт выше; здесь — клиентская часть тестов
+    // и сценарии поверх роутера.
 
     fn client_profile(endpoint_port: u16, keepalive: Option<u16>) -> WgProfile {
         let (_, _, server_pub, _) = key_pair();
@@ -2554,7 +2218,7 @@ mod tests {
 
     #[test]
     fn handshake_connects_and_tcp_echo_flows() {
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let session = start_client(&profile);
 
@@ -2584,7 +2248,7 @@ mod tests {
 
     #[test]
     fn dns_resolves_through_tunnel_not_system() {
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -2607,7 +2271,7 @@ mod tests {
     /// оказывается в WgLiveStatus::ping_ms, туннель остаётся живым.
     #[test]
     fn ping_measures_rtt_through_tunnel() {
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -2644,7 +2308,7 @@ mod tests {
     /// опроса; после TCP-эха rx_bytes в событии больше нуля.
     #[test]
     fn stats_event_reports_ping_and_bytes() {
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -2691,7 +2355,7 @@ mod tests {
     /// (PersistentKeepalive клиента гонит пустые датаграммы).
     #[test]
     fn keepalive_keeps_session_alive_when_idle() {
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, Some(1));
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -2726,7 +2390,7 @@ mod tests {
     /// established-соединения не теряются, сервер отвечает на новый адрес.
     #[test]
     fn roaming_network_change_reconnects() {
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, Some(5));
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -2800,7 +2464,7 @@ mod tests {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(25.0);
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -2865,7 +2529,7 @@ mod tests {
         if secs == 0 {
             return;
         }
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, Some(15));
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -2941,7 +2605,7 @@ mod tests {
     /// туннель → echo-сервер; домен резолвится DNS-сервером туннеля.
     #[test]
     fn socks5_router_routes_through_wg_tunnel() {
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -3032,7 +2696,7 @@ mod tests {
     fn split_routes_blocked_via_tunnel_and_direct_simultaneously() {
         use crate::vpn::rules::{RuleAction, RuleStore, SplitMode};
 
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let session = start_client(&profile);
         wait_connected(&session, 10);
@@ -3280,7 +2944,7 @@ mod tests {
         use crate::vpn::rules::{RuleAction, RuleStore, SplitMode};
         use std::io::Read;
 
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let dead_after = Duration::from_secs(15);
         let events = Arc::new(std::sync::Mutex::new(Vec::<(WgLiveState, String)>::new()));
@@ -3442,7 +3106,7 @@ mod tests {
     fn kill_switch_route_change_closes_established_connections() {
         use std::io::Read;
 
-        let server = TestWgServer::start(None);
+        let server = LoopbackWgServer::start(None, Vec::new(), None);
         let profile = client_profile(server.port, None);
         let session = start_client(&profile);
         wait_connected(&session, 10);
