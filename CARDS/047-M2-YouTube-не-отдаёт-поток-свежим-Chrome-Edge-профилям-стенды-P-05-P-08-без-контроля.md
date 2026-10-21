@@ -1,7 +1,8 @@
 ---
 id: duopulse-047
 title: 'M2 · YouTube не отдаёт поток свежим Chrome/Edge-профилям — контроль P-05/P-08 недоступен'
-status: todo
+status: blocked
+wait: duopulse_047_control_20261021
 priority: 8
 created: 2026-10-21
 updated: 2026-10-21
@@ -51,3 +52,37 @@ origin: duopulse-035
 - 2026-10-21: карточка создана из сеанса duopulse-035 (проведение решения
   автора по P-05 в жизнь): стенд p05.mjs переписан под контроль Chrome, но
   YouTube гейтит свежие профили Chrome/Edge — зонды 1–6 приложены в описании.
+
+
+- 21.10.2026, 02:44:37: диспетчер взял задачу в работу (новый запуск).
+- 21.10.2026, 02:50–03:35: расследование зондами CDP (одноразовые скрипты
+  в %TEMP%\duopulse-047, после сеанса удалены). Гейт воспроизведён и
+  исследован, НЕ обходится локально:
+  1. Воспроизведение: свежий Chrome — aqz-KE-bpKQ playerState 3, readyState 0,
+     73 с без кадра; «Me at the zoo» (jNQXAC9IVRw, видео 2005 г. без SSAI) —
+     тоже гейт ⇒ не пер-видео, а по клиенту/профилю. Свежий Edge — так же.
+  2. DuoPulse в это же время играет то же видео на свежем профиле: с
+     блокировщиком ВКЛ — контент ~6,1 с; с ВЫКЛ (settings.json
+     adblock.enabled=false) — ~5,4 с ⇒ блокировщик НЕ причина пропуска ворот
+     (гипотеза карточки опровергнута).
+  3. Отброшено перебором: персистентный профиль (2-й прогон с куками);
+     пересадка кук играющего WebView2-сеанса в Chrome (Storage.getCookies →
+     Network.setCookie); блок ad-доменов --host-resolver-rules; DoH off
+     (--disable-features=DnsOverHttps); QUIC off (--disable-quic);
+     --no-proxy-server; Chrome через локальный SOCKS5-роутер DuoPulse
+     (DUOPULSE_ROUTER_PORT); срез X-Client-Data через CDP Fetch-перехват
+     (заголовка в запросах вообще НЕТ); --lang=en-US.
+  4. Ключевые факты: движки все 155.0.4283.62 (Chrome = Edge = WebView2 —
+     версии не при чём); navigator.userAgent и userAgentData.brands у WebView2
+     и Chrome идентичны («Google Chrome;v=155…»); публичный IP один —
+     91.207.210.138 (ipify из Chrome-страницы, DuoPulse-страницы и curl; ip=
+     в SABR-URL — псевдонимизированный параметр, красная селёдка); сервер
+     ОТДАЁТ загейтненному Chrome 200-ответы потока (application/vnd.yt-ump
+     на videoplayback) ⇒ стопор в серверном SABR/SSAI-флоу по семейству
+     клиента (браузеры Chrome/Edge гейтятся, встроенный WebView2 — нет),
+     локальными средствами не обходится.
+  5. Вопрос автору о замене контроля отправлен в Aila (Хаб ИИ):
+    duopulse_047_control_20261021 — варианты: DuoPulse с выключенным
+    блокировщиком как контроль (рекомендовано; проверено — играет 5,4 с) /
+    ждать YouTube (контроль-пропуск остаётся) / pinned Chromium. Карточка —
+    wait/blocked до ответа.
