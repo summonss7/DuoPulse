@@ -27,6 +27,17 @@
 //! WireGuard принимает клиента с любого адреса, established TCP-соединения
 //! стека переживают переход (изменился только подстилающий путь). Keepalive
 //! и rekey по расписанию протокола гонит `Tunn::update_timers`.
+//!
+//! Kill-switch (задача 6.4, docs/02 §6.1): handshake старше `dead_after`
+//! (по умолчанию REJECT_AFTER_TIME протокола — 180 с: ключи сессии истекли,
+//! данные уже не дойдут) — туннель считается мёртвым: установленные
+//! соединения закрываются (EOF роутеру — страница видит обрыв, а не вечную
+//! загрузку на ретрансмиссиях), новые TCP/DNS отказывают сразу. Напрямую,
+//! мимо туннеля, ничего не уходит — маршрут остаётся за роутером, уходить
+//! в открытую ему запрещает fail-closed (docs/02 §6.1). Выключение/смена
+//! маршрута (`shutdown` в bridge) рвёт установленные соединения тем же
+//! образом. Переходы состояния (включая «мёртв» и выключение) уходят
+//! событием `vpn:state_changed` (docs/05 §2).
 
 use boringtun::noise::{Tunn, TunnResult};
 use boringtun::x25519;
@@ -58,6 +69,27 @@ const TICK: Duration = Duration::from_millis(2);
 /// Handshake считается живым, пока последний был не старше (REJECT_AFTER_TIME
 /// − запас; rekey инициируется раньше — 120 с — update_timers).
 const HANDSHAKE_FRESH: Duration = Duration::from_secs(150);
+/// Порог мёртвого туннеля для kill-switch (задача 6.4): handshake старше
+/// REJECT_AFTER_TIME протокола (180 с) гарантированно мёртв — ключи сессии
+/// истекли, данные не дойдут и сервер их отбросит. До порога молчание
+/// двусмысленно (роуминг/rekey), established-соединения живут.
+const TUNNEL_DEAD_AFTER: Duration = Duration::from_secs(180);
+/// Деталь состояния kill-switch: устанавливается в WgLiveStatus и уходит
+/// в отказах новых соединений, пока туннель мёртв.
+const KILL_SWITCH_DETAIL: &str =
+    "kill-switch: туннель мёртв — соединения закрыты, напрямую не уходим";
+
+/// Порог мёртвости сессии: DUOPULSE_WG_DEAD_MS (диагностика/стенды; минимум
+/// 1 с — Protect от опечатки, мгновенный kill глушил бы здоровый туннель),
+/// иначе протокольный [`TUNNEL_DEAD_AFTER`]. Читается один раз на сессию.
+pub fn tunnel_dead_after() -> Duration {
+    std::env::var("DUOPULSE_WG_DEAD_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|ms| *ms >= 1000)
+        .map(Duration::from_millis)
+        .unwrap_or(TUNNEL_DEAD_AFTER)
+}
 /// Таймаут открытия TCP/DNS через туннель (клиентская сторона).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Кэш резолва endpoint сервера (адрес до туннеля меняется редко).
@@ -689,12 +721,16 @@ impl WgSession {
     /// Возврат — сразу; готовность видна в [`WgSession::status`]
     /// (Connecting → Connected после handshake). Ошибки — только фатальные
     /// (не открыть сокет/endpoint не резолвится). `on_state` — подписчик
-    /// переходов состояния (None — без событий, тесты).
+    /// переходов состояния (None — без событий, тесты). `dead_after` — порог
+    /// мёртвости для kill-switch (задача 6.4: handshake старше — соединения
+    /// закрываются; приложение передаёт [`tunnel_dead_after`], тесты —
+    /// короткий, чтобы не ждать протокольные 180 с).
     pub fn start(
         profile: &WgProfile,
         private_key: [u8; 32],
         psk: Option<[u8; 32]>,
         on_state: Option<OnStateChange>,
+        dead_after: Duration,
     ) -> std::io::Result<WgSession> {
         let (tx, rx) = sync_channel::<Cmd>(64);
         let status = Arc::new(Mutex::new(WgLiveStatus {
@@ -714,6 +750,7 @@ impl WgSession {
             rx,
             tx.clone(),
             on_state,
+            dead_after,
         )?;
         let wake = runtime.wake_handle();
         std::thread::Builder::new()
@@ -902,6 +939,8 @@ struct Runtime {
     next_port: u16,
     started_at: Instant,
     send_errors: u32,
+    /// Порог мёртвости для kill-switch (задача 6.4) — см. [`TUNNEL_DEAD_AFTER`].
+    dead_after: Duration,
     /// Будильник: общий сокет отправки и актуальный адрес (обновляется при
     /// пересоздании сокета туннеля).
     wake_sock: Arc<StdUdp>,
@@ -910,6 +949,8 @@ struct Runtime {
     /// состояние — эмит только при смене.
     on_state: Option<OnStateChange>,
     last_emitted: Option<WgLiveState>,
+    /// Kill-switch эпизод уже отпечатан событием (сброс при восстановлении).
+    kill_emitted: bool,
 }
 
 impl Runtime {
@@ -932,6 +973,7 @@ impl Runtime {
         cmd: Receiver<Cmd>,
         to_thread: SyncSender<Cmd>,
         on_state: Option<OnStateChange>,
+        dead_after: Duration,
     ) -> std::io::Result<Runtime> {
         let peer_public = key_from_b64(&profile.peer_public_key)
             .map_err(|e| std::io::Error::other(format!("публичный ключ пира: {e}")))?;
@@ -995,6 +1037,7 @@ impl Runtime {
             next_port: 30000,
             started_at: Instant::now(),
             send_errors: 0,
+            dead_after,
             wake_sock: Arc::new(StdUdp::bind("127.0.0.1:0")?),
             wake_addr: Arc::new(std::sync::RwLock::new(SocketAddr::from((
                 [127, 0, 0, 1],
@@ -1002,6 +1045,7 @@ impl Runtime {
             )))),
             on_state,
             last_emitted: None,
+            kill_emitted: false,
         })
     }
 
@@ -1175,8 +1219,14 @@ impl Runtime {
     /// Открыть TCP-сокет в стеке, вернуть клиентский поток.
     /// Открыть TCP-сокет в стеке: SYN уходит, ответ вызывающему — при
     /// установлении (drain_sockets: Established → Ok, Closed → Err) —
-    /// connect к недостижимой цели не «притворяется» успешным.
+    /// connect к недостижимой цели не «притворяется» успешным. Мёртвый
+    /// туннель (kill-switch, задача 6.4) — отказ сразу, без 10 с ожидания:
+    /// данные всё равно не дойдут, напрямую роутер не ходит.
     fn open_tcp(&mut self, dst: SocketAddrV4, reply: SyncSender<Result<WgStreamHalfs, String>>) {
+        if self.is_tunnel_dead() {
+            let _ = reply.send(Err(KILL_SWITCH_DETAIL.into()));
+            return;
+        }
         let mut socket = TcpSocket::new(
             TcpBuffer::new(vec![0u8; TCP_BUF]),
             TcpBuffer::new(vec![0u8; TCP_BUF]),
@@ -1222,8 +1272,14 @@ impl Runtime {
         );
     }
 
-    /// DNS-запрос через UDP-сокет стека (в туннеле).
+    /// DNS-запрос через UDP-сокет стека (в туннеле). Мёртвый туннель —
+    /// отказ сразу (kill-switch, задача 6.4): запрос не дойдёт, ждать
+    /// таймаута бессмысленно.
     fn open_dns(&mut self, host: &str, reply: SyncSender<Result<Ipv4Addr, String>>) {
+        if self.is_tunnel_dead() {
+            let _ = reply.send(Err(KILL_SWITCH_DETAIL.into()));
+            return;
+        }
         let Some(dns_server) = self.profile.dns.first().copied() else {
             let _ = reply.send(Err("в профиле нет DNS-сервера".into()));
             return;
@@ -1449,36 +1505,96 @@ impl Runtime {
         }
     }
 
+    /// Туннель мёртв (kill-switch, задача 6.4): handshake старше `dead_after`
+    /// (REJECT_AFTER_TIME — ключи истекли, данные не дойдут) либо его не было
+    /// дольше порога с момента запуска сессии. До порога молчание двусмысленно
+    /// (роуминг/rekey) — соединения живут.
+    fn is_tunnel_dead(&self) -> bool {
+        let (hs_ago, _, _, _, _) = self.tunn.stats();
+        match hs_ago {
+            Some(d) => d >= self.dead_after,
+            None => self.started_at.elapsed() >= self.dead_after,
+        }
+    }
+
+    /// Kill-switch (задача 6.4): закрыть ВСЕ туннельные соединения и
+    /// DNS-ожидания — сокеты стека убираются, клиенты роутера получают
+    /// EOF/ошибку (страница видит обрыв, а не вечную загрузку). Напрямую
+    /// ничего не уходит: соединение только закрывается, маршрут остаётся за
+    /// роутером. Идемпотентно (пока туннель мёртв — на каждом такте пусто);
+    /// после восстановления handshake клиенты переподключаются заново.
+    fn kill_tunneled(&mut self, reason: &str) {
+        for (_, mut conn) in self.streams.drain() {
+            if let Some((reply, _)) = conn.connect_waiter.take() {
+                let _ = reply.send(Err(reason.to_string()));
+            }
+            let _ = conn.to_client.send(Vec::new()); // EOF клиенту
+            self.sockets.remove(conn.handle);
+        }
+        for (_, waiter) in self.dns.drain() {
+            let _ = waiter.reply.send(Err(reason.to_string()));
+            self.sockets.remove(waiter.handle);
+        }
+    }
+
     fn publish_status(&mut self) {
         let (hs_ago, tx, rx, _, _) = self.tunn.stats();
+        // Порог мёртвости от старта сессии — тот же, что у handshake:
+        // не поднявшийся за dead_after туннель так же мёртв (ключей нет).
+        let dead = match hs_ago {
+            Some(d) => d >= self.dead_after,
+            None => self.started_at.elapsed() >= self.dead_after,
+        };
         {
             let mut s = self.status.lock().unwrap_or_else(|p| p.into_inner());
             s.tx_bytes = tx as u64;
             s.rx_bytes = rx as u64;
-            match hs_ago {
-                Some(d) if d < HANDSHAKE_FRESH => {
-                    s.last_handshake_ms = Some(d.as_millis() as u64);
-                    if s.state != WgLiveState::Connected {
-                        s.state = WgLiveState::Connected;
-                        s.detail = "туннель жив".into();
+            if dead {
+                // Kill-switch: Error + причина всегда (detail мог остаться от
+                // «сеть сменилась» — пересоздание сессии падало); событие
+                // уходит один раз за эпизод (форс-эмит ниже).
+                s.state = WgLiveState::Error;
+                s.detail = KILL_SWITCH_DETAIL.into();
+            } else {
+                match hs_ago {
+                    Some(d) if d < HANDSHAKE_FRESH => {
+                        s.last_handshake_ms = Some(d.as_millis() as u64);
+                        if s.state != WgLiveState::Connected {
+                            s.state = WgLiveState::Connected;
+                            s.detail = "туннель жив".into();
+                        }
                     }
-                }
-                Some(d) => {
-                    s.last_handshake_ms = Some(d.as_millis() as u64);
-                    if s.state == WgLiveState::Connected {
-                        s.state = WgLiveState::Connecting;
-                        s.detail = "rekey…".into();
+                    Some(d) => {
+                        s.last_handshake_ms = Some(d.as_millis() as u64);
+                        if s.state == WgLiveState::Connected {
+                            s.state = WgLiveState::Connecting;
+                            s.detail = "rekey…".into();
+                        }
                     }
-                }
-                None => {
-                    s.last_handshake_ms = None;
-                    if s.state != WgLiveState::Error {
-                        s.state = WgLiveState::Connecting;
-                        s.detail =
-                            format!("handshake… ({} с)", self.started_at.elapsed().as_secs());
+                    None => {
+                        s.last_handshake_ms = None;
+                        if s.state != WgLiveState::Error {
+                            s.state = WgLiveState::Connecting;
+                            s.detail =
+                                format!("handshake… ({} с)", self.started_at.elapsed().as_secs());
+                        }
                     }
                 }
             }
+        }
+        if dead {
+            // Соединения закрываются на каждом такте мёртвости (идемпотентно:
+            // после первого прохода пусто; успевшее открыться до порога —
+            // накрывается этим же проходом, новое — fail-fast в open_*).
+            self.kill_tunneled(KILL_SWITCH_DETAIL);
+            if !self.kill_emitted {
+                self.kill_emitted = true;
+                // Событие kill-switch обязано уйти даже если Error уже был
+                // эмитчен с другой причиной — сбрасываем дедупликацию.
+                self.last_emitted = None;
+            }
+        } else {
+            self.kill_emitted = false; // туннель ожил — новый эпизод
         }
         self.emit_state_change();
     }
@@ -2215,7 +2331,7 @@ mod tests {
     }
 
     fn start_client(profile: &WgProfile) -> WgSession {
-        WgSession::start(profile, [1u8; 32], None, None).unwrap()
+        WgSession::start(profile, [1u8; 32], None, None, TUNNEL_DEAD_AFTER).unwrap()
     }
 
     // --- сценарии -------------------------------------------------------------
@@ -2808,5 +2924,223 @@ mod tests {
 
         session.shutdown();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- задача 6.4: kill-switch (DoD карточки duopulse-040) -------------------
+
+    /// DoD 6.4: обрыв upstream СЕРЕДИНЫ передачи — установленные соединения
+    /// закрываются (клиент видит EOF, а не вечную загрузку на ретрансмиссиях),
+    /// состояние уходит событием (Error «kill-switch»), новые соединения к
+    /// туннельной цели отказывают, напрямую к цели роутер не ходит — при живом
+    /// и наблюдаемом прямом пути (умолчание split). Порог мёртвости для этой
+    /// сессии — параметр (15 с, не env: параллельные тесты не задеваем):
+    /// здоровая фаза (handshake + первые данные) обязана уложиться в него —
+    /// запас от загрузки машины при параллельном прогоне всего пакета.
+    #[test]
+    fn kill_switch_dead_upstream_closes_established_and_fails_closed() {
+        use crate::vpn::rules::{RuleAction, RuleStore, SplitMode};
+        use std::io::Read;
+
+        let server = TestWgServer::start(None);
+        let profile = client_profile(server.port, None);
+        let dead_after = Duration::from_secs(15);
+        let events = Arc::new(std::sync::Mutex::new(Vec::<(WgLiveState, String)>::new()));
+        let events_own = Arc::clone(&events);
+        let on_state: OnStateChange = Arc::new(move |s| {
+            events_own.lock().unwrap().push((s.state, s.detail.clone()));
+        });
+        let session =
+            WgSession::start(&profile, [1u8; 32], None, Some(on_state), dead_after).unwrap();
+        wait_connected(&session, 20);
+
+        // Split: «blocked.tun» — туннель, умолчание — напрямую. Прямой echo
+        // со счётчиком наблюдает «протекание»: если бы kill-switch свалился
+        // в прямой ход, счётчик вырос бы без контрольного соединения.
+        let dir = temp_dir("kill-switch");
+        let store = RuleStore::load(&dir);
+        store.set_mode(SplitMode::Split).unwrap();
+        store.add_rule("blocked.tun", RuleAction::Tunnel).unwrap();
+        let router = crate::vpn::router::Router::start().unwrap();
+        router.set_split(session.clone(), store.handle());
+
+        let echo = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let echo_port = echo.local_addr().unwrap().port();
+        let direct_hits = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let hits_own = Arc::clone(&direct_hits);
+        std::thread::spawn(move || {
+            for stream in echo.incoming() {
+                let Ok(mut s) = stream else { break };
+                hits_own.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mut buf = [0u8; 256];
+                if let Ok(n) = s.read(&mut buf) {
+                    let _ = s.write_all(&buf[..n]);
+                }
+            }
+        });
+
+        // «Загрузка страницы»: соединение к туннельной цели, генератор качает
+        // (2 МиБ), первые данные получены — обрываем upstream в середине.
+        let mut page = connect_socks5(router.port(), "blocked.tun", SERVER_PORT);
+        page.write_all(b"gen:2097152\n").unwrap();
+        let mut got = 0usize;
+        let flow_deadline = Instant::now() + Duration::from_secs(12);
+        while got < 16 * 1024 {
+            assert!(
+                Instant::now() < flow_deadline,
+                "данные через туннель не пошли (healthy-фаза) — прочитано {got}"
+            );
+            let mut chunk = [0u8; 16 * 1024];
+            page.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let n = page.read(&mut chunk).expect("чтение healthy-фазы");
+            assert!(n > 0, "EOF healthy-фазы после {got} байт");
+            got += n;
+        }
+        assert_eq!(
+            direct_hits.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "healthy-фаза: всё идёт туннелем, прямых нет"
+        );
+
+        // ОБРЫВ UPSTREAM: сервер WireGuard ушёл (сокет закрыт, ответов нет).
+        drop(server);
+
+        // Установленное соединение закрывается в пределах порога мёртвости
+        // (+ запас): EOF/FIN, а не бесконечная загрузка. До kill-switch
+        // ретрансмиссии стека держали бы его минутами. (Таймаут чтения — не
+        // «закрыто»: ждём дальше, пока не EOF или обрыв трубы.)
+        let kill_deadline = Instant::now() + dead_after + Duration::from_secs(20);
+        page.set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        loop {
+            let mut chunk = [0u8; 16 * 1024];
+            match page.read(&mut chunk) {
+                Ok(0) => break,    // FIN — kill-switch закрыл соединение
+                Ok(n) => got += n, // хвост генератора до закрытия — нормально
+                Err(ref e)
+                    if e.kind() == std::io::ErrorKind::TimedOut
+                        || e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => break, // обрыв трубы (RST) — тоже закрыто
+            }
+            assert!(
+                Instant::now() < kill_deadline,
+                "kill-switch не закрыл соединение за порог+запас (прочитано {got} байт)"
+            );
+        }
+        assert!(
+            direct_hits.load(std::sync::atomic::Ordering::Relaxed) == 0,
+            "после обрыва напрямую к цели роутер не ходил"
+        );
+
+        // Событие в UI: переход Error с деталью kill-switch. Эмит идёт в том
+        // же такте publish_status, что и закрытие потоков, — ПОСЛЕ него:
+        // под нагрузкой нить туннеля может быть вытеснена между закрытием
+        // и колбэком, поэтому ждём с дедлайном, а не читаем мгновенно.
+        let event_deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let fired = {
+                let verdict = events.lock().unwrap();
+                verdict
+                    .iter()
+                    .any(|(st, d)| *st == WgLiveState::Error && d.contains("kill-switch"))
+            };
+            if fired {
+                break;
+            }
+            assert!(
+                Instant::now() < event_deadline,
+                "нет события Error kill-switch: {:?}",
+                events.lock().unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // Новое соединение к туннельной цели — отказ (fail-closed, быстро —
+        // fail-fast мёртвого туннеля), а не успех напрямую.
+        let mut probe = std::net::TcpStream::connect(("127.0.0.1", router.port())).unwrap();
+        probe
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        probe.write_all(&[0x05, 0x01, 0x00]).unwrap();
+        let mut sel = [0u8; 2];
+        probe.read_exact(&mut sel).unwrap();
+        let mut req = vec![0x05, 0x01, 0x00, 0x03, 12];
+        req.extend_from_slice(b"blocked.tun");
+        req.extend_from_slice(&SERVER_PORT.to_be_bytes());
+        probe.write_all(&req).unwrap();
+        let mut rep = [0u8; 10];
+        let outcome = probe.read_exact(&mut rep);
+        assert!(
+            outcome.is_err() || rep[1] != 0x00,
+            "новое соединение к туннельной цели обязано отказать, не идти напрямую"
+        );
+
+        // Прямой путь при этом жив и наблюдался счётчиком: контрольное
+        // соединение умолчания split — теперь счётчик ровно 1 («напрямую не
+        // уходит» — не потому, что роутер умер).
+        let mut direct = connect_socks5(router.port(), "127.0.0.1", echo_port);
+        direct.write_all(b"direct-ok").unwrap();
+        let mut buf = [0u8; 9];
+        direct
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        direct.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"direct-ok");
+        assert_eq!(
+            direct_hits.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "ровно одно прямое соединение — контрольное"
+        );
+
+        session.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Смена маршрута/выключение туннеля рвёт установленные соединения
+    /// (kill-switch, docs/02 §6.1: «разрыв уже установленных»): stop-путь
+    /// bridge — shutdown сессии + прямой маршрут — клиент видит обрыв,
+    /// ничего не доживает цикл и не уходит напрямую.
+    #[test]
+    fn kill_switch_route_change_closes_established_connections() {
+        use std::io::Read;
+
+        let server = TestWgServer::start(None);
+        let profile = client_profile(server.port, None);
+        let session = start_client(&profile);
+        wait_connected(&session, 10);
+
+        let router = crate::vpn::router::Router::start().unwrap();
+        router.set_route(crate::vpn::router::Route::Wg {
+            session: session.clone(),
+        });
+        let mut page = connect_socks5(router.port(), &SERVER_IP.to_string(), SERVER_PORT);
+        page.write_all(b"mid-transfer").unwrap();
+        let mut buf = [0u8; 12];
+        page.set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        page.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"mid-transfer", "эхо через туннель работает");
+
+        // Выключение туннеля (как stop_wg_tunnel в bridge): сессия гасится,
+        // маршрут — прямой. Установленное соединение обязано закрыться.
+        session.shutdown();
+        router.set_route(crate::vpn::router::Route::Direct);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        page.set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        loop {
+            let mut chunk = [0u8; 64];
+            match page.read(&mut chunk) {
+                Ok(0) => break, // FIN — соединение закрыто
+                Ok(_) => {}
+                Err(ref e)
+                    if e.kind() == std::io::ErrorKind::TimedOut
+                        || e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => break, // обрыв трубы — тоже закрыто
+            }
+            assert!(
+                Instant::now() < deadline,
+                "установленное соединение не закрылось после выключения туннеля"
+            );
+        }
     }
 }

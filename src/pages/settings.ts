@@ -15,8 +15,15 @@
 // диалоги tauri-plugin-dialog). Стиль — гайд 06: сине-чёрные поверхности,
 // неон — акценты; секции по образцу страницы «Диагностика».
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
-import type { SettingsAll, UpdaterCheckResult, UpdaterStatusResult, VpnRulesResult } from "../bridge/gen/types";
+import type {
+  SettingsAll,
+  UpdaterCheckResult,
+  UpdaterStatusResult,
+  VpnRulesResult,
+  VpnStateChanged,
+} from "../bridge/gen/types";
 
 const err = (e: unknown): void => console.error("settings-page:", e);
 
@@ -599,6 +606,21 @@ export function initSettingsPage(): void {
     ruleRow,
   );
 
+  // Статус-события туннеля (задача 6.4): переходы connecting/connected/
+  // error и выключение приходят событием vpn:state_changed — строка статуса
+  // живая, без опроса (kill-switch: «туннель мёртв — соединения закрыты»
+  // виден сразу, страница знает, что соединения закрыты, а не грузятся).
+  void listen<VpnStateChanged>(bridge.events.vpnStateChanged, (e) => {
+    const st = e.payload;
+    if (st.mode === "wg") {
+      const label =
+        st.state === "error" ? "ошибка" : st.detail === "туннель жив" ? "подключён" : "подключается";
+      vpnStatus.textContent = `Туннель: ${label} (${st.detail})`;
+    } else if (st.mode === "off" && st.state === "off") {
+      vpnStatus.textContent = "Туннель выключен — соединения закрыты, трафик по конфигу прокси/напрямую.";
+    }
+  });
+
   // --- 6. Приватность ---------------------------------------------------------
   const privacy = section("Приватность", "Данные хранятся локально в профиле браузера.");
   const clearHist = document.createElement("input");
@@ -866,6 +888,24 @@ export function initSettingsPage(): void {
     await loadTranslate().catch(err);
     await loadProxy().catch(err);
     await loadVpnRules().catch(err);
+    // Начальный статус туннеля (задача 6.4): дальше строку ведёт событие
+    // vpn:state_changed, при загрузке страницы — снапшот vpn.status.
+    await bridge.vpn
+      .status()
+      .then((st) => {
+        if (st.mode === "wg" && st.wg) {
+          const label =
+            st.wg.state === "connected"
+              ? "подключён"
+              : st.wg.state === "error"
+                ? "ошибка"
+                : "подключается";
+          vpnStatus.textContent = `Туннель: ${label} — профиль «${st.wg.profileName}» (${st.wg.endpoint}).`;
+        } else {
+          vpnStatus.textContent = "Туннель не поднят — трафик идёт по конфигу прокси/напрямую.";
+        }
+      })
+      .catch(err);
     // Обновления (задача 5.2): версия/канал/последняя проверка из Core
     await bridge.updater
       .status()

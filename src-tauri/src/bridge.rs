@@ -879,7 +879,8 @@ pub type SubtitlesTranslateUnavailable = crate::translate::SubtitlesTranslateUna
 
 /// vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1;
 /// реально эмитится с M6 — смена режима роутера и переходы туннеля WG
-/// connecting/connected/error, задача 6.2).
+/// connecting/connected/error, задача 6.2; kill-switch задачи 6.4 — Error
+/// «туннель мёртв» при обрыве upstream и Off «выключен» при остановке).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -1846,8 +1847,16 @@ fn start_wg_session(
             },
         );
     });
-    crate::vpn::wg::WgSession::start(profile, private_key, psk, Some(on_state))
-        .map_err(|e| format!("поднять туннель: {e}"))
+    crate::vpn::wg::WgSession::start(
+        profile,
+        private_key,
+        psk,
+        Some(on_state),
+        // Порог мёртвости kill-switch (задача 6.4): DUOPULSE_WG_DEAD_MS или
+        // протокольные 180 с (REJECT_AFTER_TIME).
+        crate::vpn::wg::tunnel_dead_after(),
+    )
+    .map_err(|e| format!("поднять туннель: {e}"))
 }
 
 /// Старт приложения: поднять активный WG-профиль из wg-profiles.json (задача
@@ -2031,12 +2040,26 @@ fn rules_result(store: &crate::vpn::rules::RuleStore) -> VpnRulesResult {
 
 /// Погасить туннель, если он поднят (сессия останавливается, политика роутера
 /// сбрасывается в прямой маршрут — иначе apply_saved не сможет применить
-/// конфиг прокси из-за взаимной исключительности маршрутов). Активность
-/// профиля в wg-profiles.json трогает вызывающий (set_mode(off) сохраняет
-/// выбранный профиль, use_profile(None) — снимает).
+/// конфиг прокси из-за взаимной исключительности маршрутов). Установленные
+/// туннельные соединения рвутся (kill-switch, задача 6.4: shutdown сессии
+/// закрывает их потоки — клиент видит обрыв, напрямую ничего не уходит).
+/// Активность профиля в wg-profiles.json трогает вызывающий (set_mode(off)
+/// сохраняет выбранный профиль, use_profile(None) — снимает). Событие
+/// vpn:state_changed «выключен» (docs/05 §2 disconnected) — UI видит смену
+/// состояния без опроса.
 fn stop_wg_tunnel(app: &AppHandle) {
     if let Some(crate::vpn::router::Route::Wg { session }) = router_route(app) {
         session.shutdown();
+        let _ = emit::<VpnStateChanged>(
+            app,
+            &VpnStateChanged {
+                mode: "off".into(),
+                state: proxy::ProxyState::Off,
+                detail: "туннель выключен — соединения закрыты, трафик по конфигу прокси/напрямую"
+                    .into(),
+                wg: None,
+            },
+        );
     }
     if let Some(router) = router_state(app) {
         router.set_route(crate::vpn::router::Route::Direct);

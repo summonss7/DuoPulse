@@ -1272,7 +1272,7 @@ export interface SubtitlesTranslateUnavailable {
   willRetry: boolean;
 }
 /**
- * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; реально эмитится с M6 — смена режима роутера и переходы туннеля WG connecting/connected/error, задача 6.2).
+ * vpn:state_changed: состояние маршрутизации изменилось (каркас с 1.1; реально эмитится с M6 — смена режима роутера и переходы туннеля WG connecting/connected/error, задача 6.2; kill-switch задачи 6.4 — Error «туннель мёртв» при обрыве upstream и Off «выключен» при остановке).
  */
 export interface VpnStateChanged {
   detail: string;
