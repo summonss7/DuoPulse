@@ -3081,8 +3081,28 @@ Cargo-тесты wg.rs переведены на пакет (17 тестов м�
 автотесты Core (cargo test = loopback WG-стенд, без сети); новая джоба
 e2e-vpn (windows-latest, timeout 40 мин): npm ci + npm run build (content/gen
 + dist для cargo) + cargo build (debug-exe) + cargo build wg-stand + запуск
-стенда — весь трафик 127.0.0.1, внешняя сеть не нужна; rust-cache на оба
-пакета (src-tauri,e2e/wg-stand).
+стенда — весь трафик 127.0.0.1, внешняя сеть не нужна; rust-cache дефолт
+(список workspaces через запятую у action не разбирается — «The cwd … does
+not exist», вернули дефолт).
+
+**Отладка джобы e2e-vpn на раннере (3 итерации, коммиты fb90d4c/d63a913/
+9f1052e).** Симптом: приложение на раннере живо (окно создано, роутер
+слушает, 7 webview-процессов), но CDP-порт не отвечает. Диагностика в ранер
+(пробы 127.0.0.1/[::1], наличие флага в cmdline webview, netstat, stderr
+приложения, лог vite) показала: (1) `--remote-debugging-port` ИЗ WEBVIEW2_
+ADDITIONAL_BROWSER_ARGUMENTS молча отброшен — WebView2 Runtime ≥150
+игнорирует WEBVIEW2_*-переменные в elevated-процессах (шаги GitHub Actions
+работают от администратора; локально не воспроизводится — не elevated;
+MicrosoftEdge/WebView2Feedback#5645). Фикс прикладной: env DUOPULSE_CDP_PORT
+→ аргумент через additional_browser_args API (main.rs, STARTUP_PROXY_ARGS) —
+API-путь elevated не режет (именно так --proxy-server и работал на CI всё
+время). (2) vite на раннере не поднялся на 127.0.0.1 (резолв localhost в
+::1) — ранер зовёт `vite --host 127.0.0.1 --strictPort`, UI-цель /json
+матчится по обоим написаниям хоста (devUrl приложения — localhost:5173).
+Заодно починен шаг WebView2 Runtime в джобе (шаг-идемпотентный: рантайм на
+образе уже есть, оставлен как страховка) и убран случайный хвост cargo test
+из e2e-джобы. Итог: локально e2e/vpn через DUOPULSE_CDP_PORT — 22/22; CI —
+см. ниже.
 
 **Gate M6 (сценарий docs/01 §5.6).** «Заблокированный сайт открывается без
 внешних VPN-приложений» — автотест B на loopback WG-стенде (включение из
@@ -3098,7 +3118,8 @@ WG-сервере автора — вопрос в «Хаб ИИ» Aila (id duop
 e2e/wg-stand) и fmt/clippy wg-stand — чисто; cargo clippy --all-targets
 -D warnings (обе) — чисто; cargo test 212 passed + 3 ignored (состав не
 изменился — рефакторинг стенда без изменения семантики тестов); tsc чисто;
-vitest 180/180; e2e/vpn 22/22 (два прогона); e2e/bridge 29/29 (регресс).
+vitest 180/180; e2e/vpn 22/22 (три прогона: два на env-CDP, финальный на
+DUOPULSE_CDP_PORT); e2e/bridge 29/29 (регресс).
 Backup — backup_2026-10-21_23-42-11. Временных файлов нет (профили стенда —
 в %TEMP%, удалены; скриншот протокола — e2e/vpn/panel-tunnel.png).
 
@@ -3107,6 +3128,6 @@ README (возможности VPN, этап M6, список e2e-стендов
 («Изменения плана»: 6.6 выполнена, gate M6 проверен автоматикой, живая
 приёмка — вопрос автору).
 
-**Коммит.** feat(vpn): e2e 6.6 — маршрутные тесты direct/tunnel/split/
+**Коммиты.** feat(vpn): e2e 6.6 — маршрутные тесты direct/tunnel/split/
 kill-switch + 1080p на loopback WG-стенде, CI-джоба e2e-vpn (карточка
-duopulse-042, gate M6).
+duopulse-042, gate M6); далее ci/fix-коммиты отладки раннера (см. выше).

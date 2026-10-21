@@ -485,7 +485,20 @@ try {
     `dns=[${dns1.join(",")}], http=[${hits1.map((h) => h.path).join(",")}]`,
   );
 
-  const wgStat = await vpnStatus(uiWs);
+  // Статистика (rx/handshake — сразу; ICMP-ping может опоздать на медленной
+  // машине — первый ответ приходит в течение пары секунд, ждём с дедлайном).
+  const wgStat = await pollUntil(
+    async () => {
+      const st = await vpnStatus(uiWs);
+      return st?.wg?.rxBytes > 0 &&
+        st?.wg?.lastHandshakeMs != null &&
+        typeof st?.wg?.pingMs === "number"
+        ? st
+        : null;
+    },
+    15000,
+    "живая статистика туннеля (rx/handshake/ping)",
+  );
   check(
     "B4 живая статистика туннеля: rx>0, handshake и ICMP-ping на месте",
     wgStat?.wg?.rxBytes > 0 && wgStat?.wg?.lastHandshakeMs != null && typeof wgStat?.wg?.pingMs === "number",
