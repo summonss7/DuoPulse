@@ -2059,7 +2059,9 @@ mod tests {
                 }
             });
 
-            // DNS-ответчик: A = DNS_ANSWER.
+            // DNS-ответчик: имена *.tun — SERVER_IP (echo за туннелем; сплит-
+            // тесты задачи 6.3 резолвят туннельные домены сюда), прочие —
+            // DNS_ANSWER (необслуживаемый адрес).
             let dns = sockets.get_mut::<UdpSocket>(dns_handle);
             if dns.can_recv() {
                 let mut buf = [0u8; UDP_BUF];
@@ -2067,7 +2069,13 @@ mod tests {
                     stats
                         .dns_hits
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if let Some(reply) = dns_echo_reply(&buf[..n], DNS_ANSWER) {
+                    let name = dns_query_name(&buf[..n]).unwrap_or_default();
+                    let answer = if name.ends_with(".tun") {
+                        SERVER_IP
+                    } else {
+                        DNS_ANSWER
+                    };
+                    if let Some(reply) = dns_echo_reply(&buf[..n], answer) {
                         let _ = dns.send_slice(&reply, meta.endpoint);
                     }
                 }
@@ -2114,6 +2122,35 @@ mod tests {
         ]);
         out.extend_from_slice(&answer.octets());
         Some(out)
+    }
+
+    /// Имя из вопроса DNS-запроса (стенд выбирает ответ по имени; сжатие
+    /// указателей в question-секции не бывает).
+    fn dns_query_name(query: &[u8]) -> Option<String> {
+        if query.len() < 12 {
+            return None;
+        }
+        let mut pos = 12usize;
+        let mut labels = Vec::new();
+        loop {
+            if pos >= query.len() {
+                return None;
+            }
+            let len = query[pos] as usize;
+            if len == 0 {
+                break;
+            }
+            if len & 0xC0 != 0 {
+                return None;
+            }
+            pos += 1;
+            if pos + len > query.len() {
+                return None;
+            }
+            labels.push(String::from_utf8_lossy(&query[pos..pos + len]).into_owned());
+            pos += len;
+        }
+        Some(labels.join("."))
     }
 
     fn client_profile(endpoint_port: u16, keepalive: Option<u16>) -> WgProfile {
@@ -2563,5 +2600,213 @@ mod tests {
         s.read_exact(&mut rep).unwrap();
         assert_eq!(rep[1], 0x00, "CONNECT отклонён: REP={}", rep[1]);
         s
+    }
+
+    // --- задача 6.3: split-tunnel сквозь роутер (критерии карточки 039) -------
+
+    /// Критерий карточки: заблокированный домен — через туннель, YouTube и
+    /// прочие — напрямую, ОДНОВРЕМЕННО (один роутер, split-политика). DNS
+    /// туннельного домена спрашивает только DNS-сервер туннеля (зона .tun в
+    /// системном резолвере не существует — сработай он, ответа бы не было);
+    /// счётчики стенда фиксируют и резолв, и TCP. Правило правится на лету —
+    /// общий стор IPC ↔ роутер. Персист правил переживает «перезапуск» —
+    /// правилами rules.rs (store reload).
+    #[test]
+    fn split_routes_blocked_via_tunnel_and_direct_simultaneously() {
+        use crate::vpn::rules::{RuleAction, RuleStore, SplitMode};
+
+        let server = TestWgServer::start(None);
+        let profile = client_profile(server.port, None);
+        let session = start_client(&profile);
+        wait_connected(&session, 10);
+
+        let dir = temp_dir("split");
+        let store = RuleStore::load(&dir);
+        store.set_mode(SplitMode::Split).unwrap();
+        store.add_rule("blocked.tun", RuleAction::Tunnel).unwrap();
+        store.add_rule("youtube.com", RuleAction::Direct).unwrap();
+
+        let router = crate::vpn::router::Router::start().unwrap();
+        router.set_split(session.clone(), store.handle());
+
+        // (1) Заблокированный домен (поддомен правила) — через туннель:
+        // резолв DNS-сервером туннеля (*.tun → SERVER_IP), TCP — echo сервера.
+        let dns0 = server
+            .stats
+            .dns_hits
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let tcp0 = server
+            .stats
+            .tcp_connects
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let mut s = connect_socks5(router.port(), "www.blocked.tun", SERVER_PORT);
+        s.write_all(b"via-tunnel").unwrap();
+        let mut buf = [0u8; 10];
+        s.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"via-tunnel", "эхо пришло через туннель");
+        assert_eq!(
+            server
+                .stats
+                .dns_hits
+                .load(std::sync::atomic::Ordering::Relaxed),
+            dns0 + 1,
+            "резолв домена прошёл DNS-сервером туннеля (утечек к системному нет)"
+        );
+        assert_eq!(
+            server
+                .stats
+                .tcp_connects
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tcp0 + 1,
+            "TCP соединения — через туннель"
+        );
+
+        // (2) Прямой маршрут: местный echo (адрес-литерал — без правила и без
+        // DNS, умолчание split), туннель ничего не видит. YouTube идёт этим
+        // же путём — явное правило «direct» ниже. (Имя «localhost» не
+        // годится: системный резолвер на Windows может отдать ::1 первым,
+        // а echo слушает только IPv4 — был бы недетерминированный отказ.)
+        let echo = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let echo_port = echo.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in echo.incoming() {
+                let Ok(mut s) = stream else { break };
+                let mut buf = [0u8; 256];
+                if let Ok(n) = s.read(&mut buf) {
+                    let _ = s.write_all(&buf[..n]);
+                }
+            }
+        });
+        let mut s = connect_socks5(router.port(), "127.0.0.1", echo_port);
+        s.write_all(b"direct-hello").unwrap();
+        let mut buf = [0u8; 12];
+        s.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"direct-hello", "прямой echo отвечает");
+        assert_eq!(
+            server
+                .stats
+                .tcp_connects
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tcp0 + 1,
+            "новых TCP в туннеле нет — напрямую, минуя туннель"
+        );
+        assert_eq!(
+            server
+                .stats
+                .dns_hits
+                .load(std::sync::atomic::Ordering::Relaxed),
+            dns0 + 1,
+            "новых DNS в туннеле нет"
+        );
+        assert_eq!(
+            store.match_action("youtube.com"),
+            Some(RuleAction::Direct),
+            "явное правило «direct» (тот же прямой путь)"
+        );
+
+        // (3) Конфиг прокси при живом split маршрут не роняет (взаимная
+        // исключительность: прокси вернётся при выключении VPN-режима).
+        router.apply_config(
+            &crate::proxy::ProxyConfig {
+                enabled: true,
+                proto: crate::proxy::ProxyProto::Socks5,
+                host: "127.0.0.1".into(),
+                port: 1,
+                login: None,
+            },
+            &dir,
+        );
+        assert!(
+            matches!(router.route(), crate::vpn::router::Route::Wg { .. }),
+            "split-политика жива после apply_config прокси"
+        );
+
+        // (4) Правило добавляется на лету — общий стор: новое соединение
+        // новым правилом уже маршрутизируется в туннель.
+        store.add_rule("extra.tun", RuleAction::Tunnel).unwrap();
+        let mut s = connect_socks5(router.port(), "extra.tun", SERVER_PORT);
+        s.write_all(b"live-rule").unwrap();
+        let mut buf = [0u8; 9];
+        s.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"live-rule");
+        assert_eq!(
+            server
+                .stats
+                .tcp_connects
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tcp0 + 2,
+            "правило сработало без пересборки роутера"
+        );
+
+        session.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Fail-closed в split: туннель мёртв — правило «tunnel» не «протекает»
+    /// в прямые соединения (kill-switch, docs/02 §6.1): клиент получает
+    /// ошибку, к цели напрямую роутер не ходит.
+    #[test]
+    fn split_tunnel_rule_is_fail_closed_on_dead_tunnel() {
+        use crate::vpn::rules::{RuleAction, RuleStore, SplitMode};
+
+        let dead = StdUdp::bind("127.0.0.1:0").unwrap();
+        let dead_port = dead.local_addr().unwrap().port();
+        drop(dead);
+
+        let profile = client_profile(dead_port, None);
+        let session = start_client(&profile);
+        std::thread::sleep(Duration::from_millis(300));
+
+        let dir = temp_dir("split-dead");
+        let store = RuleStore::load(&dir);
+        store.set_mode(SplitMode::Split).unwrap();
+        store.add_rule("blocked.tun", RuleAction::Tunnel).unwrap();
+
+        // Местная цель: если бы правило «протекло» напрямую, соединение
+        // удалось бы — этого не должно случиться.
+        let echo = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let echo_port = echo.local_addr().unwrap().port();
+        let hits = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let hits_own = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            for stream in echo.incoming() {
+                let Ok(mut s) = stream else { break };
+                hits_own.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mut buf = [0u8; 256];
+                if let Ok(n) = s.read(&mut buf) {
+                    let _ = s.write_all(&buf[..n]);
+                }
+            }
+        });
+
+        let router = crate::vpn::router::Router::start().unwrap();
+        router.set_split(session.clone(), store.handle());
+
+        let mut probe = std::net::TcpStream::connect(("127.0.0.1", router.port())).unwrap();
+        // Таймаут больше клиентского туннельного (резолв через мёртвый
+        // туннель откажет по нему).
+        probe
+            .set_read_timeout(Some(CONNECT_TIMEOUT + Duration::from_secs(10)))
+            .unwrap();
+        probe.write_all(&[0x05, 0x01, 0x00]).unwrap();
+        let mut sel = [0u8; 2];
+        probe.read_exact(&mut sel).unwrap();
+        let mut req = vec![0x05, 0x01, 0x00, 0x03, 12];
+        req.extend_from_slice(b"blocked.tun");
+        req.extend_from_slice(&echo_port.to_be_bytes());
+        probe.write_all(&req).unwrap();
+        let mut rep = [0u8; 10];
+        assert!(
+            probe.read_exact(&mut rep).is_err() || rep[1] != 0x00,
+            "правило «tunnel» при мёртвом туннеле обязано отказать, а не идти напрямую"
+        );
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "напрямую к цели роутер не ходил — fail-closed"
+        );
+
+        session.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

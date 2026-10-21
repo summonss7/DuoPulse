@@ -2760,3 +2760,80 @@ cargo clippy --all-targets -D warnings — чисто; cargo test — 194 passed
 
 **Коммит.** chore(релиз): задача 5.4 — LICENSE GPL-3.0 + README-финал, этап M5
 закрыт (карточка duopulse-036).
+
+## 21.10.2026, 03:39 — 06:31 — задача 6.3 (M6, карточка duopulse-039): split-tunnel — правила домен → маршрут + DNS без утечек (контракт v9)
+
+**Контекст.** Задача 6.3 из docs/05 §3 (docs/02 §6.2): split-tunnel поверх
+роутера 6.1 и туннеля 6.2. Сеанс диспетчера 03:39 выполнил бэкенд-часть
+(рабочее дерево), продолжение сеанса довело её до готовности: TS-клиент,
+UI-редактирование правил, стенды, документация. Резервная копия перед
+доработками: backups/backup_2026-10-21_05-55-12.
+
+**Что сделано.**
+- `src-tauri/src/vpn/rules.rs` (новый): режимы SplitMode off/global/split;
+  правила домен → RuleAction tunnel/direct; матчинг — суффикс по границе
+  меток (example.com ловит и sub.example.com, ample.com — нет; регистр и
+  хвостовая точка не важны; IP-литералы не ловятся); валидация домена
+  (метки ≤63, дефисы, IDNA-юмникод, IP — не домен); персист
+  `vpn/split-rules.json` (секретов нет; битый файл/строки → дефолт off/пусто,
+  пропуски); RuleStore — общий стор IPC ↔ роутер (правка действует на новые
+  соединения сразу), upsert по домену, удаление.
+- `src-tauri/src/vpn/dns.rs` (новый): Resolver::Tunnel (только DNS-сервер
+  профиля через UDP-сокет стека внутри туннеля; IPv6-литерал — честный отказ
+  v1) | Resolver::System (прямой маршрут). Единственное системное исключение
+  — endpoint WG-сервера (до туннеля, как любой WG-клиент).
+- `src-tauri/src/vpn/router.rs`: Policy::Single (один маршрут на всё —
+  off/global/прокси, поведение 6.1/6.2) | Policy::Split {session, rules} —
+  решение на КАЖДОЕ соединение по правилу домена до первого DNS-запроса
+  (Chromium шлёт ATYP=domain): правило «tunnel» → туннель, иначе/«direct» →
+  напрямую. apply_config прокси при живом туннельном режиме маршрут не трогает
+  (взаимная исключительность маршрутов; вернётся при set_mode(off)).
+  connect_direct/connect_wg/connect_upstream переведены на vpn/dns.rs.
+- `src-tauri/src/bridge.rs`: контракт v9 — vpn.{set_mode, get_rules,
+  add_rule, remove_rule} (add_rule — upsert; set_mode off гасит туннель и
+  возвращает маршрут по конфигу прокси, global/split поднимают активный
+  профиль или переиспользуют живую сессию — global↔split без разрыва; без
+  профиля — честный отказ); VpnStatusResult.routing (vpn-режим, отличим от
+  фактического mode); use_profile(Some) в off поднимает global,
+  use_profile(None)/remove_profile активного гасят режим; старт —
+  apply_wg_saved в сохранённом режиме (off — туннель не поднимается).
+  `src/main.rs`: RuleStore::load(profile_dir) в manage; contract.json и
+  gen/types.ts перегенерированы.
+- UI: `src/pages/settings.ts` — секция «VPN-туннель WireGuard — режим и
+  split-правила» в разделе «Прокси / VPN» (селектор режима off/global/split с
+  применением на лету; список правил: сегмент «Туннель/Напрямую» на строке —
+  upsert, «удалить»; добавление домена + выбор маршрута, Enter в поле);
+  `src/style.css` — .set-rules/.set-rule/.set-rule-domain (моно для домена,
+  без наложений). `src/bridge/client.ts` — vpn.setMode/getRules/addRule/
+  removeRule.
+- Тесты: wg.rs — split_routes_blocked_via_tunnel_and_direct_simultaneously
+  (критерий карточки: один роутер, split-политика: заблокированный домен —
+  DNS сервером туннеля по счётчику dns_hits + TCP-echo через туннель,
+  ОДНОВРЕМЕННО прямое соединение к местному echo — туннель новых DNS/TCP не
+  видит; правило добавляется на лету общим стором; apply_config прокси при
+  живом split маршрут не роняет) и split_tunnel_rule_is_fail_closed_on_dead_
+  tunnel (мёртвый туннель — REP≠0 и ноль прямых соединений к цели); DNS-стенд
+  стенда отвечает *.tun → SERVER_IP; rules.rs — 9 тестов (матчинг, валидация,
+  персист/перезапуск, upsert, live-handle, битый файл, пропуск строк);
+  dns.rs — 2. Починен флап split-теста: цель «localhost» → «127.0.0.1»
+  (системный резолвер Windows может отдать ::1 первым, echo слушает IPv4).
+- e2e/bridge/run.mjs: v9 + 9 проверок (get_rules дефолт, add_rule, upsert,
+  отказ кривого домена, персист-файл в профиле, routing в статусе, отказ
+  global без профиля WireGuard — fail-closed, set_mode off, remove_rule).
+- Документация: docs/05 §2 (блок задачи 6.3) + §3 (строка 6.3 ✅), docs/02
+  §6.2 (реализация 6.3), README (строки возможностей VPN и этапа M6), ROADMAP
+  («Изменения плана»: 6.3 выполнена, далее 6.4).
+
+**Проверено.** cargo fmt --check — чисто; cargo clippy --all-targets
+-D warnings — чисто; cargo test — 207 passed + 3 ignored (было 194+3;
++9 rules, +2 dns, +2 wg-split); tsc — чисто; vitest — 169/169 (client.test:
+контракт v9, покрытие новых команд); e2e/bridge — 23/23 (было 14/14);
+e2e/settings — 17/17; e2e/proxy-a — 26/26 (порт 8899 занят сервисом Aila —
+стенд гнал с E2E_PROXY_A_PORT=18899); смоук UI страницы настроек — 7/7
+(секция, дефолт off, добавление правила, переключение маршрута строки,
+персист, удаление, геометрия без наложений/переполнений). Временный
+смоук-стенд — в %TEMP%\duopulse-039-smoke (удалён после прогона).
+
+**Коммит.** feat: split-tunnel — правила домен → маршрут, режимы
+off/global/split, DNS без утечек (задача 6.3, M6, карточка duopulse-039,
+контракт v9).

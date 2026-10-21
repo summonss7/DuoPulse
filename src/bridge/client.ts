@@ -59,10 +59,14 @@ import type {
   TranslateClearCacheResult,
   UpdaterCheckResult,
   UpdaterStatusResult,
+  VpnAddRuleParams,
   VpnImportProfileParams,
   VpnProfileInfo,
   VpnRemoveProfileParams,
+  VpnRemoveRuleParams,
+  VpnRulesResult,
   VpnSetEnabledParams,
+  VpnSetModeParams,
   VpnStatusResult,
   VpnUseProfileParams,
 } from "./gen/types";
@@ -157,6 +161,17 @@ export const bridge = {
     removeProfile: (params: VpnRemoveProfileParams) => invoke<void>("vpn_remove_profile", { params }),
     /** vpn.use_profile (задача 6.2): включить туннель (id) или выключить (null). */
     useProfile: (params: VpnUseProfileParams) => invoke<VpnStatusResult>("vpn_use_profile", { params }),
+    /** vpn.set_mode (задача 6.3): режим VPN — off | global | split; действует
+     *  сразу, на новые соединения (split — правила «tunnel» через туннель,
+     *  остальное напрямую). */
+    setMode: (params: VpnSetModeParams) => invoke<VpnStatusResult>("vpn_set_mode", { params }),
+    /** vpn.get_rules (задача 6.3): режим + список split-правил. */
+    getRules: () => invoke<VpnRulesResult>("vpn_get_rules"),
+    /** vpn.add_rule (задача 6.3): добавить/обновить правило домен → tunnel|direct
+     *  (upsert; в split действует на новые соединения сразу). */
+    addRule: (params: VpnAddRuleParams) => invoke<VpnRulesResult>("vpn_add_rule", { params }),
+    /** vpn.remove_rule (задача 6.3): удалить правило по домену. */
+    removeRule: (params: VpnRemoveRuleParams) => invoke<VpnRulesResult>("vpn_remove_rule", { params }),
   },
   adblock: {
     /** adblock.set_enabled: глобальный тумблер (site=null) или исключение сайта. */

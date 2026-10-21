@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 8); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 9); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
@@ -124,10 +124,15 @@ export interface DuoPulseBridgeContract {
   UpdaterCheckResult: UpdaterCheckResult;
   UpdaterStatusResult: UpdaterStatusResult;
   UpdateInfo: UpdateInfo;
+  VpnAddRuleParams: VpnAddRuleParams;
+  VpnRulesResult: VpnRulesResult;
+  VpnRuleInfo: VpnRuleInfo;
   VpnImportProfileParams: VpnImportProfileParams;
   VpnProfileInfo: VpnProfileInfo;
   VpnRemoveProfileParams: VpnRemoveProfileParams;
+  VpnRemoveRuleParams: VpnRemoveRuleParams;
   VpnSetEnabledParams: VpnSetEnabledParams;
+  VpnSetModeParams: VpnSetModeParams;
   VpnStatusResult: VpnStatusResult;
   ProxyState: ProxyState;
   VpnWgState: VpnWgState;
@@ -1019,6 +1024,43 @@ export interface UpdateInfo {
   version: string;
 }
 /**
+ * vpn.add_rule: добавить/обновить правило (upsert по домену — повторно добавленный сайт меняет маршрут, а не плодит строки). В split-режиме действует на новые соединения сразу (общий стор с роутером).
+ */
+export interface VpnAddRuleParams {
+  domain: string;
+  /**
+   * tunnel | direct.
+   */
+  route: string;
+}
+/**
+ * Результат команд правил: режим + список (порядок добавления).
+ */
+export interface VpnRulesResult {
+  /**
+   * off | global | split.
+   */
+  mode: string;
+  rules: VpnRuleInfo[];
+}
+/**
+ * Строка списка правил (vpn.get_rules/add_rule/remove_rule).
+ */
+export interface VpnRuleInfo {
+  /**
+   * Unix-ms добавления.
+   */
+  addedAt: number;
+  /**
+   * Домен правила (суффикс по границе меток: example.com ловит и sub.example.com).
+   */
+  domain: string;
+  /**
+   * tunnel | direct.
+   */
+  route: string;
+}
+/**
  * vpn.import_profile: путь к `.conf` (нативный диалог выбора, UI — задача 6.5; e2e/диагностика — путь напрямую). Приватный ключ уходит в DPAPI, в wg-profiles.json — только открытые поля.
  */
 export interface VpnImportProfileParams {
@@ -1042,6 +1084,9 @@ export interface VpnProfileInfo {
 export interface VpnRemoveProfileParams {
   id: string;
 }
+export interface VpnRemoveRuleParams {
+  domain: string;
+}
 /**
  * vpn.set_enabled: включить/выключить маршрутизацию через внешний прокси (инкремент A; в M6 — выбор маршрута локальным роутером, docs/02 §6). Включение с невалидным конфигом — ошибка, конфиг не меняется. Взаимно исключаем с туннелем WireGuard: vpn.use_profile при включении гасит прокси.
  */
@@ -1049,7 +1094,16 @@ export interface VpnSetEnabledParams {
   on: boolean;
 }
 /**
- * vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.
+ * vpn.set_mode (задача 6.3, docs/02 §6.2): режим VPN. off — погасить туннель, весь трафик напрямую (маршрут возвращается к конфигу прокси); global — весь трафик через туннель (нужен активный профиль WireGuard); split — туннель только для правил «tunnel», YouTube и прочее — напрямую (F-12). Действует сразу, на новые соединения.
+ */
+export interface VpnSetModeParams {
+  /**
+   * off | global | split.
+   */
+  mode: string;
+}
+/**
+ * vpn.status / vpn.test_connection / vpn.use_profile / vpn.set_mode: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; routing — vpn-режим задачи 6.3 (off | global | split); при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.
  */
 export interface VpnStatusResult {
   detail: string;
@@ -1057,6 +1111,10 @@ export interface VpnStatusResult {
    * off | proxy | wg.
    */
   mode: string;
+  /**
+   * off | global | split (docs/02 §6.2; с настройками прокси независим — routing описывает туннель, mode — фактический маршрут).
+   */
+  routing: string;
   /**
    * Словарь M1 (off/on/error) в рамках текущего mode.
    */

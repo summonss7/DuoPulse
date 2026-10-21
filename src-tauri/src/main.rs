@@ -631,8 +631,11 @@ fn main() {
     // Очередь переводов в работе (задача 4.3): дедуп запросов по ключу и
     // офлайн-цикл автоповтора (watcher.rs, docs/01 §5.4).
     let translation_jobs = std::sync::Arc::new(translate::watcher::TranslationJobs::default());
+    // Split-правила и vpn-режим (задача 6.3, docs/02 §6.2): vpn/split-rules.json,
+    // общий стор IPC ↔ роутер — правки действуют на новые соединения сразу.
+    let rules_store = vpn::rules::RuleStore::load(&profile_dir);
     // Локальный SOCKS5-роутер (задача 6.1, docs/02 §6.1): WebView2 постоянно
-    // направлен на 127.0.0.1:<port>, режим (direct/upstream) переключается
+    // направлен на 127.0.0.1:<port>, режим (direct/upstream/split) переключается
     // на лету — перезапуск для смены прокси больше не нужен. Не поднялся —
     // деградация к поведению инкремента A (аргументы по конфигу напрямую).
     let router = match vpn::router::Router::start() {
@@ -664,6 +667,7 @@ fn main() {
         .manage(translation_jobs)
         .manage(updater::UpdaterService::new())
         .manage(router)
+        .manage(rules_store)
         .setup(move |app| {
             startup_mark("setup");
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и
@@ -689,8 +693,10 @@ fn main() {
                 .expect("STARTUP_PROXY_ARGS инициализируется один раз");
 
             // Туннель WireGuard (задача 6.2): активный профиль wg-profiles.json
-            // поднимается на старте и переключает маршрут роутера на Wg
-            // (события vpn:state_changed — из bridge::apply_wg_saved).
+            // поднимается на старте в сохранённом vpn-режиме (задача 6.3:
+            // global — весь трафик в туннель, split — только правила «tunnel»,
+            // off — не поднимается; события vpn:state_changed — из
+            // bridge::apply_wg_saved).
             bridge::apply_wg_saved(app.handle());
 
             // Окно создаётся кодом (не из tauri.conf.json), чтобы подставить

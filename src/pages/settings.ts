@@ -3,7 +3,9 @@
 // src/main.ts; пункт главного меню). Разделы карточки 5.1: внешний вид
 // (тема — тёмная v1, F-10), поиск (поисковик omnibox), субтитры по умолчанию
 // (язык перевода дефолт-набора Alt+D + стиль плашки новых вкладок), перевод
-// (конфиг + ключ DPAPI), прокси/VPN, приватность (очистка при выходе, кэш),
+// перевод дорожек субтитров (конфиг + ключ DPAPI), прокси/VPN (внешний прокси —
+// форма из меню навбара; режим WireGuard и split-правила — задача 6.3),
+// приватность (очистка при выходе, кэш),
 // перенос профиля одним файлом (экспорт/импорт; секреты — по явному выбору
 // с предупреждением: в файле открытым текстом).
 //
@@ -14,7 +16,7 @@
 // неон — акценты; секции по образцу страницы «Диагностика».
 import { invoke } from "@tauri-apps/api/core";
 import { bridge } from "../bridge";
-import type { SettingsAll, UpdaterCheckResult, UpdaterStatusResult } from "../bridge/gen/types";
+import type { SettingsAll, UpdaterCheckResult, UpdaterStatusResult, VpnRulesResult } from "../bridge/gen/types";
 
 const err = (e: unknown): void => console.error("settings-page:", e);
 
@@ -452,6 +454,151 @@ export function initSettingsPage(): void {
       .catch((e2) => (proxyStatus.textContent = String(e2)));
   });
 
+  // --- 5b. Split-tunnel WireGuard (задача 6.3) ---------------------------------
+  // Режим туннеля (off/global/split) и правила «домен → маршрут». Профили
+  // WireGuard — vpn.import_profile (контракт v8); панель с профилями и
+  // статистикой — задача 6.5. Правила действуют на новые соединения сразу
+  // (общий стор IPC ↔ роутер) и переживают перезапуск (vpn/split-rules.json).
+  const split = section(
+    "VPN-туннель WireGuard — режим и split-правила",
+    "Split-tunnel: заблокированные домены — через туннель, YouTube и видео — напрямую, без потери скорости. DNS каждого домена идёт его же маршрутом (туннельный — DNS-сервером туннеля), утечек нет. Применяется сразу, без перезапуска; нужен активный профиль WireGuard.",
+  );
+  const vpnMode = document.createElement("select");
+  vpnMode.dataset.vpn = "mode";
+  for (const [value, text] of [
+    ["off", "Выключен — весь трафик напрямую"],
+    ["global", "Глобальный — весь трафик через туннель"],
+    ["split", "Split-tunnel — по правилам ниже (целевой)"],
+  ] as const) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = text;
+    vpnMode.append(opt);
+  }
+  const vpnStatus = el("div", "set-status");
+  vpnStatus.dataset.vpn = "status";
+  vpnMode.addEventListener("change", () => {
+    vpnStatus.textContent = "Применяю…";
+    void bridge.vpn
+      .setMode({ mode: vpnMode.value as "off" | "global" | "split" })
+      .then((st) => {
+        vpnStatus.textContent =
+          st.mode === "wg" || st.routing === "off"
+            ? `Режим применён: ${labelRouting(st.routing)}.`
+            : `Режим сохранён: ${labelRouting(st.routing)} — туннель не поднят (${st.detail}).`;
+        return loadVpnRules();
+      })
+      .catch((e) => (vpnStatus.textContent = String(e)));
+  });
+  const labelRouting = (r: string): string =>
+    r === "global" ? "глобальный" : r === "split" ? "split-tunnel" : "выключен";
+
+  const rulesList = el("div", "set-rules");
+  rulesList.dataset.vpn = "rules";
+  const renderRules = (res: VpnRulesResult): void => {
+    vpnMode.value = res.mode;
+    rulesList.replaceChildren();
+    if (res.rules.length === 0) {
+      const empty = el("div", "set-rules-empty");
+      empty.textContent =
+        "Правил нет. Добавьте заблокированный сайт ниже — в split-режиме он пойдёт через туннель, остальное — напрямую.";
+      rulesList.append(empty);
+      return;
+    }
+    for (const r of res.rules) {
+      const row = el("div", "set-rule");
+      const dom = el("span", "set-rule-domain");
+      dom.textContent = r.domain;
+      dom.title = `правило ловит и поддомены (${r.domain} и *.${r.domain})`;
+      const seg = el("div", "set-seg");
+      const bTunnel = document.createElement("button");
+      bTunnel.type = "button";
+      bTunnel.textContent = "Туннель";
+      const bDirect = document.createElement("button");
+      bDirect.type = "button";
+      bDirect.textContent = "Напрямую";
+      bTunnel.classList.toggle("on", r.route === "tunnel");
+      bDirect.classList.toggle("on", r.route === "direct");
+      bTunnel.addEventListener("click", () => routeRule(r.domain, "tunnel"));
+      bDirect.addEventListener("click", () => routeRule(r.domain, "direct"));
+      seg.append(bTunnel, bDirect);
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "link";
+      del.textContent = "удалить";
+      del.addEventListener("click", () => {
+        void bridge.vpn
+          .removeRule({ domain: r.domain })
+          .then((res2) => {
+            renderRules(res2);
+            vpnStatus.textContent = `Правило «${r.domain}» удалено.`;
+          })
+          .catch((e) => (vpnStatus.textContent = String(e)));
+      });
+      row.append(dom, seg, del);
+      rulesList.append(row);
+    }
+  };
+  const routeRule = (domain: string, route: "tunnel" | "direct"): void => {
+    void bridge.vpn
+      .addRule({ domain, route })
+      .then((res) => {
+        renderRules(res);
+        vpnStatus.textContent = `«${domain}» — ${route === "tunnel" ? "через туннель" : "напрямую"}.`;
+      })
+      .catch((e) => (vpnStatus.textContent = String(e)));
+  };
+
+  const ruleDomain = document.createElement("input");
+  ruleDomain.type = "text";
+  ruleDomain.placeholder = "example.com";
+  ruleDomain.spellcheck = false;
+  ruleDomain.dataset.vpn = "rule-domain";
+  const ruleRoute = document.createElement("select");
+  ruleRoute.dataset.vpn = "rule-route";
+  for (const [value, text] of [
+    ["tunnel", "Через туннель"],
+    ["direct", "Напрямую"],
+  ] as const) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = text;
+    ruleRoute.append(opt);
+  }
+  const ruleAdd = document.createElement("button");
+  ruleAdd.type = "button";
+  ruleAdd.className = "primary";
+  ruleAdd.textContent = "Добавить правило";
+  ruleAdd.dataset.vpn = "rule-add";
+  const ruleRow = el("div", "set-row");
+  ruleRow.append(ruleAdd, vpnStatus);
+  const addRuleForm = (): void => {
+    const domain = ruleDomain.value.trim();
+    if (!domain) {
+      vpnStatus.textContent = "Введите домен — например, example.com.";
+      return;
+    }
+    void bridge.vpn
+      .addRule({ domain, route: ruleRoute.value as "tunnel" | "direct" })
+      .then((res) => {
+        renderRules(res);
+        ruleDomain.value = "";
+        vpnStatus.textContent = "Правило добавлено — в split-режиме действует сразу.";
+      })
+      .catch((e) => (vpnStatus.textContent = String(e)));
+  };
+  ruleAdd.addEventListener("click", addRuleForm);
+  ruleDomain.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") addRuleForm();
+  });
+  split.body.append(
+    field("Режим", vpnMode, "действует на новые соединения сразу"),
+    field("Правила", rulesList, "правило ловит домен и его поддомены"),
+    field("Домен", ruleDomain),
+    field("Маршрут", ruleRoute),
+    ruleRow,
+  );
+
   // --- 6. Приватность ---------------------------------------------------------
   const privacy = section("Приватность", "Данные хранятся локально в профиле браузера.");
   const clearHist = document.createElement("input");
@@ -651,7 +798,7 @@ export function initSettingsPage(): void {
   profileRow.append(exportBtn, importBtn, profileStatus);
   profile.body.append(secretsLabel, secretsWarn, profileRow);
 
-  root.append(appearance.root, search.root, subs.root, tr.root, proxy.root, privacy.root, upd.root, profile.root);
+  root.append(appearance.root, search.root, subs.root, tr.root, proxy.root, split.root, privacy.root, upd.root, profile.root);
 
   // --- загрузка ---------------------------------------------------------------
 
@@ -676,6 +823,13 @@ export function initSettingsPage(): void {
     proxyPassword.value = "";
     proxyPassword.placeholder = s.hasPassword ? "сохранён — пусто = не менять" : "пароль";
     proxyPassClear.hidden = !s.hasPassword;
+  };
+
+  const loadVpnRules = async (): Promise<void> => {
+    await bridge.vpn
+      .getRules()
+      .then(renderRules)
+      .catch(err);
   };
 
   const reload = async (): Promise<void> => {
@@ -711,6 +865,7 @@ export function initSettingsPage(): void {
     }
     await loadTranslate().catch(err);
     await loadProxy().catch(err);
+    await loadVpnRules().catch(err);
     // Обновления (задача 5.2): версия/канал/последняя проверка из Core
     await bridge.updater
       .status()

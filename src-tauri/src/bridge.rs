@@ -43,7 +43,11 @@ use crate::proxy;
 /// list_profiles, remove_profile, use_profile} (клиент WireGuard, boringtun),
 /// vpn.status/test_connection расширились полями mode/wg, событие
 /// vpn:state_changed — полями mode/wg (переходы туннеля).
-pub const CONTRACT_VERSION: u32 = 8;
+/// v9 (задача 6.3): split-tunnel — команды vpn.{set_mode, get_rules,
+/// add_rule, remove_rule} (режимы off/global/split, правила домен →
+/// tunnel/direct, персист vpn/split-rules.json), vpn.status расширен полем
+/// routing (vpn-режим, отличим от фактического маршрута mode).
+pub const CONTRACT_VERSION: u32 = 9;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -440,14 +444,19 @@ pub struct VpnSetEnabledParams {
     pub on: bool,
 }
 
-/// vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации.
-/// mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено
-/// поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.
+/// vpn.status / vpn.test_connection / vpn.use_profile / vpn.set_mode:
+/// состояние маршрутизации. mode — фактический маршрут роутера:
+/// off | proxy | wg; routing — vpn-режим задачи 6.3 (off | global | split);
+/// при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе
+/// состояние прокси.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VpnStatusResult {
     /// off | proxy | wg.
     pub mode: String,
+    /// off | global | split (docs/02 §6.2; с настройками прокси независим —
+    /// routing описывает туннель, mode — фактический маршрут).
+    pub routing: String,
     /// Словарь M1 (off/on/error) в рамках текущего mode.
     pub state: proxy::ProxyState,
     pub detail: String,
@@ -511,6 +520,54 @@ pub struct VpnRemoveProfileParams {
 pub struct VpnUseProfileParams {
     #[serde(default)]
     pub id: Option<String>,
+}
+
+/// vpn.set_mode (задача 6.3, docs/02 §6.2): режим VPN.
+/// off — погасить туннель, весь трафик напрямую (маршрут возвращается к
+/// конфигу прокси); global — весь трафик через туннель (нужен активный
+/// профиль WireGuard); split — туннель только для правил «tunnel», YouTube
+/// и прочее — напрямую (F-12). Действует сразу, на новые соединения.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnSetModeParams {
+    /// off | global | split.
+    pub mode: String,
+}
+
+/// Строка списка правил (vpn.get_rules/add_rule/remove_rule).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnRuleInfo {
+    /// Домен правила (суффикс по границе меток: example.com ловит и
+    /// sub.example.com).
+    pub domain: String,
+    /// tunnel | direct.
+    pub route: String,
+    /// Unix-ms добавления.
+    pub added_at: i64,
+}
+
+/// Результат команд правил: режим + список (порядок добавления).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnRulesResult {
+    /// off | global | split.
+    pub mode: String,
+    pub rules: Vec<VpnRuleInfo>,
+}
+
+/// vpn.add_rule: добавить/обновить правило (upsert по домену — повторно
+/// добавленный сайт меняет маршрут, а не плодит строки). В split-режиме
+/// действует на новые соединения сразу (общий стор с роутером).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnAddRuleParams {
+    pub domain: String,
+    /// tunnel | direct.
+    pub route: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnRemoveRuleParams {
+    pub domain: String,
 }
 
 // --- задача 2.1: блокировщик рекламы (src/adblock/) ------------------------
@@ -996,6 +1053,15 @@ pub fn contract_json() -> serde_json::Value {
             "vpn.use_profile": { "handler": "vpn_use_profile",
                                  "params": schema!(VpnUseProfileParams),
                                  "result": schema!(VpnStatusResult) },
+            "vpn.set_mode": { "handler": "vpn_set_mode", "params": schema!(VpnSetModeParams),
+                              "result": schema!(VpnStatusResult) },
+            "vpn.get_rules": { "handler": "vpn_get_rules", "params": null,
+                               "result": schema!(VpnRulesResult) },
+            "vpn.add_rule": { "handler": "vpn_add_rule", "params": schema!(VpnAddRuleParams),
+                              "result": schema!(VpnRulesResult) },
+            "vpn.remove_rule": { "handler": "vpn_remove_rule",
+                                 "params": schema!(VpnRemoveRuleParams),
+                                 "result": schema!(VpnRulesResult) },
             "adblock.set_enabled": { "handler": "adblock_set_enabled",
                                       "params": schema!(AdblockSetEnabledParams),
                                       "result": schema!(AdblockStatusResult) },
@@ -1585,15 +1651,24 @@ async fn vpn_test_connection(app: AppHandle) -> Result<VpnStatusResult, String> 
 
 /// Маршрут роутера приложения, если роутер поднялся.
 fn router_route(app: &AppHandle) -> Option<crate::vpn::router::Route> {
-    app.try_state::<Option<crate::vpn::router::Router>>()
-        .and_then(|state| state.inner().clone())
-        .map(|router| router.route())
+    router_state(app).map(|router| router.route())
 }
 
-/// Снапшот VPN: фактический маршрут роутера (off/proxy/wg) + состояние.
-/// Блокирующая (прокси-режим делает сетевую пробу) — только из spawn_blocking.
+/// Роутер приложения (клон-ручка), если поднялся.
+fn router_state(app: &AppHandle) -> Option<crate::vpn::router::Router> {
+    app.try_state::<Option<crate::vpn::router::Router>>()
+        .and_then(|state| state.inner().clone())
+}
+
+/// Снапшот VPN: фактический маршрут роутера (off/proxy/wg) + vpn-режим
+/// routing (off/global/split, задача 6.3) + состояние. Блокирующая
+/// (прокси-режим делает сетевую пробу) — только из spawn_blocking.
 fn collect_vpn_status(app: &AppHandle) -> VpnStatusResult {
     let dir = proxy::profile_dir();
+    let routing = app
+        .try_state::<crate::vpn::rules::RuleStore>()
+        .map(|store| store.mode().as_str().to_string())
+        .unwrap_or_else(|| "off".into());
     match router_route(app) {
         Some(crate::vpn::router::Route::Wg { session }) => {
             let s = session.status();
@@ -1608,6 +1683,7 @@ fn collect_vpn_status(app: &AppHandle) -> VpnStatusResult {
             };
             VpnStatusResult {
                 mode: "wg".into(),
+                routing,
                 state,
                 detail: s.detail.clone(),
                 wg: Some(VpnWgState {
@@ -1632,6 +1708,7 @@ fn collect_vpn_status(app: &AppHandle) -> VpnStatusResult {
                 } else {
                     "off".into()
                 },
+                routing,
                 state: status.state,
                 detail: status.detail,
                 wg: None,
@@ -1731,12 +1808,15 @@ fn profile_info(p: &crate::vpn::wg::WgProfile, active: bool) -> VpnProfileInfo {
 }
 
 /// vpn.remove_profile: удалить профиль и секрет. Активный — сначала гасим
-/// туннель (маршрут возвращается к конфигу прокси).
+/// туннель и режим (маршрут возвращается к конфигу прокси).
 #[tauri::command]
 fn vpn_remove_profile(app: AppHandle, params: VpnRemoveProfileParams) -> Result<(), String> {
     let dir = proxy::profile_dir();
     if crate::vpn::wg::active_id(&dir).as_deref() == Some(params.id.as_str()) {
-        stop_wg_tunnel(&app, &dir);
+        stop_wg_tunnel(&app);
+        let _ = app
+            .state::<crate::vpn::rules::RuleStore>()
+            .set_mode(crate::vpn::rules::SplitMode::Off);
     }
     crate::vpn::wg::remove_profile(&dir, &params.id)?;
     Ok(())
@@ -1771,20 +1851,32 @@ fn start_wg_session(
 }
 
 /// Старт приложения: поднять активный WG-профиль из wg-profiles.json (задача
-/// 6.2). Ошибка поднятия — деградация к маршруту по конфигу прокси с записью
-/// в журнал (полный kill-switch при недоступном туннеле — задача 6.4).
+/// 6.2) в сохранённом vpn-режиме (задача 6.3: global — весь трафик в
+/// туннель, split — только правила «tunnel»; off — туннель не поднимается,
+/// профиль остаётся выбранным). Ошибка поднятия — деградация к маршруту по
+/// конфигу прокси с записью в журнал (полный kill-switch при недоступном
+/// туннеле — задача 6.4).
 pub fn apply_wg_saved(app: &AppHandle) {
     let dir = proxy::profile_dir();
+    let mode = app
+        .try_state::<crate::vpn::rules::RuleStore>()
+        .map(|store| store.mode())
+        .unwrap_or(crate::vpn::rules::SplitMode::Global);
+    if mode == crate::vpn::rules::SplitMode::Off {
+        return; // режим off: туннель не поднимаем, маршрут — конфиг прокси
+    }
     let Some((profile, private_key, psk)) = crate::vpn::wg::active_profile(&dir) else {
         return;
     };
     match start_wg_session(app, &profile, private_key, psk) {
         Ok(session) => {
-            if let Some(router) = app
-                .try_state::<Option<crate::vpn::router::Router>>()
-                .and_then(|state| state.inner().clone())
-            {
-                router.set_route(crate::vpn::router::Route::Wg { session });
+            if let Some(router) = router_state(app) {
+                if mode == crate::vpn::rules::SplitMode::Split {
+                    let store = app.state::<crate::vpn::rules::RuleStore>();
+                    router.set_split(session, store.handle());
+                } else {
+                    router.set_route(crate::vpn::router::Route::Wg { session });
+                }
             }
         }
         Err(e) => eprintln!(
@@ -1794,14 +1886,44 @@ pub fn apply_wg_saved(app: &AppHandle) {
     }
 }
 
-/// vpn.use_profile: включить туннель (Some) или выключить (None). Маршруты
-/// взаимоисключимы до split-правил (6.3): включение WG гасит прокси-режим.
+/// Применить живую сессию туннеля к роутеру в заданном режиме (общее для
+/// use_profile/set_mode/старта): split — политика правил, global — один
+/// маршрут на всё. Прокси-режим в конфиге гасим (маршруты взаимоисключаемы).
+fn apply_tunnel_mode(
+    app: &AppHandle,
+    session: crate::vpn::wg::WgSession,
+    mode: crate::vpn::rules::SplitMode,
+) -> Result<(), String> {
+    if let Some(router) = router_state(app) {
+        if mode == crate::vpn::rules::SplitMode::Split {
+            let store = app.state::<crate::vpn::rules::RuleStore>();
+            router.set_split(session, store.handle());
+        } else {
+            router.set_route(crate::vpn::router::Route::Wg { session });
+        }
+    }
+    let dir = proxy::profile_dir();
+    let mut cfg = proxy::load_config(&dir);
+    if cfg.enabled {
+        cfg.enabled = false;
+        proxy::save_config(&dir, &cfg).map_err(|e| format!("выключить прокси-режим: {e}"))?;
+    }
+    Ok(())
+}
+
+/// vpn.use_profile: включить туннель (Some) или выключить (None).
+/// Включение поднимает роутер в ТЕКУЩЕМ vpn-режиме (задача 6.3: split
+/// сохраняется — туннель под правила; off → включение означает global,
+/// поведение задачи 6.2); выключение гасит режим (off) и возвращает маршрут
+/// по конфигу прокси. Повторное включение того же профиля — перезапуск
+/// туннеля (применение свежего импорта).
 #[tauri::command]
 fn vpn_use_profile(app: AppHandle, params: VpnUseProfileParams) -> Result<VpnStatusResult, String> {
     let dir = proxy::profile_dir();
+    let store = app.state::<crate::vpn::rules::RuleStore>();
     // Текущий туннель (если есть) гасим в любом случае: смена профиля —
     // перезапуск сессии, выключение — снятие маршрута.
-    stop_wg_tunnel(&app, &dir);
+    stop_wg_tunnel(&app);
     if let Some(id) = &params.id {
         let (profile, private_key, psk) =
             crate::vpn::wg::profile_with_keys(&dir, id).ok_or_else(|| {
@@ -1811,33 +1933,114 @@ fn vpn_use_profile(app: AppHandle, params: VpnUseProfileParams) -> Result<VpnSta
             })?;
         let session = start_wg_session(&app, &profile, private_key, psk)?;
         crate::vpn::wg::set_active(&dir, Some(id))?;
-        // Прокси-режим гасим в сохранённом конфиге (маршрут уже сменился).
-        let mut cfg = proxy::load_config(&dir);
-        if cfg.enabled {
-            cfg.enabled = false;
-            proxy::save_config(&dir, &cfg).map_err(|e| format!("выключить прокси-режим: {e}"))?;
-        }
-        if let Some(router) = app
-            .try_state::<Option<crate::vpn::router::Router>>()
-            .and_then(|state| state.inner().clone())
-        {
-            router.set_route(crate::vpn::router::Route::Wg { session });
-        }
+        // off + явное включение профиля = global (как в 6.2); split остаётся.
+        let mode = match store.mode() {
+            crate::vpn::rules::SplitMode::Off => crate::vpn::rules::SplitMode::Global,
+            m => m,
+        };
+        store.set_mode(mode)?;
+        apply_tunnel_mode(&app, session, mode)?;
     } else {
         crate::vpn::wg::set_active(&dir, None)?;
+        store.set_mode(crate::vpn::rules::SplitMode::Off)?;
         // Маршрут — по конфигу прокси (off/upstream), как до туннеля.
         crate::vpn::router::apply_saved(&app, &dir);
     }
     Ok(collect_vpn_status(&app))
 }
 
-/// Погасить туннель, если маршрут роутера — Wg (сессия останавливается,
-/// wg-profiles.json активность не трогаем — её выставляет вызывающий).
-fn stop_wg_tunnel(app: &AppHandle, dir: &std::path::Path) {
+/// vpn.set_mode (задача 6.3, docs/02 §6.2): режим VPN — off | global | split.
+/// off — погасить туннель и вернуться к маршруту по конфигу прокси (выбранный
+/// профиль сохраняется); global/split — поднять туннель активного профиля
+/// (уже поднят — переиспользуем сессию, режима это не трогает) и применить
+/// политику: global — весь трафик в туннель, split — только правила
+/// «tunnel». Правила меняются отдельно (vpn.add_rule/remove_rule) и в split
+/// действуют на новые соединения сразу.
+#[tauri::command]
+fn vpn_set_mode(app: AppHandle, params: VpnSetModeParams) -> Result<VpnStatusResult, String> {
+    use crate::vpn::rules::SplitMode;
+    let mode = SplitMode::parse(&params.mode)?;
+    let dir = proxy::profile_dir();
+    let store = app.state::<crate::vpn::rules::RuleStore>();
+    match mode {
+        SplitMode::Off => {
+            stop_wg_tunnel(&app);
+            store.set_mode(mode)?;
+            // Маршрут — по конфигу прокси (off/upstream), как до туннеля.
+            crate::vpn::router::apply_saved(&app, &dir);
+        }
+        SplitMode::Global | SplitMode::Split => {
+            // Живая сессия? — переиспользуем (и global↔split без разрыва).
+            let session = match router_route(&app) {
+                Some(crate::vpn::router::Route::Wg { session }) => session,
+                _ => {
+                    let (profile, private_key, psk) =
+                        crate::vpn::wg::active_profile(&dir).ok_or_else(|| {
+                            "нет активного профиля WireGuard — сначала выберите профиль (vpn.use_profile)".to_string()
+                        })?;
+                    let session = start_wg_session(&app, &profile, private_key, psk)?;
+                    crate::vpn::wg::set_active(&dir, Some(&profile.id))?;
+                    session
+                }
+            };
+            store.set_mode(mode)?;
+            apply_tunnel_mode(&app, session, mode)?;
+        }
+    }
+    Ok(collect_vpn_status(&app))
+}
+
+/// vpn.get_rules: режим + список split-правил (настройки VPN, задача 6.3).
+#[tauri::command]
+fn vpn_get_rules(app: AppHandle) -> VpnRulesResult {
+    rules_result(&app.state::<crate::vpn::rules::RuleStore>())
+}
+
+/// vpn.add_rule: добавить/обновить правило домен → маршрут (upsert).
+#[tauri::command]
+fn vpn_add_rule(app: AppHandle, params: VpnAddRuleParams) -> Result<VpnRulesResult, String> {
+    let action = crate::vpn::rules::RuleAction::parse(&params.route)?;
+    let store = app.state::<crate::vpn::rules::RuleStore>();
+    store.add_rule(&params.domain, action)?;
+    Ok(rules_result(&store))
+}
+
+/// vpn.remove_rule: удалить правило по домену (нет правила — не ошибка).
+#[tauri::command]
+fn vpn_remove_rule(app: AppHandle, params: VpnRemoveRuleParams) -> VpnRulesResult {
+    let store = app.state::<crate::vpn::rules::RuleStore>();
+    let _ = store.remove_rule(&params.domain);
+    rules_result(&store)
+}
+
+fn rules_result(store: &crate::vpn::rules::RuleStore) -> VpnRulesResult {
+    let snap = store.snapshot();
+    VpnRulesResult {
+        mode: snap.mode.as_str().into(),
+        rules: snap
+            .rules
+            .into_iter()
+            .map(|r| VpnRuleInfo {
+                domain: r.domain,
+                route: r.action.as_str().into(),
+                added_at: r.added_at,
+            })
+            .collect(),
+    }
+}
+
+/// Погасить туннель, если он поднят (сессия останавливается, политика роутера
+/// сбрасывается в прямой маршрут — иначе apply_saved не сможет применить
+/// конфиг прокси из-за взаимной исключительности маршрутов). Активность
+/// профиля в wg-profiles.json трогает вызывающий (set_mode(off) сохраняет
+/// выбранный профиль, use_profile(None) — снимает).
+fn stop_wg_tunnel(app: &AppHandle) {
     if let Some(crate::vpn::router::Route::Wg { session }) = router_route(app) {
         session.shutdown();
     }
-    let _ = crate::vpn::wg::set_active(dir, None);
+    if let Some(router) = router_state(app) {
+        router.set_route(crate::vpn::router::Route::Direct);
+    }
 }
 
 /// app.restart: перезапуск приложения (применение аргументов прокси WebView2 —
@@ -2365,6 +2568,10 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         vpn_list_profiles,
         vpn_remove_profile,
         vpn_use_profile,
+        vpn_set_mode,
+        vpn_get_rules,
+        vpn_add_rule,
+        vpn_remove_rule,
         adblock_set_enabled,
         adblock_status,
         adblock_update_lists,

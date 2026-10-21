@@ -7,7 +7,10 @@
 //   3) nav.navigate / nav.go_back / nav.go_forward / nav.reload — навигация
 //      через bridge меняет URL вкладки (проверяется повторным tabs.list);
 //   4) settings.get / settings.set / vpn.status — прокси-словарь контракта
-//      (включая отказ валидации при включении без адреса).
+//      (включая отказ валидации при включении без адреса);
+//   5) vpn.{get_rules,add_rule,remove_rule,set_mode} — split-tunnel (6.3):
+//      upsert-правила домен→маршрут, персист vpn/split-rules.json, отказ
+//      global/split без профиля WireGuard (fail-closed), поле routing.
 // Изоляция: APPDATA и WEBVIEW2_USER_DATA_FOLDER — во временном каталоге,
 // реальный профиль пользователя не затрагивается.
 //
@@ -149,7 +152,7 @@ try {
 
   // (1) bridge.version
   const version = await evalIn(uiWs, `window.__duopulse.bridge.version()`);
-  check("bridge.version: приложение отдаёт версию контракта", version?.version === 8, JSON.stringify(version)); // v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} (5.1)
+  check("bridge.version: приложение отдаёт версию контракта", version?.version === 9, JSON.stringify(version)); // v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} (5.1)
 
   // (2) tabs.list — СКВОЗНОЙ DoD-тест: UI → Core → ответ
   const tabs = await evalIn(uiWs, `window.__duopulse.tabs.list()`);
@@ -216,6 +219,70 @@ try {
 
   const status = await evalIn(uiWs, `window.__duopulse.vpn.status()`);
   check("vpn.status: состояние off без прокси", status?.state === "off", JSON.stringify(status));
+
+  // (5) split-tunnel v9 (задача 6.3): правила и режим через bridge
+  const rules0 = await evalIn(uiWs, `window.__duopulse.vpn.getRules()`);
+  check(
+    "vpn.get_rules: свежий профиль — режим off, правил нет",
+    rules0?.mode === "off" && Array.isArray(rules0?.rules) && rules0.rules.length === 0,
+    JSON.stringify(rules0),
+  );
+
+  const rules1 = await evalIn(
+    uiWs,
+    `window.__duopulse.vpn.addRule({ domain: "blocked.example", route: "tunnel" })`,
+  );
+  check(
+    "vpn.add_rule: правило добавлено (домен → tunnel)",
+    rules1?.rules?.length === 1 && rules1.rules[0].domain === "blocked.example" && rules1.rules[0].route === "tunnel",
+    JSON.stringify(rules1),
+  );
+
+  const rules2 = await evalIn(
+    uiWs,
+    `window.__duopulse.vpn.addRule({ domain: "blocked.example", route: "direct" })`,
+  );
+  check(
+    "vpn.add_rule: upsert — повторный домен меняет маршрут, не плодит строки",
+    rules2?.rules?.length === 1 && rules2.rules[0].route === "direct",
+    JSON.stringify(rules2),
+  );
+
+  const badRule = await evalIn(
+    uiWs,
+    `window.__duopulse.vpn.addRule({ domain: "не домен!", route: "tunnel" }).then(() => "ok", e => String(e))`,
+  );
+  check("vpn.add_rule: кривой домен отклонён", badRule !== "ok", String(badRule).slice(0, 80));
+
+  const rawRules = fs.readFileSync(path.join(tmp, "DuoPulse", "profile", "vpn", "split-rules.json"), "utf8");
+  check(
+    "vpn.add_rule: персист vpn/split-rules.json (правила переживают перезапуск)",
+    rawRules.includes("blocked.example") && rawRules.includes('"route"'),
+    rawRules.slice(0, 120),
+  );
+
+  const statusRouting = await evalIn(uiWs, `window.__duopulse.vpn.status()`);
+  check(
+    "vpn.status: поле routing (vpn-режим) в снапшоте",
+    statusRouting?.routing === "off",
+    JSON.stringify(statusRouting),
+  );
+
+  const noProfile = await evalIn(
+    uiWs,
+    `window.__duopulse.vpn.setMode({ mode: "global" }).then(() => "ok", e => String(e))`,
+  );
+  check(
+    "vpn.set_mode: global без профиля WireGuard — честный отказ (не «тихо напрямую»)",
+    noProfile !== "ok" && /профил/i.test(noProfile),
+    String(noProfile).slice(0, 100),
+  );
+
+  const modeOff = await evalIn(uiWs, `window.__duopulse.vpn.setMode({ mode: "off" })`);
+  check("vpn.set_mode: off проходит (режим уже/снова выключен)", modeOff?.routing === "off", JSON.stringify(modeOff));
+
+  const rules3 = await evalIn(uiWs, `window.__duopulse.vpn.removeRule({ domain: "blocked.example" })`);
+  check("vpn.remove_rule: правило удалено", rules3?.rules?.length === 0, JSON.stringify(rules3));
 
   uiWs.close();
 } catch (e) {

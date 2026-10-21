@@ -16,6 +16,15 @@
 //!     DNS — сервером профиля тоже в туннеле (к системному резолверу
 //!     туннельный маршрут не обращается).
 //!
+//! Split-tunnel (задача 6.3, docs/02 §6.2): политика роутера — не один
+//! маршрут на всё, а режим. `Policy::Single` — один маршрут (off/global/
+//! прокси, как до 6.3); `Policy::Split` — решение НА КАЖДОЕ соединение по
+//! split-правилу домена (`vpn/rules.rs`): правило «tunnel» — туннель
+//! (DNS — только сервером туннеля, без утечек), иначе/правило «direct» —
+//! напрямую. Домен известен до резолва (Chromium шлёт ATYP=domain),
+//! поэтому матчинг не требует DNS. Заблокированный домен идёт через
+//! туннель, YouTube — напрямую, одновременно.
+//!
 //! Fail-closed / kill-switch (docs/02 §6.1): отказ маршрута `Upstream`
 //! (upstream не отвечает, рукопожатие отклонено, битый конфиг) — клиенту
 //! возвращается ошибка SOCKS5, соединение закрывается; в открытую трафик
@@ -23,10 +32,11 @@
 //! разрыв уже установленных тоннелей — задача 6.4 (kill-switch), здесь
 //! соединения доживают свой цикл.
 //!
-//! DNS (docs/02 §6.1): схема socks5 заставляет Chromium присылать домен
-//! неразрешённым (ATYP=domain) — резолв происходит на стороне выбранного
-//! маршрута: системный резолвер в `Direct`, удалённо — в `Upstream`; утечек
-//! DNS-запросов к системному резолверу для туннельного маршрута нет.
+//! DNS (docs/02 §6.1, задача 6.3 — `vpn/dns.rs`): схема socks5 заставляет
+//! Chromium присылать домен неразрешённым (ATYP=domain) — резолв происходит
+//! на стороне выбранного маршрута: системный резолвер в `Direct`, туннельный
+//! DNS-сервер в `Wg`, удалённо — в `Upstream`; утечек DNS-запросов к
+//! системному резолверу для туннельного маршрута нет.
 //!
 //! Граница доверия: роутер слушает только loopback и без аутентификации —
 //! Chromium не принимает логин/пароль в `--proxy-server`, поэтому отличить
@@ -34,8 +44,9 @@
 //! чужих процессов ограничен доверием самой машины пользователя.
 
 use crate::proxy::{ProxyConfig, ProxyProto};
+use crate::vpn::rules::{RuleAction, RuleStore};
 use std::io::{Read, Write};
-use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, Shutdown, TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -59,11 +70,11 @@ impl std::fmt::Display for Target {
     }
 }
 
-/// Маршрут соединений (docs/02 §6.1–6.2). Split-правила по домену — задача
-/// 6.3 (тогда маршрут станет решаться на соединение).
+/// Маршрут одного соединения (docs/02 §6.1–6.2). В режиме split решается
+/// на соединение по правилу домена (`vpn/rules.rs`, задача 6.3).
 #[derive(Debug, Clone)]
 pub enum Route {
-    /// Напрямую (режим off).
+    /// Напрямую (режим off, split-умолчание и правило «direct»).
     Direct,
     /// Через внешний прокси задачи 1.8. Пароль — из DPAPI, читается при
     /// смене маршрута (в конфиге не хранится).
@@ -75,17 +86,46 @@ pub enum Route {
     Wg { session: crate::vpn::wg::WgSession },
 }
 
+/// Политика роутера: как выбирать маршрут для соединения (задача 6.3,
+/// docs/02 §6.2 — режимы off/global/split).
+#[derive(Clone)]
+pub enum Policy {
+    /// Один маршрут на весь трафик: off → Direct, global-туннель → Wg,
+    /// внешний прокси → Upstream (поведение задач 6.1/6.2).
+    Single(Route),
+    /// Split: правило домена «tunnel» — через туннель, остальное (и правило
+    /// «direct») — напрямую. Правила — общий стор с IPC (`vpn/rules.rs`):
+    /// правка действует на новые соединения сразу, без перезапуска.
+    Split {
+        session: crate::vpn::wg::WgSession,
+        rules: RuleStore,
+    },
+}
+
+impl Policy {
+    /// Доминирующий маршрут для статуса IPC: split — это туннель (часть
+    /// соединений идёт напрямую, но режим задаёт туннель).
+    fn dominant_route(&self) -> Route {
+        match self {
+            Self::Single(route) => route.clone(),
+            Self::Split { session, .. } => Route::Wg {
+                session: session.clone(),
+            },
+        }
+    }
+}
+
 /// Запущенный роутер: слушатель живёт в своей нити до конца процесса.
-/// Клонирование — это тот же маршрут (внутри Arc), клон для управления.
+/// Клонирование — это та же политика (внутри Arc), клон для управления.
 #[derive(Clone)]
 pub struct Router {
     port: u16,
-    route: Arc<RwLock<Route>>,
+    policy: Arc<RwLock<Policy>>,
 }
 
 impl Router {
     /// Поднять роутер на 127.0.0.1. Порт — из DUOPULSE_ROUTER_PORT (отладка/
-    /// стенды) или случайный свободный. Стартовый маршрут — Direct.
+    /// стенды) или случайный свободный. Стартовая политика — Single(Direct).
     pub fn start() -> std::io::Result<Router> {
         let port_env = std::env::var("DUOPULSE_ROUTER_PORT")
             .ok()
@@ -93,39 +133,62 @@ impl Router {
             .filter(|p| *p > 0);
         let listener = TcpListener::bind(("127.0.0.1", port_env.unwrap_or(0)))?;
         let port = listener.local_addr()?.port();
-        let route = Arc::new(RwLock::new(Route::Direct));
-        let route_loop = Arc::clone(&route);
+        let policy = Arc::new(RwLock::new(Policy::Single(Route::Direct)));
+        let policy_loop = Arc::clone(&policy);
         std::thread::Builder::new()
             .name("vpn-router-accept".into())
-            .spawn(move || accept_loop(listener, route_loop))?;
+            .spawn(move || accept_loop(listener, policy_loop))?;
         eprintln!("[vpn] SOCKS5-роутер слушает 127.0.0.1:{port}");
-        Ok(Router { port, route })
+        Ok(Router { port, policy })
     }
 
     pub fn port(&self) -> u16 {
         self.port
     }
 
-    /// Текущий маршрут (клонирование — для тестов; в статус vpn пойдёт
-    /// панелью задачи 6.5).
-    #[allow(dead_code)]
+    /// Доминирующий маршрут (клонирование — для тестов и статуса vpn; панель
+    /// с разрезом по split — задача 6.5).
     pub fn route(&self) -> Route {
-        self.route.read().unwrap_or_else(|p| p.into_inner()).clone()
+        self.policy
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .dominant_route()
     }
 
-    /// Сменить маршрут — действует на новые соединения, без перезапуска
-    /// приложения (docs/02 §6.1). Битый включённый конфиг сознательно даёт
-    /// `Upstream`: отказ будет у каждого соединения (fail-closed), но не
-    /// «протечёт» в прямые соединения.
+    /// Сменить политику на «один маршрут на всё» — действует на новые
+    /// соединения, без перезапуска приложения (docs/02 §6.1). Битый
+    /// включённый конфиг сознательно даёт `Upstream`: отказ будет у каждого
+    /// соединения (fail-closed), но не «протечёт» в прямые соединения.
     pub fn set_route(&self, route: Route) {
-        if let Ok(mut slot) = self.route.write() {
-            *slot = route;
+        if let Ok(mut slot) = self.policy.write() {
+            *slot = Policy::Single(route);
         }
     }
 
-    /// Применить сохранённый конфиг прокси (пароль — из DPAPI профиля).
-    /// Вызывается на старте и при каждой смене настроек/импорте профиля.
+    /// Включить split-режим: туннель для правил «tunnel», остальное —
+    /// напрямую (docs/02 §6.2). Действует на новые соединения.
+    pub fn set_split(&self, session: crate::vpn::wg::WgSession, rules: RuleStore) {
+        if let Ok(mut slot) = self.policy.write() {
+            *slot = Policy::Split { session, rules };
+        }
+    }
+
+    /// Применить к роутеру приложения сохранённый конфиг прокси (пароль —
+    /// из DPAPI профиля). Вызывается на старте и при каждой смене настроек/
+    /// импорте профиля. Туннель/global/split активен — конфиг только
+    /// сохраняется, маршрут не трогаем (взаимная исключительность
+    /// маршрутов): прокс вернётся при выключении VPN-режима (задача 6.3).
     pub fn apply_config(&self, cfg: &ProxyConfig, profile_dir: &Path) {
+        {
+            let guard = self.policy.read().unwrap_or_else(|p| p.into_inner());
+            let tunnel_is_policy = match &*guard {
+                Policy::Single(Route::Direct) | Policy::Single(Route::Upstream { .. }) => false,
+                Policy::Single(Route::Wg { .. }) | Policy::Split { .. } => true,
+            };
+            if tunnel_is_policy {
+                return;
+            }
+        }
         let route = if cfg.enabled {
             Route::Upstream {
                 cfg: cfg.clone(),
@@ -150,11 +213,11 @@ pub fn apply_saved(app: &tauri::AppHandle, profile_dir: &Path) {
     }
 }
 
-fn accept_loop(listener: TcpListener, route: Arc<RwLock<Route>>) {
+fn accept_loop(listener: TcpListener, policy: Arc<RwLock<Policy>>) {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let route = route.read().unwrap_or_else(|p| p.into_inner()).clone();
+                let policy = policy.read().unwrap_or_else(|p| p.into_inner()).clone();
                 let _ = std::thread::Builder::new()
                     .name("vpn-router-conn".into())
                     .spawn(move || {
@@ -162,7 +225,7 @@ fn accept_loop(listener: TcpListener, route: Arc<RwLock<Route>>) {
                             .peer_addr()
                             .map(|a| a.to_string())
                             .unwrap_or_else(|_| "?".into());
-                        if let Err(e) = serve_client(stream, &route) {
+                        if let Err(e) = serve_client(stream, &policy) {
                             eprintln!("[vpn] {peer}: {e}");
                         }
                     });
@@ -173,7 +236,7 @@ fn accept_loop(listener: TcpListener, route: Arc<RwLock<Route>>) {
 }
 
 /// Одно клиентское соединение WebView2 → роутер (RFC 1928, только CONNECT).
-fn serve_client(mut client: TcpStream, route: &Route) -> Result<(), String> {
+fn serve_client(mut client: TcpStream, policy: &Policy) -> Result<(), String> {
     let _ = client.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
     let _ = client.set_write_timeout(Some(HANDSHAKE_TIMEOUT));
 
@@ -239,10 +302,25 @@ fn serve_client(mut client: TcpStream, route: &Route) -> Result<(), String> {
         port: u16::from_be_bytes(port_be),
     };
 
-    // Маршрутизация. Любой отказ — ошибка клиенту (fail-closed): в режим
-    // Upstream/Wg прямой ход запрещён, в Direct отказ цели — обычная ошибка
-    // сети. (preamble — ранние данные тоннеля, приехавшие в одном сегменте с
-    // заголовками ответа HTTP-прокси.)
+    // Маршрутизация (задача 6.3): в split-режимах решение принимается ПО
+    // ДОМЕНУ на каждое соединение — до первого DNS-запроса (Chromium прислал
+    // имя, а не адрес). Правило «tunnel»/режим global — туннель (DNS — только
+    // сервером туннеля, vpn/dns.rs), остальное — напрямую. Любой отказ —
+    // ошибка клиенту (fail-closed): в туннельных маршрутах прямой ход
+    // запрещён, в Direct отказ цели — обычная ошибка сети. (preamble —
+    // ранние данные тоннеля, приехавшие в одном сегменте с заголовками
+    // ответа HTTP-прокси.)
+    let route = match &policy {
+        Policy::Single(route) => route.clone(),
+        Policy::Split { session, rules } => match rules.match_action(&target.host) {
+            Some(RuleAction::Tunnel) => Route::Wg {
+                session: session.clone(),
+            },
+            // Умолчание split — напрямую; явное правило «direct» — то же
+            // (docs/02 §6.2: в туннель — только заблокированные домены).
+            Some(RuleAction::Direct) | None => Route::Direct,
+        },
+    };
     let (upstream, preamble) = match &route {
         Route::Direct => connect_direct(&target).map(|s| (Conn::Tcp(s), Vec::new())),
         Route::Upstream { cfg, password } => {
@@ -284,19 +362,12 @@ fn reply(client: &mut TcpStream, rep: u8) -> Result<(), String> {
         .map_err(|e| format!("ответ клиенту: {e}"))
 }
 
-/// Режим off: DNS — системный резолвер, соединение — напрямую.
+/// Режим off / split-умолчание / правило «direct»: DNS — системный резолвер
+/// (vpn/dns.rs), соединение — напрямую.
 fn connect_direct(target: &Target) -> Result<TcpStream, String> {
-    let addr = resolve(&target.host, target.port)?;
+    let addr = crate::vpn::dns::Resolver::System.resolve(&target.host, target.port)?;
     TcpStream::connect_timeout(&addr, HANDSHAKE_TIMEOUT)
         .map_err(|e| format!("напрямую к {target}: {e}"))
-}
-
-fn resolve(host: &str, port: u16) -> Result<SocketAddr, String> {
-    (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("резолв {host}: {e}"))?
-        .next()
-        .ok_or_else(|| format!("резолв {host}: пусто"))
 }
 
 /// Режим прокси: соединение с внешним прокси + рукопожатие до цели.
@@ -313,7 +384,7 @@ fn connect_upstream(
     if login.len() > 255 || password.len() > 255 {
         return Err("логин/пароль прокси длиннее 255 байт".into());
     }
-    let addr = resolve(&cfg.host, cfg.port)?;
+    let addr = crate::vpn::dns::Resolver::System.resolve(&cfg.host, cfg.port)?;
     let mut stream = TcpStream::connect_timeout(&addr, HANDSHAKE_TIMEOUT)
         .map_err(|e| format!("upstream {}: {e}", cfg.host))?;
     let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
@@ -538,21 +609,16 @@ impl Conn {
 }
 
 /// Маршрут Wg: домен резолвится DNS-сервером профиля ВНУТРИ туннеля (утечек
-/// к системному резолверу нет, docs/02 §6.1), затем TCP — через туннель.
-/// Любой отказ — ошибка наверх (fail-closed), прямой ход исключён.
+/// к системному резолверу нет, docs/02 §6.1; политика — vpn/dns.rs, задача
+/// 6.3), затем TCP — через туннель. Любой отказ — ошибка наверх
+/// (fail-closed), прямой ход исключён.
 fn connect_wg(
     session: &crate::vpn::wg::WgSession,
     target: &Target,
 ) -> Result<crate::vpn::wg::WgStream, String> {
-    let ip = match target.host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(v4)) => v4,
-        Ok(IpAddr::V6(_)) => return Err(format!("{target}: IPv6 через туннель не поддержан (v1)")),
-        Err(_) => session
-            .resolve(&target.host)
-            .map_err(|e| format!("резолв {target} DNS-сервером туннеля: {e}"))?,
-    };
+    let addr = crate::vpn::dns::Resolver::Tunnel(session).resolve(&target.host, target.port)?;
     session
-        .tcp_connect(SocketAddr::new(IpAddr::V4(ip), target.port))
+        .tcp_connect(addr)
         .map_err(|e| format!("туннель к {target}: {e}"))
 }
 

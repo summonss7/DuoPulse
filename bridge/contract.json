@@ -3174,6 +3174,128 @@
         "type": "object"
       }
     },
+    "vpn.add_rule": {
+      "handler": "vpn_add_rule",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "vpn.add_rule: добавить/обновить правило (upsert по домену — повторно добавленный сайт меняет маршрут, а не плодит строки). В split-режиме действует на новые соединения сразу (общий стор с роутером).",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "route": {
+            "description": "tunnel | direct.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "route"
+        ],
+        "title": "VpnAddRuleParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "VpnRuleInfo": {
+            "description": "Строка списка правил (vpn.get_rules/add_rule/remove_rule).",
+            "properties": {
+              "addedAt": {
+                "description": "Unix-ms добавления.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "domain": {
+                "description": "Домен правила (суффикс по границе меток: example.com ловит и sub.example.com).",
+                "type": "string"
+              },
+              "route": {
+                "description": "tunnel | direct.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "addedAt",
+              "domain",
+              "route"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "Результат команд правил: режим + список (порядок добавления).",
+        "properties": {
+          "mode": {
+            "description": "off | global | split.",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/definitions/VpnRuleInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "rules"
+        ],
+        "title": "VpnRulesResult",
+        "type": "object"
+      }
+    },
+    "vpn.get_rules": {
+      "handler": "vpn_get_rules",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "VpnRuleInfo": {
+            "description": "Строка списка правил (vpn.get_rules/add_rule/remove_rule).",
+            "properties": {
+              "addedAt": {
+                "description": "Unix-ms добавления.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "domain": {
+                "description": "Домен правила (суффикс по границе меток: example.com ловит и sub.example.com).",
+                "type": "string"
+              },
+              "route": {
+                "description": "tunnel | direct.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "addedAt",
+              "domain",
+              "route"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "Результат команд правил: режим + список (порядок добавления).",
+        "properties": {
+          "mode": {
+            "description": "off | global | split.",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/definitions/VpnRuleInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "rules"
+        ],
+        "title": "VpnRulesResult",
+        "type": "object"
+      }
+    },
     "vpn.import_profile": {
       "handler": "vpn_import_profile",
       "params": {
@@ -3307,6 +3429,70 @@
       },
       "result": null
     },
+    "vpn.remove_rule": {
+      "handler": "vpn_remove_rule",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "domain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain"
+        ],
+        "title": "VpnRemoveRuleParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "VpnRuleInfo": {
+            "description": "Строка списка правил (vpn.get_rules/add_rule/remove_rule).",
+            "properties": {
+              "addedAt": {
+                "description": "Unix-ms добавления.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "domain": {
+                "description": "Домен правила (суффикс по границе меток: example.com ловит и sub.example.com).",
+                "type": "string"
+              },
+              "route": {
+                "description": "tunnel | direct.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "addedAt",
+              "domain",
+              "route"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "Результат команд правил: режим + список (порядок добавления).",
+        "properties": {
+          "mode": {
+            "description": "off | global | split.",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/definitions/VpnRuleInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "rules"
+        ],
+        "title": "VpnRulesResult",
+        "type": "object"
+      }
+    },
     "vpn.set_enabled": {
       "handler": "vpn_set_enabled",
       "params": {
@@ -3324,6 +3510,146 @@
         "type": "object"
       },
       "result": null
+    },
+    "vpn.set_mode": {
+      "handler": "vpn_set_mode",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "vpn.set_mode (задача 6.3, docs/02 §6.2): режим VPN. off — погасить туннель, весь трафик напрямую (маршрут возвращается к конфигу прокси); global — весь трафик через туннель (нужен активный профиль WireGuard); split — туннель только для правил «tunnel», YouTube и прочее — напрямую (F-12). Действует сразу, на новые соединения.",
+        "properties": {
+          "mode": {
+            "description": "off | global | split.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "VpnSetModeParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ProxyState": {
+            "oneOf": [
+              {
+                "description": "Прокси выключен — все соединения прямые.",
+                "enum": [
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён и отвечает.",
+                "enum": [
+                  "on"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Включён, но недоступен — показываем сигнальный цвет ошибки.",
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "VpnWgState": {
+            "description": "Живое состояние туннеля WireGuard (vpn/wg.rs).",
+            "properties": {
+              "endpoint": {
+                "type": "string"
+              },
+              "lastHandshakeMs": {
+                "description": "Сколько мс назад был последний handshake (null — не было).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "profileId": {
+                "type": "string"
+              },
+              "profileName": {
+                "type": "string"
+              },
+              "rxBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sinceMs": {
+                "description": "Unix-ms запуска сессии.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "state": {
+                "description": "connecting | connected | error.",
+                "type": "string"
+              },
+              "txBytes": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "endpoint",
+              "profileId",
+              "profileName",
+              "rxBytes",
+              "sinceMs",
+              "state",
+              "txBytes"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "vpn.status / vpn.test_connection / vpn.use_profile / vpn.set_mode: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; routing — vpn-режим задачи 6.3 (off | global | split); при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "mode": {
+            "description": "off | proxy | wg.",
+            "type": "string"
+          },
+          "routing": {
+            "description": "off | global | split (docs/02 §6.2; с настройками прокси независим — routing описывает туннель, mode — фактический маршрут).",
+            "type": "string"
+          },
+          "state": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/ProxyState"
+              }
+            ],
+            "description": "Словарь M1 (off/on/error) в рамках текущего mode."
+          },
+          "wg": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/VpnWgState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "detail",
+          "mode",
+          "routing",
+          "state"
+        ],
+        "title": "VpnStatusResult",
+        "type": "object"
+      }
     },
     "vpn.status": {
       "handler": "vpn_status",
@@ -3409,13 +3735,17 @@
             "type": "object"
           }
         },
-        "description": "vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
+        "description": "vpn.status / vpn.test_connection / vpn.use_profile / vpn.set_mode: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; routing — vpn-режим задачи 6.3 (off | global | split); при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
         "properties": {
           "detail": {
             "type": "string"
           },
           "mode": {
             "description": "off | proxy | wg.",
+            "type": "string"
+          },
+          "routing": {
+            "description": "off | global | split (docs/02 §6.2; с настройками прокси независим — routing описывает туннель, mode — фактический маршрут).",
             "type": "string"
           },
           "state": {
@@ -3440,6 +3770,7 @@
         "required": [
           "detail",
           "mode",
+          "routing",
           "state"
         ],
         "title": "VpnStatusResult",
@@ -3530,13 +3861,17 @@
             "type": "object"
           }
         },
-        "description": "vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
+        "description": "vpn.status / vpn.test_connection / vpn.use_profile / vpn.set_mode: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; routing — vpn-режим задачи 6.3 (off | global | split); при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
         "properties": {
           "detail": {
             "type": "string"
           },
           "mode": {
             "description": "off | proxy | wg.",
+            "type": "string"
+          },
+          "routing": {
+            "description": "off | global | split (docs/02 §6.2; с настройками прокси независим — routing описывает туннель, mode — фактический маршрут).",
             "type": "string"
           },
           "state": {
@@ -3561,6 +3896,7 @@
         "required": [
           "detail",
           "mode",
+          "routing",
           "state"
         ],
         "title": "VpnStatusResult",
@@ -3665,13 +4001,17 @@
             "type": "object"
           }
         },
-        "description": "vpn.status / vpn.test_connection / vpn.use_profile: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
+        "description": "vpn.status / vpn.test_connection / vpn.use_profile / vpn.set_mode: состояние маршрутизации. mode — фактический маршрут роутера: off | proxy | wg; routing — vpn-режим задачи 6.3 (off | global | split); при wg заполнено поле wg (живой снапшот туннеля, задача 6.2), иначе состояние прокси.",
         "properties": {
           "detail": {
             "type": "string"
           },
           "mode": {
             "description": "off | proxy | wg.",
+            "type": "string"
+          },
+          "routing": {
+            "description": "off | global | split (docs/02 §6.2; с настройками прокси независим — routing описывает туннель, mode — фактический маршрут).",
             "type": "string"
           },
           "state": {
@@ -3696,6 +4036,7 @@
         "required": [
           "detail",
           "mode",
+          "routing",
           "state"
         ],
         "title": "VpnStatusResult",
@@ -4312,5 +4653,5 @@
       }
     }
   },
-  "version": 8
+  "version": 9
 }
