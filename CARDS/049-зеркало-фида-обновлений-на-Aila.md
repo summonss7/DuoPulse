@@ -21,7 +21,7 @@ stable/canary). Задача лёгкая: продублировать фид �
 Шаги:
 1. Publish-скрипт (scripts/release.mjs): при релизе дополнительно публиковать
    на Aila те же артефулы: `node D:\Scheduler\tools\publish-update.cjs
-   duopulse` (эндпоинт aila-162) — в `updates/duopulse/` лягут и манифест v2,
+   duopulse` (эндпоинт aila-163) — в `updates/duopulse/` лягут и манифест v2,
    и `latest.json` в формате tauri-plugin-updater (с minisign-подписью и
    платформами, как сейчас на GitHub Pages). Формат tauri-фида описан в
    документации плагина; поля подписи/URL взять из текущего процесса релиза.
