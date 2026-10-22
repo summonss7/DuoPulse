@@ -300,6 +300,23 @@ const waitForTargets = async () => {
   throw new Error("CDP-цели не найдены");
 };
 
+/** Ждать ГОТОВНОСТИ UI-бандла, а не статического DOM (карточка duopulse-051):
+ *  proxyMenu есть в index.html ещё ДО выполнения main.ts → chrome.ts →
+ *  proxy-menu.ts, поэтому клики по статическому элементу уходили в пустоту
+ *  (11 FAIL: меню/статус/форма/тумблер) — на холодном vite dev после 6.5
+ *  бандл не успевает к первому клику. Положительный маркер: вкладки
+ *  отрисованы (initTabBar — тело chrome.ts, т.е. ВСЕ импорты, включая
+ *  proxy-menu с его хендлерами, уже выполнены). */
+const waitForUiBundle = async (uiWs, timeoutMs = 30000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const tabs = await evalIn(uiWs, `document.querySelectorAll('#tabbar .tab').length`).catch(() => 0);
+    if (tabs > 0) return true;
+    await sleep(500);
+  }
+  return false;
+};
+
 let failures = 0;
 try {
   const { content: contentT, ui: uiT } = await waitForTargets();
@@ -310,13 +327,10 @@ try {
   const uiWs = connect(uiT.webSocketDebuggerUrl);
   await contentWs.send("Page.enable");
   await uiWs.send("Runtime.enable");
-  // UI-документ мог ещё не доехать до полного DOM (гонка первого прогона):
-  // ждём статический маркер хрома, чтобы проверки меню не бились об пустоту.
-  for (let i = 0; i < 40; i++) {
-    const ready = await evalIn(uiWs, `!!document.getElementById('proxyMenu')`).catch(() => false);
-    if (ready === true) break;
-    await sleep(500);
-  }
+  // UI-бандл: ждём выполнения chrome.ts (рендер вкладок), а не только
+  // статический DOM — иначе клики по меню уходят до навески хендлеров (051).
+  const uiReady = await waitForUiBundle(uiWs);
+  check("UI-бандл загружен (вкладки отрисованы, хендлеры меню навешаны)", uiReady === true);
 
   // (1) аргументы: WebView2 ПОСТОЯННО на роутере (порт — фактический из cmdline)
   const cmdline = await webViewCmdlines();
@@ -512,6 +526,9 @@ try {
   const content2Ws = connect(t2.content.webSocketDebuggerUrl);
   await ui2Ws.send("Runtime.enable");
   await content2Ws.send("Page.enable");
+  // после перезапуска — та же гонка холодного бандла (051)
+  const ui2Ready = await waitForUiBundle(ui2Ws);
+  check("UI-бандл после перезапуска загружен", ui2Ready === true);
 
   await evalIn(ui2Ws, `document.getElementById('proxyBtn').click(), true`);
   await sleep(2500);

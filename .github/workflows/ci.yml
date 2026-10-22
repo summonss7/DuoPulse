@@ -13,6 +13,12 @@
 #         6.6, карточка duopulse-042): debug-exe + wg-stand.exe (loopback
 #         WG-сервер, e2e/wg-stand) + стенд e2e/vpn — сценарии direct/tunnel/
 #         1080p-видео/split/kill-switch, весь трафик — 127.0.0.1.
+#   e2e-proxy-a: приёмочный E2E локального SOCKS5-роутера и меню «Прокси»
+#         (задача 6.1, карточки duopulse-037/051): стенд e2e/proxy-a —
+#         аргументы WebView2, CONNECT/DNS через роутер, меню (статус/форма/
+#         тумблер), RFC 1929, fail-closed, перезапуск. Локальные socks5-стенды
+#         на 127.0.0.1; ходы на example.com/iana.org — обычная сеть раннера
+#         (в отличие от e2e-vpn).
 # Релизные артефакты (NSIS/portable) собираются локально в builds/ по правилу
 # проекта (карточка duopulse-045) — в CI не собираются и не публикуются.
 
@@ -95,3 +101,37 @@ jobs:
         working-directory: src-tauri
       - run: cargo build --manifest-path e2e/wg-stand/Cargo.toml
       - run: node e2e/vpn/run.mjs
+
+  e2e-proxy-a:
+    name: E2E прокси — SOCKS5-роутер + меню «Прокси» (карточка 051)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # content/gen + dist — нужны для cargo (include_str!/generate_context!)
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # WebView2 Runtime не входит в образ windows-latest (см. джобу e2e-vpn)
+      - name: WebView2 Runtime
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          if (Test-Path $key) {
+            Write-Host "WebView2 уже стоит: $((Get-ItemProperty $key).pv)"
+          } else {
+            curl.exe -L --silent --show-error --fail "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -o MicrosoftEdgeWebview2Setup.exe
+            .\MicrosoftEdgeWebview2Setup.exe /silent /install | Out-Null
+            if (Test-Path $key) { Write-Host "WebView2 установлен: $((Get-ItemProperty $key).pv)" }
+            else { Write-Host "WebView2 НЕ обнаружен после установки" }
+          }
+      - run: cargo build
+        working-directory: src-tauri
+      # 8899 на машине автора занят сервисом Aila — там стенд пускают с
+      # E2E_PROXY_A_PORT; на раннере порт свободен, дефолт подходит
+      - run: node e2e/proxy-a/run.mjs
