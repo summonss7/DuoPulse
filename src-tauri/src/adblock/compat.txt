@@ -1,0 +1,25 @@
+! DuoPulse-совместимость скриптлетов (карточка duopulse-044, метрика P-08).
+! Причина SABR-stall: правила uBO «set …adSlots» и «json-prune … adSlots …»
+! вырезают adSlots из player-ответа YouTube — SABR/SSAI-хендшейк (серверные
+! ad-решения) не получает подтверждения слотов, плеер гоняет цепочки ретраев
+! «фейковых» videoplayback-хостов и ~2 с клиентский таймаут — старт контента
+! 8–20 с вместо ~3,5 с (бисекция CDP-проб 22.10.2026: с активным set adSlots
+! столл 16–20 с на каждом SSAI-просмотре и рекламы нет; с нейтрализацией —
+! старт 3,7–4,0 с, но SSAI-преролл ИГРАЕТ (~20 с, как без блокировщика:
+! серверная врезка не подавляется клиентскими скриптлетами в принципе;
+! вырезание ЛЮБОЙ формой = столл). uBO решает то же самое переписыванием
+! сетевых ответов ($replace/trusted-rpfr — правят «adSlots»→"no_ads" ДО
+! парсинга) — у нас слоя перезаписи ответов нет; полный паритет — отдельная
+! карточка).
+! Фикс: нейтрализовать adSlots-части правил uBO точечными исключениями
+! (#@#+js — тот же текст правила) и дать свой json-prune БЕЗ adSlots:
+! playerAds/adPlacements вырезаются (клиентская реклама подавлена), adSlots
+! остаются — хендшейк SABR проходит штатно, стопора нет.
+! Исключения матчатся по точному тексту правил uBO filters.txt (оба варианта
+! текста json-prune: до 21.10 с www, после — без): смена текста апстримом
+! отключает исключение (поведение возвращается к апстримному — SABR-stall
+! снова виден стендом e2e/perf/p08.mjs как индикатор).
+m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(set, ytInitialPlayerResponse.adSlots, undefined)
+m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)
+m.youtube.com,music.youtube.com,tv.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)
+m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(json-prune, playerResponse.adPlacements playerResponse.playerAds adPlacements playerAds)

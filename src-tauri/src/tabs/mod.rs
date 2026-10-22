@@ -794,7 +794,7 @@ fn build_tab_webview(app: &AppHandle, id: &str, url: &Url) -> WebviewBuilder<tau
         // Косметика блокировщика (задача 2.2): селекторы скрытия до отрисовки
         // страницы — ресурс запрашивается у Core сразу после создания
         // документа (content/cosmetic.js → main.rs → PostWebMessage).
-        .initialization_script(crate::CONTENT_INIT_SCRIPT_COSMETIC)
+        .initialization_script(crate::content_init_script_cosmetic())
         // Дефолты субтитров из настроек (задача 5.1): до бандла субтитров —
         // window.__DUOPULSE_DEFAULTS__ (язык перевода дефолт-набора Alt+D,
         // стиль плашки новых вкладок). Читается при создании каждой вкладки:

@@ -9,7 +9,10 @@
 //      бросает ReferenceError;
 //   3) гонка асинхронной доставки: страница успела записать __dpE2eOwn
 //      до инъекции, set-constant тем не менее перезаписывает ("no");
-//   4) __duopulseCosmetic.scriptlets > 0 — код доставлен и исполнен;
+//   4) код доставлен и исполнен: ранний скрипт NavigationStarting →
+//      AddScriptToExecuteOnDocumentCreated (карточка 044: window.__duopulseSyncScriptlets,
+//      __duopulseSyncAt < 1 с документа) ИЛИ асинхронный путь cosmetic.js
+//      (scriptlets > 0);
 //   5) сайт-исключение 127.0.0.1 → reload → инъекций нет (флаг не появился,
 //      чтение не бросает, scriptlets = 0);
 //   6) глобальный тумблер off → reload → инъекций нет;
@@ -65,13 +68,19 @@ window.__probe = (function () {
     state.own = String(window.__dpE2eOwn);
     try { void window.__dpE2ePoison; state.aopr = "read-ok"; } catch (e) { state.aopr = "threw"; }
     state.scriptlets = window.__duopulseCosmetic ? window.__duopulseCosmetic.scriptlets : -1;
+    state.sync = window.__duopulseSyncScriptlets === true; // ранний скрипт (карточка 044)
+    state.syncAt = typeof window.__duopulseSyncAt === "number" ? window.__duopulseSyncAt : null;
+    state.jsLen = window.__duopulseCosmetic ? window.__duopulseCosmetic.scriptlets : -1;
+    state.log = window.__duopulseCosmetic ? window.__duopulseCosmetic.log.slice(-6) : null;
   }, 100);
   return state;
 })();
 </script></body></html>`;
 const httpServer = http.createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-  res.end(page);
+  setTimeout(() => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(page);
+  }, Number(process.env.DELAY_MS || 0));
 });
 await new Promise((r) => httpServer.listen(HTTP_PORT, "127.0.0.1", r));
 
@@ -187,7 +196,12 @@ try {
   check("set-constant (полное имя): window.__dpE2eFlag === \"yes\"", probe.flag === "yes", JSON.stringify(probe));
   check("aopr (короткая uBO-форма): чтение __dpE2ePoison бросает", probe.aopr === "threw", probe.aopr);
   check("set-constant перезаписал свойство, установленное страницей раньше (гонка доставки)", probe.own === "no", probe.own);
-  check("__duopulseCosmetic.scriptlets > 0 (код доставлен)", probe.scriptlets > 0, `scriptlets=${probe.scriptlets}`);
+  check(
+    "код доставлен и исполнен (ранний скрипт 044 или WebMessage)",
+    probe.sync === true || probe.scriptlets > 0,
+    `sync=${probe.sync} syncAt=${probe.syncAt} scriptlets=${probe.scriptlets}`,
+  );
+  check("ранняя инъекция до инлайн-скриптов (карточка 044): syncAt < 1000 мс", probe.sync === true && probe.syncAt !== null && probe.syncAt < 1000, `syncAt=${probe.syncAt}`);
   const cosmetic = await evalIn(contentWs, `window.__duopulseCosmetic ? { active: window.__duopulseCosmetic.active, ready: window.__duopulseCosmetic.ready } : null`);
   check("косметика active/ready", cosmetic?.active === true && cosmetic?.ready === true, JSON.stringify(cosmetic));
 
@@ -199,6 +213,7 @@ try {
   check("сайт-исключение: флаг не появился", probe.flag === null, JSON.stringify(probe));
   check("сайт-исключение: чтение не бросает (aopr выключен)", probe.aopr === "read-ok", probe.aopr);
   check("сайт-исключение: scriptlets = 0", probe.scriptlets === 0, `scriptlets=${probe.scriptlets}`);
+  check("сайт-исключение: ранней инъекции нет (sync-флаг не стоит)", probe.sync !== true, `sync=${probe.sync}`);
 
   // (6) глобальный тумблер off: инъекций нет (сайт-исключение снимаем)
   await evalIn(uiWs, `window.__duopulse.adblock.setEnabled({ site: "127.0.0.1", on: true })`);
@@ -208,13 +223,14 @@ try {
   probe = await settle(contentWs);
   check("глобальный тумблер off: флаг не появился", probe.flag === null, JSON.stringify(probe));
   check("глобальный тумблер off: scriptlets = 0", probe.scriptlets === 0, `scriptlets=${probe.scriptlets}`);
+  check("глобальный тумблер off: ранней инъекции нет", probe.sync !== true, `sync=${probe.sync}`);
 
   // (7) тумблер обратно: скриптлеты работают снова
   await evalIn(uiWs, `window.__duopulse.adblock.setEnabled({ site: null, on: true })`);
   await evalIn(uiWs, `window.__duopulse.nav.reload()`);
   await sleep(1500);
   probe = await waitFor(contentWs, (p) => p.flag === "yes" && p.aopr === "threw");
-  check("после включения: скриптлеты снова действуют", probe.flag === "yes" && probe.aopr === "threw" && probe.scriptlets > 0, JSON.stringify(probe));
+  check("после включения: скриптлеты снова действуют", probe.flag === "yes" && probe.aopr === "threw" && (probe.sync === true || probe.scriptlets > 0), JSON.stringify(probe));
 
   uiWs.close();
   contentWs.close();

@@ -84,6 +84,24 @@ pub(crate) const CONTENT_INIT_SCRIPT_SUBTITLES: &str =
 /// переключает роутер, аргументы от режима не зависят.
 static STARTUP_PROXY_ARGS: OnceLock<String> = OnceLock::new();
 
+/// Порт loopback-эндпоинта ранней косметики (adblock::start_early_endpoint,
+/// карточка duopulse-044): 0 — эндпоинта нет, content/cosmetic.js работает
+/// только асинхронным путём. Встраивается в init-скрипт косметики до создания
+/// первой вкладки.
+static EARLY_COSMETIC_PORT: OnceLock<u16> = OnceLock::new();
+
+/// Init-скрипт косметики с портом раннего канала (плейсхолдер заменяется;
+/// карточка 044).
+pub(crate) fn content_init_script_cosmetic() -> String {
+    crate::CONTENT_INIT_SCRIPT_COSMETIC.replace(
+        "__DUOPULSE_COSMETIC_PORT__",
+        &EARLY_COSMETIC_PORT
+            .get()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "0".into()),
+    )
+}
+
 pub(crate) fn startup_proxy_args() -> &'static str {
     STARTUP_PROXY_ARGS.get().map(String::as_str).unwrap_or("")
 }
@@ -570,8 +588,8 @@ fn parse_set_state(value: &serde_json::Value) -> subtitles::service::TabSubtitle
 
 /// Полный набор COM-обработчиков для каждой вкладки: сетевой перехват M0 +
 /// блокировщик (задача 2.1), аутентификация прокси (1.8), сообщения content
-/// (горячие клавиши, 1.2). tab_id — вкладка-владелец: её URL — запасной
-/// источник запроса для движка.
+/// (горячие клавиши, 1.2), разогрев косметики (карточка 044). tab_id — вкладка-
+/// владелец: её URL — запасной источник запроса для движка.
 #[cfg(windows)]
 pub(crate) unsafe fn install_content_handlers(
     wv: tauri::webview::PlatformWebview,
@@ -585,6 +603,58 @@ pub(crate) unsafe fn install_content_handlers(
     let env: ICoreWebView2Environment = wv.environment();
     install_request_blocker(&core, &env, app, tab_id);
     install_content_messaging(&core, app, tab_id);
+    install_cosmetic_prewarm(&core, app, tab_id);
+}
+
+/// Разогрев кэша косметических ресурсов на NavigationStarting (карточка
+/// duopulse-044): ранний синхронный канал (content/cosmetic.js →
+/// adblock::start_early_endpoint) блокирующе ждёт ресурсы на document-start;
+/// холодный расчёт `url_cosmetic_resources` по EasyList+uBO — 0,2–0,9 с, и без
+/// разогрева код скриптлетов приходит после того, как инлайн-скрипты страницы
+/// прочли свои глобалы (на YouTube — проходит SSAI-реклама). Событие стреляет
+/// до сетевого запроса документа — расчёт идёт параллельно загрузке, к
+/// document-start кэш тёплый; расчёт в фоновой нити (движок потокобезопасен,
+/// обработчик — на UI-потоке). Стартовый URL вкладки разгоняем сразу: его
+/// NavigationStarting может опередить установку обработчика.
+#[cfg(windows)]
+unsafe fn install_cosmetic_prewarm(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
+    use webview2_com::NavigationStartingEventHandler;
+    use windows_core::PWSTR;
+
+    fn prewarm_async(app: &AppHandle, url: String) {
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return;
+        }
+        let svc = app
+            .state::<std::sync::Arc<adblock::AdblockService>>()
+            .inner()
+            .clone();
+        std::thread::spawn(move || svc.prewarm(&url));
+    }
+
+    if let Some(start) = app.state::<tabs::TabManager>().url_of(tab_id) {
+        prewarm_async(app, start);
+    }
+
+    let app_for_nav = app.clone();
+    let res = core.add_NavigationStarting(
+        &NavigationStartingEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let mut uri = PWSTR::null();
+            args.Uri(&mut uri)?;
+            prewarm_async(
+                &app_for_nav,
+                webview2_com::CoTaskMemPWSTR::from(uri).to_string(),
+            );
+            Ok(())
+        })),
+        std::ptr::null_mut(),
+    );
+    if let Err(e) = res {
+        eprintln!("cosmetic-prewarm: NavigationStarting не установлен: {e}");
+    }
 }
 
 /// Нешиндовс-фолбэк: без COM (сборка проекта — только Windows, см. Cargo.toml).
@@ -673,6 +743,11 @@ fn main() {
             // Фон блокировщика: обновление списков (кэш → движок → сеть) и
             // батчинг счётчика adblock:blocked_count (задача 2.1).
             adblock_for_setup.start(app.handle());
+            // Ранний синхронный канал косметики (карточка duopulse-044):
+            // до создания вкладок — порт вшивается в init-скрипт косметики.
+            if let Some(port) = adblock_for_setup.start_early_endpoint() {
+                let _ = EARLY_COSMETIC_PORT.set(port);
+            }
             // Спящий режим вкладок (задача 2.3): нить авто-усыпления
             // долгих простоев (DUOPULSE_SLEEP_AFTER_SECS=0 — выключена).
             tabs::start_sleeper(app.handle().clone());

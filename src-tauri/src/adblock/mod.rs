@@ -86,6 +86,17 @@ const DEFAULT_LISTS: [(&str, &str); 2] = [
 /// генерирует вызов `Имя("arg1","arg2")` и оборачивает его в try/catch.
 const SCRIPTLETS_JSON: &str = include_str!("scriptlets-resources.json");
 
+/// Встроенный список совместимости (карточка duopulse-044, P-08): точечные
+/// `#@#+js`-исключения adSlots-правил uBO на YouTube (ломают SABR/SSAI-хендшейк
+/// — SABR-stall первого кадра) + свой json-prune без adSlots. Подключается
+/// третьим источником к DEFAULT_LISTS (см. `COMPAT_LIST_DEF`); env-переопределение
+/// `DUOPULSE_ADBLOCK_LISTS` (e2e-стенды) его НЕ подхватывает — точечные прогоны
+/// живут на своих списках.
+const COMPAT_RULES: &str = include_str!("compat.txt");
+/// Источник-маркер встроенного списка: текст не качается, а берётся из
+/// `COMPAT_RULES` (обновление — пересборкой бинарника).
+const COMPAT_SOURCE: &str = "builtin:";
+
 /// Разобранный набор (один раз на процесс; ошибка формата — печатаем и
 /// работаем без скриптлетов, как до карточки 043).
 fn scriptlet_resources() -> &'static [Resource] {
@@ -110,17 +121,23 @@ struct ListDef {
     source: String,
 }
 
-/// Реестр источников: DUOPULSE_ADBLOCK_LISTS (e2e) или DEFAULT_LISTS.
-/// Пустая переменная/только пробелы — списков нет (Some(vec![])).
+/// Реестр источников: DUOPULSE_ADBLOCK_LISTS (e2e) или DEFAULT_LISTS +
+/// встроенный compat-список. Пустая переменная/только пробелы — списков нет
+/// (Some(vec![])).
 fn list_defs() -> Vec<ListDef> {
     let Some(spec) = std::env::var("DUOPULSE_ADBLOCK_LISTS").ok() else {
-        return DEFAULT_LISTS
+        let mut defs: Vec<ListDef> = DEFAULT_LISTS
             .iter()
             .map(|(n, s)| ListDef {
                 name: (*n).into(),
                 source: (*s).into(),
             })
             .collect();
+        defs.push(ListDef {
+            name: "duopulse-compat".into(),
+            source: COMPAT_SOURCE.into(),
+        });
+        return defs;
     };
     if spec.trim().is_empty() {
         return vec![];
@@ -232,6 +249,10 @@ struct Inner {
     seen_total: u64,
     /// Неслитый в UI прирост блокировок (adblock:blocked_count).
     pending_delta: u64,
+    /// Кэш ответов раннего канала по URL (карточка 044): холодный расчёт
+    /// `url_cosmetic_resources` 0,2–0,9 с — дедупликация в-flight расчётов
+    /// (разогрев с NavigationStarting и запрос document-start делят один).
+    early_cache: std::collections::HashMap<String, Arc<EarlySlot>>,
     /// Запрошено принудительное обновление (adblock.update_lists force).
     force_update: bool,
 }
@@ -268,6 +289,7 @@ impl AdblockService {
                 blocked_total: 0,
                 seen_total: 0,
                 pending_delta: 0,
+                early_cache: std::collections::HashMap::new(),
                 force_update: false,
             }),
             wake: Condvar::new(),
@@ -385,6 +407,9 @@ impl AdblockService {
                 }
             }
         }
+        // тумблер/сайт-исключение меняют ответ для URL — кэш раннего канала
+        // недействителен (карточка 044: состояние решается на момент запроса)
+        guard.early_cache.clear();
         let persisted = Persisted {
             enabled: guard.enabled,
             site_exceptions: guard.site_exceptions.iter().cloned().collect(),
@@ -553,7 +578,12 @@ impl AdblockService {
                 || cached.is_none()
                 || (def.source.starts_with("http://") || def.source.starts_with("https://"))
                     && (cached_at == 0 || now - cached_at > STALE_AFTER_MS);
-            let (text, updated_at, error) = if need_fetch {
+            let (text, updated_at, error) = if def.source == COMPAT_SOURCE {
+                // Встроенный список совместимости (карточка 044): текст
+                // вкомпилирован; пишем его в кэш для единообразия меток.
+                atomic_write(&path, COMPAT_RULES.as_bytes());
+                (Some(COMPAT_RULES.to_string()), now, String::new())
+            } else if need_fetch {
                 match fetch_list(&def.source) {
                     Ok(t) => {
                         atomic_write(&path, t.as_bytes());
@@ -607,6 +637,7 @@ impl AdblockService {
             let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
             guard.engine = None;
             guard.lists = new_states;
+            guard.early_cache.clear();
             return;
         }
 
@@ -644,7 +675,142 @@ impl AdblockService {
         // при живом движке частичное обновление его не трогает.
         if texts.len() == defs.len() || (!texts.is_empty() && guard.engine.is_none()) {
             guard.engine = engine.map(Arc::new);
+            // правила могли измениться — ответы раннего канала по тем же URL
+            // больше не действительны (карточка 044)
+            guard.early_cache.clear();
         }
+    }
+
+    /// Косметические ресурсы с кэшем/дедупликацией (карточка 044): разогрев
+    /// (NavigationStarting) и запрос раннего канала (document-start) делят
+    /// один расчёт; повторные URL — из кэша. Потолок ожидания в-flight
+    /// расчёта — `wait_ms` (None — ждать без потолка; тесты/разогрев).
+    pub fn cosmetic_resources_cached(&self, url: &str, wait_ms: Option<u64>) -> CosmeticResources {
+        let slot = {
+            let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
+            if let Some(slot) = guard.early_cache.get(url) {
+                if let Some(res) = slot.done.lock().expect("early: лок слота").as_ref() {
+                    return res.clone();
+                }
+                slot.clone()
+            } else {
+                // простое ограничение памяти: пожинаем всё разом
+                if guard.early_cache.len() >= 64 {
+                    guard.early_cache.clear();
+                }
+                let slot = Arc::new(EarlySlot::default());
+                guard.early_cache.insert(url.to_string(), slot.clone());
+                slot.clone()
+            }
+        };
+        let done = slot.done.lock().expect("early: лок слота");
+        if let Some(res) = done.as_ref() {
+            return res.clone();
+        }
+        // атомарно занимаем роль «считающего»; проигравшие ждут результата
+        // (с потолком wait_ms — чтобы document-start не блокировал парсер дольше)
+        let already_computing = slot
+            .computing
+            .swap(true, std::sync::atomic::Ordering::AcqRel);
+        if already_computing {
+            let (guard, _timed_out) = match wait_ms.map(Duration::from_millis) {
+                Some(w) => {
+                    let (g, res) = slot
+                        .cv
+                        .wait_timeout(done, w)
+                        .expect("early: лок слота не отравлен");
+                    (g, res.timed_out())
+                }
+                None => {
+                    let g = slot.cv.wait(done).expect("early: лок слота не отравлен");
+                    (g, false)
+                }
+            };
+            if let Some(res) = guard.as_ref() {
+                return res.clone();
+            }
+            // расчёт не успел — честный ready=false, скрипт уйдёт на async-путь
+            return CosmeticResources {
+                active: true,
+                ready: false,
+                hide: vec![],
+                generichide: false,
+                injected_script: String::new(),
+            };
+        }
+        // мы считаем (лок inner НЕ держим), публикуем, будим ждущих
+        drop(done);
+        let res = self.cosmetic_resources(url);
+        // Мемоизируем ТОЛЬКО окончательные ответы (фильтрация выключена /
+        // готова). Промежуточный (движок строится: active=true, ready=false)
+        // не кэшируем и освобождаем роль «считающего» — иначе следующий
+        // запрос того же URL вечно получал бы «не готово» (тест
+        // early_endpoint_serves_active_resources_and_gates).
+        let final_state = !res.active || res.ready;
+        {
+            let mut done = slot.done.lock().expect("early: лок слота");
+            if final_state {
+                *done = Some(res.clone());
+            } else {
+                slot.computing
+                    .store(false, std::sync::atomic::Ordering::Release);
+            }
+        }
+        slot.cv.notify_all();
+        res
+    }
+
+    /// Разогрев кэша косметических ресурсов для URL (карточка duopulse-044):
+    /// холодный `url_cosmetic_resources` по EasyList+uBO — 0,2–0,9 с; ранний
+    /// синхронный канал (start_early_endpoint) блокирующе ждёт ответ на
+    /// document-start — без разогрева код скриптлетов приходит ПОСЛЕ того, как
+    /// инлайн-скрипты страницы прочли свои глобалы (YouTube: реклама проходит).
+    /// Вызывается с NavigationStarting (main.rs): сетевой запрос документа
+    /// (~0,2–0,4 с) идёт параллельно расчёту — к document-start кэш тёплый.
+    pub fn prewarm(&self, url: &str) {
+        // движок может строиться (свежий профиль качает списки): ждём готовности
+        // с потолком ~10 с, затем считаем и наполняем кэш
+        for _ in 0..100 {
+            let ready = {
+                let guard = self.inner.lock().expect("adblock: лок не отравлен");
+                guard.enabled && guard.engine.is_some() || !guard.enabled
+            };
+            if ready {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = self.cosmetic_resources_cached(url, None);
+    }
+
+    // --- ранний синхронный канал (карточка duopulse-044) ---------------------
+
+    /// Поднять loopback-эндпоинт ранней косметики: content/cosmetic.js на
+    /// старте каждого документа делает БЛОКИРУЮЩИЙ XHR
+    /// `GET http://127.0.0.1:<port>/duopulse-cosmetic?url=<href>` (единицы мс —
+    /// движок в памяти) и применяет скриптлеты/скрытия ДО инлайн-скриптов
+    /// страницы — тайминг uBO. Асинхронный WebMessage-путь доставляет код
+    /// через ~150–600 мс — YouTube успевает прочесть встроенный
+    /// ytInitialPlayerResponse, и «no-ads»-состояние собирается слишком поздно
+    /// (SSAI-реклама стартует) — корень SABR-stall метрики P-08. Эндпоинт
+    /// решает состояние НА МОМЕНТ запроса: тумблер/сайт-исключение действуют
+    /// на следующий документ без гонок. Порт — эфемерный (экземпляры
+    /// приложения не конфликтуют); None — слушать не удалось, скрипт остаётся
+    /// на асинхронном пути.
+    pub fn start_early_endpoint(self: &Arc<Self>) -> Option<u16> {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).ok()?;
+        let port = listener.local_addr().ok()?.port();
+        let svc = Arc::clone(self);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else {
+                    continue;
+                };
+                let svc = Arc::clone(&svc);
+                std::thread::spawn(move || serve_early(stream, &svc));
+            }
+        });
+        Some(port)
     }
 
     // --- нить слива счётчика --------------------------------------------------
@@ -670,6 +836,7 @@ impl AdblockService {
     fn set_engine(&self, engine: Engine) {
         let mut guard = self.inner.lock().unwrap();
         guard.engine = Some(Arc::new(engine));
+        guard.early_cache.clear();
     }
 }
 
@@ -695,6 +862,101 @@ pub struct CosmeticResources {
     /// определения функций + вызовы с аргументами правила; пустая строка —
     /// правил/ресурсов нет или фильтрация не действует.
     pub injected_script: String,
+}
+
+/// Слот кэша раннего канала (карточка 044): результат, будильник ждущих и
+/// флаг «кто-то считает» (дедупликация разогрев/document-start).
+#[derive(Default)]
+struct EarlySlot {
+    done: Mutex<Option<CosmeticResources>>,
+    cv: Condvar,
+    computing: std::sync::atomic::AtomicBool,
+}
+
+/// Ответ раннего канала (синхронный XHR content/cosmetic.js, карточка 044):
+/// подмножество [`CosmeticResources`] в JSON; `ready=false` — скрипт остаётся
+/// на асинхронном WebMessage-пути (движок строится).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EarlyResponse {
+    active: bool,
+    ready: bool,
+    hide: Vec<String>,
+    script: String,
+}
+
+/// Одно соединение раннего канала: минимальный HTTP/1.1 (GET, без тела),
+/// ответ сразу с Connection: close. Блокирующий клиент ждёт единицы мс.
+fn serve_early(mut stream: std::net::TcpStream, svc: &AdblockService) {
+    use std::io::{Read, Write};
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let mut buf = [0u8; 8192];
+    let Ok(n) = stream.read(&mut buf) else {
+        return;
+    };
+    let first = String::from_utf8_lossy(&buf[..n])
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let path = first.split(' ').nth(1).unwrap_or_default();
+    let (status, body) = early_response_for(path, svc);
+    let resp = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(resp.as_bytes());
+}
+
+/// Ответ по пути запроса (тесты зовут напрямую): только
+/// `/duopulse-cosmetic?url=<http(s)-адрес>`.
+fn early_response_for(path: &str, svc: &AdblockService) -> (&'static str, String) {
+    const PREFIX: &str = "/duopulse-cosmetic?url=";
+    let Some(raw) = path.strip_prefix(PREFIX) else {
+        return ("404 Not Found", "{}".into());
+    };
+    let decoded = percent_decode(raw);
+    if !(decoded.starts_with("http://") || decoded.starts_with("https://")) {
+        return ("400 Bad Request", "{}".into());
+    }
+    // кэш/дедупликация: ждём разогрев не дольше 600 мс — дальше честный
+    // ready=false (скрипт уходит на асинхронный путь, парсер не виснет)
+    let res = svc.cosmetic_resources_cached(&decoded, Some(600));
+    let body = serde_json::to_string(&EarlyResponse {
+        active: res.active,
+        ready: res.ready,
+        hide: res.hide,
+        script: res.injected_script,
+    })
+    .unwrap_or_else(|_| "{}".into());
+    ("200 OK", body)
+}
+
+/// Декодирование %XX (encodeURIComponent: «+» остаётся «+», пробел — %20).
+fn percent_decode(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = |b: u8| -> Option<u8> {
+                match b {
+                    b'0'..=b'9' => Some(b - b'0'),
+                    b'a'..=b'f' => Some(b - b'a' + 10),
+                    b'A'..=b'F' => Some(b - b'A' + 10),
+                    _ => None,
+                }
+            };
+            if let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push(h * 16 + l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn now_ms() -> i64 {
@@ -1489,6 +1751,155 @@ mod tests {
             !res.active && res.injected_script.is_empty(),
             "сайт в исключениях — скриптлетов нет"
         );
+    }
+
+    // --- карточка duopulse-044: compat-список против SABR-stall ----------------
+
+    /// Дословные YouTube-правила живого uBO filters.txt (uAssets 20–22.10.2026;
+    /// оба варианта текста json-prune: до 21.10 — с www, после — без) —
+    /// аргументы исключений compat-списка обязаны совпадать с ними до символа.
+    const UBO_YOUTUBE_RULES: [&str; 6] = [
+        "m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(set, ytInitialPlayerResponse.playerAds, undefined)",
+        "m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(set, ytInitialPlayerResponse.adPlacements, undefined)",
+        "m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(set, ytInitialPlayerResponse.adSlots, undefined)",
+        "m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(set, playerResponse.adPlacements, undefined)",
+        "m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)",
+        "m.youtube.com,music.youtube.com,tv.youtube.com,youtubekids.com,youtube-nocookie.com##+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)",
+    ];
+
+    #[test]
+    fn compat_neutralizes_adslots_and_adds_prune_without_it() {
+        let rules: Vec<&str> = UBO_YOUTUBE_RULES
+            .iter()
+            .copied()
+            .chain(COMPAT_RULES.lines())
+            .collect();
+        let mut e = Engine::from_rules(rules.iter().copied(), ParseOptions::default());
+        e.use_resources(scriptlet_resources().iter().cloned());
+        let s = service();
+        s.set_engine(e);
+        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=x");
+        assert!(res.active && res.ready);
+        // playerAds/adPlacements вырезаются как раньше (P-07: рекламы нет)
+        assert!(res
+            .injected_script
+            .contains(r#"setConstant("ytInitialPlayerResponse.playerAds", "undefined")"#));
+        assert!(res
+            .injected_script
+            .contains(r#"setConstant("ytInitialPlayerResponse.adPlacements", "undefined")"#));
+        // adSlots больше не трогаем — SABR/SSAI-хендшейк проходит штатно
+        assert!(
+            !res.injected_script
+                .contains(r#"setConstant("ytInitialPlayerResponse.adSlots", "undefined")"#),
+            "set adSlots должен быть нейтрализован"
+        );
+        assert!(
+            !res.injected_script.contains(
+                r#""playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots""#
+            ),
+            "json-prune с adSlots должен быть нейтрализован"
+        );
+        // наш json-prune без adSlots действует
+        assert!(res
+            .injected_script
+            .contains(r#"jsonPrune("playerResponse.adPlacements playerResponse.playerAds adPlacements playerAds")"#));
+        // новый текст json-prune (без www, uAssets 21.10+) нейтрализован на
+        // своих хостах: adSlots не вырезается и на m.youtube.com
+        let mres = s.cosmetic_resources("https://m.youtube.com/watch?v=x");
+        assert!(mres.active && mres.ready);
+        assert!(
+            !mres.injected_script.contains(
+                r#""playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots""#
+            ),
+            "json-prune с adSlots нейтрализован и на m.youtube.com (новый текст без www)"
+        );
+        assert!(mres
+            .injected_script
+            .contains(r#"jsonPrune("playerResponse.adPlacements playerResponse.playerAds adPlacements playerAds")"#));
+        // чужой хост — ничего (как у исходных правил)
+        assert!(s
+            .cosmetic_resources("https://other.test/")
+            .injected_script
+            .is_empty());
+    }
+
+    #[test]
+    fn compat_only_with_default_lists() {
+        let _env = ENV_LOCK.lock().unwrap();
+        let _guard = EnvGuard::set("DUOPULSE_ADBLOCK_LISTS", "a=C:\\tmp\\a.txt");
+        assert!(
+            !list_defs().iter().any(|d| d.source == COMPAT_SOURCE),
+            "env-переопределение (e2e) не тянет compat-список"
+        );
+        std::env::remove_var("DUOPULSE_ADBLOCK_LISTS");
+        let defs = list_defs();
+        assert!(defs.iter().any(|d| d.source == COMPAT_SOURCE));
+        assert_eq!(
+            defs.iter().filter(|d| d.source != COMPAT_SOURCE).count(),
+            DEFAULT_LISTS.len(),
+            "сетевые списки не задвоены"
+        );
+    }
+
+    // --- ранний синхронный канал (карточка 044) --------------------------------
+
+    #[test]
+    fn early_endpoint_serves_active_resources_and_gates() {
+        let s = service();
+        // движка ещё нет → active+not-ready: скрипт остаётся на async-пути
+        let (status, body) = early_response_for(
+            "/duopulse-cosmetic?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dx",
+            &s,
+        );
+        assert_eq!(status, "200 OK");
+        assert!(
+            body.contains(r#""active":true"#) && body.contains(r#""ready":false"#),
+            "{body}"
+        );
+
+        s.set_engine(scriptlet_engine(&[
+            "www.youtube.com##+js(set, ytInitialPlayerResponse.playerAds, undefined)",
+            "www.youtube.com##.mastad",
+        ]));
+        let (_, body) = early_response_for(
+            "/duopulse-cosmetic?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dx",
+            &s,
+        );
+        assert!(
+            body.contains(r#""active":true"#) && body.contains(r#""ready":true"#),
+            "{body}"
+        );
+        assert!(
+            body.contains("ytInitialPlayerResponse.playerAds"),
+            "код скриптлета в ответе: {body}"
+        );
+        assert!(
+            body.contains(".mastad"),
+            "селекторы скрытия в ответе: {body}"
+        );
+
+        // выключенный блокировщик — active=false (тумблер действует на
+        // следующий документ без гонок)
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.enabled = false;
+        }
+        let (_, body) = early_response_for(
+            "/duopulse-cosmetic?url=https%3A%2F%2Fwww.youtube.com%2Fwatch",
+            &s,
+        );
+        assert!(body.contains(r#""active":false"#), "{body}");
+    }
+
+    #[test]
+    fn early_endpoint_rejects_bad_paths_and_schemes() {
+        let s = service();
+        let (status, _) = early_response_for("/duopulse-cosmetic?url=ftp%3A%2F%2Fx", &s);
+        assert_eq!(status, "400 Bad Request", "только http(s)");
+        let (status, _) = early_response_for("/elsewhere?url=https%3A%2F%2Fa.test", &s);
+        assert_eq!(status, "404 Not Found");
+        // percent-декодирование: %2F → /, «+» остаётся «+» (encodeURIComponent)
+        assert_eq!(percent_decode("a%2Fb%3Fc%2Bd%20e"), "a/b?c+d e");
     }
 
     #[test]

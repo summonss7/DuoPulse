@@ -229,21 +229,27 @@ try {
     JSON.stringify(watchAfter.cosmetic),
   );
 
-  // скриптлеты (карточка duopulse-043): uBO filters содержит непривилегированные
-  // правила для youtube (`set ytInitialPlayerResponse.playerAds/adSlots,
-  // undefined`) — код должен инъенцироваться и ИСПОЛНИТЬСЯ (scriptletsRan —
-  // маркер ставит сам код; YouTube энфорсит Trusted Types + nonce/strict-dynamic
-  // CSP — проверяем, что обход работает); замеряем и тайминг доставки
+  // скриптлеты (карточка duopulse-043 + ранний путь 044): uBO filters содержит
+  // непривилегированные правила для youtube (`set ytInitialPlayerResponse.playerAds,
+  // undefined` — adSlots с 22.10.2026 НЕ трогаем: compat-список против SABR-stall,
+  // adblock/compat.txt) — код должен инъенцироваться и ИСПОЛНИТЬСЯ: ранним скриптом
+  // NavigationStarting → AddScriptToExecuteOnDocumentCreated (main.rs, до инлайн-
+  // скриптов страницы, window.__duopulseSyncScriptlets — CSP/Trusted Types не мешают)
+  // ИЛИ асинхронным <script>-элементом cosmetic.js (scriptletsRan — маркер ставит
+  // сам код). Проверяем ЭФФЕКТ: ytInitialPlayerResponse.playerAds === undefined.
   const scriptlets = await evalIn(ytWs, `window.__duopulseCosmetic ? {
     len: window.__duopulseCosmetic.scriptlets,
     atMs: window.__duopulseCosmetic.scriptletsAt,
     ranMs: window.__duopulseCosmetic.scriptletsRan,
+    sync: window.__duopulseSyncScriptlets === true,
+    syncAt: typeof window.__duopulseSyncAt === 'number' ? window.__duopulseSyncAt : null,
     playerAds: window.ytInitialPlayerResponse ? String(window.ytInitialPlayerResponse.playerAds) : 'нет-объекта',
     adSlots: window.ytInitialPlayerResponse ? String(window.ytInitialPlayerResponse.adSlots) : 'нет-объекта',
   } : null`);
   check(
-    "watch: скриптлеты uBO инъенцированы и исполнены (##+js set ytInitialPlayerResponse.*, Trusted Types/CSP обойдены)",
-    scriptlets?.len > 0 && scriptlets?.ranMs > 0,
+    "watch: скриптлеты исполнены ДО инлайн-скриптов страницы (ранний скрипт 044: playerAds=undefined) или через <script> (scriptletsRan)",
+    (scriptlets?.sync === true && scriptlets?.playerAds === "undefined") ||
+      (scriptlets?.len > 0 && scriptlets?.ranMs > 0),
     JSON.stringify(scriptlets),
   );
 
