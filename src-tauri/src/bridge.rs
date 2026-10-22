@@ -612,6 +612,11 @@ pub struct AdblockStatusResult {
     pub blocked_total: u64,
     /// Всех http(s)-запросов через перехватчик (диагностика P-07).
     pub seen_total: u64,
+    /// Загружено $replace-правил перезаписи ответов (карточка duopulse-050;
+    /// живые правила uBO движок adblock-rs игнорирует — парсит их наш слой).
+    pub replace_rules: u32,
+    /// Ответов, чьи тела реально переписаны ($replace), за сеанс.
+    pub replaced_total: u64,
     pub lists: Vec<AdblockListInfo>,
     /// Сайты-исключения (хосты).
     pub site_exceptions: Vec<String>,

@@ -116,6 +116,14 @@ pub(crate) fn startup_proxy_args() -> &'static str {
 /// (adblock-rs, src/adblock/): решение должно быть быстрым — обработчик
 /// вызывается синхронно на UI-потоке WebView2.
 ///
+/// Перезапись тел ответов ($replace, карточка duopulse-050): если запрос
+/// проходит блокировку и под него есть replace-правила — обработчик берёт
+/// Deferral, снимок запроса уходит в фоновую нить (самофетч через локальный
+/// SOCKS5-роутер + замены в теле + CreateWebResourceResponse/SetResponse),
+/// UI-поток возвращается сразу. Любой сбой — Deferral завершается без
+/// ответа, и WebView2 выполняет свой сетевой запрос (слой перезаписи не
+/// может ухудшить поведение страницы относительно своего отсутствия).
+///
 /// Источник запроса для движка: Referer (для подресурсов), при его отсутствии
 /// URL вкладки tab_id; тип запроса — из ResourceContext. Запросы с путём
 /// BLOCK_TEST_PATH получают 403 + заголовок X-DuoPulse-Block: 1 (тест M0).
@@ -178,12 +186,257 @@ unsafe fn install_request_blocker(
                     &HSTRING::from("X-DuoPulse-Block: adblock\r\nAccess-Control-Allow-Origin: *"),
                 )?;
                 args.SetResponse(&response)?;
+                return Ok(());
+            }
+            // Перезапись тела ответа ($replace, карточка duopulse-050): план
+            // замен есть — уводим обработку в фон (Deferral), ответ подменяем
+            // самофетчем с заменами; сбой — дефолтный сетевой запрос WebView2.
+            let ops = app
+                .state::<std::sync::Arc<adblock::AdblockService>>()
+                .replace_plan(tab_url.as_deref(), &uri, rtype, referer.as_deref());
+            if let Some(ops) = ops {
+                if let Err(e) =
+                    rewrite_response_in_background(&env, &args, &request, &uri, ops, &app)
+                {
+                    eprintln!("adblock: $replace не начат для {uri}: {e}");
+                }
             }
             Ok(())
         })),
         std::ptr::null_mut(),
     )
     .expect("add_WebResourceRequested");
+}
+
+/// COM-интерфейсы WebView2 не помечены Send, а Environment ещё и привязан к
+/// нити-создателю (0x802A000C «thread that created the object»): обёртка
+/// переносит их через границы нитей, а все вызовы методов — только на главном
+/// потоке (run_on_main_thread; самофетч живёт в фоновой нити без COM).
+/// Доступ — только через `into_inner` (метод на целом значении): точечный
+/// захват `env.0` в замыкании обошёл бы обёртку и захватил бы сырой
+/// интерфейс.
+#[cfg(windows)]
+struct SendCom<T>(T);
+#[cfg(windows)]
+unsafe impl<T> Send for SendCom<T> {}
+#[cfg(windows)]
+impl<T> SendCom<T> {
+    fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+/// Снять с запроса данные для самофетча и отправить перезапись в фоновую
+/// нить. Deferral держит событие открытым до SetResponse + Complete. Ошибка —
+/// событие уже нельзя «отменить» безопасно: вызывающий только логирует
+/// (Deferral ещё не взят, WebView2 продолжит своим сетевым запросом).
+#[cfg(windows)]
+unsafe fn rewrite_response_in_background(
+    env: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment,
+    args: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2WebResourceRequestedEventArgs,
+    request: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2WebResourceRequest,
+    uri: &str,
+    ops: Vec<adblock::replace::ReplaceOp>,
+    app: &AppHandle,
+) -> Result<(), String> {
+    let mut method_pw = windows_core::PWSTR::null();
+    request
+        .Method(&mut method_pw)
+        .map_err(|e| format!("Method: {e}"))?;
+    let method = webview2_com::CoTaskMemPWSTR::from(method_pw).to_string();
+
+    let headers = request_headers(request).map_err(|e| format!("Headers: {e}"))?;
+    let body = match request.Content() {
+        Ok(stream) => read_stream(&stream).map_err(|e| format!("Content: {e}"))?,
+        Err(_) => None,
+    };
+
+    let deferral = args
+        .GetDeferral()
+        .map_err(|e| format!("GetDeferral: {e}"))?;
+    // Complete обязан быть вызван ровно один раз при любом исходе:
+    // - нить не поднялась → UI-нить (здесь), клон 1;
+    // - run_on_main_thread не принял замыкание → рабочая нить, клон 2
+    //   (недостижимо практически; Complete без SetResponse — фолббек
+    //   дефолтным сетевым запросом WebView2);
+    // - норма → замыкание finish на главном потоке.
+    let deferral_spawn_fallback = deferral.clone();
+    let deferral_dispatch_fallback = SendCom(deferral.clone());
+    let svc = app
+        .state::<std::sync::Arc<adblock::AdblockService>>()
+        .inner()
+        .clone();
+    // Самофетч — тем же сетевым путём, что и WebView2 (через локальный
+    // SOCKS5-роутер, задача 6.1): IP-адрес сессии согласован с остальным
+    // трафиком плеера. Роутера нет — напрямую.
+    let socks_port = app
+        .try_state::<Option<vpn::router::Router>>()
+        .and_then(|r| r.inner().as_ref().map(vpn::router::Router::port));
+
+    let env = SendCom(env.clone());
+    let args = SendCom(args.clone());
+    let deferral = SendCom(deferral);
+    let uri = uri.to_string();
+    let app = app.clone();
+    // DUOPULSE_REPLACE_DEBUG=1: журнал решений слоя перезаписи (e2e/диагностика)
+    let debug = std::env::var("DUOPULSE_REPLACE_DEBUG").is_ok();
+    let spawned = std::thread::Builder::new()
+        .name("adblock-replace".into())
+        .spawn(move || {
+            // фоновая нить: только сеть, без COM (Environment привязан к
+            // нити-создателю — 0x802A000C)
+            let rewritten = adblock::replace::fetch_and_rewrite(
+                &method,
+                &uri,
+                &headers,
+                body.as_deref(),
+                &ops,
+                socks_port,
+            );
+            // финализация — на главном потоке (нить создания COM-объектов):
+            // CreateWebResourceResponse/SetResponse/Complete
+            let finish = move |rr: Option<adblock::replace::RewrittenResponse>| {
+                let (env, args, deferral) =
+                    (env.into_inner(), args.into_inner(), deferral.into_inner());
+                if debug {
+                    match &rr {
+                        Some(rr) => eprintln!(
+                            "[replace] {method} {uri} → {} {} (изменён: {}, тело {} Б)",
+                            rr.status,
+                            rr.reason,
+                            rr.changed,
+                            rr.body.len()
+                        ),
+                        None => {
+                            eprintln!("[replace] {method} {uri} → самофетч не удался (фолббек)")
+                        }
+                    }
+                }
+                if let Some(rr) = rr {
+                    if unsafe { set_rewritten_response(&env, &args, &rr) } && rr.changed {
+                        svc.note_replaced();
+                    }
+                    // подмена не удалась (COM) — просто Complete без ответа:
+                    // WebView2 сделает сетевой запрос сам
+                }
+                let _ = deferral.Complete();
+            };
+            if app.run_on_main_thread(move || finish(rewritten)).is_err() {
+                eprintln!(
+                    "adblock: $replace: не вернуться на главный поток — фолбэк без перезаписи"
+                );
+                let _ = deferral_dispatch_fallback.into_inner().Complete();
+            }
+        });
+    if spawned.is_err() {
+        let _ = deferral_spawn_fallback.Complete();
+    }
+    Ok(())
+}
+
+/// Заголовки запроса парами (переходят в самофетч как есть, кроме
+/// отфильтрованных в fetch_and_rewrite).
+#[cfg(windows)]
+unsafe fn request_headers(
+    request: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2WebResourceRequest,
+) -> Result<Vec<(String, String)>, windows_core::Error> {
+    let headers = request.Headers()?;
+    let it = headers.GetIterator()?;
+    let mut out = Vec::new();
+    loop {
+        let mut has = windows_core::BOOL::default();
+        it.HasCurrentHeader(&mut has)?;
+        if !has.as_bool() {
+            break;
+        }
+        let mut name = windows_core::PWSTR::null();
+        let mut value = windows_core::PWSTR::null();
+        it.GetCurrentHeader(&mut name, &mut value)?;
+        out.push((
+            webview2_com::CoTaskMemPWSTR::from(name).to_string(),
+            webview2_com::CoTaskMemPWSTR::from(value).to_string(),
+        ));
+        let mut next = windows_core::BOOL::default();
+        it.MoveNext(&mut next)?;
+        if !next.as_bool() {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Прочитать IStream тела запроса (POST /player — единицы КБ) до конца;
+/// None — тела нет/пустое. Потолок — защита от патологических тел.
+#[cfg(windows)]
+unsafe fn read_stream(
+    stream: &windows::Win32::System::Com::IStream,
+) -> Result<Option<Vec<u8>>, String> {
+    const CAP: usize = 4 * 1024 * 1024;
+    let mut out = Vec::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let mut read = 0u32;
+        let hr = stream.Read(
+            buf.as_mut_ptr() as *mut core::ffi::c_void,
+            buf.len() as u32,
+            Some(&mut read),
+        );
+        if hr.is_err() {
+            return Err(format!("IStream::Read: {}", hr.0));
+        }
+        if read == 0 {
+            break;
+        }
+        if out.len() + read as usize > CAP {
+            return Err("тело запроса больше потолка".into());
+        }
+        out.extend_from_slice(&buf[..read as usize]);
+    }
+    Ok((!out.is_empty()).then_some(out))
+}
+
+/// Собрать ответ из переписанного тела и подменить им событие. false —
+/// COM-сбой (вызывающий не считает замену сделанной).
+#[cfg(windows)]
+unsafe fn set_rewritten_response(
+    env: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment,
+    args: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2WebResourceRequestedEventArgs,
+    rr: &adblock::replace::RewrittenResponse,
+) -> bool {
+    // Заголовки ответа + Content-Length итогового тела (контентные/хоп-
+    // заголовки исходного уже отфильтрованы в fetch_and_rewrite)
+    let mut headers = String::new();
+    for (name, value) in &rr.headers {
+        headers.push_str(name);
+        headers.push_str(": ");
+        headers.push_str(value);
+        headers.push_str("\r\n");
+    }
+    headers.push_str(&format!("Content-Length: {}\r\n", rr.body.len()));
+    let stream = windows::Win32::UI::Shell::SHCreateMemStream(Some(&rr.body));
+    let Some(stream) = stream else {
+        eprintln!("adblock: $replace: SHCreateMemStream не создал поток");
+        return false;
+    };
+    let response = match env.CreateWebResourceResponse(
+        &stream,
+        rr.status as i32,
+        &windows_core::HSTRING::from(rr.reason.as_str()),
+        &windows_core::HSTRING::from(headers.as_str()),
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("adblock: $replace: CreateWebResourceResponse: {e}");
+            return false;
+        }
+    };
+    match args.SetResponse(&response) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("adblock: $replace: SetResponse: {e}");
+            false
+        }
+    }
 }
 
 /// Тип запроса для движка adblock-rs из ResourceContext (строки — словарь

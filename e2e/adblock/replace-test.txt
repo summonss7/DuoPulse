@@ -1,0 +1,6 @@
+! DuoPulse e2e: $replace-перезапись тел ответов (карточка duopulse-050).
+! Пара xhr/doc-правил на локальный стенд + @@-исключение: покрытие матчера
+! (тип запроса, 1p, исключения) и слоя подмены ответа (main.rs).
+||127.0.0.1/xhr-path$xhr,1p,replace=/"adSlots"/"no_ads"/
+||127.0.0.1/doc-path$doc,1p,replace=/"adSlots"/"no_ads"/
+@@||127.0.0.1/except-path$xhr,replace=/"adSlots"/"no_ads"/

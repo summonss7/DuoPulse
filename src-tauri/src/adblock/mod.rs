@@ -28,6 +28,12 @@
 //! на старте отсутствующие/протухшие (сутки) списки, далее проверка раз в
 //! час и по команде `adblock.update_lists`.
 //!
+//! Перезапись тел ответов (`$replace`, карточка duopulse-050): движок
+//! adblock-rs опцию не поддерживает — правила разбирает собственный парсер
+//! из тех же текстов (подмножество `replace.rs`), решение отдаёт
+//! [`AdblockService::replace_plan`], а самофетч/подмену ответа делает
+//! COM-перехватчик (main.rs); счётчик переписанных — `replaced_total`.
+//!
 //! `DUOPULSE_ADBLOCK_LISTS="имя=путь-или-url;…"` — переопределение источников
 //! (e2e-стенды: локальные файлы вместо сети); пустое значение — списков нет,
 //! движок не строится. Источник-путь читается с диска, http(s) — качается.
@@ -40,6 +46,8 @@
 //! События (docs/05 §2): `adblock:blocked_count` (батчинг: фон-нить сливает
 //! накопленный дельта-счётчик раз в 400 мс — без шторма IPC на тяжёлых
 //! страницах), `adblock:site_exception_changed`.
+
+pub(crate) mod replace;
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Condvar, Mutex};
@@ -119,6 +127,10 @@ struct ListDef {
     name: String,
     /// http(s)-адрес или путь к локальному файлу.
     source: String,
+    /// Списку доверяют trusted-скриптлеты (`trusted-*`, карточка 050):
+    /// uBO-кураторский список и наш встроенный compat — тот же уровень
+    /// доверия, что даёт им сам uBO; EasyList и env-списки (e2e) — нет.
+    trusted: bool,
 }
 
 /// Реестр источников: DUOPULSE_ADBLOCK_LISTS (e2e) или DEFAULT_LISTS +
@@ -131,11 +143,18 @@ fn list_defs() -> Vec<ListDef> {
             .map(|(n, s)| ListDef {
                 name: (*n).into(),
                 source: (*s).into(),
+                // ДОВЕРИЕ ВЫКЛЮЧЕНО (эксперимент 050): инъекция живых
+                // trusted-replace-xhr-response uBO добавляла ~300 мс к
+                // старту (P-08 4674–4725 vs контроль 4239–4381) — обёртки
+                // fetch/XHR на каждом youtube-документе; преролл на жёсткой
+                // навигации и так не убивали. Включение — за автором.
+                trusted: false,
             })
             .collect();
         defs.push(ListDef {
             name: "duopulse-compat".into(),
             source: COMPAT_SOURCE.into(),
+            trusted: false,
         });
         return defs;
     };
@@ -153,6 +172,7 @@ fn list_defs() -> Vec<ListDef> {
             Some(ListDef {
                 name: name.into(),
                 source: source.into(),
+                trusted: false,
             })
         })
         .collect()
@@ -249,6 +269,11 @@ struct Inner {
     seen_total: u64,
     /// Неслитый в UI прирост блокировок (adblock:blocked_count).
     pending_delta: u64,
+    /// $replace-правила из сырых текстов списков (движок их отбрасывает —
+    /// UnrecognisedOption; карточка duopulse-050), включая @@-исключения.
+    replace_rules: Vec<replace::ReplaceRule>,
+    /// Ответов, чьи тела реально переписаны ($replace, диагностика).
+    replaced_total: u64,
     /// Кэш ответов раннего канала по URL (карточка 044): холодный расчёт
     /// `url_cosmetic_resources` 0,2–0,9 с — дедупликация в-flight расчётов
     /// (разогрев с NavigationStarting и запрос document-start делят один).
@@ -289,6 +314,8 @@ impl AdblockService {
                 blocked_total: 0,
                 seen_total: 0,
                 pending_delta: 0,
+                replace_rules: Vec::new(),
+                replaced_total: 0,
                 early_cache: std::collections::HashMap::new(),
                 force_update: false,
             }),
@@ -356,6 +383,62 @@ impl AdblockService {
         blocked
     }
 
+    /// План перезаписи тела ответа ($replace, карточка duopulse-050): ops для
+    /// URL, если живое правило совпало и не погашено @@-исключением. Вызов —
+    /// из COM-перехватчика ПОСЛЕ should_block=false; тумблер/сайт-исключения
+    /// действуют так же, как на блокировки. None — переписывать нечего.
+    pub fn replace_plan(
+        &self,
+        tab_url: Option<&str>,
+        uri: &str,
+        request_type: &str,
+        referer: Option<&str>,
+    ) -> Option<Vec<replace::ReplaceOp>> {
+        let guard = self.inner.lock().expect("adblock: лок не отравлен");
+        if !guard.enabled || guard.replace_rules.is_empty() {
+            return None;
+        }
+        // Источник запроса — та же логика, что в should_block (document —
+        // сама цель, подресурсы — Referer/URL вкладки)
+        let source = if request_type == "document" {
+            uri
+        } else {
+            referer
+                .filter(|r| r.starts_with("http://") || r.starts_with("https://"))
+                .or(tab_url)
+                .unwrap_or(uri)
+        };
+        if source_host_exempted(&guard.site_exceptions, source) {
+            return None;
+        }
+        let source_host = replace::host_of(source);
+        if guard
+            .replace_rules
+            .iter()
+            .any(|r| r.exception && r.matches(uri, request_type, source_host.as_deref()))
+        {
+            return None;
+        }
+        let ops: Vec<replace::ReplaceOp> = guard
+            .replace_rules
+            .iter()
+            .filter(|r| !r.exception && r.matches(uri, request_type, source_host.as_deref()))
+            .flat_map(|r| r.ops.iter().cloned())
+            .collect();
+        if ops.is_empty() {
+            None
+        } else {
+            Some(ops)
+        }
+    }
+
+    /// Отметить успешную перезапись тела ответа (счётчик диагностики,
+    /// adblock.status.replacedTotal).
+    pub fn note_replaced(&self) {
+        let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
+        guard.replaced_total += 1;
+    }
+
     /// adblock.status: снапшот состояния для UI/e2e.
     pub fn status(&self) -> AdblockStatusResult {
         let guard = self.inner.lock().expect("adblock: лок не отравлен");
@@ -364,6 +447,8 @@ impl AdblockService {
             ready: guard.engine.is_some(),
             blocked_total: guard.blocked_total,
             seen_total: guard.seen_total,
+            replace_rules: guard.replace_rules.iter().filter(|r| !r.exception).count() as u32,
+            replaced_total: guard.replaced_total,
             lists: guard
                 .lists
                 .iter()
@@ -563,7 +648,7 @@ impl AdblockService {
         let defs = list_defs();
         let filters_dir = self.profile_dir.join("filters");
         let _ = std::fs::create_dir_all(&filters_dir);
-        let mut texts: Vec<(String, String)> = Vec::new(); // (имя, текст)
+        let mut texts: Vec<(String, String, bool)> = Vec::new(); // (имя, текст, trusted)
         let mut new_states: Vec<ListState> = Vec::new();
         let mut meta = read_meta(&filters_dir);
         let now = now_ms();
@@ -629,7 +714,7 @@ impl AdblockService {
                 updated_at,
                 error,
             });
-            texts.push((def.name.clone(), text));
+            texts.push((def.name.clone(), text, def.trusted));
         }
 
         if defs.is_empty() {
@@ -637,18 +722,27 @@ impl AdblockService {
             let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
             guard.engine = None;
             guard.lists = new_states;
+            guard.replace_rules = Vec::new();
             guard.early_cache.clear();
             return;
         }
 
         // Скомпилированный кэш валиден, если набор digest'ов совпал; digest
         // ресурсного набора скриптлетов — в том же наборе (смена набора при
-        // обновлении бинарника перестраивает engine.bin).
+        // обновлении бинарника перестраивает engine.bin); набор trusted-флагов
+        // списков — тоже (карточка 050: смена доверия меняет инъекции).
         let mut digests: Vec<u64> = defs
             .iter()
             .map(|d| meta.lists.get(&d.name).map(|m| m.digest).unwrap_or(0))
             .collect();
         digests.push(digest(SCRIPTLETS_JSON));
+        let trusted_marks = defs
+            .iter()
+            .filter(|d| d.trusted)
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        digests.push(digest(&format!("trusted:{trusted_marks}")));
         let engine = match load_compiled(&filters_dir, &digests) {
             // serialize_raw ресурсы не хранит — подключаем после deserialize
             Some(mut e) => {
@@ -656,8 +750,23 @@ impl AdblockService {
                 Some(e)
             }
             None => {
-                let rules = texts.iter().flat_map(|(_, t)| t.lines());
-                let mut engine = Engine::from_rules(rules, ParseOptions::default());
+                // FilterSet: права выдаются ПО СПИСКУ (карточка 050) —
+                // trusted-скриптлеты uBO (trusted-replace-xhr-response и пр.)
+                // инъенцируются только из доверенных источников (uBO-кураторский
+                // список, наш compat), EasyList/env-списки — по-прежнему нет
+                let mut set = adblock::lists::FilterSet::new(false);
+                for (_, text, trusted) in &texts {
+                    let opts = if *trusted {
+                        ParseOptions {
+                            permissions: adblock::resources::PermissionMask::from_bits(1),
+                            ..ParseOptions::default()
+                        }
+                    } else {
+                        ParseOptions::default()
+                    };
+                    set.add_filters(text.lines(), opts);
+                }
+                let mut engine = Engine::from_filter_set(set, true);
                 engine.use_resources(scriptlet_resources().iter().cloned());
                 if let Ok(bin) = engine.serialize_raw() {
                     write_compiled(&filters_dir, &bin, &digests);
@@ -675,6 +784,11 @@ impl AdblockService {
         // при живом движке частичное обновление его не трогает.
         if texts.len() == defs.len() || (!texts.is_empty() && guard.engine.is_none()) {
             guard.engine = engine.map(Arc::new);
+            // $replace-правила — из тех же текстов, что построили движок
+            guard.replace_rules = texts
+                .iter()
+                .flat_map(|(_, t, _)| replace::parse_replace_rules(t))
+                .collect();
             // правила могли измениться — ответы раннего канала по тем же URL
             // больше не действительны (карточка 044)
             guard.early_cache.clear();
@@ -1310,11 +1424,13 @@ mod tests {
             vec![
                 ListDef {
                     name: "a".into(),
-                    source: "C:\\tmp\\a.txt".into()
+                    source: "C:\\tmp\\a.txt".into(),
+                    trusted: false,
                 },
                 ListDef {
                     name: "b".into(),
-                    source: "https://x.test/b.txt".into()
+                    source: "https://x.test/b.txt".into(),
+                    trusted: false,
                 },
             ]
         );
@@ -1729,6 +1845,31 @@ mod tests {
     }
 
     #[test]
+    fn trusted_scriptlet_injects_with_granted_permission() {
+        // Карточка 050: механизм per-list-доверия (FilterSet + PermissionMask,
+        // refresh_lists) — живые правила trusted-replace-xhr-response uBO
+        // инъенцируются, когда списку выданы trusted-права парсинга
+        let mut set = adblock::lists::FilterSet::new(false);
+        set.add_filters(
+            [r#"www.youtube.com##+js(trusted-replace-xhr-response, '"adSlots"', '"no_ads"', /player?/)"#],
+            ParseOptions {
+                permissions: adblock::resources::PermissionMask::from_bits(1),
+                ..ParseOptions::default()
+            },
+        );
+        let mut engine = Engine::from_filter_set(set, true);
+        engine.use_resources(scriptlet_resources().iter().cloned());
+        let s = service();
+        s.set_engine(engine);
+        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=x");
+        assert!(
+            res.injected_script.contains("trustedReplaceXhrResponse"),
+            "trusted-скриптлет инъенцируется с правами: {}",
+            &res.injected_script[..res.injected_script.len().min(200)]
+        );
+    }
+
+    #[test]
     fn scriptlets_disabled_by_toggle_and_site_exception() {
         let s = service();
         s.set_engine(scriptlet_engine(&["a.test##+js(set-constant, flag, yes)"]));
@@ -1768,7 +1909,7 @@ mod tests {
     ];
 
     #[test]
-    fn compat_neutralizes_adslots_and_adds_prune_without_it() {
+    fn compat_neutralizes_adslots_on_all_hosts() {
         let rules: Vec<&str> = UBO_YOUTUBE_RULES
             .iter()
             .copied()
@@ -1778,49 +1919,146 @@ mod tests {
         e.use_resources(scriptlet_resources().iter().cloned());
         let s = service();
         s.set_engine(e);
-        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=x");
-        assert!(res.active && res.ready);
-        // playerAds/adPlacements вырезаются как раньше (P-07: рекламы нет)
-        assert!(res
-            .injected_script
-            .contains(r#"setConstant("ytInitialPlayerResponse.playerAds", "undefined")"#));
-        assert!(res
-            .injected_script
-            .contains(r#"setConstant("ytInitialPlayerResponse.adPlacements", "undefined")"#));
-        // adSlots больше не трогаем — SABR/SSAI-хендшейк проходит штатно
-        assert!(
-            !res.injected_script
-                .contains(r#"setConstant("ytInitialPlayerResponse.adSlots", "undefined")"#),
-            "set adSlots должен быть нейтрализован"
-        );
-        assert!(
-            !res.injected_script.contains(
-                r#""playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots""#
-            ),
-            "json-prune с adSlots должен быть нейтрализован"
-        );
-        // наш json-prune без adSlots действует
-        assert!(res
-            .injected_script
-            .contains(r#"jsonPrune("playerResponse.adPlacements playerResponse.playerAds adPlacements playerAds")"#));
-        // новый текст json-prune (без www, uAssets 21.10+) нейтрализован на
-        // своих хостах: adSlots не вырезается и на m.youtube.com
-        let mres = s.cosmetic_resources("https://m.youtube.com/watch?v=x");
-        assert!(mres.active && mres.ready);
-        assert!(
-            !mres.injected_script.contains(
-                r#""playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots""#
-            ),
-            "json-prune с adSlots нейтрализован и на m.youtube.com (новый текст без www)"
-        );
-        assert!(mres
-            .injected_script
-            .contains(r#"jsonPrune("playerResponse.adPlacements playerResponse.playerAds adPlacements playerAds")"#));
+        // Клиентские adSlots-скриптлеты uBO нейтрализованы на ВСЕХ хостах
+        // (карточки 044/050: клиентское вырезание = SABR-stall; преролл
+        // снимает сетевой слой $replace на XHR /player — эксперимент 050
+        // без исключений на www вернул столл 13–15 с)
+        for host in ["www.youtube.com", "m.youtube.com"] {
+            let res = s.cosmetic_resources(&format!("https://{host}/watch?v=x"));
+            assert!(res.active && res.ready);
+            assert!(
+                res.injected_script
+                    .contains(r#"setConstant("ytInitialPlayerResponse.playerAds", "undefined")"#),
+                "{host}: playerAds вырезается клиентски (P-07)"
+            );
+            assert!(
+                !res.injected_script
+                    .contains(r#"setConstant("ytInitialPlayerResponse.adSlots", "undefined")"#),
+                "{host}: set adSlots нейтрализован"
+            );
+            assert!(
+                !res.injected_script.contains(
+                    r#""playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important""#
+                ),
+                "{host}: json-prune с adSlots нейтрализован"
+            );
+            // наш json-prune без adSlots действует
+            assert!(
+                res.injected_script.contains(
+                    r#"jsonPrune("playerResponse.adPlacements playerResponse.playerAds adPlacements playerAds")"#
+                ),
+                "{host}: собственный prune"
+            );
+        }
         // чужой хост — ничего (как у исходных правил)
         assert!(s
             .cosmetic_resources("https://other.test/")
             .injected_script
             .is_empty());
+    }
+
+    // --- карточка duopulse-050: $replace-перезапись ответов -------------------
+
+    #[test]
+    fn compat_has_no_network_replace_rules() {
+        // $doc-перепись /watch экспериментально убрана (журнал 050): преролл
+        // она не убивала (SSAI зашит серверно), задержку самофетча 1,4 МБ
+        // добавляла; сетевой слой $replace живёт на живых xhr-правилах uBO
+        assert!(replace::parse_replace_rules(COMPAT_RULES).is_empty());
+    }
+
+    #[test]
+    fn replace_plan_from_lists_toggles_and_counters() {
+        let _env = ENV_LOCK.lock().unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("duopulse-adblock-replace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let list = dir.join("list.txt");
+        std::fs::write(
+            &list,
+            "/alwaysblocked/*\n||127.0.0.1/replace$xhr,1p,replace=/\"k\"/\"v\"/\n",
+        )
+        .unwrap();
+        let _guard = EnvGuard::set("DUOPULSE_ADBLOCK_LISTS", &format!("t={}", list.display()));
+        let profile = dir.join("profile");
+        std::fs::create_dir_all(&profile).unwrap();
+        let s = AdblockService::new(&profile);
+        s.refresh_lists(false);
+
+        // план замен: XHR с 1p-источником на 127.0.0.1
+        let plan = s.replace_plan(
+            Some("http://127.0.0.1:8895/"),
+            "http://127.0.0.1:8895/replace?x=1",
+            "xhr",
+            Some("http://127.0.0.1:8895/page"),
+        );
+        let ops = plan.expect("правило совпало");
+        assert_eq!(ops.len(), 1);
+        // не-xhr тип — правила $xhr не действуют
+        assert!(s
+            .replace_plan(
+                Some("http://127.0.0.1:8895/"),
+                "http://127.0.0.1:8895/replace?x=1",
+                "document",
+                None,
+            )
+            .is_none());
+        // 3p-источник — правило 1p не действует
+        assert!(s
+            .replace_plan(
+                None,
+                "http://127.0.0.1:8895/replace?x=1",
+                "xhr",
+                Some("https://other.test/page"),
+            )
+            .is_none());
+        // чужой путь — нет правил
+        assert!(s
+            .replace_plan(
+                Some("http://127.0.0.1:8895/"),
+                "http://127.0.0.1:8895/elsewhere",
+                "xhr",
+                Some("http://127.0.0.1:8895/page"),
+            )
+            .is_none());
+
+        // диагностика: счётчики в статусе
+        let st = s.status();
+        assert_eq!(st.replace_rules, 1);
+        assert_eq!(st.replaced_total, 0);
+        s.note_replaced();
+        s.note_replaced();
+        assert_eq!(s.status().replaced_total, 2);
+
+        // тумблер/сайт-исключение гасят перезапись, как и блокировки
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.enabled = false;
+        }
+        assert!(s
+            .replace_plan(
+                None,
+                "http://127.0.0.1:8895/replace?x=1",
+                "xhr",
+                Some("http://127.0.0.1:8895/page"),
+            )
+            .is_none());
+        {
+            let mut g = s.inner.lock().unwrap();
+            g.enabled = true;
+            g.site_exceptions.insert("127.0.0.1".into());
+        }
+        assert!(s
+            .replace_plan(
+                None,
+                "http://127.0.0.1:8895/replace?x=1",
+                "xhr",
+                Some("http://127.0.0.1:8895/page"),
+            )
+            .is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

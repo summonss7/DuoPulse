@@ -32,11 +32,15 @@ windows-core = "0.62"
 # DPAPI для пароля прокси (CryptProtectData; задача 1.8, docs/02 §9).
 # GetProcessMemoryInfo — приватная память duopulse.exe для страницы
 # «Диагностика» (задача 2.5, метрика P-03).
+# System::Com::IStream + SHCreateMemStream — поток-обёртка тела ответа для
+# подмены ответов WebResourceRequested ($replace, карточка duopulse-050).
 windows = { version = "0.62", features = [
     "Win32_Security_Cryptography",
     "Win32_Foundation",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
 ] }
 # SQLite + FTS5: история и закладки (задачи 1.3–1.4) — файл duopulse.db
 # в профиле (docs/02 §8), FTS5-индекс для omnibox-подсказок и поиска.
@@ -58,8 +62,16 @@ adblock = { version = "0.9", default-features = false, features = [
 rmp = "=0.8.14"
 # Загрузка блок-листов по HTTPS (задача 2.1): блокирующий клиент без async-
 # рантайма — обновление списков идёт в фоновой нити. tls — rustls с корнями
-# webpki-roots (системное хранилище не требуется).
-ureq = { version = "2", features = ["tls"], default-features = false }
+# webpki-roots (системное хранилище не требуется). socks-proxy — самофетч
+# ответов для перезаписи ($replace, карточка duopulse-050) ходит тем же
+# сетевым путём, что и WebView2: через локальный SOCKS5-роутер (задача 6.1).
+# gzip — прозрачная декомпрессия самофетча (content-encoding срезаем, тело
+# отдаётся со своей длиной): /player-ответы качаются сжатыми, критический
+# путь плеера короче.
+ureq = { version = "2", features = ["tls", "socks-proxy", "gzip"], default-features = false }
+# Регексы $replace-правил перезаписи ответов (карточка duopulse-050);
+# уже в дереве транзитивно (adblock full-regex-handling).
+regex = "1"
 # Разбор адресов фида обновлений (задача 5.2): url::Url требуется плагину
 # апдейтера при подстановке канала в endpoints.
 url = "2"

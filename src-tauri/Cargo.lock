@@ -884,6 +884,7 @@ dependencies = [
  "boringtun",
  "duopulse-wg-stand",
  "quick-xml 0.36.2",
+ "regex",
  "rmp",
  "rusqlite",
  "schemars 0.8.22",
@@ -3587,6 +3588,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "socks"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0c3dbbd9ae980613c6dd8e28a9407b50509d3803b57624d5dfe8315218cd58b"
+dependencies = [
+ "byteorder",
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "softbuffer"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4538,10 +4550,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
 dependencies = [
  "base64 0.22.1",
+ "flate2",
  "log",
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "socks",
  "url",
  "webpki-roots 0.26.11",
 ]

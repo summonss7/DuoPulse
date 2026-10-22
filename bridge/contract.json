@@ -84,6 +84,18 @@
             "description": "Движок построен (списки загружены/из кэша) — фильтрация активна.",
             "type": "boolean"
           },
+          "replaceRules": {
+            "description": "Загружено $replace-правил перезаписи ответов (карточка duopulse-050; живые правила uBO движок adblock-rs игнорирует — парсит их наш слой).",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "replacedTotal": {
+            "description": "Ответов, чьи тела реально переписаны ($replace), за сеанс.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
           "seenTotal": {
             "description": "Всех http(s)-запросов через перехватчик (диагностика P-07).",
             "format": "uint64",
@@ -103,6 +115,8 @@
           "enabled",
           "lists",
           "ready",
+          "replaceRules",
+          "replacedTotal",
           "seenTotal",
           "siteExceptions"
         ],
@@ -175,6 +189,18 @@
             "description": "Движок построен (списки загружены/из кэша) — фильтрация активна.",
             "type": "boolean"
           },
+          "replaceRules": {
+            "description": "Загружено $replace-правил перезаписи ответов (карточка duopulse-050; живые правила uBO движок adblock-rs игнорирует — парсит их наш слой).",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "replacedTotal": {
+            "description": "Ответов, чьи тела реально переписаны ($replace), за сеанс.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
           "seenTotal": {
             "description": "Всех http(s)-запросов через перехватчик (диагностика P-07).",
             "format": "uint64",
@@ -194,6 +220,8 @@
           "enabled",
           "lists",
           "ready",
+          "replaceRules",
+          "replacedTotal",
           "seenTotal",
           "siteExceptions"
         ],
@@ -278,6 +306,18 @@
             "description": "Движок построен (списки загружены/из кэша) — фильтрация активна.",
             "type": "boolean"
           },
+          "replaceRules": {
+            "description": "Загружено $replace-правил перезаписи ответов (карточка duopulse-050; живые правила uBO движок adblock-rs игнорирует — парсит их наш слой).",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "replacedTotal": {
+            "description": "Ответов, чьи тела реально переписаны ($replace), за сеанс.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
           "seenTotal": {
             "description": "Всех http(s)-запросов через перехватчик (диагностика P-07).",
             "format": "uint64",
@@ -297,6 +337,8 @@
           "enabled",
           "lists",
           "ready",
+          "replaceRules",
+          "replacedTotal",
           "seenTotal",
           "siteExceptions"
         ],

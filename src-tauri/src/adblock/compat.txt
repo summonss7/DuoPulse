@@ -1,25 +1,24 @@
-! DuoPulse-совместимость скриптлетов (карточка duopulse-044, метрика P-08).
-! Причина SABR-stall: правила uBO «set …adSlots» и «json-prune … adSlots …»
-! вырезают adSlots из player-ответа YouTube — SABR/SSAI-хендшейк (серверные
-! ad-решения) не получает подтверждения слотов, плеер гоняет цепочки ретраев
-! «фейковых» videoplayback-хостов и ~2 с клиентский таймаут — старт контента
-! 8–20 с вместо ~3,5 с (бисекция CDP-проб 22.10.2026: с активным set adSlots
-! столл 16–20 с на каждом SSAI-просмотре и рекламы нет; с нейтрализацией —
-! старт 3,7–4,0 с, но SSAI-преролл ИГРАЕТ (~20 с, как без блокировщика:
-! серверная врезка не подавляется клиентскими скриптлетами в принципе;
-! вырезание ЛЮБОЙ формой = столл). uBO решает то же самое переписыванием
-! сетевых ответов ($replace/trusted-rpfr — правят «adSlots»→"no_ads" ДО
-! парсинга) — у нас слоя перезаписи ответов нет; полный паритет — отдельная
-! карточка).
-! Фикс: нейтрализовать adSlots-части правил uBO точечными исключениями
-! (#@#+js — тот же текст правила) и дать свой json-prune БЕЗ adSlots:
-! playerAds/adPlacements вырезаются (клиентская реклама подавлена), adSlots
-! остаются — хендшейк SABR проходит штатно, стопора нет.
-! Исключения матчатся по точному тексту правил uBO filters.txt (оба варианта
-! текста json-prune: до 21.10 с www, после — без): смена текста апстримом
-! отключает исключение (поведение возвращается к апстримному — SABR-stall
-! снова виден стендом e2e/perf/p08.mjs как индикатор).
+! DuoPulse-совместимость скриптлетов (карточки duopulse-044/050, P-07/P-08).
+! Причина SABR-stall (бисекция 22.10.2026, журнал 044; подтверждено
+! матрицей экспериментов 050): правила uBO «set …adSlots» и
+! «json-prune … adSlots …», ВЫРЕЗАЮЩИЕ adSlots из уже спарсенных ответов
+! клиентскими скриптлетами, убивают преролл, но ломают SABR/SSAI-хендшейк
+! в DuoPulse — старт 8–20 с вместо ~4 с (у живого uBO — не столлит).
+! Эксперименты 050 (журнал): сетевая перезапись $replace
+! "adSlots"→"no_ads" (живые xhr-правила uBO + наши $doc-правила для /watch)
+! применяется честно (DUOPULSE_REPLACE_DEBUG: документ 1,4 МБ переписан),
+! НО преролл на жёсткой навигации играет и после неё — SSAI-решение зашито
+! серверно в SABR-манифест, клиентский ключ его не определяет; на жёсткой
+! навигации XHR-/player вообще не зовётся (единственный перезаписанный
+! запрос — документ). Поэтому: $doc-правила убраны (чистая задержка
+! самофетча), adSlots-исключения оставлены на ВСЕХ хостах (столл хуже
+! преролла — решение 044/duopulse_044_tradeoff). Слой $replace остаётся:
+! живые xhr-правила uBO применяются на SPA-навигациях и /player-вызовах,
+! trusted-скриптлеты uBO (trusted-replace-xhr-response) инъенцируются
+! per-list-доверием (карточка 050).
+! Собственный json-prune без adSlots (044) остаётся: playerAds/adPlacements
+! вырезаются клиентски (клиентская реклама подавлена, P-07).
 m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(set, ytInitialPlayerResponse.adSlots, undefined)
 m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)
-m.youtube.com,music.youtube.com,tv.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)
+m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)
 m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(json-prune, playerResponse.adPlacements playerResponse.playerAds adPlacements playerAds)

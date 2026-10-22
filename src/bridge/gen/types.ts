@@ -176,6 +176,14 @@ export interface AdblockStatusResult {
    */
   ready: boolean;
   /**
+   * Загружено $replace-правил перезаписи ответов (карточка duopulse-050; живые правила uBO движок adblock-rs игнорирует — парсит их наш слой).
+   */
+  replaceRules: number;
+  /**
+   * Ответов, чьи тела реально переписаны ($replace), за сеанс.
+   */
+  replacedTotal: number;
+  /**
    * Всех http(s)-запросов через перехватчик (диагностика P-07).
    */
   seenTotal: number;
