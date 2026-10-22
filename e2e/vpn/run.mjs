@@ -4,7 +4,9 @@
 // HTTP-сервер (страницы, /video.mp4, paced /slow.bin), DNS (*.tun) и echo.
 // Сценарии:
 //   A. direct (режим off): локальная страница грузится напрямую;
-//      «заблокированный» домен .tun без туннеля не открывается (ERR);
+//      «заблокированный» домен .tun без туннеля не открывается — с карточки
+//      048 это собственная страница ошибки DuoPulse (webview вкладки
+//      пересоздаётся, CDP-цель меняется);
 //   B. tunnel, сценарий docs/01 §5.6: импорт .conf → тумблер в панели VPN →
 //      handshake → http://blocked.tun/ открывается ЧЕРЕЗ туннель (DNS-запрос
 //      и HTTP-хит видит только стенд), живая статистика rx/tx/ping;
@@ -13,12 +15,16 @@
 //   D. split: правило blocked.tun → туннель (страница грузится через
 //      туннель), посторонний домен — напрямую (стенд его DNS не видит),
 //      локальная страница живёт при включённом туннеле;
+//   F. страница ошибки (карточка 048): без правила — страница ошибки с
+//      действием «этот сайт — через туннель»; клик создаёт split-правило
+//      (общий стор IPC ↔ роутер) и повторная загрузка проходит туннелем;
+//      внутренняя страница («Новая вкладка») страницу ошибки не показывает;
 //   E. kill-switch (второй сеанс приложения, DUOPULSE_WG_DEAD_MS=20000,
 //      свежий эндпоинт стенда — upsert того же профиля): загрузка большого
 //      файла через туннель обрывается смертью стенда ПОСЕРЕДИНЕ передачи —
 //      fetch видит обрыв (не висит вечно), новые соединения отказывают
-//      (ERR-страница), статус Error «kill-switch» в UI; режим split и
-//      профиль пережили перезапуск (автозапуск туннеля на старте).
+//      (страница ошибки DuoPulse), статус Error «kill-switch» в UI; режим
+//      split и профиль пережили перезапуск (автозапуск туннеля на старте).
 // Изоляция: APPDATA и WEBVIEW2_USER_DATA_FOLDER — во временном каталоге,
 // реальный профиль пользователя не затрагивается.
 //
@@ -145,12 +151,23 @@ function connect(wsUrl) {
     ws.onerror = rej;
   });
   open.catch(() => {});
+  // Таймаут на каждый вызов: у цели, умершей вместе с webview (пересоздание
+  // страницы ошибки, карточка 048), WebSocket.send молча виснет — без таймаута
+  // стенд стоит вечно вместо внятного отказа сценария.
+  const CDP_CALL_TIMEOUT_MS = 20000;
   const send = (method, params = {}) =>
     open.then(
       () =>
         new Promise((res, rej) => {
           const i = ++id;
-          pending.set(i, { res, rej });
+          const timer = setTimeout(() => {
+            pending.delete(i);
+            rej(new Error(`CDP ${method}: нет ответа ${CDP_CALL_TIMEOUT_MS} мс`));
+          }, CDP_CALL_TIMEOUT_MS);
+          pending.set(i, {
+            res: (v) => { clearTimeout(timer); res(v); },
+            rej: (e) => { clearTimeout(timer); rej(e); },
+          });
           ws.send(JSON.stringify({ id: i, method, params }));
         }),
     );
@@ -183,6 +200,72 @@ const navigate = async (ws, url) => {
   await ws.send("Page.navigate", { url });
   return waitForLoad(ws);
 };
+
+/** Ждать перехода документа на URL с префиксом (для навигаций со страницы
+ *  ошибки через nav.navigate: invoke резолвится до загрузки, readyState
+ *  старого документа ещё complete — waitForLoad вернул бы прошлое). */
+const waitForNavigate = async (ws, urlPrefix, timeoutMs = 30000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await evalIn(
+      ws,
+      `location.href.startsWith(${JSON.stringify(urlPrefix)}) && document.readyState === 'complete'
+         ? { url: location.href, text: document.body ? document.body.innerText.slice(0, 400) : '' }
+         : null`,
+    ).catch(() => null);
+    if (r) return r;
+    await sleep(400);
+  }
+  return null;
+};
+
+// --- цели страницы ошибки (карточка 048): webview вкладки при неудачной ---
+// --- навигации пересоздаётся (page-error-N, UI-бандл) — CDP-цель меняется ---
+
+const listTargets = async () =>
+  (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).filter((t) => t.type === "page");
+
+/** Найти цель-страницу ошибки: бандл 5173 (как UI-хром — различаем контентом)
+ *  + window.__DUOPULSE_ERROR__; url — ожидаемый упавший адрес (null — любой). */
+const connectErrorPage = async (url = null, timeoutMs = 30000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const t of await listTargets().catch(() => [])) {
+      if (!/(?:localhost|127\.0\.0\.1):5173/.test(t.url)) continue;
+      const ws = connect(t.webSocketDebuggerUrl);
+      const ctx = await evalIn(ws, `window.__DUOPULSE_ERROR__ ?? null`).catch(() => null);
+      if (ctx && (!url || ctx.url === url)) {
+        await ws.send("Page.enable").catch(() => {});
+        return { ws, ctx };
+      }
+      ws.close();
+    }
+    await sleep(700);
+  }
+  throw new Error(`страница ошибки не найдена (${url ?? "любая"})`);
+};
+
+/** Ждать на цели страницы ошибки действия (кнопки бандла могли отстать от
+ *  init-скрипта) и снять их состояние. */
+const errorActions = async (ws) =>
+  pollUntil(
+    async () => {
+      const a = await evalIn(
+        ws,
+        `(() => {
+           const bs = [...document.querySelectorAll('.err-actions button')];
+           if (!bs.length) return null;
+           return {
+             retry: bs.some((b) => b.className.includes('primary')),
+             tunnel: bs.find((b) => !b.className.includes('primary'))?.textContent ?? null,
+           };
+         })()`,
+      ).catch(() => null);
+      return a?.retry ? a : null;
+    },
+    10000,
+    "кнопки страницы ошибки",
+  );
 
 // --- 1. локальные серверы и стенд ----------------------------------------------
 
@@ -406,7 +489,7 @@ try {
     `udp=127.0.0.1:${ready1.udp_port}, conf=${path.basename(stand1.confPath)}`,
   );
 
-  const { contentWs, uiWs } = await startApp(null); // сеанс 1: порог kill-switch протокольный
+  let { contentWs, uiWs } = await startApp(null); // сеанс 1: порог kill-switch протокольный
   console.log("сеанс 1 запущен (порог kill-switch — протокольный 180 с)");
 
   // --- A. direct (режим off, туннеля нет) --------------------------------------
@@ -422,11 +505,21 @@ try {
     `dns=${dnsNames(stand1).join(",") || "—"}, http=${httpHits(stand1).length}`,
   );
 
-  const rA2 = await navigate(contentWs, "http://blocked.tun/");
+  // A2 (карточка 048): «заблокированный» домен без туннеля — собственная
+  // страница ошибки DuoPulse вместо ERR-страницы Chromium: webview вкладки
+  // пересоздаётся, прежняя CDP-цель умирает.
+  await contentWs.send("Page.navigate", { url: "http://blocked.tun/" }).catch(() => {});
+  contentWs.close();
+  const errA = await connectErrorPage("http://blocked.tun/");
+  const actA = await errorActions(errA.ws);
   check(
-    "A2 direct (off): «заблокированный» домен без туннеля — ERR-страница",
-    rA2.error !== undefined && /^ERR_/.test(rA2.error),
-    `load=${JSON.stringify(rA2).slice(0, 80)}`,
+    "A2 (048) direct (off): неудачная навигация — своя страница ошибки (адрес, причина, действия)",
+    errA.ctx?.url === "http://blocked.tun/" &&
+      typeof errA.ctx?.reason === "string" &&
+      errA.ctx.reason.length > 0 &&
+      actA.retry &&
+      /blocked\.tun/.test(actA.tunnel ?? ""),
+    `ctx=${JSON.stringify(errA.ctx)}, actions=${JSON.stringify(actA)}`,
   );
 
   // --- B. tunnel: сценарий docs/01 §5.6 -----------------------------------------
@@ -470,12 +563,16 @@ try {
     `panel=${panelState}, shield=${shieldState}, routing=${stB.routing}`,
   );
 
-  const rB3 = await navigate(contentWs, "http://blocked.tun/");
+  // B3 §5.6: повторная загрузка со страницы ошибки (действие «Повторить» =
+  // nav.navigate активной вкладки) — webview той же цели уходит на сайт.
+  await evalIn(errA.ws, `window.__duopulse.nav.navigate({ url: "http://blocked.tun/" }), true`);
+  contentWs = errA.ws;
+  const rB3 = await waitForNavigate(contentWs, "http://blocked.tun/");
   const dns1 = dnsNames(stand1);
   const hits1 = httpHits(stand1);
   check(
     "B3 §5.6: заблокированный сайт открывается ЧЕРЕЗ туннель",
-    rB3.loaded && /tunnel ok/i.test(rB3.text ?? ""),
+    rB3 != null && /tunnel ok/i.test(rB3.text ?? ""),
     `load=${JSON.stringify(rB3).slice(0, 60)}`,
   );
   check(
@@ -631,6 +728,87 @@ try {
     JSON.stringify(routesText).slice(0, 120),
   );
 
+  // --- F. страница ошибки → «этот сайт — через туннель» (карточка 048) -----------
+  // Туннель поднят, режим split. Свежий домен зоны .tun (не в DNS-кэше
+  // Chromium от B/D): без правила идёт напрямую — системный DNS отдаёт
+  // NXDOMAIN → страница ошибки с действием «через туннель». Клик:
+  // vpn.add_rule (общий стор IPC ↔ роутер, задача 6.3) + туннель поднят в
+  // split → автоповтор загрузки по правилу (критерий 048): DNS и HTTP видит
+  // только стенд (домен зоны .tun → живой HTTP-сервер стенда).
+  const F_HOST = "fresh-048.tun";
+  const rulesF0 = await evalIn(uiWs, `window.__duopulse.vpn.getRules()`);
+  check(
+    `F0 правила «${F_HOST}» нет (режим split жив)`,
+    rulesF0?.mode === "split" && !rulesF0?.rules?.some((r) => r.domain === F_HOST),
+    JSON.stringify(rulesF0),
+  );
+
+  const dnsF0 = dnsNames(stand1).filter((n) => n === F_HOST).length;
+  const hitsF0 = httpHits(stand1).length;
+  await contentWs.send("Page.navigate", { url: `http://${F_HOST}/` }).catch(() => {});
+  contentWs.close();
+  const errF = await connectErrorPage(`http://${F_HOST}/`);
+  const actF = await errorActions(errF.ws);
+  check(
+    `F1 без правила — страница ошибки с действием «через туннель» (${F_HOST})`,
+    errF.ctx?.url === `http://${F_HOST}/` && actF.tunnel != null && actF.tunnel.includes(F_HOST),
+    `ctx=${JSON.stringify(errF.ctx)}, actions=${JSON.stringify(actF)}`,
+  );
+  await evalIn(
+    errF.ws,
+    `(() => {
+       const b = [...document.querySelectorAll('.err-actions button')].find((x) => !x.className.includes('primary'));
+       b.click();
+       return true;
+     })()`,
+  );
+  // Клик создал правило и повторил загрузку: тот же webview уходит на сайт.
+  contentWs = errF.ws;
+  const rF2 = await waitForNavigate(contentWs, `http://${F_HOST}/`);
+  const rulesF = await evalIn(uiWs, `window.__duopulse.vpn.getRules()`);
+  check(
+    "F2 (048) клик «через туннель»: правило создано общим стором, повторная загрузка прошла туннелем",
+    rulesF?.rules?.some((r) => r.domain === F_HOST && r.route === "tunnel") &&
+      rF2 != null &&
+      /tunnel ok/i.test(rF2.text ?? "") &&
+      dnsNames(stand1).filter((n) => n === F_HOST).length > dnsF0 &&
+      httpHits(stand1).length > hitsF0,
+    `rules=${JSON.stringify(rulesF?.rules)}, load=${JSON.stringify(rF2).slice(0, 60)}, dns=${dnsF0}→${dnsNames(stand1).filter((n) => n === F_HOST).length}, http=${hitsF0}→${httpHits(stand1).length}`,
+  );
+
+  // Внутренние страницы ошибки не показывают (критерий 048): «Новая вкладка»
+  // открывается штатно (маркер .ntp, без контекста ошибки).
+  const tabsF = await evalIn(uiWs, `window.__duopulse.tabs.open({ url: "duopulse://newtab" })`);
+  const ntTarget = await pollUntil(async () => {
+    for (const t of await listTargets().catch(() => [])) {
+      if (!/(?:localhost|127\.0\.0\.1):5173/.test(t.url)) continue;
+      const ws = connect(t.webSocketDebuggerUrl);
+      const isNtp = await evalIn(ws, `!!document.querySelector('.ntp')`).catch(() => false);
+      if (isNtp) {
+        ws.close();
+        return t;
+      }
+      ws.close();
+    }
+    return null;
+  }, 15000, "цель «Новая вкладка»");
+  check(
+    "F3 (048) внутренняя страница открывается без страницы ошибки",
+    ntTarget != null && tabsF?.tabs?.length > 0,
+  );
+  await evalIn(
+    uiWs,
+    `window.__duopulse.tabs.close({ id: ${JSON.stringify(tabsF.tabs.find((t) => t.active)?.id ?? tabsF.tabs.at(-1).id)} }), true`,
+  );
+  await sleep(400);
+  const tabsAfterF = await evalIn(uiWs, `window.__duopulse.tabs.list()`);
+  check(
+    "F4 (048) вкладок-ошибок не плодится (одна вкладка сайта, вкладка newtab закрыта)",
+    tabsAfterF?.tabs?.every((t) => !t.url.startsWith("duopulse://error")) &&
+      tabsAfterF?.tabs?.some((t) => t.url.startsWith(`http://${F_HOST}/`)),
+    JSON.stringify(tabsAfterF?.tabs?.map((t) => t.url)),
+  );
+
   // --- завершение сеанса 1 (профиль/режим остаются в профиле) --------------------
   contentWs.close();
   uiWs.close();
@@ -648,8 +826,7 @@ const stand2 = startWgStand("two");
 try {
   const ready2 = await stand2.ready;
   console.log(`сеанс 2: wg-stand #2 udp=127.0.0.1:${ready2.udp_port}, DUOPULSE_WG_DEAD_MS=${DEAD_MS}`);
-  const { contentWs, uiWs } = await startApp(DEAD_MS);
-
+  let { contentWs, uiWs } = await startApp(DEAD_MS);
   // Перезапуск: режим split и профиль восстановились — туннель автостартовал
   // (эндпоинт ещё старый/мёртвый — обновим upsert-импортом того же пира).
   const st0 = await vpnStatus(uiWs);
@@ -675,8 +852,22 @@ try {
   );
 
   // Загрузка большого файла через туннель; обрываем upstream посередине.
-  const rEnav = await navigate(contentWs, "http://blocked.tun/");
-  if (!rEnav.loaded) console.log(`(навигация перед slow: ${JSON.stringify(rEnav).slice(0, 80)})`);
+  // Туннель после upsert-эндпоинта мог ещё догонять: мгновенный отказ первого
+  // хода — вкладка уходит в страницу ошибки (карточка 048), цель вкладки
+  // пересоздаётся — навигация повторяется со страницы ошибки (nav.navigate).
+  let rEnav = await navigate(contentWs, "http://blocked.tun/").catch((e) => ({ error: String(e) }));
+  for (let tries = 0; !rEnav?.loaded && tries < 3; tries++) {
+    console.log(`(навигация к blocked.tun не прошла (${JSON.stringify(rEnav).slice(0, 70)}), ретрай ${tries + 1})`);
+    await sleep(2000);
+    const errNav = await connectErrorPage("http://blocked.tun/", 10000).catch(() => null);
+    if (!errNav) break;
+    await evalIn(errNav.ws, `window.__duopulse.nav.navigate({ url: "http://blocked.tun/" }), true`);
+    contentWs = errNav.ws;
+    rEnav = await waitForNavigate(contentWs, "http://blocked.tun/");
+    rEnav = rEnav ? { loaded: true } : { error: "timeout" };
+  }
+  if (!rEnav?.loaded) console.log(`(навигация перед slow так и не прошла: ${JSON.stringify(rEnav).slice(0, 80)})`);
+  else console.log("навигация к blocked.tun прошла, грузим большой файл…");
   await evalIn(
     contentWs,
     `(() => {
@@ -731,12 +922,15 @@ try {
     JSON.stringify(slowResult).slice(0, 140),
   );
 
-  // Новые соединения к туннельной цели отказывают (fail-closed быстро).
-  const rE2 = await navigate(contentWs, "http://blocked.tun/after-kill");
+  // Новые соединения к туннельной цели отказывают (fail-closed быстро):
+  // с карточки 048 — страница ошибки DuoPulse (webview пересоздаётся).
+  await contentWs.send("Page.navigate", { url: "http://blocked.tun/after-kill" }).catch(() => {});
+  contentWs.close();
+  const errE = await connectErrorPage("http://blocked.tun/after-kill");
   check(
-    "E2 kill-switch: новые соединения — ERR-страница (напрямую не пошли)",
-    rE2.error !== undefined && /^ERR_/.test(rE2.error),
-    `load=${JSON.stringify(rE2).slice(0, 60)}`,
+    "E2 kill-switch: новые соединения — страница ошибки DuoPulse (напрямую не пошли)",
+    errE.ctx?.url === "http://blocked.tun/after-kill",
+    `ctx=${JSON.stringify(errE.ctx)}`,
   );
 
   // Статус в UI: Error с деталью kill-switch (щит и панель). После смерти
@@ -783,11 +977,17 @@ try {
     `panel=${ui?.panelErr}, shield=${ui?.shieldErr}, detail=${JSON.stringify(stK?.detail ?? "").slice(0, 60)}`,
   );
 
-  // Прямой путь жив: контрольная страница грузится напрямую.
-  const rE4 = await navigate(contentWs, `http://127.0.0.1:${HTTP_PORT}/alive-check`);
+  // Прямой путь жив: контрольная страница грузится напрямую — уходим со
+  // страницы ошибки её же действием (страница активной вкладки).
+  await evalIn(
+    errE.ws,
+    `window.__duopulse.nav.navigate({ url: "http://127.0.0.1:${HTTP_PORT}/alive-check" }), true`,
+  );
+  contentWs = errE.ws;
+  const rE4 = await waitForNavigate(contentWs, `http://127.0.0.1:${HTTP_PORT}/`);
   check(
     "E4 kill-switch: прямой маршрут жив (контрольная страница грузится)",
-    rE4.loaded,
+    rE4 != null,
     `load=${JSON.stringify(rE4).slice(0, 60)}`,
   );
 

@@ -1379,6 +1379,84 @@ body.internal-page {
   font-size: var(--text-sm);
 }
 
+/* --- Внутренняя страница ошибки загрузки (карточка duopulse-048,
+   duopulse://error) ---
+   Колонка по центру на --bg-base: адрес — моно (§4), причина — подпись;
+   действия в стиле proxy-actions (неон — кромка primary, не заливка, §8).
+   Подсказка после «через туннель» — строка .err-note. */
+.errp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100vh;
+  padding: 32px;
+  box-sizing: border-box;
+  text-align: center;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.errp .err-ico {
+  color: var(--text-muted);
+}
+.errp h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.errp .err-url {
+  max-width: 72ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.errp .err-reason,
+.errp .err-note {
+  margin: 0;
+  max-width: 64ch;
+  color: var(--text-muted);
+}
+.errp .err-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.errp .err-actions button {
+  width: auto;
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.errp .err-actions button:hover:not(:disabled) {
+  background: var(--hover-neutral);
+}
+.errp .err-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* Главная кнопка — неон-кромка, не заливка (§8) */
+.errp .err-actions button.primary {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+  font-weight: 700;
+}
+.errp .err-actions button.primary:hover {
+  background: color-mix(in srgb, var(--accent-neon) 10%, transparent);
+  box-shadow: var(--focus-ring-soft);
+}
+
 /* --- Внутренняя страница «Диагностика» (задача 2.5, duopulse://diagnostics) ---
    Живой срез сеанса (perf.snapshot) и история прогонов P-01..P-08: карточки
    на --bg-surface, спарклайны — неон-линия, выход за бюджет — сигнальный

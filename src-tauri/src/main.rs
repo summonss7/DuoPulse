@@ -857,6 +857,48 @@ pub(crate) unsafe fn install_content_handlers(
     install_request_blocker(&core, &env, app, tab_id);
     install_content_messaging(&core, app, tab_id);
     install_cosmetic_prewarm(&core, app, tab_id);
+    install_nav_failure_watcher(&core, app, tab_id);
+}
+
+/// Страница ошибки загрузки (карточка duopulse-048): NavigationCompleted без
+/// успеха отдаётся TabManager::on_nav_failed — вкладка превращается в
+/// duopulse://error с адресом, причиной и действием «этот сайт — через
+/// туннель». Отменённые навигации (WebErrorStatus OPERATION_CANCELED — Esc,
+/// перебита новой) и внутренние страницы отфильтровывает TabManager (у него
+/// состояние вкладки). Вызывается после подписки wry на то же событие —
+/// on_page_load(Finished) успевает актуализировать URL вкладки.
+#[cfg(windows)]
+unsafe fn install_nav_failure_watcher(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
+    use webview2_com::{
+        Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN,
+        NavigationCompletedEventHandler,
+    };
+    use windows_core::BOOL;
+
+    let app = app.clone();
+    let tab_id = tab_id.to_string();
+    let res = core.add_NavigationCompleted(
+        &NavigationCompletedEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let mut ok = BOOL::default();
+            if args.IsSuccess(&mut ok).is_err() || ok.as_bool() {
+                return Ok(());
+            }
+            let mut status = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+            if args.WebErrorStatus(&mut status).is_err() {
+                return Ok(());
+            }
+            app.state::<tabs::TabManager>()
+                .on_nav_failed(&app, &tab_id, status.0);
+            Ok(())
+        })),
+        std::ptr::null_mut(),
+    );
+    if let Err(e) = res {
+        eprintln!("error-page: NavigationCompleted не установлен: {e}");
+    }
 }
 
 /// Разогрев кэша косметических ресурсов на NavigationStarting (карточка

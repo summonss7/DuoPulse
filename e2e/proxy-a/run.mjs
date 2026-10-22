@@ -11,7 +11,8 @@
 //      БЕЗ перезапуска (выкл — страницы грузятся напрямую, вкл — через прокси);
 //   6) путь с паролем: роутер подставляет креденшалы из DPAPI (RFC 1929);
 //   7) FAIL-CLOSED: битый upstream — уровень роутера (REP≠0, цель не
-//      получает соединений) и уровень страницы (ERR_-страница);
+//      получает соединений) и уровень страницы (страница ошибки DuoPulse,
+//      карточка 048);
 //   8) после перезапуска приложения роутер и режим на месте.
 // Изоляция: приложение запускается с APPDATA и WEBVIEW2_USER_DATA_FOLDER во
 // временном каталоге — реальный профиль пользователя не затрагивается.
@@ -130,12 +131,22 @@ function connect(wsUrl) {
     ws.onerror = rej;
   });
   open.catch(() => {}); // close() после теста не должен рождать unhandled rejection
+  // Таймаут на каждый вызов: у цели, умершей вместе с webview (пересоздание
+  // страницы ошибки, карточка 048), WebSocket.send молча виснет.
+  const CDP_CALL_TIMEOUT_MS = 20000;
   const send = (method, params = {}) =>
     open.then(
       () =>
         new Promise((res, rej) => {
           const i = ++id;
-          pending.set(i, { res, rej });
+          const timer = setTimeout(() => {
+            pending.delete(i);
+            rej(new Error(`CDP ${method}: нет ответа ${CDP_CALL_TIMEOUT_MS} мс`));
+          }, CDP_CALL_TIMEOUT_MS);
+          pending.set(i, {
+            res: (v) => { clearTimeout(timer); res(v); },
+            rej: (e) => { clearTimeout(timer); rej(e); },
+          });
           ws.send(JSON.stringify({ id: i, method, params }));
         }),
     );
@@ -167,6 +178,49 @@ const waitForLoad = async (ws, timeoutMs = 15000) => {
 const navigate = async (ws, url) => {
   await ws.send("Page.navigate", { url });
   return waitForLoad(ws);
+};
+
+// --- страница ошибки DuoPulse (карточка 048): неудачная навигация внешнего ---
+// --- сайта пересоздаёт webview вкладки (page-error-N, UI-бандл) — цель меняется
+
+/** Найти цель-страницу ошибки: бандл 5173 (как UI — различаем контентом) +
+ *  window.__DUOPULSE_ERROR__; url — ожидаемый упавший адрес. */
+const connectErrorPage = async (url, timeoutMs = 20000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let targets = [];
+    try {
+      targets = (await (await fetch(`http://localhost:${CDP_PORT}/json`)).json()).filter(
+        (t) => t.type === "page",
+      );
+    } catch {
+      /* приложение поднимается */
+    }
+    for (const t of targets) {
+      if (!/(?:localhost|127\.0\.0\.1):5173/.test(t.url)) continue;
+      const ws = connect(t.webSocketDebuggerUrl);
+      const ctx = await evalIn(ws, `window.__DUOPULSE_ERROR__ ?? null`).catch(() => null);
+      if (ctx && ctx.url === url) return { ws, ctx };
+      ws.close();
+    }
+    await sleep(700);
+  }
+  throw new Error(`страница ошибки не найдена (${url})`);
+};
+
+/** Ждать перехода документа на URL с префиксом (для nav.navigate со страницы
+ *  ошибки: invoke резолвится до загрузки, readyState старой — complete). */
+const waitForNavigate = async (ws, urlPrefix, timeoutMs = 20000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await evalIn(
+      ws,
+      `location.href.startsWith(${JSON.stringify(urlPrefix)}) && document.readyState === 'complete'`,
+    ).catch(() => false);
+    if (r) return true;
+    await sleep(400);
+  }
+  return false;
 };
 
 // --- 1. локальные серверы ------------------------------------------------------
@@ -252,7 +306,7 @@ try {
   console.log(
     `CDP-цели: content=${contentT.url.slice(0, 60)}, ui=${uiT.url.slice(0, 60)}`,
   );
-  const contentWs = connect(contentT.webSocketDebuggerUrl);
+  let contentWs = connect(contentT.webSocketDebuggerUrl);
   const uiWs = connect(uiT.webSocketDebuggerUrl);
   await contentWs.send("Page.enable");
   await uiWs.send("Runtime.enable");
@@ -398,11 +452,21 @@ try {
     httpHits === hitsBefore,
     `http-хиты: ${hitsBefore} → ${httpHits}`,
   );
-  const r6 = await navigate(contentWs, "http://neverssl.com/");
+  // fail-closed на уровне страницы (карточка 048): неудачная навигация —
+  // собственная страница ошибки DuoPulse (webview пересоздаётся, цель новая).
+  await contentWs.send("Page.navigate", { url: "http://neverssl.com/" }).catch(() => {});
+  contentWs.close();
+  let errWs;
+  let errCtx;
+  try {
+    ({ ws: errWs, ctx: errCtx } = await connectErrorPage("http://neverssl.com/"));
+  } catch (e) {
+    errCtx = { error: e.message };
+  }
   check(
-    "fail-closed (страница): загрузка заканчивается ERR_-ошибкой, не прямым ходом",
-    r6.error !== undefined && /^ERR_/.test(r6.error),
-    `load=${JSON.stringify(r6)}`,
+    "fail-closed (страница): страница ошибки DuoPulse, не прямой ход",
+    errCtx?.url === "http://neverssl.com/",
+    `ctx=${JSON.stringify(errCtx).slice(0, 120)}`,
   );
 
   // восстановление: рабочий прокси снова принимает трафик
@@ -413,8 +477,15 @@ try {
        document.getElementById('proxySave').click(); return true; })()`,
   );
   await sleep(2000);
-  const r7 = await navigate(contentWs, "http://example.com/");
-  check("после восстановления прокси страницы снова грузятся", r7.loaded, `load=${JSON.stringify(r7)}`);
+  // восстановление: рабочий прокси снова принимает трафик — уходим со
+  // страницы ошибки её же действием (nav.navigate активной вкладки).
+  await evalIn(
+    errWs,
+    `window.__duopulse.nav.navigate({ url: "http://example.com/" }), true`,
+  ).catch(() => {});
+  contentWs = errWs;
+  const r7 = await waitForNavigate(contentWs, "http://example.com/");
+  check("после восстановления прокси страницы снова грузятся", r7 === true, `navigated=${r7}`);
 
   // скриншот меню для протокола
   const shot = await uiWs.send("Page.captureScreenshot", { format: "png" });

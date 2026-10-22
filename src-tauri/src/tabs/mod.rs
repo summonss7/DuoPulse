@@ -585,7 +585,7 @@ impl TabManager {
         let builder = if internal {
             build_page_webview(id)
         } else {
-            build_tab_webview(app, id, url)
+            build_tab_webview(app, id, WebviewUrl::External(url.clone()))
         };
         let webview = {
             let (pos, size) = content_rect(&window);
@@ -743,6 +743,104 @@ impl TabManager {
         }
         self.finish(app);
     }
+
+    /// NavigationCompleted с ошибкой (карточка duopulse-048, docs/02 §6.2):
+    /// неудачная навигация внешней страницы превращает вкладку в собственную
+    /// страницу ошибки duopulse://error — с адресом, причиной и действием
+    /// «этот сайт — через туннель». Вызывается из COM-колбэка на главном
+    /// потоке: только фильтры под локом, пересоздание webview — async-задачей
+    /// (round-trip создания нельзя делать на потоке цикла событий, см. open).
+    pub(crate) fn on_nav_failed(&self, app: &AppHandle, tab_id: &str, status: i32) {
+        let url = {
+            let st = self.state.lock().expect("tabs: лок не отравлен");
+            let Some(entry) = st.tabs.iter().find(|t| t.id == tab_id) else {
+                return;
+            };
+            let parsed = Url::parse(&entry.url).ok();
+            if !should_show_error_page(entry.internal, parsed.as_ref(), status) {
+                return;
+            }
+            entry.url.clone()
+        };
+        let app = app.clone();
+        let tab_id = tab_id.to_string();
+        tauri::async_runtime::spawn(async move {
+            let manager = app.state::<TabManager>();
+            if let Err(e) = manager.show_error_page(&app, &tab_id, &url, status) {
+                eprintln!("tabs: страница ошибки не показана ({url}): {e}");
+            }
+        });
+    }
+
+    /// Замена webview вкладки на страницу ошибки: прежний webview (ERR-страница
+    /// Chromium) закрывается, новый с меткой page-error-<N> грузит UI-бандл —
+    /// метка матчит роутер src/main.ts и capability page-* (IPC для кнопки
+    /// «через туннель»). Контекст (адрес/причина) — init-скриптом до бандла.
+    /// Content-скрипты ставятся как у контентных вкладок: «Повторить» уводит
+    /// webview на сайт, и он должен работать полноценно (блокировщик, субтитры).
+    /// Канонический адрес вкладки (omnibox, сессия) остаётся адресом сайта —
+    /// как в браузерах: рестарт загрузит сайт заново, не страницу ошибки.
+    fn show_error_page(
+        &self,
+        app: &AppHandle,
+        old_id: &str,
+        url: &str,
+        status: i32,
+    ) -> Result<(), String> {
+        let new_id = {
+            let mut st = self.state.lock().expect("tabs: лок не отравлен");
+            // seq берём до поиска entry: и то и другое через DerefMut guard,
+            // живой mutable-borrow tabs не даёт тронуть next_seq после.
+            st.next_seq += 1;
+            let seq = st.next_seq;
+            let entry = st
+                .tabs
+                .iter_mut()
+                .find(|t| t.id == old_id)
+                .ok_or_else(|| format!("вкладка {old_id} не найдена"))?;
+            // Пока задача дошла до выполнения, вкладка могла уйти с упавшего
+            // адреса (Finished новой навигации) — ошибка уже не про неё.
+            if entry.url != url {
+                return Ok(());
+            }
+            let new_id = format!("page-error-{seq}");
+            entry.id = new_id.clone();
+            entry.internal = true; // app-origin загрузки не трогают URL вкладки
+            entry.title = None;
+            entry.loading = false;
+            entry.sleeping = false;
+            entry.media_playing = false;
+            entry.last_active_ms = now_ms();
+            new_id
+        };
+        if let Some(wv) = app.get_webview(old_id) {
+            wv.close()
+                .map_err(|e| format!("закрытие webview вкладки: {e}"))?;
+        }
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "окно main не найдено".to_string())?;
+        let script = format!(
+            "window.__DUOPULSE_ERROR__ = {};",
+            serde_json::json!({ "url": url, "code": status, "reason": describe_web_error(status) })
+        );
+        let builder = build_tab_webview(app, &new_id, WebviewUrl::App("index.html".into()))
+            .initialization_script(script);
+        let (pos, size) = content_rect(&window);
+        let webview = window
+            .add_child(builder, pos, size)
+            .map_err(|e| format!("создание webview страницы ошибки: {e}"))?;
+        let app_for_handlers = app.clone();
+        let id_for_handlers = new_id;
+        webview
+            .with_webview(move |wv| unsafe {
+                crate::install_content_handlers(wv, &app_for_handlers, &id_for_handlers)
+            })
+            .map_err(|e| format!("установка обработчиков страницы ошибки: {e}"))?;
+        self.apply_visibility(app);
+        self.finish(app);
+        Ok(())
+    }
 }
 
 /// Текущее время, unix-ms (метка сохранения сессии, отсчёт простоя вкладок).
@@ -753,6 +851,47 @@ pub(crate) fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+// --- страница ошибки загрузки (карточка duopulse-048, docs/02 §6.2) -----------
+// Значения COREWEBVIEW2_WEB_ERROR_STATUS, участвующие в решениях: числа
+// стабильны в API WebView2; словарь живёт здесь, чтобы модуль не зависел от
+// виндового крейта (юнит-тесты фильтра гоняются везде).
+
+/// Навигация отменена (Esc, перебита новой) — не ошибка сайта, страницу
+/// ошибки не показываем.
+const WEB_ERROR_OPERATION_CANCELED: i32 = 14;
+
+/// Человекочитаемая причина для страницы ошибки (дефолт — «сайт недоступен»).
+pub(crate) fn describe_web_error(status: i32) -> &'static str {
+    match status {
+        1 => "имя в сертификате сайта не совпадает с адресом",
+        2 => "сертификат сайта истёк",
+        3 | 5 => "сертификат сайта недействителен",
+        4 => "сертификат сайта отозван",
+        6 => "сервер недоступен",
+        7 => "превышено время ожидания ответа",
+        8 => "сервер вернул некорректный ответ",
+        9 | 12 => "не удаётся подключиться к серверу",
+        10 | 11 => "соединение прервано",
+        13 => "домен не найден (DNS)",
+        15 => "цикл или сбой перенаправления",
+        16 => "неожиданная ошибка сети",
+        17 => "сервер требует авторизацию",
+        18 => "прокси требует авторизацию",
+        _ => "сайт недоступен",
+    }
+}
+
+/// Показывать ли страницу ошибки для завершившейся навигации: только внешние
+/// http/https-страницы (внутренние duopulse:// и app-origin бандл не считаются)
+/// и только настоящие сбои — отменённая навигация (Esc, перебитая новой) не
+/// ошибка сайта.
+fn should_show_error_page(internal: bool, url: Option<&Url>, status: i32) -> bool {
+    if internal || status == WEB_ERROR_OPERATION_CANCELED {
+        return false;
+    }
+    matches!(url.map(|u| u.scheme()), Some("http" | "https"))
+}
+
 /// Внутренние страницы duopulse:// (задача 1.4): адрес → имя страницы.
 /// Новые страницы добавляются сюда + в роутер src/main.ts.
 fn internal_page_name(url: &Url) -> Option<&'static str> {
@@ -761,6 +900,7 @@ fn internal_page_name(url: &Url) -> Option<&'static str> {
         "newtab" => Some("newtab"), // «Новая вкладка», задача 1.5 (гайд 06 §7)
         "diagnostics" => Some("diagnostics"), // «Диагностика», задача 2.5
         "settings" => Some("settings"), // «Настройки», задача 5.1
+        "error" => Some("error"),   // страница ошибки загрузки, карточка 048
         _ => None,
     }
 }
@@ -775,13 +915,14 @@ fn is_app_origin(app: &AppHandle, url: &Url) -> bool {
         .unwrap_or(false)
 }
 
-/// Сборка webview контентной вкладки: стартовый URL, content-скрипты (монитор
+/// Сборка webview контентной вкладки: стартовый URL (External сайта; для
+/// страницы ошибки — App-бандл, см. show_error_page), content-скрипты (монитор
 /// M0 + горячие клавиши таб-бара), аргументы окружения старта, трекинг
 /// URL/заголовка.
-fn build_tab_webview(app: &AppHandle, id: &str, url: &Url) -> WebviewBuilder<tauri::Wry> {
+fn build_tab_webview(app: &AppHandle, id: &str, start: WebviewUrl) -> WebviewBuilder<tauri::Wry> {
     let app_for_load = app.clone();
     let app_for_title = app.clone();
-    WebviewBuilder::new(id, WebviewUrl::External(url.clone()))
+    WebviewBuilder::new(id, start)
         // Критерий M0: скрипт выполняется в каждом новом документе
         // (WebView2: AddScriptToExecuteOnDocumentCreatedAsync).
         .initialization_script(crate::CONTENT_INIT_SCRIPT_M0)
@@ -892,5 +1033,44 @@ mod tests {
             internal_page_name(&Url::parse("duopulse://unknown").unwrap()),
             None
         );
+        assert_eq!(
+            internal_page_name(&Url::parse("duopulse://error?url=https://x").unwrap()),
+            Some("error"),
+            "страница ошибки (карточка 048) — внутренняя"
+        );
+    }
+
+    /// Фильтр страницы ошибки (карточка 048): отмена (Esc, перебитая
+    /// навигация) и внутренние страницы кнопку/страницу не показывают,
+    /// внешние http/https — показывают.
+    #[test]
+    fn error_page_filters() {
+        let site = Url::parse("https://blocked.example/").unwrap();
+        // отменённая навигация — не ошибка сайта (критерий карточки)
+        assert!(!should_show_error_page(false, Some(&site), 14));
+        // внутренняя страница / app-origin бандл (в т.ч. повторная ошибка
+        // поверх страницы ошибки, пока вкладка не ушла «Повторить»)
+        assert!(!should_show_error_page(true, Some(&site), 13));
+        assert!(!should_show_error_page(true, None, 13));
+        // не-внешние схемы (tauri:// бандл, file://, about:)
+        assert!(!should_show_error_page(
+            false,
+            Some(&Url::parse("tauri://localhost/index.html").unwrap()),
+            13
+        ));
+        assert!(!should_show_error_page(false, None, 13));
+        // настоящий сетевой сбой внешней страницы — показываем
+        assert!(should_show_error_page(false, Some(&site), 13));
+        assert!(should_show_error_page(false, Some(&site), 0));
+    }
+
+    /// Словарь причин: ключевые статусы дают осмысленный текст, неизвестный
+    /// код — честный дефолт «сайт недоступен».
+    #[test]
+    fn error_page_reasons() {
+        assert_eq!(describe_web_error(13), "домен не найден (DNS)");
+        assert_eq!(describe_web_error(7), "превышено время ожидания ответа");
+        assert_eq!(describe_web_error(14), "сайт недоступен");
+        assert_eq!(describe_web_error(99), "сайт недоступен");
     }
 }

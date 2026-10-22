@@ -20,6 +20,8 @@ if (page === "history") {
   void import("./pages/diagnostics");
 } else if (page === "settings") {
   void import("./pages/settings"); // задача 5.1: полные настройки + профиль
+} else if (page === "error") {
+  void import("./pages/error"); // страница ошибки загрузки, карточка 048
 } else {
   void import("./chrome");
 }
