@@ -51,7 +51,10 @@ use crate::proxy;
 /// статистика панели VPN, эмит нитью туннеля при изменении) и
 /// vpn:route_changed (решение роутера домен → tunnel|direct|proxy, дедуп);
 /// VpnWgState расширен полем pingMs (ICMP-RTT до DNS-сервера туннеля).
-pub const CONTRACT_VERSION: u32 = 10;
+/// v11 (duopulse-049): источник фида обновлений (GitHub/Aila) — UpdaterConfig
+/// и UpdaterStatusResult расширены полем source, UpdaterCheckResult — полем
+/// source («кто ответил»: выбранный источник или зеркало-фолбэк).
+pub const CONTRACT_VERSION: u32 = 11;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -2185,31 +2188,28 @@ fn app_restart(app: AppHandle) {
 
 // --- задача 5.2: автообновление (src/updater.rs) ----------------------------
 
-/// updater.status: снапшот автообновления — текущая версия, канал/автопроверка
-/// (раздел настроек), последняя проверка и ожидающее обновление.
+/// updater.status: снапшот автообновления — текущая версия, канал/источник/
+/// автопроверка (раздел настроек), последняя проверка и ожидающее обновление.
 #[tauri::command]
 fn updater_status(
     app: AppHandle,
     updater: tauri::State<'_, crate::updater::UpdaterService>,
 ) -> crate::updater::UpdaterStatusResult {
     let cfg = crate::settings::load_updater(&proxy::profile_dir());
-    updater.status(
-        app.package_info().version.to_string(),
-        cfg.channel,
-        cfg.auto_check,
-    )
+    updater.status(app.package_info().version.to_string(), &cfg)
 }
 
-/// updater.check: проверить фид канала из настроек (async — сеть плагина);
-/// найденный пакет запоминается в сервисе до install/следующей проверки.
+/// updater.check: проверить фид (канал и источник — из настроек; при
+/// недоступности выбранного источника — зеркало, duopulse-049); найденный
+/// пакет запоминается в сервисе до install/следующей проверки.
 /// Отказ — в поле error результата (не Err): UI показывает причину.
 #[tauri::command]
 async fn updater_check(
     app: AppHandle,
     updater: tauri::State<'_, crate::updater::UpdaterService>,
 ) -> Result<crate::updater::UpdaterCheckResult, String> {
-    let channel = crate::settings::load_updater(&proxy::profile_dir()).channel;
-    Ok(crate::updater::run_check(&app, &updater, channel).await)
+    let cfg = crate::settings::load_updater(&proxy::profile_dir());
+    Ok(crate::updater::run_check(&app, &updater, &cfg).await)
 }
 
 /// updater.install: скачать подписанный пакет последней проверки и установить.

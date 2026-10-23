@@ -10,8 +10,9 @@
 //        «/S» превращается в путь);
 //     3) каталог установки + запись Uninstall в реестре HKCU + ярлыки
 //        (рабочий стол и «Пуск») на месте;
-//     4) запуск установленного приложения: UI отвечает, контракт v7,
-//        updater.status — версия 0.1.0, канал stable, автопроверка вкл.
+//     4) запуск установленного приложения: UI отвечает, контракт v11,
+//        updater.status — версия 0.1.0, канал stable, источник github,
+//        автопроверка вкл.
 //
 //   фаза B «обновление канарейки» (пакет 0.1.1 — синтетический, та же подпись):
 //     5) сборка 0.1.1 (tauri build --config с override версии) — подписанный;
@@ -22,6 +23,11 @@
 //        установщик перезапустил приложение;
 //     9) новое приложение: версия 0.1.1, профиль выжил (канал canary на месте),
 //        реестр показывает 0.1.1.
+//
+//   фаза B+ «источник Aila» (duopulse-049): локальный фид в форме зеркала
+//   (latest-canary.json), профиль source=aila → updater.check обращается по
+//   адресу зеркала и отвечает «у вас последняя версия» (0.1.1 = 0.1.1,
+//   source=aila в результате — «кто ответил» видно).
 //
 //   фаза C «деинсталляция»: uninstall /S сносит каталог и запись реестра.
 //
@@ -208,7 +214,9 @@ const killInstalled = async (exe) => {
 
 const feed = { latestJson: "", package: Buffer.alloc(0) };
 const feedServer = http.createServer((req, res) => {
-  if (req.url.startsWith("/canary/")) {
+  if (req.url.startsWith("/canary/") || req.url.startsWith("/latest-canary.json")) {
+    // github-форма фида (<канал>/…) и aila-форма (latest-<канал>.json,
+    // duopulse-049) отдают один манифест стенда
     res.writeHead(200, { "Content-Type": "application/json" }).end(feed.latestJson);
   } else if (req.url.includes(`_${NEW_VER}_x64-setup.exe`)) {
     res.writeHead(200, { "Content-Type": "application/octet-stream" }).end(feed.package);
@@ -302,12 +310,12 @@ try {
   const a = await launchInstalled(exeA, tmpA, false);
   try {
     const version = await evalIn(a.ws, `window.__duopulse.bridge.version()`);
-    check("A5 установленное приложение: контракт v7", version?.version === 7, JSON.stringify(version));
+    check("A5 установленное приложение: контракт v11", version?.version === 11, JSON.stringify(version));
     const st = await evalIn(a.ws, `window.__duopulse.updater.status()`);
     check(
-      "A6 updater.status: версия 0.1.0, канал stable, автопроверка вкл",
-      st?.currentVersion === OLD_VER && st?.channel === "stable" && st?.autoCheck === true,
-      JSON.stringify(st && { v: st.currentVersion, ch: st.channel, auto: st.autoCheck }),
+      "A6 updater.status: версия 0.1.0, канал stable, источник github, автопроверка вкл",
+      st?.currentVersion === OLD_VER && st?.channel === "stable" && st?.source === "github" && st?.autoCheck === true,
+      JSON.stringify(st && { v: st.currentVersion, ch: st.channel, src: st.source, auto: st.autoCheck }),
     );
   } finally {
     a.ws.close();
@@ -332,9 +340,9 @@ try {
 
     const res = await evalIn(b.ws, `window.__duopulse.updater.check()`);
     check(
-      "B2 updater.check: найден пакет 0.1.1 (подпись фида проверена)",
-      res?.available === true && res?.version === NEW_VER && !res?.error,
-      JSON.stringify(res && { v: res.version, err: res.error }),
+      "B2 updater.check: найден пакет 0.1.1 (подпись фида проверена, ответил github)",
+      res?.available === true && res?.version === NEW_VER && !res?.error && res?.source === "github",
+      JSON.stringify(res && { v: res.version, src: res.source, err: res.error }),
     );
     const st1 = await evalIn(b.ws, `window.__duopulse.updater.status()`);
     check("B3 статус: обновление ожидает решения (pending)", st1?.pending?.version === NEW_VER, JSON.stringify(st1?.pending));
@@ -386,6 +394,47 @@ try {
     wsC?.close();
     const exeNow = await installedExe();
     if (exeNow) await killInstalled(exeNow);
+    await waitForCdpDown(CDP_PORT);
+  }
+
+  // ===== фаза B+: источник Aila (duopulse-049) =================================
+  // адресация зеркала: <база>/latest-<канал>.json вместо github-формы
+  // <канал>/{{target}}/{{arch}}/{{current_version}}; фид стенда показывает
+  // ту же версию → проверка отвечает «у вас последняя версия», и видно,
+  // кто ответил (source=aila).
+  const exeB = await installedExe();
+  const profileDirB = path.join(tmpA, "DuoPulse", "profile");
+  fs.writeFileSync(
+    path.join(profileDirB, "settings.json"),
+    JSON.stringify(
+      { settingsVersion: 2, updater: { channel: "canary", source: "aila", autoCheck: false } },
+      null,
+      2,
+    ),
+  );
+  const bp = await launchInstalled(exeB, tmpA, true);
+  try {
+    const st0 = await evalIn(bp.ws, `window.__duopulse.updater.status()`);
+    check(
+      "B+1 источник aila из профиля",
+      st0?.channel === "canary" && st0?.source === "aila",
+      JSON.stringify(st0 && { ch: st0.channel, src: st0.source }),
+    );
+    const res = await evalIn(bp.ws, `window.__duopulse.updater.check()`);
+    check(
+      "B+2 зеркало aila: проверка прошла, «у вас последняя версия» (ответил aila)",
+      res?.available === false && !res?.error && res?.source === "aila",
+      JSON.stringify(res && { v: res.version, src: res.source, err: res.error }),
+    );
+    const st1 = await evalIn(bp.ws, `window.__duopulse.updater.status()`);
+    check(
+      "B+3 статус: последняя проверка без ошибки, pending пуст",
+      st1?.lastCheck && !st1.lastCheck.error && st1.lastCheck.source === "aila" && !st1?.pending,
+      JSON.stringify(st1?.lastCheck),
+    );
+  } finally {
+    bp.ws.close();
+    await killInstalled(exeB);
     await waitForCdpDown(CDP_PORT);
   }
 

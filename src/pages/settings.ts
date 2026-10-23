@@ -658,10 +658,11 @@ export function initSettingsPage(): void {
   privacyRow.append(clearHistNow, clearCache, privacyStatus);
   privacy.body.append(clearHistLabel, privacyRow);
 
-  // --- 7. Обновления (задача 5.2) ----------------------------------------------
+  // --- 7. Обновления (задача 5.2; источник — duopulse-049) ---------------------
   const upd = section(
     "Обновления",
-    "Подписанные пакеты установщика; проверка — по кнопке или тихо на старте, установка всегда вручную.",
+    "Подписанные пакеты установщика; проверка — по кнопке или тихо на старте, установка всегда вручную. " +
+      "Если выбранный источник недоступен, проверка уходит ко второму (GitHub ↔ Aila).",
   );
   const updChannel = document.createElement("select");
   for (const [value, text] of [
@@ -672,6 +673,16 @@ export function initSettingsPage(): void {
     opt.value = value;
     opt.textContent = text;
     updChannel.append(opt);
+  }
+  const updSource = document.createElement("select");
+  for (const [value, text] of [
+    ["github", "GitHub (по умолчанию)"],
+    ["aila", "Aila (семейный сервер)"],
+  ] as const) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = text;
+    updSource.append(opt);
   }
   const updAuto = document.createElement("input");
   updAuto.type = "checkbox";
@@ -693,16 +704,38 @@ export function initSettingsPage(): void {
   updInstallBtn.dataset.upd = "install";
   const updRow = el("div", "set-row");
   updRow.append(updCheckBtn, updInstallBtn, updStatus);
-  upd.body.append(field("Канал", updChannel, "канарейка — ранние сборки на тестовые машины"), updAutoLabel, updVersionLine, updRow);
+  upd.body.append(
+    field("Канал", updChannel, "канарейка — ранние сборки на тестовые машины"),
+    field("Источник", updSource, "зеркало Aila не зависит от GitHub; ответ второго — в строке проверки"),
+    updAutoLabel,
+    updVersionLine,
+    updRow,
+  );
 
-  /** Канал/автопроверка → раздел настроек updater. */
+  /** Канал/источник/автопроверка → раздел настроек updater. */
   const updApply = (): void => {
     void bridge.settings
-      .apply({ updater: { channel: updChannel.value as "stable" | "canary", autoCheck: updAuto.checked } })
+      .apply({
+        updater: {
+          channel: updChannel.value as "stable" | "canary",
+          source: updSource.value as "github" | "aila",
+          autoCheck: updAuto.checked,
+        },
+      })
       .catch((e) => (updStatus.textContent = String(e)));
   };
   updChannel.addEventListener("change", updApply);
+  updSource.addEventListener("change", updApply);
   updAuto.addEventListener("change", updApply);
+
+  /** Подпись источника проверки (duopulse-049): кто ответил и не было ли фолбэка. */
+  const updSourceNote = (answered: "github" | "aila" | null | undefined): string => {
+    if (!answered) return "";
+    const label = answered === "aila" ? "Aila" : "GitHub";
+    return answered === updSource.value
+      ? ` · источник: ${label}`
+      : ` · источник: ${label} (выбранный недоступен — ответило зеркало)`;
+  };
 
   /** Итог проверки/статуса → кнопки и тексты. */
   const renderUpdateState = (st: UpdaterStatusResult | null, res: UpdaterCheckResult | null): void => {
@@ -710,22 +743,26 @@ export function initSettingsPage(): void {
       ? { version: res.version ?? "?", notes: res.notes ?? null, dateUnix: res.dateUnix }
       : st?.pending ?? null;
     if (st) {
-      updVersionLine.textContent = `Текущая версия: ${st.currentVersion} · канал: ${st.channel === "canary" ? "канарейка" : "стабильный"}`;
+      updVersionLine.textContent =
+        `Текущая версия: ${st.currentVersion} · канал: ${st.channel === "canary" ? "канарейка" : "стабильный"}` +
+        ` · источник: ${st.source === "aila" ? "Aila" : "GitHub"}`;
       if (!res) {
         if (pending) updStatus.textContent = `Доступна версия ${pending.version} (найдена ранее).`;
         else if (st.lastCheck) {
           updStatus.textContent = st.lastCheck.error
             ? `Последняя проверка: ${st.lastCheck.error}`
-            : `Последняя проверка: обновлений нет.`;
+            : `Последняя проверка: ✓ у вас последняя версия${updSourceNote(st.lastCheck.source ?? null)}`;
         }
       }
     }
     if (res) {
       if (res.available) {
         const when = res.dateUnix > 0 ? ` от ${new Date(res.dateUnix * 1000).toLocaleDateString("ru-RU")}` : "";
-        updStatus.textContent = `Доступна версия ${res.version}${when}${res.notes ? ` — ${res.notes}` : ""}`;
+        updStatus.textContent = `Доступна версия ${res.version}${when}${res.notes ? ` — ${res.notes}` : ""}${updSourceNote(res.source ?? null)}`;
       } else {
-        updStatus.textContent = res.error ? res.error : "У вас последняя версия.";
+        updStatus.textContent = res.error
+          ? res.error
+          : `✓ У вас последняя версия${updSourceNote(res.source ?? null)}`;
       }
     }
     updInstallBtn.hidden = !pending;
@@ -880,6 +917,7 @@ export function initSettingsPage(): void {
       clearHist.checked = all.privacy.clearHistoryOnExit ?? false;
       const up = all.updater;
       updChannel.value = up.channel ?? "stable";
+      updSource.value = up.source ?? "github";
       updAuto.checked = up.autoCheck ?? true;
       subsStatus.textContent = "";
     } catch (e) {

@@ -363,6 +363,18 @@ impl UpdateChannel {
     }
 }
 
+/// Источник фида обновлений (duopulse-049): GitHub Pages (по умолчанию) или
+/// зеркало на семейном сервере Aila (updates/duopulse/, aila-163). При
+/// недоступности выбранного проверка уходит ко второму (порядок попыток и
+/// «кто ответил» — src/updater.rs); установка в любом случае идёт с
+/// minisign-подписью, источник меняет только адрес фида и пакета.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateSource {
+    Github,
+    Aila,
+}
+
 /// Раздел "updater" settings.json (задача 5.2). Появился после v2 —
 /// сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -370,6 +382,8 @@ impl UpdateChannel {
 pub struct UpdaterConfig {
     /// Канал фида обновлений (stable/canary).
     pub channel: UpdateChannel,
+    /// Источник фида: GitHub Pages или зеркало Aila (duopulse-049).
+    pub source: UpdateSource,
     /// Тихая автопроверка на старте (установка — всегда руками, из настроек).
     pub auto_check: bool,
 }
@@ -378,6 +392,7 @@ impl Default for UpdaterConfig {
     fn default() -> Self {
         Self {
             channel: UpdateChannel::Stable,
+            source: UpdateSource::Github,
             auto_check: true,
         }
     }
@@ -566,22 +581,39 @@ mod tests {
 
     #[test]
     fn updater_config_roundtrip_and_defaults() {
-        // отсутствие/битый раздел — дефолт (stable, автопроверка вкл)
+        // отсутствие/битый раздел — дефолт (stable, github, автопроверка вкл)
         let dir = tmp_dir("updater");
         assert_eq!(
             load_updater(&dir),
             UpdaterConfig {
                 channel: UpdateChannel::Stable,
+                source: UpdateSource::Github,
                 auto_check: true,
             }
         );
         write_key(&dir, "updater", &serde_json::json!("мусор")).unwrap();
         assert_eq!(load_updater(&dir), UpdaterConfig::default());
+        // старый файл без source (до duopulse-049) — source по умолчанию
+        write_key(
+            &dir,
+            "updater",
+            &serde_json::json!({"channel": "canary", "autoCheck": false}),
+        )
+        .unwrap();
+        assert_eq!(
+            load_updater(&dir),
+            UpdaterConfig {
+                channel: UpdateChannel::Canary,
+                source: UpdateSource::Github,
+                auto_check: false,
+            }
+        );
 
         save_updater(
             &dir,
             &UpdaterConfig {
                 channel: UpdateChannel::Canary,
+                source: UpdateSource::Aila,
                 auto_check: false,
             },
         )
@@ -590,6 +622,7 @@ mod tests {
             load_updater(&dir),
             UpdaterConfig {
                 channel: UpdateChannel::Canary,
+                source: UpdateSource::Aila,
                 auto_check: false,
             }
         );

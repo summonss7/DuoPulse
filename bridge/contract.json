@@ -1179,6 +1179,14 @@
             ],
             "type": "string"
           },
+          "UpdateSource": {
+            "description": "Источник фида обновлений (duopulse-049): GitHub Pages (по умолчанию) или зеркало на семейном сервере Aila (updates/duopulse/, aila-163). При недоступности выбранного проверка уходит ко второму (порядок попыток и «кто ответил» — src/updater.rs); установка в любом случае идёт с minisign-подписью, источник меняет только адрес фида и пакета.",
+            "enum": [
+              "github",
+              "aila"
+            ],
+            "type": "string"
+          },
           "UpdaterConfig": {
             "description": "Раздел \"updater\" settings.json (задача 5.2). Появился после v2 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).",
             "properties": {
@@ -1195,6 +1203,15 @@
                 ],
                 "default": "stable",
                 "description": "Канал фида обновлений (stable/canary)."
+              },
+              "source": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/UpdateSource"
+                  }
+                ],
+                "default": "github",
+                "description": "Источник фида: GitHub Pages или зеркало Aila (duopulse-049)."
               }
             },
             "type": "object"
@@ -1652,6 +1669,14 @@
             ],
             "type": "string"
           },
+          "UpdateSource": {
+            "description": "Источник фида обновлений (duopulse-049): GitHub Pages (по умолчанию) или зеркало на семейном сервере Aila (updates/duopulse/, aila-163). При недоступности выбранного проверка уходит ко второму (порядок попыток и «кто ответил» — src/updater.rs); установка в любом случае идёт с minisign-подписью, источник меняет только адрес фида и пакета.",
+            "enum": [
+              "github",
+              "aila"
+            ],
+            "type": "string"
+          },
           "UpdaterConfig": {
             "description": "Раздел \"updater\" settings.json (задача 5.2). Появился после v2 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).",
             "properties": {
@@ -1668,6 +1693,15 @@
                 ],
                 "default": "stable",
                 "description": "Канал фида обновлений (stable/canary)."
+              },
+              "source": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/UpdateSource"
+                  }
+                ],
+                "default": "github",
+                "description": "Источник фида: GitHub Pages или зеркало Aila (duopulse-049)."
               }
             },
             "type": "object"
@@ -3028,6 +3062,16 @@
       "params": null,
       "result": {
         "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "UpdateSource": {
+            "description": "Источник фида обновлений (duopulse-049): GitHub Pages (по умолчанию) или зеркало на семейном сервере Aila (updates/duopulse/, aila-163). При недоступности выбранного проверка уходит ко второму (порядок попыток и «кто ответил» — src/updater.rs); установка в любом случае идёт с minisign-подписью, источник меняет только адрес фида и пакета.",
+            "enum": [
+              "github",
+              "aila"
+            ],
+            "type": "string"
+          }
+        },
         "description": "Итог проверки фида: что нашли (или почему не смогли посмотреть).",
         "properties": {
           "available": {
@@ -3057,6 +3101,17 @@
               "string",
               "null"
             ]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/UpdateSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Источник, ответивший проверкой (github/aila, duopulse-049): выбранной базой или зеркалом-фолбэком; None — ответа не было (error)."
           },
           "version": {
             "description": "Версия найденного пакета (available=true).",
@@ -3120,6 +3175,14 @@
             ],
             "type": "object"
           },
+          "UpdateSource": {
+            "description": "Источник фида обновлений (duopulse-049): GitHub Pages (по умолчанию) или зеркало на семейном сервере Aila (updates/duopulse/, aila-163). При недоступности выбранного проверка уходит ко второму (порядок попыток и «кто ответил» — src/updater.rs); установка в любом случае идёт с minisign-подписью, источник меняет только адрес фида и пакета.",
+            "enum": [
+              "github",
+              "aila"
+            ],
+            "type": "string"
+          },
           "UpdaterCheckResult": {
             "description": "Итог проверки фида: что нашли (или почему не смогли посмотреть).",
             "properties": {
@@ -3151,6 +3214,17 @@
                   "null"
                 ]
               },
+              "source": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/UpdateSource"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Источник, ответивший проверкой (github/aila, duopulse-049): выбранной базой или зеркалом-фолбэком; None — ответа не было (error)."
+              },
               "version": {
                 "description": "Версия найденного пакета (available=true).",
                 "type": [
@@ -3178,7 +3252,7 @@
                 "$ref": "#/definitions/UpdateChannel"
               }
             ],
-            "description": "Канал и автопроверка — раздел \"updater\" настроек."
+            "description": "Канал, источник и автопроверка — раздел \"updater\" настроек."
           },
           "currentVersion": {
             "description": "Версия работающего приложения (package_info).",
@@ -3205,12 +3279,16 @@
               }
             ],
             "description": "Обновление, найденное последней удачной проверкой (ждёт решения)."
+          },
+          "source": {
+            "$ref": "#/definitions/UpdateSource"
           }
         },
         "required": [
           "autoCheck",
           "channel",
-          "currentVersion"
+          "currentVersion",
+          "source"
         ],
         "title": "UpdaterStatusResult",
         "type": "object"
@@ -4809,5 +4887,5 @@
       }
     }
   },
-  "version": 10
+  "version": 11
 }

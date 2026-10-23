@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 10); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 11); регенерация: npm run gen:bridge.
 
 /**
  * Откуда подсказка: посещение из истории или закладка.
@@ -13,6 +13,10 @@ export type SearchEngine = ("google" | "bing" | "duckduckgo") | "youtube";
  * Канал обновлений (задача 5.2): stable — релизы, canary — ранние сборки для тестовых машин (DoD 5.2 — обновление канарейки). Канал — сегмент пути фида: <база>/<канал>/{{target}}/{{arch}}/{{current_version}}.
  */
 export type UpdateChannel = "stable" | "canary";
+/**
+ * Источник фида обновлений (duopulse-049): GitHub Pages (по умолчанию) или зеркало на семейном сервере Aila (updates/duopulse/, aila-163). При недоступности выбранного проверка уходит ко второму (порядок попыток и «кто ответил» — src/updater.rs); установка в любом случае идёт с minisign-подписью, источник меняет только адрес фида и пакета.
+ */
+export type UpdateSource = "github" | "aila";
 /**
  * settings.get / settings.set: ключи настроек профиля. M1: один ключ.
  */
@@ -76,6 +80,7 @@ export interface DuoPulseBridgeContract {
   SubtitlesConfig: SubtitlesConfig;
   SubtitlesStyleDefaults: SubtitlesStyleDefaults;
   UpdateChannel: UpdateChannel;
+  UpdateSource: UpdateSource;
   UpdaterConfig: UpdaterConfig;
   SettingsExportParams: SettingsExportParams;
   SettingsExportResult: SettingsExportResult;
@@ -518,6 +523,10 @@ export interface UpdaterConfig {
    * Канал фида обновлений (stable/canary).
    */
   channel?: UpdateChannel & string;
+  /**
+   * Источник фида: GitHub Pages или зеркало Aila (duopulse-049).
+   */
+  source?: UpdateSource & string;
 }
 /**
  * settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на чистую машину за 1 файл). path — абсолютный путь из нативного диалога сохранения (UI); include_secrets — явный выбор пользователя (UI предупреждает: пароль прокси и ключи API попадут в файл открытым текстом).
@@ -990,6 +999,10 @@ export interface UpdaterCheckResult {
    */
   notes?: string | null;
   /**
+   * Источник, ответивший проверкой (github/aila, duopulse-049): выбранной базой или зеркалом-фолбэком; None — ответа не было (error).
+   */
+  source?: UpdateSource | null;
+  /**
    * Версия найденного пакета (available=true).
    */
   version?: string | null;
@@ -1000,7 +1013,7 @@ export interface UpdaterCheckResult {
 export interface UpdaterStatusResult {
   autoCheck: boolean;
   /**
-   * Канал и автопроверка — раздел "updater" настроек.
+   * Канал, источник и автопроверка — раздел "updater" настроек.
    */
   channel: UpdateChannel;
   /**
@@ -1015,6 +1028,7 @@ export interface UpdaterStatusResult {
    * Обновление, найденное последней удачной проверкой (ждёт решения).
    */
   pending?: UpdateInfo | null;
+  source: UpdateSource;
 }
 /**
  * Доступное обновление (найдено проверкой, ждёт решения пользователя).
