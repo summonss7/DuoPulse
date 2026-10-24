@@ -16,6 +16,15 @@
 // старт видео относительно «как без нас» (убранный преролл — часть выигрыша).
 // Блокировщик выключается settings.json {"adblock":{"enabled":false}} в профиле
 // контроля ДО первого запуска (ключ читается на старте, adblock/mod.rs).
+// Устойчивость (duopulse-052, 24.10.2026): транзитный сетевой сбой на пути
+// через SOCKS5-роутер (резолв 11001 и пр.) роняет перезагрузку страницы
+// (themeRefresh/пассивный логин Google) → приложение показывает свою страницу
+// ошибки (карточка 048) → youtube-цели в CDP нет, кадра не будет никогда.
+// Это инфра-сбой запуска, а не «медленное видео»: прогон перезапускается
+// (до INVALID_RETRIES на прогон, каждый повтор логируется). Проверка перед
+// стартом: exe в dev-режиме (cargo build --release без tauri-CLI грузит UI с
+// vite — ловушка e2e/perf/run.mjs) — стенд отказывается работать: внутренние
+// страницы (newtab/страница ошибки) мертвы, числа не сравнимы с релизом.
 // Запуск:  node e2e/perf/p08.mjs [url-видео]
 // Требует release-сборку DuoPulse (npx tauri build).
 import { execFile, spawn } from "node:child_process";
@@ -28,6 +37,8 @@ const DUO_EXE = path.join(ROOT, "src-tauri", "target", "release", "duopulse.exe"
 const VIDEO = process.argv[2] || "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 const RUNS = 3;
 const WARMUPS = 2;
+// Перезапусков «неправильного» прогона (сетевой сбой — страница не загрузилась)
+const INVALID_RETRIES = 3;
 const DUO_CDP = 9232;
 const CTL_CDP = 9233;
 
@@ -146,6 +157,67 @@ async function killTree(pid) {
   } catch {}
 }
 
+/** Жива ли youtube-цель: вкладка не ушла со страницы видео (сетевой сбой
+ *  уводит её на страницу ошибки 048 — цель с watch-URL исчезает из /json). */
+async function youtubeTargetAlive(cdpPort) {
+  try {
+    const targets = await (await fetch(`http://localhost:${cdpPort}/json`)).json();
+    return targets.some((x) => x.type === "page" && /youtube\.com\/watch/.test(x.url));
+  } catch {
+    return false;
+  }
+}
+
+/** Префлайт: exe в dev-режиме (cargo build --release без tauri-CLI) грузит UI
+ *  и внутренние страницы с vite localhost:5173 — без сервера они мертвы,
+ *  числа прогона не сравнимы с релизом (ловушка e2e/perf/run.mjs). Отказ
+ *  до старта замеров, пока не потрачены загрузки YouTube. */
+async function ensureReleaseBuild() {
+  const PREFLIGHT_PORT = 9234;
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-p08-pre-"));
+  const app = spawn(DUO_EXE, [], {
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      APPDATA: profile,
+      DUOPULSE_START_URL: "about:blank",
+      DUOPULSE_CDP_PORT: String(PREFLIGHT_PORT),
+      WEBVIEW2_USER_DATA_FOLDER: path.join(profile, "webview2-data"),
+    },
+  });
+  try {
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      let targets = null;
+      try {
+        targets = await (await fetch(`http://localhost:${PREFLIGHT_PORT}/json`)).json();
+      } catch {}
+      const pages = (targets ?? []).filter(
+        (t) => t.type === "page" && t.url && t.url !== "about:blank",
+      );
+      if (pages.length > 0) {
+        if (pages.some((t) => /^http:\/\/(localhost|127\.0\.0\.1):5173\//.test(t.url))) {
+          console.error("FAIL  exe в dev-режиме (UI грузится с localhost:5173 — cargo build --release без tauri-CLI):");
+          console.error("      соберите npx tauri build — ловушка описана в e2e/perf/run.mjs");
+          process.exit(1);
+        }
+        return;
+      }
+      if (Date.now() > deadline) {
+        console.error("FAIL  префлайт: CDP не поднялся за 30 с");
+        process.exit(1);
+      }
+      await sleep(300);
+    }
+  } finally {
+    await killTree(app.pid);
+    await sleep(500);
+    try {
+      fs.rmSync(profile, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
 // --- DuoPulse (релизная сборка, тёплый профиль) ------------------------------
 const duoProfile = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-p08-duo-"));
 // --- контроль: DuoPulse с выключенным блокировщиком (тёплый профиль) ---------
@@ -204,24 +276,34 @@ async function waitWebViewDown(prof) {
 
 /** Прогрев+замеры одного прогона: launch → ждём кадр → kill; возвращает
  *  массив { ms, adSeen } замеренных прогонов. settle — ждать полной смерти
- *  процессов профиля (DuoPulse/WebView2), чтобы порт и папка освободились. */
+ *  процессов профиля (DuoPulse/WebView2), чтобы порт и папка освободились.
+ *  Прогон без кадра, где страница потеряна (сетевой сбой → страница ошибки
+ *  048 — youtube-цели нет), — инфра-сбой: перезапуск до INVALID_RETRIES.
+ *  Цель на месте, а кадра нет — честный провал метрики, не маскируем. */
 async function measureBrowser(name, launch, cdpPort, settle) {
   const out = [];
   const total = WARMUPS + RUNS;
   for (let i = 0; i < total; i++) {
-    const app = launch();
-    const t0 = Date.now();
-    const r = await waitFirstFrame(cdpPort, t0, 120_000);
-    await sleep(i < WARMUPS ? 8000 : 2500); // прогрев досматривает ролик (кэш/кап рекламы)
-    await killTree(app.pid);
-    if (settle) await settle();
-    await sleep(1200);
-    if (!r) throw new Error(`${name}: первый кадр не дождан в прогоне ${i + 1}`);
-    if (i >= WARMUPS) {
-      out.push(r);
-      console.log(`  ${name} прогон ${i - WARMUPS + 1}: ${r.ms} мс${r.adSeen ? " (видна реклама)" : ""}`);
-    } else {
-      console.log(`  ${name} прогрев ${i + 1}: ${r.ms} мс${r.adSeen ? " (видна реклама)" : ""}`);
+    const label = i < WARMUPS ? `прогрев ${i + 1}` : `прогон ${i - WARMUPS + 1}`;
+    for (let attempt = 1; ; attempt++) {
+      const app = launch();
+      const t0 = Date.now();
+      const r = await waitFirstFrame(cdpPort, t0, 120_000);
+      // до killTree — CDP-порт ещё жив, можно спросить про цель
+      const pageAlive = r ? true : await youtubeTargetAlive(cdpPort);
+      await sleep(i < WARMUPS ? 8000 : 2500); // прогрев досматривает ролик (кэш/кап рекламы)
+      await killTree(app.pid);
+      if (settle) await settle();
+      await sleep(1200);
+      if (r) {
+        if (i >= WARMUPS) out.push(r);
+        console.log(`  ${name} ${label}: ${r.ms} мс${r.adSeen ? " (видна реклама)" : ""}`);
+        break;
+      }
+      if (pageAlive || attempt > INVALID_RETRIES) {
+        throw new Error(`${name}: первый кадр не дождан в ${label}`);
+      }
+      console.log(`  ${name} ${label}: инфра-сбой (страница не загрузилась) — перезапуск ${attempt}`);
     }
   }
   return out;
@@ -231,6 +313,7 @@ let failures = 0;
 let duoMedian = NaN;
 let ctlMedian = NaN;
 try {
+  await ensureReleaseBuild();
   console.log("DuoPulse (блокировщик включён):");
   const duo = await measureBrowser("DuoPulse", launchDuo, DUO_CDP, () => waitWebViewDown(duoProfile));
   console.log("Контроль — DuoPulse (блокировщик выключен, решение 21.10.2026 duopulse_047_control):");
