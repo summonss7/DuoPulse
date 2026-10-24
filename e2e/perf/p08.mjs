@@ -1,10 +1,26 @@
 // Замер метрики P-08 (задача 2.5/gate M2, docs/04 §2): «Время до первого
 // кадра видео (повторный просмотр) ≤ контрольного браузера (не хуже)».
 // Повторный просмотр = тёплый кэш профиля (2 прогрев-просмотра), затем
-// 3 замеренных запуска на прогон, медиана; отсчёт — запуск процесса →
-// первый кадр КОНТЕНТА (currentTime > 0.5, не пауза, не реклама; реклама
-// детектируется и репортится: в DuoPulse её нет — скриптлеты, в контроле
-// без блокировщика преролл ждём честно, он входит в число контроля).
+// 3 замеренных запуска на прогон; отсчёт — запуск процесса → первый кадр
+// ВОСПРОИЗВЕДЕНИЯ (currentTime > 0.5, не пауза). Тонкость (карточка 055):
+// при преролле первый воспроизводимый кадр — кадр РЕКЛАМЫ (у YouTube ролик
+// крутится в том же <video>), т.е. в число входит стартовый путь преролла
+// (манифест/сегменты рекламы), но НЕ его полная длительность — она лотерея
+// YouTube, а не качество продукта. Состояние рекламы каждого прогона
+// детектируется (.ad-showing) и репортится.
+//
+// Стратификация по состоянию рекламы (карточка duopulse-055, 24.10.2026):
+// SSAI-преролл attachится стохастично от сессии/профиля (24.10: блокировщик
+// 5/5 прогонов с рекламой, контроль 1/5) — сравнение «медиана всех ≤ медиана
+// всех» меняло вердикт от лотереи YouTube, а не от качества продукта.
+// Вердикт — по паре ячеек РАВНОГО состояния (ad-vs-ad / noad-vs-noad),
+// минимум MIN_CELL прогонов в ячейке у ОБЕИХ сторон; недостающие ячейки
+// добираются добавочными запусками (каждый запуск — новый тираж лотереи,
+// до EXTRA_ROUNDS раундов). Пары нет — вердикт «НЕ ОПРЕДЕЛЁН» (exit 3):
+// это не FAIL продукта. При наличии обеих пар решает noad-пара (чистое
+// сравнение движка/блокировщика), ad-пара репортится справочно — правило
+// утверждено автором 24.10.2026 12:12 (вопрос duopulse_055_metric_20261024,
+// выбор 1, Aila).
 //
 // Контроль (решение автора 21.10.2026 03:48, duopulse_047_control_20261021):
 // DuoPulse с ВЫКЛЮЧЕННЫМ блокировщиком — тот же движок WebView2 и та же
@@ -39,6 +55,9 @@ const RUNS = 3;
 const WARMUPS = 2;
 // Перезапусков «неправильного» прогона (сетевой сбой — страница не загрузилась)
 const INVALID_RETRIES = 3;
+// Стратификация (карточка 055): минимально честная ячейка и добор лотереи
+const MIN_CELL = 2; // прогонов одного состояния рекламы у каждой стороны
+const EXTRA_ROUNDS = 4; // раундов добора (по одному запуску на сторону)
 const DUO_CDP = 9232;
 const CTL_CDP = 9233;
 
@@ -55,9 +74,9 @@ const run = (cmd, args) =>
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
 setTimeout(() => {
-  console.error("СТЕНД: глобальный таймаут 15 мин — принудительное завершение");
+  console.error("СТЕНД: глобальный таймаут 20 мин — принудительное завершение");
   process.exit(2);
-}, 15 * 60_000).unref?.();
+}, 20 * 60_000).unref?.();
 
 function connect(wsUrl) {
   const ws = new WebSocket(wsUrl);
@@ -274,59 +293,117 @@ async function waitWebViewDown(prof) {
   }
 }
 
-/** Прогрев+замеры одного прогона: launch → ждём кадр → kill; возвращает
- *  массив { ms, adSeen } замеренных прогонов. settle — ждать полной смерти
- *  процессов профиля (DuoPulse/WebView2), чтобы порт и папка освободились.
- *  Прогон без кадра, где страница потеряна (сетевой сбой → страница ошибки
- *  048 — youtube-цели нет), — инфра-сбой: перезапуск до INVALID_RETRIES.
- *  Цель на месте, а кадра нет — честный провал метрики, не маскируем. */
+/** Один запуск: launch → ждём кадр → kill; возвращает { ms, adSeen } или
+ *  бросает ошибку. Прогон без кадра, где страница потеряна (сетевой сбой →
+ *  страница ошибки 048 — youtube-цели нет), — инфра-сбой: перезапуск до
+ *  INVALID_RETRIES. Цель на месте, а кадра нет — честный провал метрики,
+ *  не маскируем. watchMs — сколько смотреть ролик после кадра (прогрев
+ *  досматривает дольше: кэш/кап рекламы). settle — ждать полной смерти
+ *  процессов профиля (DuoPulse/WebView2), чтобы порт и папка освободились. */
+async function measureOnce(name, launch, cdpPort, settle, label, watchMs) {
+  for (let attempt = 1; ; attempt++) {
+    const app = launch();
+    const t0 = Date.now();
+    const r = await waitFirstFrame(cdpPort, t0, 120_000);
+    // до killTree — CDP-порт ещё жив, можно спросить про цель
+    const pageAlive = r ? true : await youtubeTargetAlive(cdpPort);
+    await sleep(watchMs);
+    await killTree(app.pid);
+    if (settle) await settle();
+    await sleep(1200);
+    if (r) {
+      console.log(`  ${name} ${label}: ${r.ms} мс${r.adSeen ? " (видна реклама)" : ""}`);
+      return r;
+    }
+    if (pageAlive || attempt > INVALID_RETRIES) {
+      throw new Error(`${name}: первый кадр не дождан в ${label}`);
+    }
+    console.log(`  ${name} ${label}: инфра-сбой (страница не загрузилась) — перезапуск ${attempt}`);
+  }
+}
+
+/** Прогрев+замеры стороны: WARMUPS прогревов (в вердикт не входят — первый
+ *  запуск профиля качает списки/строит движок) + RUNS замеренных прогонов. */
 async function measureBrowser(name, launch, cdpPort, settle) {
   const out = [];
-  const total = WARMUPS + RUNS;
-  for (let i = 0; i < total; i++) {
-    const label = i < WARMUPS ? `прогрев ${i + 1}` : `прогон ${i - WARMUPS + 1}`;
-    for (let attempt = 1; ; attempt++) {
-      const app = launch();
-      const t0 = Date.now();
-      const r = await waitFirstFrame(cdpPort, t0, 120_000);
-      // до killTree — CDP-порт ещё жив, можно спросить про цель
-      const pageAlive = r ? true : await youtubeTargetAlive(cdpPort);
-      await sleep(i < WARMUPS ? 8000 : 2500); // прогрев досматривает ролик (кэш/кап рекламы)
-      await killTree(app.pid);
-      if (settle) await settle();
-      await sleep(1200);
-      if (r) {
-        if (i >= WARMUPS) out.push(r);
-        console.log(`  ${name} ${label}: ${r.ms} мс${r.adSeen ? " (видна реклама)" : ""}`);
-        break;
-      }
-      if (pageAlive || attempt > INVALID_RETRIES) {
-        throw new Error(`${name}: первый кадр не дождан в ${label}`);
-      }
-      console.log(`  ${name} ${label}: инфра-сбой (страница не загрузилась) — перезапуск ${attempt}`);
-    }
+  for (let i = 0; i < WARMUPS; i++) {
+    await measureOnce(name, launch, cdpPort, settle, `прогрев ${i + 1}`, 8000);
+  }
+  for (let i = 0; i < RUNS; i++) {
+    out.push(await measureOnce(name, launch, cdpPort, settle, `прогон ${i + 1}`, 2500));
   }
   return out;
 }
 
+// --- стратификация по состоянию рекламы (карточка 055, шапка файла) ----------
+const cellsOf = (runs) => ({
+  ad: runs.filter((r) => r.adSeen).map((r) => r.ms),
+  noad: runs.filter((r) => !r.adSeen).map((r) => r.ms),
+});
+const fmtCell = (xs) => `[${xs.join(", ")}]`;
+
+/** Пара равного состояния рекламы с ≥MIN_CELL прогонами у обеих сторон;
+ *  при обеих парах решает noad (чистое сравнение без лотереи SSAI). */
+function pickPair(duo, ctl) {
+  const dc = cellsOf(duo);
+  const cc = cellsOf(ctl);
+  if (dc.noad.length >= MIN_CELL && cc.noad.length >= MIN_CELL)
+    return { state: "без рекламы", duo: median(dc.noad), ctl: median(cc.noad) };
+  if (dc.ad.length >= MIN_CELL && cc.ad.length >= MIN_CELL)
+    return { state: "с прероллом", duo: median(dc.ad), ctl: median(cc.ad) };
+  return null;
+}
+
 let failures = 0;
-let duoMedian = NaN;
-let ctlMedian = NaN;
+// 0 = PASS, 1 = FAIL, 3 = вердикт не определён (нет пары равных состояний)
+let exitCode = 1;
 try {
   await ensureReleaseBuild();
   console.log("DuoPulse (блокировщик включён):");
   const duo = await measureBrowser("DuoPulse", launchDuo, DUO_CDP, () => waitWebViewDown(duoProfile));
   console.log("Контроль — DuoPulse (блокировщик выключен, решение 21.10.2026 duopulse_047_control):");
   const ctl = await measureBrowser("контроль", launchCtl, CTL_CDP, () => waitWebViewDown(ctlProfile));
-  duoMedian = median(duo.map((r) => r.ms));
-  ctlMedian = median(ctl.map((r) => r.ms));
-  const ok = duoMedian <= ctlMedian;
+
+  // пары равных состояний нет — добираем ячейки добавочными запусками
+  // (каждый запуск — новый тираж лотереи SSAI), максимум EXTRA_ROUNDS раундов
+  let pair = pickPair(duo, ctl);
+  for (let round = 1; !pair && round <= EXTRA_ROUNDS; round++) {
+    console.log(`добор ячеек (равные состояния рекламы), раунд ${round}:`);
+    duo.push(
+      await measureOnce("DuoPulse", launchDuo, DUO_CDP, () => waitWebViewDown(duoProfile), `добор ${round}`, 2500),
+    );
+    pair = pickPair(duo, ctl);
+    if (!pair) {
+      ctl.push(
+        await measureOnce("контроль", launchCtl, CTL_CDP, () => waitWebViewDown(ctlProfile), `добор ${round}`, 2500),
+      );
+      pair = pickPair(duo, ctl);
+    }
+  }
+
+  const dc = cellsOf(duo);
+  const cc = cellsOf(ctl);
   console.log(
-    `\nP-08: DuoPulse медиана ${duoMedian} мс vs контроль без блокировщика ${ctlMedian} мс — ${ok ? "НЕ ХУЖЕ" : "хуже"} (docs/04 §2: контроль с 21.10.2026 — DuoPulse без блокировщика)`,
+    `\nячейки по состоянию рекламы: DuoPulse ad=${fmtCell(dc.ad)} noad=${fmtCell(dc.noad)} | ` +
+      `контроль ad=${fmtCell(cc.ad)} noad=${fmtCell(cc.noad)}`,
   );
-  console.log(`      прогоны: DuoPulse=${JSON.stringify(duo.map((r) => r.ms))} контроль=${JSON.stringify(ctl.map((r) => r.ms))}`);
-  console.log(`      реклама: DuoPulse=${JSON.stringify(duo.map((r) => r.adSeen))} контроль=${JSON.stringify(ctl.map((r) => r.adSeen))}`);
-  if (!ok) failures++;
+  console.log(
+    `смешанные медианы (старая методика 044–052, справочно, НЕ вердикт): DuoPulse ${median(duo.map((r) => r.ms))} vs контроль ${median(ctl.map((r) => r.ms))} мс`,
+  );
+  if (pair) {
+    const ok = pair.duo <= pair.ctl;
+    console.log(
+      `\nP-08: пара «${pair.state}» — DuoPulse медиана ${pair.duo} мс vs контроль ${pair.ctl} мс — ${ok ? "НЕ ХУЖЕ" : "хуже"} (docs/04 §2, стратификация duopulse-055)`,
+    );
+    if (!ok) failures++;
+    exitCode = ok ? 0 : 1;
+  } else {
+    console.log(
+      `\nP-08: НЕТ пары равных состояний рекламы (нужно ≥${MIN_CELL} прогонов у обеих сторон) — ` +
+        `вердикт НЕ ОПРЕДЕЛЁН: лотерея SSAI YouTube, это не FAIL продукта (карточка duopulse-055)`,
+    );
+    exitCode = 3;
+  }
 } catch (e) {
   failures++;
   console.error("E2E ERROR:", e.message);
@@ -349,5 +426,7 @@ try {
   await sleep(1000);
 }
 
-console.log(`\n${failures === 0 ? "ALL PASS" : "FAILURES: " + failures}`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(
+  `\n${exitCode === 0 ? "ALL PASS" : exitCode === 3 && failures === 0 ? "INCONCLUSIVE (exit 3)" : "FAILURES: " + failures}`,
+);
+process.exit(exitCode === 3 && failures === 0 ? 3 : failures === 0 ? exitCode : 1);
