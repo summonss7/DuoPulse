@@ -153,6 +153,50 @@ const launchAt = (profile, port) => () =>
     },
   });
 
+// --- версия фильтр-листов (карточка duopulse-056, хуки как в p08.mjs) ---------
+// DUOPULSE_P08_SEED_FILTERS=<dir> — заморозка версий списков (сесть из донора,
+// не качать); DUOPULSE_P08_KEEP_FILTERS=<dir> — копия txt+meta до удаления
+// профилей. Версия (digest+rules из meta.json) падает в дамп прогона: гипотеза
+// 056 — «версия совпала при разной скорости → списки исключаются».
+// DUOPULSE_P08_TRACE_STAMP_DIR=<dir> — копия дампа с меткой времени туда
+// (последовательные прогоны не затирают друг друга; p08-trace-last.json
+// пишется как и раньше).
+function seedFilters(profile) {
+  const seed = process.env.DUOPULSE_P08_SEED_FILTERS;
+  if (!seed) return;
+  const dst = path.join(profile, "DuoPulse", "profile", "filters");
+  fs.mkdirSync(dst, { recursive: true });
+  fs.cpSync(seed, dst, { recursive: true });
+}
+function keepFilters(profile, tag) {
+  const keep = process.env.DUOPULSE_P08_KEEP_FILTERS;
+  if (!keep) return;
+  try {
+    const src = path.join(profile, "DuoPulse", "profile", "filters");
+    const dst = path.join(keep, `${tag}-${new Date().toISOString().replace(/[:.]/g, "")}`);
+    fs.mkdirSync(dst, { recursive: true });
+    for (const f of fs.readdirSync(src))
+      if (f.endsWith(".txt") || f === "meta.json") fs.copyFileSync(path.join(src, f), path.join(dst, f));
+  } catch {}
+}
+function listVersionsOf(profile) {
+  try {
+    const meta = JSON.parse(
+      fs.readFileSync(path.join(profile, "DuoPulse", "profile", "filters", "meta.json"), "utf8"),
+    );
+    return Object.entries(meta.lists ?? {}).map(([name, m]) => ({
+      name,
+      digest: m.digest,
+      rules: m.rules,
+      updatedAt: m.updated_at,
+    }));
+  } catch {
+    return null;
+  }
+}
+seedFilters(duoProfile);
+seedFilters(ctlProfile);
+
 /** Простой запуск без трассировки (прогрев профиля, как p08.mjs). */
 async function warmupOnce(name, launch, cdpPort, settle) {
   const app = launch();
@@ -427,12 +471,35 @@ try {
       console.log(`медиана первого кадра: ${summary[side].medianFrameMs} мс`);
     }
   }
-  fs.writeFileSync(DUMP, JSON.stringify({ video: VIDEO, generated: new Date().toISOString(), summary, raw: runs }, null, 1));
+  const dump = () =>
+    JSON.stringify(
+      {
+        video: VIDEO,
+        generated: new Date().toISOString(),
+        // версия списков на момент прогона (карточка 056): digest+rules meta.json
+        lists: { DuoPulse: listVersionsOf(duoProfile), контроль: listVersionsOf(ctlProfile) },
+        summary,
+        raw: runs,
+      },
+      null,
+      1,
+    );
+  fs.writeFileSync(DUMP, dump());
+  const stampDir = process.env.DUOPULSE_P08_TRACE_STAMP_DIR;
+  if (stampDir) {
+    const stamped = path.join(stampDir, `p08-trace-${new Date().toISOString().replace(/[:.]/g, "")}.json`);
+    fs.mkdirSync(stampDir, { recursive: true });
+    fs.writeFileSync(stamped, dump());
+    console.log(`копия дампа: ${stamped}`);
+  }
   console.log(`\nдамп: ${path.relative(ROOT, DUMP)}`);
+  console.log(`списки DuoPulse: ${(listVersionsOf(duoProfile) ?? []).map((l) => `${l.name}#${l.digest.toString(16)}(${l.rules})`).join(" ") || "meta.json нет"}`);
 } catch (e) {
   console.error("E2E ERROR:", e.message);
   process.exitCode = 1;
 } finally {
+  keepFilters(duoProfile, "duo");
+  keepFilters(ctlProfile, "ctl");
   try {
     fs.rmSync(duoProfile, { recursive: true, force: true });
   } catch {}

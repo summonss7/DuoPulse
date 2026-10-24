@@ -261,6 +261,56 @@ const launchAt = (profile, port) => () =>
 const launchDuo = launchAt(duoProfile, DUO_CDP);
 const launchCtl = launchAt(ctlProfile, CTL_CDP);
 
+// --- версия фильтр-листов (карточка duopulse-056) -----------------------------
+// Свежий профиль качает списки при первом старте (кэш <профиль>/DuoPulse/
+// profile/filters валиден сутки) — состав правил может меняться между прогонами
+// и быть источником плавающей разницы DuoPulse-vs-контроль. Хуки:
+//  DUOPULSE_P08_SEED_FILTERS=<dir> — засеять кэш списков каждого профиля из
+//    каталога-донора до первого запуска (заморозка версий: приложение видит
+//    свежий кэш и не качает, все прогоны на байт-идентичных списках);
+//  DUOPULSE_P08_KEEP_FILTERS=<dir> — перед удалением профилей скопировать туда
+//    txt+meta обеих сторон (duo-<ts>/ctl-<ts>) для diff'а текстов списков.
+// Независимо от хуков версия списков (digest+rules из meta.json) печатается
+// в вывод прогона — трассировка «версия совпала при разной скорости → списки
+// исключаются» (гипотеза карточки 056).
+function seedFilters(profile) {
+  const seed = process.env.DUOPULSE_P08_SEED_FILTERS;
+  if (!seed) return;
+  const dst = path.join(profile, "DuoPulse", "profile", "filters");
+  fs.mkdirSync(dst, { recursive: true });
+  fs.cpSync(seed, dst, { recursive: true });
+}
+function keepFilters(profile, tag) {
+  const keep = process.env.DUOPULSE_P08_KEEP_FILTERS;
+  if (!keep) return;
+  try {
+    const src = path.join(profile, "DuoPulse", "profile", "filters");
+    const dst = path.join(keep, `${tag}-${new Date().toISOString().replace(/[:.]/g, "")}`);
+    fs.mkdirSync(dst, { recursive: true });
+    for (const f of fs.readdirSync(src))
+      if (f.endsWith(".txt") || f === "meta.json") fs.copyFileSync(path.join(src, f), path.join(dst, f));
+  } catch {}
+}
+function listVersionsOf(profile) {
+  try {
+    const meta = JSON.parse(
+      fs.readFileSync(path.join(profile, "DuoPulse", "profile", "filters", "meta.json"), "utf8"),
+    );
+    return Object.entries(meta.lists ?? {}).map(([name, m]) => ({
+      name,
+      digest: m.digest,
+      rules: m.rules,
+      updatedAt: m.updated_at,
+    }));
+  } catch {
+    return null;
+  }
+}
+const fmtLists = (v) =>
+  v ? v.map((l) => `${l.name}#${l.digest.toString(16)}(${l.rules} пр.)`).join(" ") : "meta.json нет";
+seedFilters(duoProfile);
+seedFilters(ctlProfile);
+
 /** Дождаться смерти процессов WebView2 профиля DuoPulse: осиротевший браузер
  *  держит user-data-folder и порт CDP — следующий прогон получит зомби-цели
  *  (как e2e/perf/run.mjs waitWebViewDown). */
@@ -408,6 +458,11 @@ try {
   failures++;
   console.error("E2E ERROR:", e.message);
 } finally {
+  // версия списков обеих сторон (карточка 056): до удаления профилей
+  console.log(`\nсписки DuoPulse: ${fmtLists(listVersionsOf(duoProfile))}`);
+  console.log(`списки контроля: ${fmtLists(listVersionsOf(ctlProfile))}`);
+  keepFilters(duoProfile, "duo");
+  keepFilters(ctlProfile, "ctl");
   // контроль шёл с выключенным блокировщиком по settings.json — убедимся,
   // что приложение не перезаписало ключ (санити подложенного конфига)
   try {
