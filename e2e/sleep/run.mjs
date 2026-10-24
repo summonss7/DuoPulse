@@ -325,9 +325,12 @@ try {
   const music = await waitFor(uiWs, (t) => t.url.endsWith("/music"), 15000, "вкладка music в списке");
   const musicId = music.id;
   let musicState;
-  for (let i = 0; i < 30 && !musicState; i++) {
+  // ждём именно ИГРАЮЩЕЕ аудио: первая публикация title может выйти до старта
+  // автоплея (p:0 — буферизация tone.wav идёт через SOCKS5-роутер), проверка
+  // (7) ниже подтверждает, что звук реально играет и вкладка не спит
+  for (let i = 0; i < 30 && musicState?.p !== 1; i++) {
     musicState = stateOf(await tabBy(uiWs, (t) => t.id === musicId));
-    if (!musicState) await sleep(500);
+    if (musicState?.p !== 1) await sleep(500);
   }
   await evalIn(uiWs, `window.__duopulse.tabs.activate({ id: "${p0Id}" })`); // music → фон
   check("аудио во вкладке играет (autoplay, публикация в title)", musicState?.p === 1);

@@ -154,7 +154,7 @@ try {
 
   // (1) bridge.version
   const version = await evalIn(uiWs, `window.__duopulse.bridge.version()`);
-  check("bridge.version: приложение отдаёт версию контракта", version?.version === 10, JSON.stringify(version)); // v10: события vpn:stats + vpn:route_changed, VpnWgState.pingMs (6.5); v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} (5.1)
+  check("bridge.version: приложение отдаёт версию контракта", version?.version === 11, JSON.stringify(version)); // v11: updater.{check,status}.source — источник фида «кто ответил» (зеркало GitHub/Aila, duopulse-049); v10: события vpn:stats + vpn:route_changed, VpnWgState.pingMs (6.5); v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} (5.1)
 
   // (2) tabs.list — СКВОЗНОЙ DoD-тест: UI → Core → ответ
   const tabs = await evalIn(uiWs, `window.__duopulse.tabs.list()`);

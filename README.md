@@ -123,9 +123,9 @@ adblock-стенды — локальный тест-лист):
 ```bash
 node e2e/bridge/run.mjs       # сквозной IPC-контракт (UI → Core → ответ)
 node e2e/tabs/run.mjs         # вкладки: Ctrl+Tab, Ctrl+Shift+T, контекст-меню
-node e2e/omnibox/run.mjs      # omnibox + история/закладки, FTS5-подсказки
+node e2e/omnibox/run.mjs      # omnibox + история/закладки, FTS5-подсказки (порт — env E2E_OMNIBOX_PORT)
 node e2e/style/run.mjs        # сверка фирменного стиля по гайду 06
-node e2e/session/run.mjs      # восстановление сессии, ленивость, старт
+node e2e/session/run.mjs      # восстановление сессии, ленивость, старт (порт — env E2E_SESSION_PORT)
 node e2e/adblock/run.mjs      # сетевой слой блокировщика + метрика P-07
 node e2e/adblock/cosmetic.mjs # косметика (селекторы, observer, тумблеры)
 node e2e/adblock/scriptlets.mjs   # скриптлеты ##+js

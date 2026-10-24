@@ -65,12 +65,24 @@ function connect(wsUrl) {
     ws.onerror = rej;
   });
   open.catch(() => {});
+  // Таймаут на каждый вызов (как e2e/vpn, карточка 048): у цели, умершей
+  // вместе со страницей (SSAI-навигации/капча YouTube), WebSocket.send молча
+  // виснет — без таймаута стенд стоит до глобальных 15 мин вместо внятного
+  // отказа прогона (наблюдалось 24.10.2026 на контрольной стороне, duopulse-052).
+  const CDP_CALL_TIMEOUT_MS = 20000;
   const send = (method, params = {}) =>
     open.then(
       () =>
         new Promise((res, rej) => {
           const i = ++id;
-          pending.set(i, { res, rej });
+          const timer = setTimeout(() => {
+            pending.delete(i);
+            rej(new Error(`CDP ${method}: нет ответа ${CDP_CALL_TIMEOUT_MS} мс`));
+          }, CDP_CALL_TIMEOUT_MS);
+          pending.set(i, {
+            res: (v) => { clearTimeout(timer); res(v); },
+            rej: (e) => { clearTimeout(timer); rej(e); },
+          });
           ws.send(JSON.stringify({ id: i, method, params }));
         }),
     );
@@ -104,7 +116,13 @@ async function waitFirstFrame(cdpPort, t0, timeoutMs) {
             if (v.paused) { v.muted = true; v.play().catch(() => {}); }
             return { ad: window.__p08ad === true, frame: v.currentTime > 0.5 && !v.paused };
           })()`,
-        ).catch(() => null);
+        ).catch(() => {
+          // цель умерла (страница пересоздана) — переподключимся на следующем витке,
+          // иначе мёртвый ws держит опрос до конца дедлайна прогона
+          ws?.close();
+          ws = null;
+          return null;
+        });
         if (st && !st.novideo) {
           if (st.ad) adSeen = true;
           if (st.frame) {
