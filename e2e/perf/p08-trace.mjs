@@ -21,6 +21,18 @@
 //    реклама→контент, клиентская реклама сбрасывает в ~0.
 // Сводка печатается и падает в e2e/perf/p08-trace-last.json.
 //
+// Детект themeRefresh-перезагрузки (карточка duopulse-056): в медленных
+// окнах YouTube на стороне блокировщика после успешного первого media-запроса
+// идёт 401-навигация accounts.google.com/ServiceLogin → ПОЛНАЯ перезагрузка
+// watch-страницы (Document «…&themeRefresh=1») → повторный цикл загрузки
+// (+1,2 с к первому кадру). Оба маркера ловятся в Network-событиях и
+// репортятся по каждому прогону (моменты в мс от запуска) + в дамп —
+// «медленный прогон» сразу атрибутируется внешнему рестарту, а не продукту.
+//
+// DUOPULSE_P08_SIDES="duo"|"ctl"|"duo,ctl" — какие стороны гонять (по
+// умолчанию обе); одно-сторонний режим экономит лимит ~25 загрузок
+// YouTube/час при точечных прогонах (бисекция 056).
+//
 // Запуск:  node e2e/perf/p08-trace.mjs [url-видео]
 // Требует release-сборку DuoPulse (npx tauri build, как p08.mjs).
 import { execFile, spawn } from "node:child_process";
@@ -375,6 +387,15 @@ const bucketOf = (r) => {
   return "other";
 };
 
+/** Маркеры внешнего рестарта YouTube (карточка 056): момент первого запроса
+ *  к accounts.google.com/ServiceLogin (401-пассивный логин) и первого
+ *  Document с themeRefresh=1 (полная перезагрузка watch-страницы). */
+function reloadMarks(l) {
+  const sl = l.requests.find((r) => /accounts\.google\.com\/ServiceLogin/.test(r.url));
+  const tr = l.requests.find((r) => /themeRefresh=1/.test(r.url));
+  return { serviceLoginAt: sl?.sent ?? null, themeRefreshAt: tr?.sent ?? null };
+}
+
 function analyze(l) {
   const frame = l.frameAt ?? 1e9;
   const before = l.requests.filter((r) => r.sent !== undefined && r.sent <= frame);
@@ -397,33 +418,44 @@ const fmtHost = (r) =>
   `${r.host} (dns ${r.dns ?? "?"} / proxy ${r.proxy ?? "?"} / connect ${r.connect ?? "?"} / tls ${r.ssl ?? "?"} мс, первый запрос @${r.sent} мс${r.proto ? ", " + r.proto : ""})`;
 
 const runs = { DuoPulse: [], контроль: [] };
+// Какие стороны гонять (карточка 056, бисекция): duo / ctl / обе
+const SIDES = (process.env.DUOPULSE_P08_SIDES ?? "duo,ctl")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter((s) => s === "duo" || s === "ctl");
 try {
   console.log(`Трассировка P-08 (карточка duopulse-055): ${VIDEO}`);
-  console.log("DuoPulse (блокировщик включён):");
-  for (let i = 0; i < WARMUPS; i++) {
-    await warmupOnce("DuoPulse", launchAt(duoProfile, DUO_CDP), DUO_CDP, () => waitWebViewDown(duoProfile));
+  if (SIDES.includes("duo")) {
+    console.log("DuoPulse (блокировщик включён):");
+    for (let i = 0; i < WARMUPS; i++) {
+      await warmupOnce("DuoPulse", launchAt(duoProfile, DUO_CDP), DUO_CDP, () => waitWebViewDown(duoProfile));
+    }
+    for (let i = 0; i < TRACED_RUNS; i++) {
+      runs.DuoPulse.push(
+        await traceLaunch("DuoPulse", launchAt(duoProfile, DUO_CDP), DUO_CDP, () => waitWebViewDown(duoProfile), `прогон ${i + 1}`),
+      );
+    }
   }
-  for (let i = 0; i < TRACED_RUNS; i++) {
-    runs.DuoPulse.push(
-      await traceLaunch("DuoPulse", launchAt(duoProfile, DUO_CDP), DUO_CDP, () => waitWebViewDown(duoProfile), `прогон ${i + 1}`),
-    );
-  }
-  console.log("Контроль — DuoPulse (блокировщик выключен):");
-  for (let i = 0; i < WARMUPS; i++) {
-    await warmupOnce("контроль", launchAt(ctlProfile, CTL_CDP), CTL_CDP, () => waitWebViewDown(ctlProfile));
-  }
-  for (let i = 0; i < TRACED_RUNS; i++) {
-    runs.контроль.push(
-      await traceLaunch("контроль", launchAt(ctlProfile, CTL_CDP), CTL_CDP, () => waitWebViewDown(ctlProfile), `прогон ${i + 1}`),
-    );
+  if (SIDES.includes("ctl")) {
+    console.log("Контроль — DuoPulse (блокировщик выключен):");
+    for (let i = 0; i < WARMUPS; i++) {
+      await warmupOnce("контроль", launchAt(ctlProfile, CTL_CDP), CTL_CDP, () => waitWebViewDown(ctlProfile));
+    }
+    for (let i = 0; i < TRACED_RUNS; i++) {
+      runs.контроль.push(
+        await traceLaunch("контроль", launchAt(ctlProfile, CTL_CDP), CTL_CDP, () => waitWebViewDown(ctlProfile), `прогон ${i + 1}`),
+      );
+    }
   }
 
   const summary = {};
   for (const [side, list] of Object.entries(runs)) {
+    if (!list.length) continue; // сторона пропущена (DUOPULSE_P08_SIDES)
     console.log(`\n=== ${side} ===`);
     summary[side] = { launches: [] };
     for (const l of list) {
       const a = analyze(l);
+      const marks = reloadMarks(l);
       const ad = l.frameAt !== null && (l.adStartAt !== null || l.curMaxAd > 0);
       const kind = ad
         ? l.curReset
@@ -433,6 +465,13 @@ try {
       console.log(
         `[${l.label}] первый кадр ${l.frameAt} мс${l.contentAt !== null ? `, контент ${l.contentAt} мс` : ""} — ${kind}`,
       );
+      if (marks.themeRefreshAt !== null) {
+        console.log(
+          `  !! themeRefresh-перезагрузка @${marks.themeRefreshAt} мс${marks.serviceLoginAt !== null ? ` (ServiceLogin @${marks.serviceLoginAt})` : ""} — внешний рестарт YouTube, старт пошёл заново (карточка 056)`,
+        );
+      } else if (marks.serviceLoginAt !== null) {
+        console.log(`  ?? ServiceLogin @${marks.serviceLoginAt} мс без themeRefresh-перезагрузки`);
+      }
       console.log(
         `  запросов до кадра: ${a.before} (${Object.entries(a.buckets).map(([k, v]) => `${k}=${v}`).join(", ") || "пусто"});` +
           ` новых хостов: ${a.newHosts.length}, их DNS+proxy+connect: ${a.newCost} мс`,
@@ -457,6 +496,8 @@ try {
         curMaxAd: l.curMaxAd,
         curAtContent: l.curAtContent,
         curReset: l.curReset,
+        serviceLoginAt: marks.serviceLoginAt,
+        themeRefreshAt: marks.themeRefreshAt,
         requestsBeforeFrame: a.before,
         buckets: a.buckets,
         newHostsBeforeFrame: a.newHosts.map((r) => ({ host: r.host, sent: r.sent, dns: r.dns, proxy: r.proxy, connect: r.connect, ssl: r.ssl, proto: r.proto })),
@@ -469,6 +510,11 @@ try {
     if (frames.length) {
       summary[side].medianFrameMs = median(frames);
       console.log(`медиана первого кадра: ${summary[side].medianFrameMs} мс`);
+    }
+    const trRuns = summary[side].launches.filter((x) => x.themeRefreshAt !== null);
+    if (trRuns.length) {
+      summary[side].themeRefreshRuns = trRuns.length;
+      console.log(`прогонов с themeRefresh-перезагрузкой: ${trRuns.length}/${list.length} (окно YouTube, карточка 056)`);
     }
   }
   const dump = () =>

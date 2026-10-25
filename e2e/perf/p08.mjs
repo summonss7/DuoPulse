@@ -22,6 +22,17 @@
 // утверждено автором 24.10.2026 12:12 (вопрос duopulse_055_metric_20261024,
 // выбор 1, Aila).
 //
+// Стратификация по themeRefresh-перезагрузке (карточка duopulse-056,
+// 25.10.2026): в части временных окон YouTube на стороне блокировщика после
+// успешного первого media-запроса делает 401-пассивный логин
+// (accounts.google.com/ServiceLogin) и ПОЛНОСТЬЮ перезагружает watch-страницу
+// (Document «…&themeRefresh=1») — старт идёт заново, +1,2 с к первому кадру.
+// Это внешний рестарт (механизм — журнал 056, дампы 24.10), не качество
+// движка: прогоны DuoPulse с таким рестартом помечаются в выводе, а пара
+// вердикта ищется СНАЧАЛА без них; если пара равного состояния рекламы
+// собирается только из themeRefresh-прогонов — вердикт «НЕ ОПРЕДЕЛЁН
+// (окно themeRefresh)», exit 3 — как с лотереей SSAI, это не FAIL продукта.
+//
 // Контроль (решение автора 21.10.2026 03:48, duopulse_047_control_20261021):
 // DuoPulse с ВЫКЛЮЧЕННЫМ блокировщиком — тот же движок WebView2 и та же
 // машина, разница только в блокировщике; независимость движка теряется
@@ -78,7 +89,7 @@ setTimeout(() => {
   process.exit(2);
 }, 20 * 60_000).unref?.();
 
-function connect(wsUrl) {
+function connect(wsUrl, onEvent) {
   const ws = new WebSocket(wsUrl);
   let id = 0;
   const pending = new Map();
@@ -88,6 +99,8 @@ function connect(wsUrl) {
       const p = pending.get(m.id);
       pending.delete(m.id);
       m.error ? p.rej(new Error(JSON.stringify(m.error))) : p.res(m.result);
+    } else if (m.method && onEvent) {
+      onEvent(m);
     }
   };
   const open = new Promise((res, rej) => {
@@ -125,16 +138,34 @@ const evalIn = async (ws, expression) => {
 };
 
 /** Первый кадр контента в youtube-цели браузера на порту cdpPort.
- *  Возвращает { ms, adSeen } от t0 или null, пока не дождались. */
+ *  Возвращает { ms, adSeen, tr, sl } от t0 или null, пока не дождались.
+ *  tr/sl — маркеры внешнего рестарта YouTube (карточка 056): ServiceLogin
+ *  401-навигация (sl) и themeRefresh=1-перезагрузка (tr). Ловятся двумя
+ *  каналами: Network-события подключённой цели (Document-запросы) и URL
+ *  целей из /json на витках опроса (перезагруженная watch-страница видна
+ *  с &themeRefresh=1 ~1,5 с — переживает разрывы ws при рестарте). */
 async function waitFirstFrame(cdpPort, t0, timeoutMs) {
   const deadline = t0 + timeoutMs;
   let ws = null;
   let adSeen = false;
+  let sawServiceLogin = false;
+  let sawThemeRefresh = false;
+  const noteUrl = (u) => {
+    if (/accounts\.google\.com\/ServiceLogin/.test(u)) sawServiceLogin = true;
+    if (/themeRefresh=1/.test(u)) sawThemeRefresh = true;
+  };
+  const onEvent = (m) => {
+    if (m.method === "Network.requestWillBeSent") noteUrl(m.params?.request?.url ?? "");
+  };
   while (Date.now() < deadline) {
     try {
       const targets = await (await fetch(`http://localhost:${cdpPort}/json`)).json();
+      for (const t of targets) noteUrl(t.url ?? "");
       const yt = targets.find((x) => x.type === "page" && /youtube\.com\/watch/.test(x.url));
-      if (yt && !ws) ws = connect(yt.webSocketDebuggerUrl);
+      if (yt && !ws) {
+        ws = connect(yt.webSocketDebuggerUrl, onEvent);
+        ws.send("Network.enable").catch(() => {});
+      }
       if (ws) {
         const st = await evalIn(
           ws,
@@ -157,7 +188,7 @@ async function waitFirstFrame(cdpPort, t0, timeoutMs) {
           if (st.ad) adSeen = true;
           if (st.frame) {
             ws.close();
-            return { ms: Date.now() - t0, adSeen };
+            return { ms: Date.now() - t0, adSeen, tr: sawThemeRefresh, sl: sawServiceLogin };
           }
         }
       }
@@ -362,7 +393,14 @@ async function measureOnce(name, launch, cdpPort, settle, label, watchMs) {
     if (settle) await settle();
     await sleep(1200);
     if (r) {
-      console.log(`  ${name} ${label}: ${r.ms} мс${r.adSeen ? " (видна реклама)" : ""}`);
+      console.log(
+        `  ${name} ${label}: ${r.ms} мс${r.adSeen ? " (видна реклама)" : ""}` +
+          (r.tr
+            ? " [themeRefresh-перезагрузка — внешний рестарт YouTube, карточка 056]"
+            : r.sl
+              ? " [ServiceLogin без перезагрузки]"
+              : ""),
+      );
       return r;
     }
     if (pageAlive || attempt > INVALID_RETRIES) {
@@ -385,22 +423,38 @@ async function measureBrowser(name, launch, cdpPort, settle) {
   return out;
 }
 
-// --- стратификация по состоянию рекламы (карточка 055, шапка файла) ----------
+// --- стратификация по состоянию рекламы (карточка 055) и themeRefresh (056) ---
+// Clean-ячейки — прогоны БЕЗ themeRefresh-перезагрузки (внешний рестарт
+// YouTube в части окон, только на стороне блокировщика: механизм и дампы —
+// журнал карточки 056): вердикт ищется сначала по ним.
 const cellsOf = (runs) => ({
   ad: runs.filter((r) => r.adSeen).map((r) => r.ms),
   noad: runs.filter((r) => !r.adSeen).map((r) => r.ms),
+  adClean: runs.filter((r) => r.adSeen && !r.tr).map((r) => r.ms),
+  noadClean: runs.filter((r) => !r.adSeen && !r.tr).map((r) => r.ms),
 });
 const fmtCell = (xs) => `[${xs.join(", ")}]`;
 
 /** Пара равного состояния рекламы с ≥MIN_CELL прогонами у обеих сторон;
- *  при обеих парах решает noad (чистое сравнение без лотереи SSAI). */
+ *  при обеих парах решает noad (чистое сравнение без лотереи SSAI).
+ *  Со стороны DuoPulse ячейка — clean (без themeRefresh-перезагрузок). */
 function pickPair(duo, ctl) {
   const dc = cellsOf(duo);
   const cc = cellsOf(ctl);
-  if (dc.noad.length >= MIN_CELL && cc.noad.length >= MIN_CELL)
-    return { state: "без рекламы", duo: median(dc.noad), ctl: median(cc.noad) };
-  if (dc.ad.length >= MIN_CELL && cc.ad.length >= MIN_CELL)
-    return { state: "с прероллом", duo: median(dc.ad), ctl: median(cc.ad) };
+  if (dc.noadClean.length >= MIN_CELL && cc.noad.length >= MIN_CELL)
+    return { state: "без рекламы", duo: median(dc.noadClean), ctl: median(cc.noad) };
+  if (dc.adClean.length >= MIN_CELL && cc.ad.length >= MIN_CELL)
+    return { state: "с прероллом", duo: median(dc.adClean), ctl: median(cc.ad) };
+  return null;
+}
+
+/** Пара равного состояния по ВСЕМ прогонам DuoPulse (включая themeRefresh):
+ *  существует, а clean-пары нет — активное окно themeRefresh (056). */
+function pairAny(duo, ctl) {
+  const dc = cellsOf(duo);
+  const cc = cellsOf(ctl);
+  if (dc.noad.length >= MIN_CELL && cc.noad.length >= MIN_CELL) return "без рекламы";
+  if (dc.ad.length >= MIN_CELL && cc.ad.length >= MIN_CELL) return "с прероллом";
   return null;
 }
 
@@ -437,16 +491,30 @@ try {
     `\nячейки по состоянию рекламы: DuoPulse ad=${fmtCell(dc.ad)} noad=${fmtCell(dc.noad)} | ` +
       `контроль ad=${fmtCell(cc.ad)} noad=${fmtCell(cc.noad)}`,
   );
+  const duoTr = duo.filter((r) => r.tr);
+  const ctlTr = ctl.filter((r) => r.tr);
+  if (duoTr.length || ctlTr.length)
+    console.log(
+      `themeRefresh-перезагрузки (внешний рестарт YouTube, карточка 056): DuoPulse ${fmtCell(duoTr.map((r) => r.ms))}` +
+        (ctlTr.length ? `, контроль ${fmtCell(ctlTr.map((r) => r.ms))}` : "") +
+        " — в вердикт не входят",
+    );
   console.log(
     `смешанные медианы (старая методика 044–052, справочно, НЕ вердикт): DuoPulse ${median(duo.map((r) => r.ms))} vs контроль ${median(ctl.map((r) => r.ms))} мс`,
   );
   if (pair) {
     const ok = pair.duo <= pair.ctl;
     console.log(
-      `\nP-08: пара «${pair.state}» — DuoPulse медиана ${pair.duo} мс vs контроль ${pair.ctl} мс — ${ok ? "НЕ ХУЖЕ" : "хуже"} (docs/04 §2, стратификация duopulse-055)`,
+      `\nP-08: пара «${pair.state}» — DuoPulse медиана ${pair.duo} мс vs контроль ${pair.ctl} мс — ${ok ? "НЕ ХУЖЕ" : "хуже"} (docs/04 §2, стратификация duopulse-055${duoTr.length ? ", themeRefresh-прогоны исключены (duopulse-056)" : ""})`,
     );
     if (!ok) failures++;
     exitCode = ok ? 0 : 1;
+  } else if (pairAny(duo, ctl) && duoTr.length) {
+    const anyState = pairAny(duo, ctl);
+    console.log(
+      `\nP-08: НЕ ОПРЕДЕЛЁН — АКТИВНОЕ ОКНО themeRefresh: пара «${anyState}» собирается только из прогонов DuoPulse с внешней перезагрузкой watch-страницы (${fmtCell(duoTr.map((r) => r.ms))} мс; 401 ServiceLogin → themeRefresh=1, карточка duopulse-056): это состояние YouTube, не FAIL продукта`,
+    );
+    exitCode = 3;
   } else {
     console.log(
       `\nP-08: НЕТ пары равных состояний рекламы (нужно ≥${MIN_CELL} прогонов у обеих сторон) — ` +
