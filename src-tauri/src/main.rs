@@ -873,6 +873,7 @@ pub(crate) unsafe fn install_content_handlers(
     install_new_window_handler(&core, app);
     install_cosmetic_prewarm(&core, app, tab_id);
     install_nav_failure_watcher(&core, app, tab_id);
+    install_fullscreen_watcher(&core, app, tab_id);
 }
 
 /// Страница ошибки загрузки (карточка duopulse-048): NavigationCompleted без
@@ -1008,6 +1009,40 @@ unsafe fn install_cosmetic_prewarm(core: &ICoreWebView2, app: &AppHandle, tab_id
     );
     if let Err(e) = res {
         eprintln!("cosmetic-prewarm: NavigationStarting не установлен: {e}");
+    }
+}
+
+/// HTML-fullscreen во вкладке (карточка duopulse-062): WebView2 сообщает
+/// ContainsFullScreenElementChanged, TabManager::on_fullscreen уводит окно
+/// в borderless-fullscreen и растягивает webview вкладки на всё окно —
+/// развёрнутое видео занимает весь экран без рамок и полосы хрома.
+/// (tauri-runtime-wry по этому же событию переключает fullscreen самого
+/// окна, но webview вкладки остаётся под полосой хрома — геометрией
+/// владеет TabManager.)
+#[cfg(windows)]
+unsafe fn install_fullscreen_watcher(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
+    use webview2_com::ContainsFullScreenElementChangedEventHandler;
+    use windows_core::BOOL;
+
+    let app = app.clone();
+    let tab_id = tab_id.to_string();
+    let res = core.add_ContainsFullScreenElementChanged(
+        &ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _args| {
+            let Some(sender) = sender else {
+                return Ok(());
+            };
+            let mut contains = BOOL::default();
+            if sender.ContainsFullScreenElement(&mut contains).is_err() {
+                return Ok(());
+            }
+            app.state::<tabs::TabManager>()
+                .on_fullscreen(&app, &tab_id, contains.as_bool());
+            Ok(())
+        })),
+        std::ptr::null_mut(),
+    );
+    if let Err(e) = res {
+        eprintln!("fullscreen: ContainsFullScreenElementChanged не установлен: {e}");
     }
 }
 
@@ -1160,12 +1195,15 @@ fn main() {
             // Окно создаётся кодом (не из tauri.conf.json), чтобы подставить
             // аргументы: UI-webview и дочерние webview вкладок делят одно
             // окружение WebView2 — прокси действует на все (localhost обходит).
+            // Заголовок с версией (карточка duopulse-062): версия — из
+            // tauri.conf.json (package_info), единственный источник для
+            // release.mjs и фидов обновлений.
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::App("index.html".into()),
             )
-            .title("DuoPulse")
+            .title(format!("DuoPulse {}", app.package_info().version))
             .inner_size(1360.0, 860.0)
             .min_inner_size(800.0, 600.0)
             .resizable(true)

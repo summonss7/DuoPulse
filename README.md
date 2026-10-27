@@ -81,7 +81,12 @@ DuoPulse — настольный браузер (Windows-first) для повс
 
 Публикация релиза — одной командой `npm run release [-- --notes "что нового"]`:
 сборка → фиды → оба канала (зеркало Aila через `D:\Scheduler\tools\publish-update.cjs`,
-GitHub Pages — коммит в локальный клон `D:\duopulse-updates`).
+GitHub Pages — коммит в локальный клон `D:\duopulse-updates`) → **обновление
+локальной портативной копии `C:\DuoPulse\duopulse.exe`** (правило карточки
+duopulse-062: каждый выход новой версии обязан обновлять и её — последний шаг
+`scripts/release.mjs`; папки нет — шаг пропускается, файл занят — закрыть
+DuoPulse и повторить `npm run release -- --deploy-local`). Версия в заголовке
+окна берётся из `tauri.conf.json` — тот же источник, что у релиза.
 
 ## Статус этапов
 

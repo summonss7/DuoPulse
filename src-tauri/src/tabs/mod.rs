@@ -63,16 +63,21 @@ fn default_tab_url() -> String {
     std::env::var("DUOPULSE_START_URL").unwrap_or_else(|_| "duopulse://newtab".into())
 }
 
-/// Размер дочернего webview вкладки под полосой хрома.
-fn content_rect(window: &Window<tauri::Wry>) -> (LogicalPosition<f64>, LogicalSize<f64>) {
+/// Полный размер окна в логических пикселях (HTML-fullscreen, карточка 062).
+fn window_logical_size(window: &Window<tauri::Wry>) -> LogicalSize<f64> {
     let scale = window.scale_factor().unwrap_or(1.0);
-    let size = window
+    window
         .inner_size()
         .unwrap_or_default()
-        .to_logical::<f64>(scale);
+        .to_logical::<f64>(scale)
+}
+
+/// Размер дочернего webview вкладки под полосой хрома.
+fn content_rect(window: &Window<tauri::Wry>) -> (LogicalPosition<f64>, LogicalSize<f64>) {
+    let full = window_logical_size(window);
     (
         LogicalPosition::new(0.0, CHROME_HEIGHT),
-        LogicalSize::new(size.width, (size.height - CHROME_HEIGHT).max(0.0)),
+        LogicalSize::new(full.width, (full.height - CHROME_HEIGHT).max(0.0)),
     )
 }
 
@@ -91,6 +96,10 @@ struct TabsState {
     next_seq: u64,
     /// Стек закрытых для tabs.reopen: (url, позиция в баре на момент закрытия).
     closed: VecDeque<(String, usize)>,
+    /// Вкладка в HTML-fullscreen (карточка duopulse-062): видео развёрнуто
+    /// на весь экран — webview этой вкладки растянут на всё окно (поверх
+    /// полосы хрома), окно — borderless-fullscreen. None — обычный режим.
+    fullscreen_tab: Option<String>,
 }
 
 struct TabEntry {
@@ -398,6 +407,9 @@ impl TabManager {
                 };
             }
         }
+        // Закрыта вкладка-владелец HTML-fullscreen (карточка 062) — выходим
+        // из fullscreen: вебview уничтожается и события выхода можно не ждать.
+        self.exit_fullscreen(app, None);
         if let Some(wv) = app.get_webview(id) {
             wv.close().map_err(|e| format!("close webview: {e}"))?;
         }
@@ -432,6 +444,9 @@ impl TabManager {
         if wake {
             self.resume_webview(app, id);
         }
+        // Переключение с вкладки в HTML-fullscreen (карточка 062) — выходим
+        // из fullscreen (как браузеры); повторная активация владельца — остаётся.
+        self.exit_fullscreen(app, Some(id));
         self.apply_visibility(app);
         if let Some(wv) = self.active_webview(app) {
             wv.set_focus().ok();
@@ -543,21 +558,92 @@ impl TabManager {
 
     /// Подгонка всех webview вкладок под размер окна (событие Resized):
     /// скрытые тоже — чтобы переключение не показало старую геометрию.
+    /// Вкладка в HTML-fullscreen (карточка 062) растягивается на всё окно
+    /// (0,0 — поверх полосы хрома), остальные — под хромом как обычно.
     pub fn relayout(&self, app: &AppHandle) {
         let Some(window) = app.get_window("main") else {
             return;
         };
         let (pos, size) = content_rect(&window);
-        let ids: Vec<String> = {
+        let full = window_logical_size(&window);
+        let (fullscreen_tab, ids): (Option<String>, Vec<String>) = {
             let st = self.state.lock().expect("tabs: лок не отравлен");
-            st.tabs.iter().map(|t| t.id.clone()).collect()
+            (
+                st.fullscreen_tab.clone(),
+                st.tabs.iter().map(|t| t.id.clone()).collect(),
+            )
         };
         for id in ids {
-            if let Some(wv) = app.get_webview(&id) {
+            let Some(wv) = app.get_webview(&id) else {
+                continue;
+            };
+            if Some(&id) == fullscreen_tab.as_ref() {
+                wv.set_position(LogicalPosition::new(0.0, 0.0)).ok();
+                wv.set_size(full).ok();
+            } else {
                 wv.set_position(pos).ok();
                 wv.set_size(size).ok();
             }
         }
+    }
+
+    /// HTML-fullscreen во вкладке (карточка duopulse-062): документ вызвал
+    /// requestFullscreen/exitFullscreen — WebView2 сообщает
+    /// ContainsFullScreenElementChanged. Вход: окно уходит в borderless-
+    /// fullscreen (рамок нет), webview вкладки растягивается на всё окно —
+    /// полоса хрома не остаётся полосой поверх видео. Выход: обратный
+    /// переход. Учитывается только активная вкладка — фоновая не должна
+    /// уводить окно (браузеры при переключении вкладок выходят из
+    /// fullscreen). Вызывается из COM-колбэка на главном потоке: только
+    /// состояние под локом, оконные вызовы — после снятия лока.
+    pub(crate) fn on_fullscreen(&self, app: &AppHandle, id: &str, contains: bool) {
+        let Some(window) = app.get_window("main") else {
+            return;
+        };
+        let mut relayout_needed = false;
+        {
+            let mut st = self.state.lock().expect("tabs: лок не отравлен");
+            if contains {
+                let is_active = st.active.is_some_and(|i| st.tabs[i].id == id);
+                if !is_active || st.fullscreen_tab.is_some() {
+                    return; // фоновая вкладка или уже в fullscreen
+                }
+                st.fullscreen_tab = Some(id.to_string());
+                relayout_needed = true;
+            } else if st.fullscreen_tab.as_deref() == Some(id) {
+                st.fullscreen_tab = None;
+                relayout_needed = true;
+            }
+        }
+        if relayout_needed {
+            let _ = window.set_fullscreen(contains);
+            self.relayout(app);
+        }
+    }
+
+    /// Выйти из HTML-fullscreen при закрытии вкладки-владельца или
+    /// переключении на другую (карточка 062): окну возвращаются рамки,
+    /// вкладки — геометрия под полосой хрома. except — вкладка, за которой
+    /// fullscreen сохраняется (повторная активация вкладки-владельца).
+    /// True — вышли.
+    fn exit_fullscreen(&self, app: &AppHandle, except: Option<&str>) -> bool {
+        let exited = {
+            let mut st = self.state.lock().expect("tabs: лок не отравлен");
+            let keep = except.is_some_and(|keep| st.fullscreen_tab.as_deref() == Some(keep));
+            if st.fullscreen_tab.is_some() && !keep {
+                st.fullscreen_tab = None;
+                true
+            } else {
+                false
+            }
+        };
+        if exited {
+            if let Some(window) = app.get_window("main") {
+                let _ = window.set_fullscreen(false);
+            }
+            self.relayout(app);
+        }
+        exited
     }
 
     /// Создание webview вкладки; position — индекс вставки в бар (None — конец).

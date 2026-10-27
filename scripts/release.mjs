@@ -19,11 +19,18 @@
 //     <канал>/DuoPulse_…exe + .sig, фид — <канал>/windows/x86_64/<верс>
 //
 // Запуск: node scripts/release.mjs [--debug] [--notes "что нового"]
-//         [--publish-only] [--no-aila]
+//         [--publish-only] [--no-aila] [--deploy-local]
 //   --debug         тип сборки debug (публикуется только канал canary)
 //   --notes         «что нового» в манифесты каналов (по умолчанию пусто)
 //   --publish-only  не собирать: опубликовать готовые артефакты из builds/
 //   --no-aila       пропустить публикацию на Aila (GitHub — как обычно)
+//   --deploy-local  не собирать/публиковать: только обновить локальную
+//                   копию C:\DuoPulse свежим exe из target/<тип>/ (карточка
+//                   duopulse-062 — повтор после «файл занят»)
+//
+// После публикации каналов релиз всегда обновляет и локальную портативную
+// копию C:\DuoPulse\duopulse.exe (правило карточки duopulse-062: каждый
+// выход новой версии обязан обновлять эту копию; папки нет — шаг пропущен).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -35,10 +42,21 @@ const VERSION = conf.version;
 const TYPE = process.argv.includes("--debug") ? "debug" : "release";
 const PUBLISH_ONLY = process.argv.includes("--publish-only");
 const NO_AILA = process.argv.includes("--no-aila");
+const DEPLOY_LOCAL = process.argv.includes("--deploy-local");
+// Локальная портативная копия (карточка duopulse-062) — обновляется каждым
+// релизом; детали — в deployLocal() ниже.
+const LOCAL_DEPLOY_DIR = "C:\\DuoPulse";
 const NOTES = (() => {
   const i = process.argv.indexOf("--notes");
   return i >= 0 ? (process.argv[i + 1] ?? "") : "";
 })();
+
+// --deploy-local: только локальная копия (повтор после «файл занят») — ключ
+// подписи и каналы не нужны, выходим до проверок релиза.
+if (DEPLOY_LOCAL) {
+  deployLocal();
+  process.exit(0);
+}
 
 // Каналы обновлений: релиз уходит в stable и canary, debug — только в canary.
 const CHANNELS = TYPE === "release" ? ["stable", "canary"] : ["canary"];
@@ -81,6 +99,42 @@ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= "";
 
 const outDir = path.join(ROOT, "builds", `duopulse_${VERSION}_${TYPE}`);
 const setupName = `DuoPulse_${VERSION}_x64-setup.exe`;
+
+// ---------------------------------------------------------------------------
+// Локальная копия C:\DuoPulse (карточка duopulse-062): папа пользуется
+// портативной копией C:\DuoPulse\duopulse.exe, поэтому каждый релиз обязан
+// обновлять и её — свежий exe (+ WebView2Loader.dll) из target/<тип>/.
+// Папки нет (чужая машина/CI) — шаг пропускается. Файл занят (DuoPulse
+// открыт) — ошибка: закрыть DuoPulse и повторить `npm run release --
+// --deploy-local` (только докопирование, без сборки и публикации).
+// ---------------------------------------------------------------------------
+
+function deployLocal() {
+  if (!fs.existsSync(path.join(LOCAL_DEPLOY_DIR, "duopulse.exe"))) {
+    console.log(`\nлокальная копия ${LOCAL_DEPLOY_DIR} не найдена — обновление пропущено`);
+    return;
+  }
+  const srcExe = path.join(ROOT, "src-tauri", "target", TYPE, "duopulse.exe");
+  if (!fs.existsSync(srcExe)) {
+    console.error(`нет свежей сборки ${srcExe} — сначала обычный запуск release`);
+    process.exit(1);
+  }
+  console.log(`\nобновление локальной копии ${LOCAL_DEPLOY_DIR} (v${VERSION}, ${TYPE})…`);
+  const srcDll = path.join(ROOT, "src-tauri", "target", TYPE, "WebView2Loader.dll");
+  const sources = [srcExe, ...(fs.existsSync(srcDll) ? [srcDll] : [])];
+  try {
+    for (const from of sources) {
+      fs.copyFileSync(from, path.join(LOCAL_DEPLOY_DIR, path.basename(from)));
+      console.log(`  ${path.basename(from)} — обновлён`);
+    }
+  } catch (e) {
+    console.error(
+      `не удалось обновить ${LOCAL_DEPLOY_DIR}: ${e.message}\n` +
+        "Закройте DuoPulse и повторите: npm run release -- --deploy-local",
+    );
+    process.exit(1);
+  }
+}
 
 if (PUBLISH_ONLY) {
   // повторная публикация готовых артефактов (без сборки): фиды ниже будут
@@ -226,3 +280,7 @@ if (!fs.existsSync(path.join(GH_FEED_DIR, ".git"))) {
   git(["push"]);
   console.log(`фид GitHub Pages обновлён: ${GH_FEED_BASE}`);
 }
+
+// Локальная копия C:\DuoPulse — последний шаг каждого релиза (карточка
+// duopulse-062): новая версия обязана обновлять и папину портативную копию.
+deployLocal();
