@@ -353,6 +353,15 @@ body {
   box-shadow: var(--focus-ring-soft);
 }
 
+/* Звёздочка избранного (карточка duopulse-057): закладка активной страницы;
+   залитая — страница уже в избранном (акцент-неон, как активные состояния) */
+.star-btn[data-on="true"] {
+  color: var(--accent-neon);
+}
+.star-btn[data-on="true"] svg {
+  fill: var(--accent-neon);
+}
+
 /* --- Подсказки omnibox (панель 12px, elevated, §5) --- */
 .suggest {
   position: absolute;
@@ -1329,6 +1338,16 @@ body.internal-page {
 }
 .ntp-search input::placeholder {
   color: var(--text-muted);
+}
+/* Подсказка первых запусков (карточка duopulse-057): где искать субтитры
+   и избранное — одна приглушённая строка под поиском, без сети и картинок */
+.ntp-hint {
+  margin-top: 18px;
+  max-width: min(640px, 86vw);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  text-align: center;
 }
 .ntp-grid {
   display: grid;

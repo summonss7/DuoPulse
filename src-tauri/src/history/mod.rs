@@ -457,6 +457,25 @@ impl HistoryStore {
         Ok(())
     }
 
+    /// Есть ли закладка с этим URL (звёздочка навбара, карточка duopulse-057).
+    pub fn is_bookmarked(&self, url: &str) -> bool {
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        conn.query_row("SELECT 1 FROM bookmarks WHERE url = ?1", [url], |_| Ok(()))
+            .is_ok()
+    }
+
+    /// Ctrl+D / звёздочка: закладка вкл/выкл. Ответ — стала ли страница
+    /// закладкой (добавили — true, убрали — false).
+    pub fn toggle_bookmark(&self, url: &str, title: &str) -> Result<bool, String> {
+        if self.is_bookmarked(url) {
+            self.bookmark_remove(url)?;
+            Ok(false)
+        } else {
+            self.bookmark_add(url, title)?;
+            Ok(true)
+        }
+    }
+
     /// Удалить закладку (нет — тихо ок, операция идемпотентна).
     pub fn bookmark_remove(&self, url: &str) -> Result<(), String> {
         let mut conn = self.conn.lock().expect("history: лок не отравлен");
@@ -1025,6 +1044,29 @@ mod tests {
             .unwrap()
             .iter()
             .any(|h| h.url == "https://a.example/"));
+    }
+
+    /// Ctrl+D / звёздочка (карточка duopulse-057): toggle добавляет и убирает,
+    /// is_bookmarked следит за состоянием, повторный toggle идемпотентен.
+    #[test]
+    fn bookmark_toggle_adds_and_removes() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let url = "https://yt.example/watch?v=1";
+        assert!(!store.is_bookmarked(url));
+        assert!(
+            store.toggle_bookmark(url, "Видео").unwrap(),
+            "первый — добавить"
+        );
+        assert!(store.is_bookmarked(url));
+        // тот же URL — снятие; пустой заголовок при добавлении не мешает
+        assert!(!store.toggle_bookmark(url, "").unwrap(), "второй — убрать");
+        assert!(!store.is_bookmarked(url));
+        // цикл повторяется: снова добавить
+        assert!(
+            store.toggle_bookmark(url, "").unwrap(),
+            "третий — снова добавить"
+        );
+        assert!(store.is_bookmarked(url));
     }
 
     // --- задача 1.4: файл в профиле и замер omnibox ---------------------------

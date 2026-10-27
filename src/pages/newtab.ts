@@ -132,7 +132,15 @@ search.append(searchIco, input);
 const grid = document.createElement("div");
 grid.className = "ntp-grid";
 
-root.append(logo, search, grid);
+// Подсказка первых запусков (карточка duopulse-057): входы в субтитры и
+// избранное неочевидны с первого взгляда — одна приглушённая строка.
+const hint = document.createElement("div");
+hint.className = "ntp-hint";
+hint.textContent =
+  "На видео появится кнопка «duo» — субтитры до 3 строк, выбор языков и вид плашки (Alt+D — вкл/выкл). " +
+  "Звёздочка рядом с адресом добавляет страницу в избранное (Ctrl+D).";
+
+root.append(logo, search, hint, grid);
 document.body.append(root);
 
 grid.addEventListener("click", (e) => {

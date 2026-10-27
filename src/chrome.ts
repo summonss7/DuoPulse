@@ -5,6 +5,7 @@
 import { bridge } from "./bridge";
 import { initTabBar, onTabsChanged } from "./chrome/tabbar";
 import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
+import { initStar, setActivePage } from "./chrome/star";
 import "./chrome/mainmenu";
 import "./proxy-menu";
 import "./vpn-panel/vpn-panel";
@@ -15,15 +16,19 @@ import { initTranslateSettings } from "./subtitles-panel/translate-settings";
 initTabBar();
 // Omnibox (задача 1.3): подсказки, Enter/Esc/стрелки, кнопки навигации.
 initOmnibox();
+// Звёздочка избранного (карточка duopulse-057): закладка активной страницы.
+initStar();
 // Кнопка «duo» + панель настроек набора субтитров (задача 3.7, docs/03 §8).
 initDuo();
 // Секция «Перевод» duo-панели: провайдеры DeepL/Google/LibreTranslate (4.1).
 initTranslateSettings();
 
-// URL активной вкладки — в адресную строку (кроме моментов ввода).
+// URL активной вкладки — в адресную строку (кроме моментов ввода); сюда же —
+// звёздочка (SPA-навигация и Ctrl+D из контента тоже приходят tabs.updated).
 onTabsChanged((tabs) => {
   const active = tabs.find((t) => t.active);
   setActiveUrl(active?.url ?? "");
+  setActivePage(active);
 });
 
 // Кнопки навигации (nav.* контракта действуют на активную вкладку).

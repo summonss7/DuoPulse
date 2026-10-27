@@ -3781,3 +3781,42 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
   3953 vs 3941 мс — паритет). Бэкап проекта backup.bat 25.10 21:32.
 - Коммит: 18c299f — fix(vpn): duopulse-054 — устойчивость системного резолва
   через SOCKS5-роутер (ретрай + кэш, тесты, docs, карточка done).
+
+## 27.10.2026 21:10 — duopulse-057: UX первого запуска — полный URL в omnibox на SPA, «открыть в новой вкладке», избранное-звёздочка, видимость меню субтитров
+- Начало работы: 27.10.2026 19:44 (бэкап backup.bat 19:47)
+- Окончание работы: 27.10.2026 21:10
+- Что сделано (обратная связь первого запуска, 5 пунктов):
+  - П.1 полный URL видео в omnibox: YouTube — SPA (pushState без загрузки
+    документа), адрес вкладки Core обновлял только в on_page_load. Новый
+    content/url-watch.js (хук History API, popstate/hashchange, только
+    top-level фрейм) → WebMessage «spa-url» → TabManager::on_spa_url
+    (src-tauri/src/tabs/mod.rs): адрес вкладки, визит истории (заголовок —
+    on_title) и сессия отслеживают SPA-переходы; адрес видео виден/копируется.
+  - П.2 «открыть в новой вкладке»: COM-обработчик NewWindowRequested
+    (src-tauri/src/main.rs, install_new_window_handler) — пункт контекстного
+    меню, target=_blank, средняя кнопка и window.open открывают вкладку
+    DuoPulse (Handled=true; по живым пробам IsUserInitiated в рантайме
+    всегда true — попап-фильтр не делал, поведение зафиксировано).
+  - П.3 реклама: проникает SSAI (вшита сервером в видеопоток — сетевые
+    списки не видят); рычаг trusted-скриптлетов по ROADMAP включается только
+    решением автора → карточка CARDS/061 (замер + вопрос с вариантами).
+  - П.4 субтитры: кнопка «duo» теперь видна на любом видео (не только с
+    дорожками платформы — панель даёт файлы, облачный перевод, стиль),
+    подсказка возможностей на «Новой вкладке». Цвет/пресеты вида → CARDS/059;
+    генерация субтитров (ASR) → CARDS/060.
+  - П.5 избранное: звёздочка в Navbar (src/chrome/star.ts; вкл/выкл
+    history.bookmark_*, состояние по bookmark_list) + Ctrl+D из контентной
+    вкладки (content/chrome-hotkeys.js → TabManager::toggle_bookmark_active;
+    HistoryStore::{is_bookmarked, toggle_bookmark} + юнит-тест). Группы
+    избранного → CARDS/058.
+  - Документация: README (строка «Навигация как в браузере»), docs/02 §3–4,
+    docs/03 §8 п.1, docs/05 (дерево + строка 1.9 M1), ROADMAP (27.10).
+- Как проверено: cargo test 243 passed / 0 failed (+1: bookmark_toggle_
+  adds_and_removes), clippy 0 предупреждений, fmt чисто; tsc чисто; vitest
+  187/187; npm run build и cargo build проходят. Живой CDP-стенд (vite dev,
+  изолированный профиль, локальный SPA-сайт, DUOPULSE_CDP_PORT): 10/10 —
+  SPA-URL в omnibox/tabs.list/истории с заголовком; target=_blank
+  trusted-кликом и window.open → новые вкладки; звезда вкл/выкл кликом и
+  Ctrl+D из контента; пиксель-проверка залитой звезды RGB(189,254,79)=
+  #BDFE4F. Временные файлы стенда удалены.
+- Коммит: <хеш подшит следующим коммитом>

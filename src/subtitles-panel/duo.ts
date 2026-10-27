@@ -102,9 +102,11 @@ const el = <T extends HTMLElement>(tag: string, cls?: string, text?: string): T 
 // --- рендер -----------------------------------------------------------------
 
 function renderButton(): void {
-  // Кнопка видна только при видео с дорожками: список адаптера или файловые
-  // (docs/03 §8 п.1; сценарий §5.3 — кнопка появляется после дропа .srt).
-  const visible = !!state.videoKey && (state.canTracks || state.tracks.length > 0);
+  // Кнопка видна на любом найденном видео (карточка duopulse-057: на видео
+  // без дорожек платформы панель нужна не меньше — свои файлы .srt/.vtt,
+  // облачный перевод, стиль плашки; пустой набор честно показан в панели).
+  // Прежний фильтр «только с дорожками» прятал вход в субтитры целиком.
+  const visible = !!state.videoKey;
   btn.hidden = !visible;
   btn.dataset.count = String(state.enabled ? state.tracks.length : 0);
   btn.setAttribute("aria-pressed", String(state.enabled));

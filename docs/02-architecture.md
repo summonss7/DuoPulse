@@ -56,7 +56,7 @@ UI и Content общаются с Core только через типизиро�
 
 | Модуль | Ответственность | Библиотеки |
 |---|---|---|
-| `tabs` | жизненный цикл вкладок webview, спящий режим (throttle) | tauri 2 APIs |
+| `tabs` | жизненный цикл вкладок webview, спящий режим (throttle); адрес вкладки: полные переходы — on_page_load, SPA-навигация (pushState) — сообщения content/url-watch.js (`on_spa_url`, карточка duopulse-057); требования нового окна (target=_blank, «открыть в новой вкладке», средняя кнопка) — COM-обработчик NewWindowRequested открывает вкладку DuoPulse | tauri 2 APIs |
 | `adblock` | фильтрация запросов/косметика, списки EasyList+uBO, вкл/выкл по сайту | `adblock-rs` |
 | `subtitles` | парсеры SRT/VTT/YouTube-timedtext; хранение cue-таблиц | `nom`/ручные парсеры, `rusqlite` |
 | `translate` | клиенты провайдеров, батчинг, кэш (SQLite), деградация офлайн | `reqwest` |
@@ -78,6 +78,12 @@ UI и Content общаются с Core только через типизиро�
 - `engine/` — cue-таймлайн, синхронизация с `video.currentTime`;
 - `overlay/` — рендер строк субтитров набора, 1–3 одновременно (DOM поверх видео, `pointer-events:none`);
 - `messaging` — канал до Core (настройки, команды включения, готовность треков).
+
+Кроме бандла субтитров, initialization_script-ами ставятся одиночные скрипты без
+сборки: `chrome-hotkeys.js` (Ctrl+Tab/Ctrl+Shift+T/Ctrl+D → Core), `url-watch.js`
+(хук History API: SPA-переходы не порождают загрузки документа — фактический URL
+сообщается Core, карточка duopulse-057), `media-watch.js` (играет звук/видео —
+вкладка не усыпляется), `cosmetic.js` (ранние селекторы скрытия блокировщика).
 
 ## 5. Поток данных двойных субтитров (кратко)
 

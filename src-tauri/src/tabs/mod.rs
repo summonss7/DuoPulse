@@ -486,8 +486,43 @@ impl TabManager {
                     }
                 });
             }
+            // Закладка активной вкладки вкл/выкл (карточка duopulse-057):
+            // дублирует звёздочку навбара для фокуса в контенте; итоговое
+            // состояние UI видит по событию tabs.updated (finish).
+            "ctrl+d" => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let manager = app.state::<TabManager>();
+                    if let Err(e) = manager.toggle_bookmark_active(&app) {
+                        eprintln!("tabs: закладка (ctrl+d): {e}");
+                    }
+                });
+            }
             _ => {}
         }
+    }
+
+    /// Ctrl+D: закладка активной вкладки — добавить/убрать (внешние http/https
+    /// адреса; внутренние страницы и прочие схемы не закладываются). Ответ —
+    /// стала ли страница закладкой; событие tabs.updated обновит звёздочку.
+    fn toggle_bookmark_active(&self, app: &AppHandle) -> Result<bool, String> {
+        let (url, title) = {
+            let st = self.state.lock().expect("tabs: лок не отравлен");
+            let entry = st
+                .active
+                .and_then(|i| st.tabs.get(i))
+                .ok_or("активной вкладки нет")?;
+            let parsed = Url::parse(&entry.url).map_err(|e| format!("url вкладки: {e}"))?;
+            if entry.internal || !matches!(parsed.scheme(), "http" | "https") {
+                return Ok(false);
+            }
+            (parsed.to_string(), entry.title.clone().unwrap_or_default())
+        };
+        let added = app
+            .state::<crate::history::HistoryStore>()
+            .toggle_bookmark(&url, &title)?;
+        self.finish(app);
+        Ok(added)
     }
 
     /// Активная вкладка ещё без webview (ленивая, задача 1.6)? Навигационным
@@ -665,6 +700,42 @@ impl TabManager {
                 wv.hide().ok();
             }
         }
+    }
+
+    /// SPA-навигация документа (карточка duopulse-057): history.pushState/
+    /// replaceState/popstate сообщаются content/url-watch.js — новой загрузки
+    /// документа (on_page_load) не происходит, адрес вкладки актуализируется
+    /// здесь: omnibox, история (визит с текущим заголовком — заголовок новый
+    /// документ подтянет on_title → note_title) и сессия видят каждый
+    /// переход. Флаги loading/internal не трогаем: документ тот же. Вызывается
+    /// из COM-колбэка на главном потоке — фильтры под локом и finish,
+    /// как у on_page_load.
+    pub(crate) fn on_spa_url(&self, app: &AppHandle, id: &str, url: &str) {
+        let Ok(parsed) = Url::parse(url) else {
+            return;
+        };
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return;
+        }
+        let canonical = parsed.to_string();
+        let (visit_url, visit_title) = {
+            let mut st = self.state.lock().expect("tabs: лок не отравлен");
+            let Some(entry) = st.tabs.iter_mut().find(|t| t.id == id) else {
+                return;
+            };
+            if entry.internal || entry.url == canonical {
+                return;
+            }
+            entry.url = canonical.clone();
+            (canonical, entry.title.clone().unwrap_or_default())
+        };
+        if let Err(e) = app
+            .state::<crate::history::HistoryStore>()
+            .visit(&visit_url, &visit_title)
+        {
+            eprintln!("history: визит SPA не записан ({visit_url}): {e}");
+        }
+        self.finish(app);
     }
 
     /// on_page_load: URL актуализируется на каждом переходе (в т.ч. клики по
@@ -929,6 +1000,10 @@ fn build_tab_webview(app: &AppHandle, id: &str, start: WebviewUrl) -> WebviewBui
         // Горячие клавиши таб-бара в контенте (задача 1.2) — до скриптов
         // страницы, чтобы перехват нельзя было снять.
         .initialization_script(crate::CONTENT_INIT_SCRIPT_HOTKEYS)
+        // Трекер SPA-навигации (карточка duopulse-057): pushState/replaceState
+        // не порождают загрузки документа — адрес вкладки актуализируется
+        // сообщением из страницы (TabManager::on_spa_url).
+        .initialization_script(crate::CONTENT_INIT_SCRIPT_URL_WATCH)
         // Монитор медиа для спящего режима (задача 2.3): играет звук/видео —
         // вкладка не усыпляется (сообщение → TabManager::on_media).
         .initialization_script(crate::CONTENT_INIT_SCRIPT_MEDIA)

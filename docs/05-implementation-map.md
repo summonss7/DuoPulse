@@ -38,7 +38,7 @@ DuoPulse/
 │   └── tests/                      # интеграционные тесты Core
 ├── src/                            # UI-слой (Svelte + TS)
 │   ├── main.ts                     # монтирование хрома
-│   ├── chrome/                     # TabBar, Omnibox, Navbar, MainMenu
+│   ├── chrome/                     # TabBar, Omnibox, Navbar, MainMenu, Star (избранное)
 │   ├── pages/                      # NewTab (статический), Settings, Diagnostics
 │   ├── subtitles-panel/            # панель настройки субтитров (набор дорожек 1–3, стиль, сдвиг)
 │   ├── vpn-panel/                  # панель VPN: тумблер, режим off/global/split, сервер, правила
@@ -57,7 +57,8 @@ DuoPulse/
 │   ├── messaging/                  # канал до Core (WebMessage; 3.2)
 │   ├── gen/                        # генерат esbuild (gitignore, include_str! в cargo)
 │   └── *.js                        # досборочные скрипты без бандла: m0-spike,
-│                                   #   chrome-hotkeys, media-watch, cosmetic
+│                                   #   chrome-hotkeys (+Ctrl+D), url-watch (SPA-URL,
+│                                   #   карточка 057), media-watch, cosmetic
 ├── bridge/                         # IPC-контракт: contract.json (генерится из Rust-типов
 │                                   #   src-tauri/src/bridge.rs; из него — src/bridge/gen/types.ts)
 ├── e2e/                            # сценарии приёмки (по этапам)
@@ -574,6 +575,7 @@ Gate-проверки этапов включены в последние кар
 | 1.6 | **✅ выполнено 13.10.2026 (карточка duopulse-016)** Восстановление сессии (ленивое): session.json в профиле, при старте грузится только активная | 10 вкладок восстанавливаются, старт не деградирует > 10% (замер: −7,3%) |
 | 1.7 | Спайк многоканального звука 5.1/7.1 (карточка duopulse-006): поканальные тесты + YouTube 5.1 на реальной системе 5.1/7.1 | протокол e2e заполнен; все каналы звучат из правильных динамиков не хуже Chrome/Edge; при провале — карточка-решение и запись в ROADMAP |
 | 1.8 | **✅ выполнено 11.10.2026 (карточка duopulse-009)** Прокси (F-12, инкремент A): настройки SOCKS5/HTTP(S) с аутентификацией, применение через аргументы WebView2 (перезапуск), тумблер и статус в меню (карточка CARDS/009) | браузер ходит через внешний прокси (проверка IP-эхом), без прокси — напрямую; пароль прокси — в DPAPI |
+| 1.9 | **✅ выполнено 27.10.2026 (карточка duopulse-057)** UX первого запуска: полный URL в omnibox на SPA-YouTube (content/url-watch.js → `TabManager::on_spa_url` — адрес вкладки, визит истории, сессия); «открыть в новой вкладке»/target=_blank/средняя кнопка → COM NewWindowRequested открывает вкладку DuoPulse; звёздочка избранного в Navbar + Ctrl+D из контента (`HistoryStore::toggle_bookmark`); кнопка «duo» видна на любом видео; подсказка возможностей на «Новой вкладке» | живой стенд 10/10 (SPA-URL в omnibox/tabs.list/истории; target=_blank и window.open → новые вкладки; звезда вкл/выкл кликом и Ctrl+D), пиксель-проверка залитой звезды #BDFE4F; cargo 243, vitest 187 |
 
 ### M2 — скорость
 | # | Задача | DoD |

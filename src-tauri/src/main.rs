@@ -66,10 +66,12 @@ const BLOCK_TEST_PATH: &str = "/duopulse_block_test_probe";
 
 /// Content-скрипты каждой вкладки (docs/02 §4): монитор M0 + горячие клавиши
 /// таб-бара (задача 1.2) + монитор медиа для спящего режима (задача 2.3) +
-/// косметика блокировщика (задача 2.2) + бандл субтитров (задача 3.2).
+/// косметика блокировщика (задача 2.2) + бандл субтитров (задача 3.2) +
+/// трекер SPA-навигации (карточка duopulse-057).
 pub(crate) const CONTENT_INIT_SCRIPT_M0: &str = include_str!("../../content/m0-spike.js");
 pub(crate) const CONTENT_INIT_SCRIPT_HOTKEYS: &str =
     include_str!("../../content/chrome-hotkeys.js");
+pub(crate) const CONTENT_INIT_SCRIPT_URL_WATCH: &str = include_str!("../../content/url-watch.js");
 pub(crate) const CONTENT_INIT_SCRIPT_MEDIA: &str = include_str!("../../content/media-watch.js");
 pub(crate) const CONTENT_INIT_SCRIPT_COSMETIC: &str = include_str!("../../content/cosmetic.js");
 /// Субтитры (M3, задача 3.2): content/*.ts → esbuild-IIFE → content/gen/
@@ -497,7 +499,11 @@ unsafe fn referer_of(
 
 /// Сообщения content-слоя вкладки (window.chrome.webview.postMessage):
 /// - «hotkey» — горячие клавиши таб-бара (content/chrome-hotkeys.js →
-///   tabs::handle_hotkey, задача 1.2);
+///   tabs::handle_hotkey, задача 1.2; Ctrl+D — закладка страницы, карточка
+///   duopulse-057);
+/// - «spa-url» — фактический URL документа после SPA-навигации
+///   (content/url-watch.js, карточка duopulse-057): TabManager::on_spa_url
+///   актуализирует адрес вкладки (omnibox/история/сессия);
 /// - «media» — состояние медиа документа (content/media-watch.js, задача
 ///   2.3: играет звук/видео → вкладка не усыпляется); вкладка-отправитель —
 ///   tab_id (обработчик ставится на каждый webview отдельно);
@@ -552,6 +558,14 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
             if parsed["duopulse"] == "hotkey" {
                 if let Some(key) = parsed["key"].as_str() {
                     app.state::<tabs::TabManager>().handle_hotkey(&app, key);
+                }
+            } else if parsed["duopulse"] == "spa-url" {
+                // SPA-навигация документа (карточка duopulse-057):
+                // pushState/replaceState/popstate из content/url-watch.js —
+                // загрузки документа нет, адрес вкладки Core актуализирует
+                // здесь (omnibox, история, сессия).
+                if let Some(url) = parsed["url"].as_str() {
+                    app.state::<tabs::TabManager>().on_spa_url(&app, &tab_id, url);
                 }
             } else if parsed["duopulse"] == "media" {
                 if let Some(playing) = parsed["playing"].as_bool() {
@@ -856,6 +870,7 @@ pub(crate) unsafe fn install_content_handlers(
     let env: ICoreWebView2Environment = wv.environment();
     install_request_blocker(&core, &env, app, tab_id);
     install_content_messaging(&core, app, tab_id);
+    install_new_window_handler(&core, app);
     install_cosmetic_prewarm(&core, app, tab_id);
     install_nav_failure_watcher(&core, app, tab_id);
 }
@@ -898,6 +913,50 @@ unsafe fn install_nav_failure_watcher(core: &ICoreWebView2, app: &AppHandle, tab
     );
     if let Err(e) = res {
         eprintln!("error-page: NavigationCompleted не установлен: {e}");
+    }
+}
+
+/// «Открыть в новой вкладке» (карточка duopulse-057): target=_blank, средняя
+/// кнопка и пункт контекстного меню WebView2 поднимают NewWindowRequested —
+/// без обработчика запрос попросту умирает (popup-окон у WebView2 нет).
+/// Любой http(s)-запрос становится новой вкладкой DuoPulse (Handled=true,
+/// создание webview — async-задачей: round-trip создания нельзя делать на
+/// потоке цикла событий, см. tabs::open); прочие схемы (about:blank и т.п.)
+/// блокируются. Попап-фильтра по IsUserInitiated нет: в живом рантайме
+/// (пробы карточки 057) WebView2 сообщает true даже скриптовому window.open
+/// при загрузке страницы — фильтр бы только дал ложные блокировки.
+#[cfg(windows)]
+unsafe fn install_new_window_handler(core: &ICoreWebView2, app: &AppHandle) {
+    use webview2_com::NewWindowRequestedEventHandler;
+    use windows_core::PWSTR;
+
+    let app = app.clone();
+    let res = core.add_NewWindowRequested(
+        &NewWindowRequestedEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let mut uri_pw = PWSTR::null();
+            args.Uri(&mut uri_pw)?;
+            let uri = webview2_com::CoTaskMemPWSTR::from(uri_pw).to_string();
+            // любое окно закрываем сами: popup-окно WebView2 не создаём
+            args.SetHandled(true)?;
+            if !(uri.starts_with("http://") || uri.starts_with("https://")) {
+                return Ok(()); // чужая схема — блокировано
+            }
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let manager = app.state::<tabs::TabManager>();
+                if let Err(e) = manager.open(&app, Some(uri.clone()), None) {
+                    eprintln!("tabs: new-window не открыл {uri}: {e}");
+                }
+            });
+            Ok(())
+        })),
+        std::ptr::null_mut(),
+    );
+    if let Err(e) = res {
+        eprintln!("tabs: NewWindowRequested не установлен: {e}");
     }
 }
 

@@ -6,9 +6,11 @@
    вкладок (Ctrl+Tab / Ctrl+Shift+Tab) и восстановление закрытой (Ctrl+Shift+T)
    ловятся здесь и уходят в Core сообщением WebView2
    (window.chrome.webview.postMessage → WebMessageReceived в main.rs →
-   tabs::handle_hotkey). Команды навигации самого таб-бара сюда не входят —
-   это уровень браузерного хрома, страница их не видит (preventDefault +
-   stopPropagation на захвате). Без зависимостей, IIFE — как docs/02 §4. */
+   tabs::handle_hotkey). Ctrl+D — закладка текущей страницы (карточка 057):
+   ту же команду дублирует звёздочка в навбаре (фокус в UI). Команды
+   навигации самого таб-бара сюда не входят — это уровень браузерного хрома,
+   страница их не видит (preventDefault + stopPropagation на захвате).
+   Без зависимостей, IIFE — как docs/02 §4. */
 (function () {
   "use strict";
   if (window.__DUOPULSE_HOTKEYS__) return;
@@ -33,6 +35,8 @@
         post(e.shiftKey ? "ctrl+shift+tab" : "ctrl+tab");
       } else if (e.shiftKey && !e.repeat && (e.key === "t" || e.key === "T")) {
         post("ctrl+shift+t");
+      } else if (!e.shiftKey && !e.repeat && (e.key === "d" || e.key === "D")) {
+        post("ctrl+d");
       } else {
         return;
       }
