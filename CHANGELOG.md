@@ -4077,3 +4077,4 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
 - Вопрос автору отправлен в «Хаб ИИ» Aila (id duopulse_060_choice_20261029):
   гибрид (рекомендовано) / только локальный whisper.cpp / только облако.
   Карточка 060 — wait/blocked до ответа.
+- Коммит: e33387e — chore(research): duopulse-060 — ASR-спайк, e2e/asr-spike/, вопрос автору; карточка wait/blocked.
