@@ -2,7 +2,10 @@
 //! docs/02 §8): SQLite-файл `duopulse.db` в профиле пользователя
 //! (`%APPDATA%\DuoPulse\profile\`).
 //!
-//! Схема: таблицы `visits` (визиты) и `bookmarks` (закладки, url — ключ) +
+//! Схема: таблицы `visits` (визиты) и `bookmarks` (закладки, url — ключ),
+//! `bookmark_groups` + `bookmark_group_items` (группы избранного, карточка
+//! duopulse-058: закладка состоит в нескольких группах или без группы;
+//! миграция плоского списка — все закладки в «Избранное», is_default) +
 //! FTS5-индекс `search` для полнотекстового поиска (омnibox-подсказки и поиск
 //! на странице управления). FTS-строка хранит (title, url, source, ref= id
 //! строки исходной таблицы); вставка/правка/удаление держат индекс в sync
@@ -27,7 +30,9 @@ use serde::{Deserialize, Serialize};
 
 // HistoryBookmark — тип контракта bridge; реэкспорт для settings/profile.rs.
 pub use crate::bridge::HistoryBookmark;
-use crate::bridge::{HistoryEntry, HistoryHit, HistorySource};
+use crate::bridge::{
+    BookmarkGroupInfo, BookmarkGroupRef, BookmarkGroupRow, HistoryEntry, HistoryHit, HistorySource,
+};
 
 /// Строка визита для экспорта/импорта профиля (задача 5.1, settings/profile.rs):
 /// поля таблицы visits без внутреннего id.
@@ -108,6 +113,8 @@ impl HistoryStore {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
+        // каскады членства закладок в группах (удаление группы/закладки)
+        conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS visits(
                  id INTEGER PRIMARY KEY,
@@ -123,10 +130,46 @@ impl HistoryStore {
                  title TEXT NOT NULL DEFAULT '',
                  added_at INTEGER NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS bookmark_groups(
+                 id INTEGER PRIMARY KEY,
+                 name TEXT NOT NULL UNIQUE,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 sort_by TEXT NOT NULL DEFAULT 'manual',
+                 is_default INTEGER NOT NULL DEFAULT 0,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS bookmark_group_items(
+                 group_id INTEGER NOT NULL REFERENCES bookmark_groups(id) ON DELETE CASCADE,
+                 bookmark_id INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY(group_id, bookmark_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_bgi_group_pos
+                 ON bookmark_group_items(group_id, position);
              CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
                  title, url, source UNINDEXED, ref UNINDEXED
              );",
         )?;
+        // Миграция плоского списка (карточка duopulse-058): групп ещё не было —
+        // создаётся «Избранное» (is_default, туда же падают Ctrl+D и звёздочка
+        // без выбора) и все существующие закладки становятся её членами в
+        // порядке добавления. Повторно не срабатывает: группы есть у всех
+        // последующих открытий (в т.ч. после ручного разгруппирования).
+        let has_groups: i64 =
+            conn.query_row("SELECT COUNT(*) FROM bookmark_groups", [], |r| r.get(0))?;
+        if has_groups == 0 {
+            conn.execute(
+                "INSERT INTO bookmark_groups(name, position, sort_by, is_default, created_at)
+                 VALUES ('Избранное', 0, 'manual', 1, ?1)",
+                rusqlite::params![now_ms()],
+            )?;
+            let gid = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT OR IGNORE INTO bookmark_group_items(group_id, bookmark_id, position)
+                 SELECT ?1, id, ROW_NUMBER() OVER (ORDER BY added_at, id) - 1 FROM bookmarks",
+                rusqlite::params![gid],
+            )?;
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -218,7 +261,8 @@ impl HistoryStore {
 
     /// Полнотекстовый поиск подсказок omnibox: каждый токен запроса —
     /// префиксный, ранжирование bm25. Пустой запрос — закладки (подсказки
-    /// на фокус).
+    /// на фокус); у закладочных подсказок поле group — имена групп «Имя · Имя»
+    /// (карточка duopulse-058).
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<HistoryHit>, String> {
         let conn = self.conn.lock().expect("history: лок не отравлен");
         let limit = limit.clamp(1, 20) as i64;
@@ -226,7 +270,14 @@ impl HistoryStore {
         if q.is_empty() {
             // закладки по свежести добавления, без FTS
             let mut stmt = conn
-                .prepare("SELECT url, title FROM bookmarks ORDER BY added_at DESC LIMIT ?1")
+                .prepare(
+                    "SELECT b.url, b.title,
+                            (SELECT GROUP_CONCAT(g.name, ' · ')
+                             FROM bookmark_group_items i
+                             JOIN bookmark_groups g ON g.id = i.group_id
+                             WHERE i.bookmark_id = b.id)
+                     FROM bookmarks b ORDER BY b.added_at DESC LIMIT ?1",
+                )
                 .map_err(err_sql)?;
             let hits = stmt
                 .query_map([limit], |r| {
@@ -234,6 +285,7 @@ impl HistoryStore {
                         source: HistorySource::Bookmark,
                         url: r.get(0)?,
                         title: r.get(1)?,
+                        group: r.get(2)?,
                     })
                 })
                 .map_err(err_sql)?
@@ -246,22 +298,46 @@ impl HistoryStore {
         };
         let mut stmt = conn
             .prepare(
-                "SELECT source, url, title FROM search
+                "SELECT source, url, title, ref FROM search
                  WHERE search MATCH ?1 ORDER BY rank LIMIT ?2",
             )
             .map_err(err_sql)?;
-        let hits = stmt
+        // ref (id исходной строки) нужен только для метки группы закладки —
+        // в контракт он не идёт, снимается до сборки ответа
+        let rows = stmt
             .query_map(rusqlite::params![expr, limit], |r| {
-                Ok(HistoryHit {
-                    source: HistorySource::from_db(&r.get::<_, String>(0)?),
-                    url: r.get(1)?,
-                    title: r.get(2)?,
-                })
+                Ok((
+                    HistoryHit {
+                        source: HistorySource::from_db(&r.get::<_, String>(0)?),
+                        url: r.get(1)?,
+                        title: r.get(2)?,
+                        group: None,
+                    },
+                    r.get::<_, Option<i64>>(3)?,
+                ))
             })
             .map_err(err_sql)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(err_sql)?;
-        Ok(hits)
+        let mut ids: Vec<i64> = rows
+            .iter()
+            .filter(|(h, _)| h.source == HistorySource::Bookmark)
+            .filter_map(|(_, id)| *id)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let labels = group_labels(&conn, &ids).map_err(err_sql)?;
+        Ok(rows
+            .into_iter()
+            .map(|(mut hit, id)| {
+                if hit.source == HistorySource::Bookmark {
+                    if let (Some(id), None) = (id, &hit.group) {
+                        hit.group = labels.get(&id).cloned();
+                    }
+                }
+                hit
+            })
+            .collect())
     }
 
     /// Топ-хосты истории (задача 2.4, docs/04 §1.4 — прогрев DNS/preconnect):
@@ -409,11 +485,57 @@ impl HistoryStore {
         Ok(())
     }
 
-    /// Добавить закладку (url — ключ): повторное добавление обновляет
-    /// заголовок, не трогая дату. Пустой заголовок сохраняет прежний.
-    pub fn bookmark_add(&self, url: &str, title: &str) -> Result<(), String> {
+    /// Добавить закладку в группу (карточка duopulse-058): group=None —
+    /// группа по умолчанию («Избранное»), Some(id) — конкретная (её нет —
+    /// ошибка). Существующая закладка получает членство (upsert).
+    pub fn bookmark_add_to(
+        &self,
+        url: &str,
+        title: &str,
+        group: Option<i64>,
+    ) -> Result<(), String> {
         let mut conn = self.conn.lock().expect("history: лок не отравлен");
         let tx = conn.transaction().map_err(err_sql)?;
+        let member = match group {
+            Some(id) => {
+                let exists: bool = tx
+                    .query_row("SELECT 1 FROM bookmark_groups WHERE id = ?1", [id], |_| {
+                        Ok(true)
+                    })
+                    .or_else(|e| match e {
+                        rusqlite::Error::QueryReturnedNoRows => Ok(false),
+                        other => Err(other),
+                    })
+                    .map_err(err_sql)?;
+                if !exists {
+                    return Err(format!("группа {id} не найдена"));
+                }
+                Some(id)
+            }
+            None => Some(
+                tx.query_row(
+                    "SELECT id FROM bookmark_groups WHERE is_default = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(|e| format!("группа по умолчанию не найдена: {e}"))?,
+            ),
+        };
+        Self::bookmark_add_tx(&tx, url, title, member, now_ms())?;
+        tx.commit().map_err(err_sql)
+    }
+
+    /// Ядро добавления (в транзакции вызвавшего): upsert закладки + индекс;
+    /// member — добавить членство группы (INSERT OR IGNORE идемпотентен;
+    /// None — членств не трогать — путь импорта профиля). Ответ — id строки
+    /// и вставлена ли она только что (для счётчика импорта).
+    fn bookmark_add_tx(
+        tx: &rusqlite::Transaction<'_>,
+        url: &str,
+        title: &str,
+        member: Option<i64>,
+        added_at: i64,
+    ) -> Result<(i64, bool), String> {
         let existing: Option<i64> = tx
             .query_row("SELECT id FROM bookmarks WHERE url = ?1", [url], |r| {
                 r.get(0)
@@ -424,7 +546,7 @@ impl HistoryStore {
                 other => Err(other),
             })
             .map_err(err_sql)?;
-        match existing {
+        let (id, inserted) = match existing {
             Some(id) => {
                 tx.execute(
                     "UPDATE bookmarks SET title = CASE WHEN ?1 = '' THEN title ELSE ?1 END
@@ -438,11 +560,12 @@ impl HistoryStore {
                     rusqlite::params![title, id],
                 )
                 .map_err(err_sql)?;
+                (id, false)
             }
             None => {
                 tx.execute(
                     "INSERT INTO bookmarks(url, title, added_at) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![url, title, now_ms()],
+                    rusqlite::params![url, title, added_at],
                 )
                 .map_err(err_sql)?;
                 let id = tx.last_insert_rowid();
@@ -451,10 +574,20 @@ impl HistoryStore {
                     rusqlite::params![title, url, id],
                 )
                 .map_err(err_sql)?;
+                (id, true)
             }
+        };
+        if let Some(gid) = member {
+            tx.execute(
+                "INSERT OR IGNORE INTO bookmark_group_items(group_id, bookmark_id, position)
+                 VALUES (?1, ?2,
+                     (SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_group_items
+                      WHERE group_id = ?1))",
+                rusqlite::params![gid, id],
+            )
+            .map_err(err_sql)?;
         }
-        tx.commit().map_err(err_sql)?;
-        Ok(())
+        Ok((id, inserted))
     }
 
     /// Есть ли закладка с этим URL (звёздочка навбара, карточка duopulse-057).
@@ -465,13 +598,14 @@ impl HistoryStore {
     }
 
     /// Ctrl+D / звёздочка: закладка вкл/выкл. Ответ — стала ли страница
-    /// закладкой (добавили — true, убрали — false).
+    /// закладкой (добавили — true, убрали — false). Добавление — в группу
+    /// по умолчанию (карточка duopulse-058).
     pub fn toggle_bookmark(&self, url: &str, title: &str) -> Result<bool, String> {
         if self.is_bookmarked(url) {
             self.bookmark_remove(url)?;
             Ok(false)
         } else {
-            self.bookmark_add(url, title)?;
+            self.bookmark_add_to(url, title, None)?;
             Ok(true)
         }
     }
@@ -515,61 +649,415 @@ impl HistoryStore {
         Ok(())
     }
 
-    /// Закладки для страницы управления (свежие первыми), query — FTS-фильтр.
+    /// Закладки для страницы управления, query — FTS-фильтр, group — охват
+    /// и порядок (карточка duopulse-058): All — все свежими первыми;
+    /// Group(id) — члены группы в её порядке сортировки (manual → позиции
+    /// drag&drop, title → по имени, added → свежими первыми); Ungrouped —
+    /// вне групп. Каждая строка несёт свои группы (groups: id + имя).
     pub fn bookmark_list(
         &self,
         query: &str,
+        group: GroupFilter,
         offset: u32,
         limit: u32,
     ) -> Result<(Vec<HistoryBookmark>, u32), String> {
         let conn = self.conn.lock().expect("history: лок не отравлен");
         let limit = limit.clamp(1, 500) as i64;
         let offset = offset.min(i32::MAX as u32) as i64;
-        let filter = match match_expr(query.trim()) {
-            Some(expr) => format!(
-                " WHERE b.id IN (SELECT ref FROM search WHERE search MATCH '{}' \
+        let mut conds: Vec<String> = Vec::new();
+        if let Some(expr) = match_expr(query.trim()) {
+            conds.push(format!(
+                "b.id IN (SELECT ref FROM search WHERE search MATCH '{}' \
                  AND source = 'bookmark')",
                 expr.replace('\'', "''")
-            ),
-            None => String::new(),
+            ));
+        }
+        let mut params: Vec<i64> = Vec::new();
+        let (join, order) = match group {
+            GroupFilter::All => (String::new(), "b.added_at DESC, b.url".to_string()),
+            GroupFilter::Group(gid) => {
+                let sort_by: String = conn
+                    .query_row(
+                        "SELECT sort_by FROM bookmark_groups WHERE id = ?1",
+                        [gid],
+                        |r| r.get(0),
+                    )
+                    .map_err(|_| format!("группа {gid} не найдена"))?;
+                let order = match sort_by.as_str() {
+                    "title" => "b.title COLLATE NOCASE, b.url".to_string(),
+                    "added" => "b.added_at DESC, b.url".to_string(),
+                    _ => "i.position, b.url".to_string(),
+                };
+                params.push(gid);
+                (
+                    " JOIN bookmark_group_items i ON i.bookmark_id = b.id AND i.group_id = ?1"
+                        .to_string(),
+                    order,
+                )
+            }
+            GroupFilter::Ungrouped => {
+                conds.push("i.group_id IS NULL".into());
+                (
+                    " LEFT JOIN bookmark_group_items i ON i.bookmark_id = b.id".to_string(),
+                    "b.added_at DESC, b.url".to_string(),
+                )
+            }
         };
+        let where_clause = if conds.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conds.join(" AND "))
+        };
+        // нумерация: ?1 — группа (если есть), ?2/?3 — LIMIT/OFFSET (только
+        // entries-запрос); COUNT использует те же ?1 и WHERE
+        let mut entry_params = params.clone();
+        entry_params.push(limit);
+        entry_params.push(offset);
         let sql_entries = format!(
-            "SELECT b.url, b.title, b.added_at FROM bookmarks b{filter}
-             ORDER BY b.added_at DESC, b.url LIMIT ?1 OFFSET ?2"
+            "SELECT b.id, b.url, b.title, b.added_at FROM bookmarks b{join}{where_clause}
+             ORDER BY {order} LIMIT ?{} OFFSET ?{}",
+            params.len() + 1,
+            params.len() + 2
         );
         let mut stmt = conn.prepare(&sql_entries).map_err(err_sql)?;
-        let bookmarks = stmt
-            .query_map(rusqlite::params![limit, offset], |r| {
-                Ok(HistoryBookmark {
-                    url: r.get(0)?,
-                    title: r.get(1)?,
-                    added_at: r.get(2)?,
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(&entry_params), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    HistoryBookmark {
+                        url: r.get(1)?,
+                        title: r.get(2)?,
+                        added_at: r.get(3)?,
+                        groups: Vec::new(),
+                    },
+                ))
+            })
+            .map_err(err_sql)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(err_sql)?;
+        let sql_total = format!("SELECT COUNT(*) FROM bookmarks b{join}{where_clause}");
+        let total = conn
+            .query_row(&sql_total, rusqlite::params_from_iter(&params), |r| {
+                r.get::<_, i64>(0)
+            })
+            .map_err(err_sql)? as u32;
+        let ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
+        let refs = group_refs_of(&conn, &ids).map_err(err_sql)?;
+        let bookmarks = rows
+            .into_iter()
+            .map(|(id, mut b)| {
+                b.groups = refs.get(&id).cloned().unwrap_or_default();
+                b
+            })
+            .collect();
+        Ok((bookmarks, total))
+    }
+
+    // --- карточка duopulse-058: группы избранного -----------------------------
+
+    /// Группы для UI (по позициям) с числом закладок.
+    pub fn group_list(&self) -> Result<Vec<BookmarkGroupInfo>, String> {
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        let mut stmt = conn
+            .prepare(
+                "SELECT g.id, g.name, g.position, g.sort_by, g.is_default,
+                        (SELECT COUNT(*) FROM bookmark_group_items i WHERE i.group_id = g.id)
+                 FROM bookmark_groups g ORDER BY g.position, g.id",
+            )
+            .map_err(err_sql)?;
+        let groups = stmt
+            .query_map([], |r| {
+                Ok(BookmarkGroupInfo {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    position: r.get::<_, i64>(2)? as u32,
+                    sort_by: r.get(3)?,
+                    is_default: r.get::<_, i64>(4)? != 0,
+                    count: r.get::<_, i64>(5)? as u32,
                 })
             })
             .map_err(err_sql)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(err_sql)?;
-        let sql_total = format!("SELECT COUNT(*) FROM bookmarks b{filter}");
-        let total = conn
-            .query_row(&sql_total, [], |r| r.get::<_, i64>(0))
-            .map_err(err_sql)? as u32;
-        Ok((bookmarks, total))
+        Ok(groups)
+    }
+
+    /// Создать группу (имя уникально, пустое/дубликат — ошибка); новая —
+    /// последняя, сортировка «вручную».
+    pub fn group_add(&self, name: &str) -> Result<BookmarkGroupInfo, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("имя группы пустое".into());
+        }
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let dup: bool = tx
+            .query_row(
+                "SELECT 1 FROM bookmark_groups WHERE name = ?1",
+                [name],
+                |_| Ok(()),
+            )
+            .is_ok();
+        if dup {
+            return Err(format!("группа «{name}» уже есть"));
+        }
+        let position: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_groups",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(err_sql)?;
+        tx.execute(
+            "INSERT INTO bookmark_groups(name, position, sort_by, is_default, created_at)
+             VALUES (?1, ?2, 'manual', 0, ?3)",
+            rusqlite::params![name, position, now_ms()],
+        )
+        .map_err(err_sql)?;
+        let id = tx.last_insert_rowid();
+        tx.commit().map_err(err_sql)?;
+        Ok(BookmarkGroupInfo {
+            id,
+            name: name.to_string(),
+            position: position as u32,
+            sort_by: "manual".into(),
+            is_default: false,
+            count: 0,
+        })
+    }
+
+    /// Переименовать группу (имя уникально; несуществующая — ошибка).
+    pub fn group_rename(&self, id: i64, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("имя группы пустое".into());
+        }
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let dup: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM bookmark_groups WHERE name = ?1 AND id != ?2",
+                rusqlite::params![name, id],
+                |r| r.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })
+            .map_err(err_sql)?;
+        if dup.is_some() {
+            return Err(format!("группа «{name}» уже есть"));
+        }
+        let changed = tx
+            .execute(
+                "UPDATE bookmark_groups SET name = ?1 WHERE id = ?2",
+                rusqlite::params![name, id],
+            )
+            .map_err(err_sql)?;
+        if changed == 0 {
+            return Err(format!("группа {id} не найдена"));
+        }
+        tx.commit().map_err(err_sql)
+    }
+
+    /// Удалить группу: закладки остаются (членства снимаются каскадом),
+    /// группа по умолчанию не удаляется (Ctrl+D и звёздочка без выбора
+    /// добавляют в неё).
+    pub fn group_remove(&self, id: i64) -> Result<(), String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let is_default: Option<bool> = tx
+            .query_row(
+                "SELECT is_default != 0 FROM bookmark_groups WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })
+            .map_err(err_sql)?;
+        match is_default {
+            None => return Err(format!("группа {id} не найдена")),
+            Some(true) => return Err("группу по умолчанию удалить нельзя — переименуйте её".into()),
+            Some(false) => {}
+        }
+        tx.execute("DELETE FROM bookmark_groups WHERE id = ?1", [id])
+            .map_err(err_sql)?;
+        tx.commit().map_err(err_sql)
+    }
+
+    /// Режим сортировки группы: manual (позиции drag&drop) | title | added.
+    pub fn group_set_sort(&self, id: i64, sort_by: &str) -> Result<(), String> {
+        let sort_by = normalize_sort_by(sort_by);
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        let changed = conn
+            .execute(
+                "UPDATE bookmark_groups SET sort_by = ?1 WHERE id = ?2",
+                rusqlite::params![sort_by, id],
+            )
+            .map_err(err_sql)?;
+        if changed == 0 {
+            return Err(format!("группа {id} не найдена"));
+        }
+        Ok(())
+    }
+
+    /// Членство закладки в группе вкл/выкл (закладка может быть в нескольких
+    /// группах или ни в одной). Снятие всех членств оставляет закладку
+    /// «без группы» (видна в фильтре Ungrouped и в «Все»).
+    pub fn group_toggle_bookmark(&self, url: &str, group_id: i64, on: bool) -> Result<(), String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let group_exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM bookmark_groups WHERE id = ?1",
+                [group_id],
+                |_| Ok(true),
+            )
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(false),
+                other => Err(other),
+            })
+            .map_err(err_sql)?;
+        if !group_exists {
+            return Err(format!("группа {group_id} не найдена"));
+        }
+        let bid: i64 = tx
+            .query_row("SELECT id FROM bookmarks WHERE url = ?1", [url], |r| {
+                r.get(0)
+            })
+            .map_err(|_| format!("закладка {url} не найдена"))?;
+        if on {
+            tx.execute(
+                "INSERT OR IGNORE INTO bookmark_group_items(group_id, bookmark_id, position)
+                 VALUES (?1, ?2,
+                     (SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_group_items
+                      WHERE group_id = ?1))",
+                rusqlite::params![group_id, bid],
+            )
+            .map_err(err_sql)?;
+        } else {
+            tx.execute(
+                "DELETE FROM bookmark_group_items WHERE group_id = ?1 AND bookmark_id = ?2",
+                rusqlite::params![group_id, bid],
+            )
+            .map_err(err_sql)?;
+        }
+        tx.commit().map_err(err_sql)
+    }
+
+    /// Переставить закладку внутри группы (drag&drop, позиция 0 = верх):
+    /// порядок группы переписывается целиком — позиции всегда плотные.
+    pub fn bookmark_move(&self, url: &str, group_id: i64, position: u32) -> Result<(), String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let group_exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM bookmark_groups WHERE id = ?1",
+                [group_id],
+                |_| Ok(true),
+            )
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(false),
+                other => Err(other),
+            })
+            .map_err(err_sql)?;
+        if !group_exists {
+            return Err(format!("группа {group_id} не найдена"));
+        }
+        let bid: i64 = tx
+            .query_row("SELECT id FROM bookmarks WHERE url = ?1", [url], |r| {
+                r.get(0)
+            })
+            .map_err(|_| format!("закладка {url} не найдена"))?;
+        let mut ids: Vec<i64> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT bookmark_id FROM bookmark_group_items
+                     WHERE group_id = ?1 ORDER BY position, bookmark_id",
+                )
+                .map_err(err_sql)?;
+            let rows = stmt
+                .query_map([group_id], |r| r.get::<_, i64>(0))
+                .map_err(err_sql)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(err_sql)?;
+            rows
+        };
+        let from = ids
+            .iter()
+            .position(|id| *id == bid)
+            .ok_or_else(|| format!("закладка {url} не в группе {group_id}"))?;
+        ids.remove(from);
+        let to = (position as usize).min(ids.len());
+        ids.insert(to, bid);
+        for (idx, id) in ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE bookmark_group_items SET position = ?1
+                 WHERE group_id = ?2 AND bookmark_id = ?3",
+                rusqlite::params![idx as i64, group_id, id],
+            )
+            .map_err(err_sql)?;
+        }
+        tx.commit().map_err(err_sql)
     }
 
     // --- задача 5.1: экспорт/импорт профиля -----------------------------------
 
     /// Дамп всех закладок (экспорт профиля; url — ключ, даты сохраняются).
+    /// Строки несут членства групп (groups: id машины-источника + имя).
     pub fn dump_bookmarks(&self) -> Result<Vec<HistoryBookmark>, String> {
         let conn = self.conn.lock().expect("history: лок не отравлен");
         let mut stmt = conn
-            .prepare("SELECT url, title, added_at FROM bookmarks ORDER BY added_at, url")
+            .prepare("SELECT id, url, title, added_at FROM bookmarks ORDER BY added_at, url")
             .map_err(err_sql)?;
         let rows = stmt
             .query_map([], |r| {
-                Ok(HistoryBookmark {
-                    url: r.get(0)?,
-                    title: r.get(1)?,
-                    added_at: r.get(2)?,
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    HistoryBookmark {
+                        url: r.get(1)?,
+                        title: r.get(2)?,
+                        added_at: r.get(3)?,
+                        groups: Vec::new(),
+                    },
+                ))
+            })
+            .map_err(err_sql)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(err_sql)?;
+        let ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
+        let refs = group_refs_of(&conn, &ids).map_err(err_sql)?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, mut b)| {
+                b.groups = refs.get(&id).cloned().unwrap_or_default();
+                b
+            })
+            .collect())
+    }
+
+    /// Дамп групп (экспорт профиля): позиция, сортировка, флаг «по
+    /// умолчанию»; id — локальный (импорт мапит по имени).
+    pub fn dump_groups(&self) -> Result<Vec<BookmarkGroupRow>, String> {
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, position, sort_by, is_default
+                 FROM bookmark_groups ORDER BY position, id",
+            )
+            .map_err(err_sql)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(BookmarkGroupRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    position: r.get::<_, i64>(2)? as u32,
+                    sort_by: r.get(3)?,
+                    is_default: r.get::<_, i64>(4)? != 0,
                 })
             })
             .map_err(err_sql)?
@@ -598,10 +1086,95 @@ impl HistoryStore {
         Ok(rows)
     }
 
+    /// Импорт групп (переезд профиля): соответствие по имени — на машине-
+    /// приёмнике свои id (в т.ч. группа по умолчанию уже есть); новые группы
+    /// дописываются в конец, существующим обновляется режим сортировки.
+    /// Ответ — карта id файла → локальный id (для членств закладок).
+    /// Группа с is_default переносит флаг «по умолчанию» на локальную группу
+    /// с этим именем (если имени нет — создаётся новая и становится default).
+    pub fn import_groups(
+        &self,
+        rows: &[BookmarkGroupRow],
+    ) -> Result<std::collections::BTreeMap<i64, i64>, String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let mut map = std::collections::BTreeMap::new();
+        let mut next_pos: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_groups",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(err_sql)?;
+        for row in rows {
+            let name = row.name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let local: Option<i64> = tx
+                .query_row(
+                    "SELECT id FROM bookmark_groups WHERE name = ?1",
+                    [name],
+                    |r| r.get(0),
+                )
+                .map(Some)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other),
+                })
+                .map_err(err_sql)?;
+            let id = match local {
+                Some(id) => {
+                    tx.execute(
+                        "UPDATE bookmark_groups SET sort_by = ?1 WHERE id = ?2",
+                        rusqlite::params![normalize_sort_by(&row.sort_by), id],
+                    )
+                    .map_err(err_sql)?;
+                    id
+                }
+                None => {
+                    tx.execute(
+                        "INSERT INTO bookmark_groups(name, position, sort_by, is_default,
+                                                     created_at)
+                         VALUES (?1, ?2, ?3, 0, ?4)",
+                        rusqlite::params![
+                            name,
+                            next_pos,
+                            normalize_sort_by(&row.sort_by),
+                            now_ms()
+                        ],
+                    )
+                    .map_err(err_sql)?;
+                    next_pos += 1;
+                    tx.last_insert_rowid()
+                }
+            };
+            map.insert(row.id, id);
+        }
+        // флаг «по умолчанию» — с файла на локальную группу (ровно один)
+        if let Some(src_default) = rows.iter().find(|r| r.is_default) {
+            if let Some(&local) = map.get(&src_default.id) {
+                tx.execute(
+                    "UPDATE bookmark_groups SET is_default = CASE WHEN id = ?1 THEN 1 ELSE 0 END",
+                    [local],
+                )
+                .map_err(err_sql)?;
+            }
+        }
+        tx.commit().map_err(err_sql)?;
+        Ok(map)
+    }
+
     /// Импорт закладок (переезд профиля): существующий url получает заголовок
-    /// из файла (непустой), дата добавления сохраняется у новых. Возвращает
-    /// число вставленных.
-    pub fn import_bookmarks(&self, rows: &[HistoryBookmark]) -> Result<u32, String> {
+    /// из файла (непустой), дата добавления сохраняется у новых. Членства
+    /// групп применяются по карте import_groups (фолбэк — имя); закладка без
+    /// групп в файле становится членом группы по умолчанию (как при миграции
+    /// плоского списка). Возвращает число вставленных.
+    pub fn import_bookmarks(
+        &self,
+        rows: &[HistoryBookmark],
+        group_map: &std::collections::BTreeMap<i64, i64>,
+    ) -> Result<u32, String> {
         let mut conn = self.conn.lock().expect("history: лок не отравлен");
         let tx = conn.transaction().map_err(err_sql)?;
         let mut inserted = 0u32;
@@ -609,45 +1182,54 @@ impl HistoryStore {
             if b.url.trim().is_empty() {
                 continue;
             }
-            let existing: Option<i64> = tx
-                .query_row("SELECT id FROM bookmarks WHERE url = ?1", [&b.url], |r| {
-                    r.get(0)
-                })
-                .map(Some)
-                .or_else(|e| match e {
-                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                    other => Err(other),
-                })
-                .map_err(err_sql)?;
-            match existing {
-                Some(id) => {
-                    if !b.title.is_empty() {
-                        tx.execute(
-                            "UPDATE bookmarks SET title = ?1 WHERE id = ?2",
-                            rusqlite::params![b.title, id],
+            // upsert (даты — из файла), членства — ниже по карте/имени
+            let (id, was_new) = Self::bookmark_add_tx(&tx, &b.url, &b.title, None, b.added_at)?;
+            if was_new {
+                inserted += 1;
+            }
+            // членства: карта id файла → локальный; фолбэк — совпадение имени
+            let mut gids: Vec<i64> = Vec::new();
+            for r in &b.groups {
+                if let Some(local) = group_map.get(&r.id) {
+                    gids.push(*local);
+                } else {
+                    let by_name: Option<i64> = tx
+                        .query_row(
+                            "SELECT id FROM bookmark_groups WHERE name = ?1",
+                            [r.name.trim()],
+                            |row| row.get(0),
                         )
+                        .map(Some)
+                        .or_else(|e| match e {
+                            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                            other => Err(other),
+                        })
                         .map_err(err_sql)?;
-                        tx.execute(
-                            "UPDATE search SET title = ?1 WHERE source = 'bookmark' AND ref = ?2",
-                            rusqlite::params![b.title, id],
-                        )
-                        .map_err(err_sql)?;
+                    if let Some(local) = by_name {
+                        gids.push(local);
                     }
                 }
-                None => {
-                    tx.execute(
-                        "INSERT INTO bookmarks(url, title, added_at) VALUES (?1, ?2, ?3)",
-                        rusqlite::params![b.url, b.title, b.added_at],
+            }
+            if gids.is_empty() && was_new {
+                // файл без групп (старый формат) — в группу по умолчанию
+                gids.push(
+                    tx.query_row(
+                        "SELECT id FROM bookmark_groups WHERE is_default = 1",
+                        [],
+                        |r| r.get(0),
                     )
-                    .map_err(err_sql)?;
-                    let id = tx.last_insert_rowid();
-                    tx.execute(
-                        "INSERT INTO search(title, url, source, ref) VALUES (?1, ?2, 'bookmark', ?3)",
-                        rusqlite::params![b.title, b.url, id],
-                    )
-                    .map_err(err_sql)?;
-                    inserted += 1;
-                }
+                    .map_err(err_sql)?,
+                );
+            }
+            for gid in gids {
+                tx.execute(
+                    "INSERT OR IGNORE INTO bookmark_group_items(group_id, bookmark_id, position)
+                     VALUES (?1, ?2,
+                         (SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_group_items
+                          WHERE group_id = ?1))",
+                    rusqlite::params![gid, id],
+                )
+                .map_err(err_sql)?;
             }
         }
         tx.commit().map_err(err_sql)?;
@@ -691,6 +1273,99 @@ impl HistoryStore {
         }
         tx.commit().map_err(err_sql)?;
         Ok(inserted)
+    }
+}
+
+/// Фильтр/порядок списка закладок по группам (карточка duopulse-058):
+/// All — все, свежие первыми; Group(id) — члены группы в её порядке
+/// сортировки; Ungrouped — вне групп, свежие первыми.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupFilter {
+    All,
+    Group(i64),
+    Ungrouped,
+}
+
+/// Членства групп закладок: id закладки → (id группы, имя) по позициям групп
+/// (общее для списка закладок и дампа профиля). Чанками — лимит переменных
+/// SQLite на старых движках.
+fn group_refs_of(
+    conn: &Connection,
+    ids: &[i64],
+) -> rusqlite::Result<std::collections::HashMap<i64, Vec<BookmarkGroupRef>>> {
+    let mut map: std::collections::HashMap<i64, Vec<BookmarkGroupRef>> =
+        std::collections::HashMap::new();
+    for chunk in ids.chunks(500) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT i.bookmark_id, g.id, g.name
+             FROM bookmark_group_items i JOIN bookmark_groups g ON g.id = i.group_id
+             WHERE i.bookmark_id IN ({placeholders})
+             ORDER BY i.bookmark_id, g.position, g.id"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                BookmarkGroupRef {
+                    id: r.get(1)?,
+                    name: r.get(2)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (bid, rf) = row?;
+            map.entry(bid).or_default().push(rf);
+        }
+    }
+    Ok(map)
+}
+
+/// Имена групп одним текстом «Имя · Имя» (подсказки omnibox): id закладки →
+/// конкатенация (порядок групп — их позиции).
+fn group_labels(
+    conn: &Connection,
+    ids: &[i64],
+) -> rusqlite::Result<std::collections::HashMap<i64, String>> {
+    let mut map: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+    for chunk in ids.chunks(500) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT i.bookmark_id, GROUP_CONCAT(g.name, ' · ')
+             FROM bookmark_group_items i JOIN bookmark_groups g ON g.id = i.group_id
+             WHERE i.bookmark_id IN ({placeholders})
+             GROUP BY i.bookmark_id"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        for row in rows {
+            let (bid, label) = row?;
+            if let Some(label) = label {
+                map.insert(bid, label);
+            }
+        }
+    }
+    Ok(map)
+}
+
+/// Канонический режим сортировки группы (неизвестный — «вручную»).
+fn normalize_sort_by(s: &str) -> &'static str {
+    match s.trim() {
+        "title" => "title",
+        "added" => "added",
+        _ => "manual",
     }
 }
 
@@ -778,19 +1453,20 @@ mod tests {
             .visit("https://translate.google.com/", "Google Переводчик")
             .unwrap();
         store
-            .bookmark_add("https://www.youtube.com/", "YouTube")
+            .bookmark_add_to("https://www.youtube.com/", "YouTube", None)
             .unwrap();
         store
-            .bookmark_add(
+            .bookmark_add_to(
                 "https://ru.wikipedia.org/",
                 "Википедия — свободная энциклопедия",
+                None,
             )
             .unwrap();
         store
-            .bookmark_add("https://github.com/", "GitHub: Let's build from here")
+            .bookmark_add_to("https://github.com/", "GitHub: Let's build from here", None)
             .unwrap();
         store
-            .bookmark_add("https://developer.mozilla.org/ru/", "MDN Web Docs")
+            .bookmark_add_to("https://developer.mozilla.org/ru/", "MDN Web Docs", None)
             .unwrap();
         store
     }
@@ -915,7 +1591,7 @@ mod tests {
             .visit_at("https://a.example/1", "статья один", 300_000)
             .unwrap(); // 2-й визит
         store
-            .bookmark_add("https://c.example/", "статья три (закладка)")
+            .bookmark_add_to("https://c.example/", "статья три (закладка)", None)
             .unwrap();
         let (entries, total) = store.list("", 0, 100).unwrap();
         assert_eq!(total, 2, "закладки в историю не попадают");
@@ -977,11 +1653,17 @@ mod tests {
     #[test]
     fn bookmark_upsert_remove_update_and_list() {
         let store = HistoryStore::open_in_memory().unwrap();
-        store.bookmark_add("https://a.example/", "A").unwrap();
+        store
+            .bookmark_add_to("https://a.example/", "A", None)
+            .unwrap();
         // повторное добавление: обновляет заголовок, дата не сбрасывается в 0
-        store.bookmark_add("https://a.example/", "A v2").unwrap();
-        store.bookmark_add("https://b.example/", "B").unwrap();
-        let (marks, total) = store.bookmark_list("", 0, 100).unwrap();
+        store
+            .bookmark_add_to("https://a.example/", "A v2", None)
+            .unwrap();
+        store
+            .bookmark_add_to("https://b.example/", "B", None)
+            .unwrap();
+        let (marks, total) = store.bookmark_list("", GroupFilter::All, 0, 100).unwrap();
         assert_eq!(total, 2);
         assert_eq!(
             marks
@@ -1002,10 +1684,12 @@ mod tests {
             .iter()
             .any(|h| h.source == HistorySource::Bookmark));
         // пустой заголовок при добавлении не затирает существующий
-        store.bookmark_add("https://b.example/", "").unwrap();
+        store
+            .bookmark_add_to("https://b.example/", "", None)
+            .unwrap();
         assert_eq!(
             store
-                .bookmark_list("", 0, 100)
+                .bookmark_list("", GroupFilter::All, 0, 100)
                 .unwrap()
                 .0
                 .iter()
@@ -1017,7 +1701,10 @@ mod tests {
         // удаление идемпотентно
         store.bookmark_remove("https://a.example/").unwrap();
         store.bookmark_remove("https://a.example/").unwrap();
-        assert_eq!(store.bookmark_list("", 0, 100).unwrap().1, 1);
+        assert_eq!(
+            store.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1,
+            1
+        );
         assert!(
             store.search("a v2", 8).unwrap().is_empty(),
             "индекс закладки тоже удалён"
@@ -1025,17 +1712,25 @@ mod tests {
         // правка несуществующей — ошибка
         assert!(store.bookmark_update("https://nope.example/", "x").is_err());
         // FTS-фильтр списка
-        assert_eq!(store.bookmark_list("новое", 0, 100).unwrap().1, 1);
+        assert_eq!(
+            store
+                .bookmark_list("новое", GroupFilter::All, 0, 100)
+                .unwrap()
+                .1,
+            1
+        );
     }
 
     #[test]
     fn bookmark_survives_history_deletion_of_same_url() {
         let store = HistoryStore::open_in_memory().unwrap();
         store.visit("https://a.example/", "A").unwrap();
-        store.bookmark_add("https://a.example/", "A").unwrap();
+        store
+            .bookmark_add_to("https://a.example/", "A", None)
+            .unwrap();
         store.delete_urls(&["https://a.example/".into()]).unwrap();
         assert_eq!(
-            store.bookmark_list("", 0, 100).unwrap().1,
+            store.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1,
             1,
             "закладка не часть истории"
         );
@@ -1067,6 +1762,405 @@ mod tests {
             "третий — снова добавить"
         );
         assert!(store.is_bookmarked(url));
+    }
+
+    // --- карточка duopulse-058: группы избранного -----------------------------
+
+    /// Миграция duopulse.db с плоским списком закладок (до карточки 058):
+    /// все закладки — в «Избранное» (is_default) в порядке добавления,
+    /// ничего не теряется. Повторное открытие не пересобирает членства.
+    #[test]
+    fn migration_moves_flat_bookmarks_to_default_group() {
+        let dir = std::env::temp_dir().join(format!("duopulse-migrate-{}", std::process::id()));
+        let path = dir.join("duopulse.db");
+        let _ = std::fs::remove_file(&path);
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            // старая схема: без bookmark_groups/bookmark_group_items
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE bookmarks(
+                     id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE,
+                     title TEXT NOT NULL DEFAULT '', added_at INTEGER NOT NULL);
+                 CREATE VIRTUAL TABLE search USING fts5(
+                     title, url, source UNINDEXED, ref UNINDEXED);
+                 INSERT INTO bookmarks(url, title, added_at) VALUES
+                     ('https://a.example/', 'A', 100),
+                     ('https://b.example/', 'B', 300),
+                     ('https://c.example/', 'C', 200);",
+            )
+            .unwrap();
+        }
+        let store = HistoryStore::open(&dir).unwrap();
+        let groups = store.group_list().unwrap();
+        assert_eq!(groups.len(), 1);
+        let fav = &groups[0];
+        assert_eq!(fav.name, "Избранное");
+        assert!(fav.is_default);
+        assert_eq!(fav.count, 3, "все закладки мигрировали");
+        // порядок внутри группы — по added_at (A, C, B)
+        let (marks, total) = store
+            .bookmark_list("", GroupFilter::Group(fav.id), 0, 100)
+            .unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(
+            marks.iter().map(|m| m.url.as_str()).collect::<Vec<_>>(),
+            vec![
+                "https://a.example/",
+                "https://c.example/",
+                "https://b.example/"
+            ]
+        );
+        // «Все» по-прежнему всё
+        assert_eq!(
+            store.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1,
+            3
+        );
+
+        // снятие членства переживает переоткрытие (миграция не повторяется)
+        store
+            .group_toggle_bookmark("https://a.example/", fav.id, false)
+            .unwrap();
+        drop(store);
+        let store = HistoryStore::open(&dir).unwrap();
+        assert_eq!(
+            store
+                .bookmark_list("", GroupFilter::Ungrouped, 0, 100)
+                .unwrap()
+                .1,
+            1,
+            "a.example осталась без группы"
+        );
+        assert_eq!(
+            store
+                .bookmark_list("", GroupFilter::Group(fav.id), 0, 100)
+                .unwrap()
+                .1,
+            2
+        );
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(dir.join("duopulse.db-wal"));
+        let _ = std::fs::remove_file(dir.join("duopulse.db-shm"));
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// Свежая база: группа по умолчанию есть и без закладок; Ctrl+D
+    /// (toggle_bookmark) кладёт новые закладки в неё.
+    #[test]
+    fn fresh_db_has_default_group_and_toggle_uses_it() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let groups = store.group_list().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].is_default);
+        assert!(store.toggle_bookmark("https://x.example/", "X").unwrap());
+        let (marks, _) = store
+            .bookmark_list("", GroupFilter::Group(groups[0].id), 0, 100)
+            .unwrap();
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].groups.len(), 1);
+        assert_eq!(marks[0].groups[0].name, "Избранное");
+    }
+
+    /// CRUD групп + членства: создание/переименование/удаление, дубликаты
+    /// имён, защита группы по умолчанию, множественные членства, «без группы».
+    #[test]
+    fn group_crud_and_membership() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let fav = store.group_list().unwrap().remove(0);
+        let work = store.group_add("Работа").unwrap();
+        let study = store.group_add("Учёба").unwrap();
+        // позиции растут, счётчики нулевые
+        let groups = store.group_list().unwrap();
+        assert_eq!(
+            groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
+            vec!["Избранное", "Работа", "Учёба"]
+        );
+        assert!(groups.iter().all(|g| g.count == 0));
+
+        // пустое имя и дубликат — ошибки
+        assert!(store.group_add("   ").is_err());
+        assert!(store.group_add("Работа").is_err());
+        // переименование в занятое имя — ошибка, в своё — ок
+        assert!(store.group_rename(work.id, "Учёба").is_err());
+        store.group_rename(work.id, "Работа и проект").unwrap();
+        assert!(store.group_rename(999, "нет такой").is_err());
+        // группу по умолчанию удалить нельзя, прочие — можно
+        assert!(store.group_remove(fav.id).is_err());
+        store.group_remove(study.id).unwrap();
+        assert_eq!(store.group_list().unwrap().len(), 2);
+
+        // закладки и членства
+        store
+            .bookmark_add_to("https://a.example/", "A", None)
+            .unwrap();
+        store
+            .bookmark_add_to("https://b.example/", "B", Some(work.id))
+            .unwrap();
+        // b — в двух группах, a — только в «Избранное»
+        store
+            .group_toggle_bookmark("https://b.example/", fav.id, true)
+            .unwrap();
+        let groups = store.group_list().unwrap();
+        let w = groups.iter().find(|g| g.name == "Работа и проект").unwrap();
+        let f = groups.iter().find(|g| g.is_default).unwrap();
+        assert_eq!((f.count, w.count), (2, 1));
+        // строки несут свои группы
+        let (marks, _) = store.bookmark_list("", GroupFilter::All, 0, 100).unwrap();
+        let b = marks.iter().find(|m| m.url.contains("b.example")).unwrap();
+        assert_eq!(b.groups.len(), 2);
+        // неизвестная группа/закладка — ошибки
+        assert!(
+            store
+                .group_toggle_bookmark("https://b.example/", study.id, true)
+                .is_err(),
+            "группа удалена"
+        );
+        assert!(store
+            .group_toggle_bookmark("https://nope.example/", work.id, true)
+            .is_err());
+        assert!(store
+            .bookmark_add_to("https://c.example/", "C", Some(999))
+            .is_err());
+
+        // снятие обоих членств — закладка «без группы», но жива
+        store
+            .group_toggle_bookmark("https://b.example/", fav.id, false)
+            .unwrap();
+        store
+            .group_toggle_bookmark("https://b.example/", work.id, false)
+            .unwrap();
+        assert_eq!(
+            store
+                .bookmark_list("", GroupFilter::Ungrouped, 0, 100)
+                .unwrap()
+                .1,
+            1
+        );
+        assert_eq!(
+            store.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1,
+            2,
+            "«Все» показывает и безгруппные"
+        );
+        // FTS-фильтр работает вместе с фильтром группы
+        assert_eq!(
+            store
+                .bookmark_list("b.example", GroupFilter::Ungrouped, 0, 100)
+                .unwrap()
+                .1,
+            1
+        );
+        // удаление группы снимает членства (каскад), закладки живы
+        store
+            .group_toggle_bookmark("https://a.example/", work.id, true)
+            .unwrap();
+        store.group_remove(work.id).unwrap();
+        assert_eq!(
+            store.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1,
+            2
+        );
+        // удаление закладки тоже снимает членства без остатка
+        store.bookmark_remove("https://a.example/").unwrap();
+        let groups = store.group_list().unwrap();
+        assert_eq!(groups[0].count, 0, "членства a.example ушли вместе с ней");
+    }
+
+    /// Сортировка группы: manual — позиции (bookmark_move/drag&drop),
+    /// title — по имени без учёта регистра, added — свежие первыми.
+    #[test]
+    fn group_sort_modes_and_manual_move() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let fav = store.group_list().unwrap().remove(0);
+        let read = store.group_add("Чтение").unwrap();
+        for (url, title) in [
+            ("https://w.example/", "Википедия"),
+            ("https://g.example/", "GitHub"),
+            ("https://m.example/", "mdn"),
+        ] {
+            store.bookmark_add_to(url, title, Some(read.id)).unwrap();
+        }
+        let urls = |g: GroupFilter| {
+            store
+                .bookmark_list("", g, 0, 100)
+                .unwrap()
+                .0
+                .iter()
+                .map(|m| m.url.as_str().to_string())
+                .collect::<Vec<_>>()
+        };
+        // manual: порядок вставки
+        assert_eq!(
+            urls(GroupFilter::Group(read.id)),
+            vec![
+                "https://w.example/",
+                "https://g.example/",
+                "https://m.example/"
+            ]
+        );
+        // перемещение вверх: m → позиция 0; кламп за пределы — в конец
+        store
+            .bookmark_move("https://m.example/", read.id, 0)
+            .unwrap();
+        store
+            .bookmark_move("https://w.example/", read.id, 99)
+            .unwrap();
+        assert_eq!(
+            urls(GroupFilter::Group(read.id)),
+            vec![
+                "https://m.example/",
+                "https://g.example/",
+                "https://w.example/"
+            ],
+            "[w,g,m] → m наверх → w в конец → [m,g,w]"
+        );
+        assert!(
+            store
+                .bookmark_move("https://w.example/", fav.id, 0)
+                .is_err(),
+            "w не в «Избранное» — перемещать нельзя"
+        );
+
+        // title: без учёта регистра
+        store.group_set_sort(read.id, "title").unwrap();
+        store.group_set_sort(999, "title").unwrap_err();
+        assert_eq!(
+            urls(GroupFilter::Group(read.id)),
+            vec![
+                "https://g.example/",
+                "https://m.example/",
+                "https://w.example/"
+            ],
+            "GitHub < mdn < Википедия (латиница раньше кириллицы)"
+        );
+        // added: свежие первыми — задаём явные added_at (в цикле добавления
+        // миллисекунды совпадают, тогда порядок решает url-тайбрейк)
+        {
+            let conn = store.conn.lock().expect("history: лок не отравлен");
+            conn.execute(
+                "UPDATE bookmarks SET added_at = 3000 WHERE url = 'https://m.example/'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE bookmarks SET added_at = 2000 WHERE url = 'https://g.example/'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE bookmarks SET added_at = 1000 WHERE url = 'https://w.example/'",
+                [],
+            )
+            .unwrap();
+        }
+        store.group_set_sort(read.id, "added").unwrap();
+        assert_eq!(
+            urls(GroupFilter::Group(read.id)),
+            vec![
+                "https://m.example/",
+                "https://g.example/",
+                "https://w.example/"
+            ]
+        );
+        // неизвестный режим — «вручную» (не ошибка)
+        store.group_set_sort(read.id, "мусор").unwrap();
+        assert_eq!(
+            urls(GroupFilter::Group(read.id)),
+            vec![
+                "https://m.example/",
+                "https://g.example/",
+                "https://w.example/"
+            ]
+        );
+    }
+
+    /// Подсказки omnibox несут имена групп закладки (пустой запрос и FTS);
+    /// вне групп — None.
+    #[test]
+    fn search_hits_carry_group_labels() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let fav = store.group_list().unwrap().remove(0);
+        let work = store.group_add("Работа").unwrap();
+        store
+            .bookmark_add_to("https://rust.example/", "Rust", Some(fav.id))
+            .unwrap();
+        store
+            .group_toggle_bookmark("https://rust.example/", work.id, true)
+            .unwrap();
+        store
+            .bookmark_add_to("https://plain.example/", "Plain", None)
+            .unwrap();
+        // пустой запрос — закладки с метками
+        let hits = store.search("", 8).unwrap();
+        let rust = hits
+            .iter()
+            .find(|h| h.url.contains("rust.example"))
+            .unwrap();
+        let label = rust.group.as_deref().unwrap();
+        assert!(
+            label.contains("Избранное") && label.contains("Работа"),
+            "«{label}»"
+        );
+        // FTS-поиск — метка у bookmark-подсказок, у history — None
+        let hits = store.search("rust", 8).unwrap();
+        let rust = hits
+            .iter()
+            .find(|h| h.url.contains("rust.example"))
+            .unwrap();
+        assert!(rust.group.as_deref().unwrap().contains("Избранное"));
+        assert!(hits
+            .iter()
+            .all(|h| h.group.is_none() || h.source == HistorySource::Bookmark));
+        // одиночная группа — просто имя, без разделителя
+        let hits = store.search("plain", 8).unwrap();
+        let plain = hits
+            .iter()
+            .find(|h| h.url.contains("plain.example"))
+            .unwrap();
+        assert_eq!(plain.group.as_deref(), Some("Избранное"));
+    }
+
+    /// Импорт групп (профиль): соответствие по имени, новые — в конец,
+    /// is_default с файла переносится на локальную группу.
+    #[test]
+    fn import_groups_maps_by_name_and_moves_default() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let map = store
+            .import_groups(&[
+                BookmarkGroupRow {
+                    id: 10,
+                    name: "Избранное".into(),
+                    position: 0,
+                    sort_by: "manual".into(),
+                    is_default: true,
+                },
+                BookmarkGroupRow {
+                    id: 11,
+                    name: "Работа".into(),
+                    position: 1,
+                    sort_by: "title".into(),
+                    is_default: false,
+                },
+            ])
+            .unwrap();
+        let fav_local = store.group_list().unwrap().remove(0).id;
+        assert_eq!(map.get(&10), Some(&fav_local), "«Избранное» смапилась");
+        let work_local = *map.get(&11).unwrap();
+        assert_ne!(work_local, fav_local);
+        let groups = store.group_list().unwrap();
+        let w = groups.iter().find(|g| g.id == work_local).unwrap();
+        assert_eq!((w.name.as_str(), w.sort_by.as_str()), ("Работа", "title"));
+        assert!(groups.iter().filter(|g| g.is_default).count() == 1);
+        // пустые имена пропускаются
+        let map2 = store
+            .import_groups(&[BookmarkGroupRow {
+                id: 12,
+                name: "  ".into(),
+                position: 9,
+                sort_by: "manual".into(),
+                is_default: false,
+            }])
+            .unwrap();
+        assert!(map2.is_empty());
+        assert_eq!(store.group_list().unwrap().len(), 2);
     }
 
     // --- задача 1.4: файл в профиле и замер omnibox ---------------------------
@@ -1121,11 +2215,16 @@ mod tests {
         {
             let store = HistoryStore::open(&dir).unwrap();
             store.visit("https://a.example/", "A").unwrap();
-            store.bookmark_add("https://b.example/", "B").unwrap();
+            store
+                .bookmark_add_to("https://b.example/", "B", None)
+                .unwrap();
         }
         let store = HistoryStore::open(&dir).unwrap();
         assert_eq!(store.list("", 0, 100).unwrap().1, 1);
-        assert_eq!(store.bookmark_list("", 0, 100).unwrap().1, 1);
+        assert_eq!(
+            store.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1,
+            1
+        );
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(dir.join("duopulse.db-wal"));
         let _ = std::fs::remove_file(dir.join("duopulse.db-shm"));
@@ -1139,12 +2238,16 @@ mod tests {
         let src = seeded();
         let visits = src.dump_visits().unwrap();
         let marks = src.dump_bookmarks().unwrap();
+        let groups = src.dump_groups().unwrap();
         assert_eq!(visits.len(), 13);
         assert_eq!(marks.len(), 4);
+        assert_eq!(groups.len(), 1, "у сида одна группа — «Избранное»");
+        assert!(marks.iter().all(|m| m.groups.len() == 1));
 
         // «чистая машина»: другой store (in-memory), импорт, сверка
         let dst = HistoryStore::open_in_memory().unwrap();
-        assert_eq!(dst.import_bookmarks(&marks).unwrap(), 4);
+        let empty_map = std::collections::BTreeMap::new();
+        assert_eq!(dst.import_bookmarks(&marks, &empty_map).unwrap(), 4);
         assert_eq!(dst.import_visits(&visits).unwrap(), 13);
         assert_eq!(dst.dump_visits().unwrap().len(), 13);
         assert_eq!(dst.dump_bookmarks().unwrap().len(), 4);
@@ -1165,18 +2268,18 @@ mod tests {
 
         // повторный импорт того же файла — идемпотентен (точные дубликаты скип)
         assert_eq!(dst.import_visits(&visits).unwrap(), 0);
-        assert_eq!(dst.import_bookmarks(&marks).unwrap(), 0);
+        assert_eq!(dst.import_bookmarks(&marks, &empty_map).unwrap(), 0);
         assert_eq!(dst.dump_visits().unwrap().len(), 13);
 
         // существующая закладка обновляет заголовок, дата не сбрасывается
         let mut changed = marks[0].clone();
         changed.title = "Новое имя".into();
         assert_eq!(
-            dst.import_bookmarks(std::slice::from_ref(&changed))
+            dst.import_bookmarks(std::slice::from_ref(&changed), &empty_map)
                 .unwrap(),
             0
         );
-        let (all, _) = dst.bookmark_list("", 0, 100).unwrap();
+        let (all, _) = dst.bookmark_list("", GroupFilter::All, 0, 100).unwrap();
         assert_eq!(
             all.iter().find(|m| m.url == changed.url).unwrap().title,
             "Новое имя"

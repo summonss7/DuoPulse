@@ -54,6 +54,11 @@ use crate::proxy;
 /// v11 (duopulse-049): источник фида обновлений (GitHub/Aila) — UpdaterConfig
 /// и UpdaterStatusResult расширены полем source, UpdaterCheckResult — полем
 /// source («кто ответил»: выбранный источник или зеркало-фолбэк).
+/// v11 (duopulse-058, без bump — совместимое расширение): домен history
+/// вырос группами избранного — команды history.{group_list, group_add,
+/// group_rename, group_remove, group_set_sort, group_toggle_bookmark,
+/// bookmark_move}; HistoryBookmark.groups, HistoryBookmarkAddParams.groupId,
+/// HistoryBookmarkListParams.groupId, HistoryHit.group (все с serde-default).
 pub const CONTRACT_VERSION: u32 = 11;
 
 // ---------------------------------------------------------------------------
@@ -192,6 +197,10 @@ pub struct HistoryHit {
     pub source: HistorySource,
     pub url: String,
     pub title: String,
+    /// Имена групп закладки «Имя · Имя» (карточка duopulse-058; только у
+    /// подсказок-закладок, вне групп — null).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 // --- задача 1.4: история и закладки (SQLite в профиле, src/history/) --------
@@ -261,10 +270,15 @@ pub struct HistoryDeleteRangeParams {
 /// history.bookmark_add: добавить закладку (url — ключ; повторное добавление
 /// обновляет заголовок, пустой заголовок сохраняет прежний).
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryBookmarkAddParams {
     pub url: String,
     #[serde(default)]
     pub title: String,
+    /// Группа закладки (карточка duopulse-058): null — группа по умолчанию
+    /// («Избранное»), id — выбранная в мини-меню звёздочки.
+    #[serde(default)]
+    pub group_id: Option<i64>,
 }
 
 /// history.bookmark_remove: удалить закладку (идемпотентна).
@@ -287,6 +301,10 @@ pub struct HistoryBookmarkUpdateParams {
 pub struct HistoryBookmarkListParams {
     #[serde(default)]
     pub query: Option<String>,
+    /// Фильтр групп (карточка duopulse-058): null — все; -1 — без группы;
+    /// id — члены группы в её порядке сортировки.
+    #[serde(default)]
+    pub group_id: Option<i64>,
     #[serde(default)]
     pub offset: u32,
     #[serde(default = "default_bookmark_limit")]
@@ -311,6 +329,107 @@ pub struct HistoryBookmark {
     pub title: String,
     /// Добавлена, unix-ms.
     pub added_at: i64,
+    /// Группы закладки (карточка duopulse-058; пусто — без группы). В файле
+    /// профиля id — машины-источника (импорт мапит по имени).
+    #[serde(default)]
+    pub groups: Vec<BookmarkGroupRef>,
+}
+
+/// Ссылка на группу в строке закладки: id + имя (для UI-меток и профиля).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BookmarkGroupRef {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Строка дампа/импорта групп (файл профиля, карточка duopulse-058): id —
+/// машины-источника (импорт мапит по имени), position/sortBy/isDefault —
+/// как в BookmarkGroupInfo.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BookmarkGroupRow {
+    pub id: i64,
+    pub name: String,
+    pub position: u32,
+    /// manual | title | added.
+    pub sort_by: String,
+    pub is_default: bool,
+}
+
+// --- карточка duopulse-058: группы избранного --------------------------------
+
+/// Группа закладок для UI: имя, позиция в ряду групп, режим сортировки
+/// (manual | title | added), флаг «по умолчанию» и число закладок.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BookmarkGroupInfo {
+    pub id: i64,
+    pub name: String,
+    pub position: u32,
+    /// manual | title | added.
+    pub sort_by: String,
+    pub is_default: bool,
+    pub count: u32,
+}
+
+/// history.group_list: группы с числом закладок.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGroupListResult {
+    pub groups: Vec<BookmarkGroupInfo>,
+}
+
+/// history.group_add: создать группу (имя уникально).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGroupAddParams {
+    pub name: String,
+}
+
+/// history.group_rename: переименовать группу.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGroupRenameParams {
+    pub id: i64,
+    pub name: String,
+}
+
+/// history.group_remove: удалить группу (закладки остаются; группа по
+/// умолчанию не удаляется).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGroupRemoveParams {
+    pub id: i64,
+}
+
+/// history.group_set_sort: режим сортировки группы — manual | title | added.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGroupSetSortParams {
+    pub id: i64,
+    /// manual | title | added.
+    pub sort_by: String,
+}
+
+/// history.group_toggle_bookmark: членство закладки в группе вкл/выкл
+/// (закладка может состоять в нескольких группах или ни в одной).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGroupToggleBookmarkParams {
+    pub url: String,
+    pub group_id: i64,
+    pub on: bool,
+}
+
+/// history.bookmark_move: переставить закладку внутри группы (drag&drop;
+/// позиция 0 = верх, за пределами списка — клампится).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryBookmarkMoveParams {
+    pub url: String,
+    pub group_id: i64,
+    pub position: u32,
 }
 
 /// settings.get: ключ, значение которого читаем.
@@ -1093,6 +1212,26 @@ pub fn contract_json() -> serde_json::Value {
             "history.bookmark_list": { "handler": "history_bookmark_list",
                                        "params": schema!(HistoryBookmarkListParams),
                                        "result": schema!(HistoryBookmarkListResult) },
+            "history.group_list": { "handler": "history_group_list", "params": null,
+                                    "result": schema!(HistoryGroupListResult) },
+            "history.group_add": { "handler": "history_group_add",
+                                   "params": schema!(HistoryGroupAddParams),
+                                   "result": schema!(BookmarkGroupInfo) },
+            "history.group_rename": { "handler": "history_group_rename",
+                                      "params": schema!(HistoryGroupRenameParams),
+                                      "result": null },
+            "history.group_remove": { "handler": "history_group_remove",
+                                      "params": schema!(HistoryGroupRemoveParams),
+                                      "result": null },
+            "history.group_set_sort": { "handler": "history_group_set_sort",
+                                        "params": schema!(HistoryGroupSetSortParams),
+                                        "result": null },
+            "history.group_toggle_bookmark": { "handler": "history_group_toggle_bookmark",
+                                               "params": schema!(HistoryGroupToggleBookmarkParams),
+                                               "result": null },
+            "history.bookmark_move": { "handler": "history_bookmark_move",
+                                       "params": schema!(HistoryBookmarkMoveParams),
+                                       "result": null },
             "settings.get": { "handler": "settings_get", "params": schema!(SettingsGetParams),
                               "result": schema!(ProxySettings) },
             "settings.set": { "handler": "settings_set", "params": schema!(SettingsSetParams),
@@ -1513,13 +1652,14 @@ fn history_delete_range(
     history.delete_range(params.from_ms, params.to_ms)
 }
 
-/// history.bookmark_add: добавить закладку (upsert по url).
+/// history.bookmark_add: добавить закладку (upsert по url); groupId — группа
+/// (null — по умолчанию), карточка duopulse-058.
 #[tauri::command]
 fn history_bookmark_add(
     history: tauri::State<'_, crate::history::HistoryStore>,
     params: HistoryBookmarkAddParams,
 ) -> Result<(), String> {
-    history.bookmark_add(&params.url, &params.title)
+    history.bookmark_add_to(&params.url, &params.title, params.group_id)
 }
 
 /// history.bookmark_remove: удалить закладку.
@@ -1540,18 +1680,91 @@ fn history_bookmark_update(
     history.bookmark_update(&params.url, &params.title)
 }
 
-/// history.bookmark_list: закладки для страницы управления.
+/// history.bookmark_list: закладки для страницы управления (groupId: null —
+/// все, -1 — без группы, id — члены группы в её порядке).
 #[tauri::command]
 fn history_bookmark_list(
     history: tauri::State<'_, crate::history::HistoryStore>,
     params: HistoryBookmarkListParams,
 ) -> Result<HistoryBookmarkListResult, String> {
+    let group = match params.group_id {
+        None => crate::history::GroupFilter::All,
+        Some(-1) => crate::history::GroupFilter::Ungrouped,
+        Some(id) => crate::history::GroupFilter::Group(id),
+    };
     let (bookmarks, total) = history.bookmark_list(
         params.query.as_deref().unwrap_or(""),
+        group,
         params.offset,
         params.limit,
     )?;
     Ok(HistoryBookmarkListResult { bookmarks, total })
+}
+
+// --- карточка duopulse-058: группы избранного --------------------------------
+
+/// history.group_list: группы с числом закладок.
+#[tauri::command]
+fn history_group_list(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+) -> Result<HistoryGroupListResult, String> {
+    Ok(HistoryGroupListResult {
+        groups: history.group_list()?,
+    })
+}
+
+/// history.group_add: создать группу.
+#[tauri::command]
+fn history_group_add(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryGroupAddParams,
+) -> Result<BookmarkGroupInfo, String> {
+    history.group_add(&params.name)
+}
+
+/// history.group_rename: переименовать группу.
+#[tauri::command]
+fn history_group_rename(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryGroupRenameParams,
+) -> Result<(), String> {
+    history.group_rename(params.id, &params.name)
+}
+
+/// history.group_remove: удалить группу (закладки остаются).
+#[tauri::command]
+fn history_group_remove(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryGroupRemoveParams,
+) -> Result<(), String> {
+    history.group_remove(params.id)
+}
+
+/// history.group_set_sort: режим сортировки группы (manual | title | added).
+#[tauri::command]
+fn history_group_set_sort(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryGroupSetSortParams,
+) -> Result<(), String> {
+    history.group_set_sort(params.id, &params.sort_by)
+}
+
+/// history.group_toggle_bookmark: членство закладки в группе вкл/выкл.
+#[tauri::command]
+fn history_group_toggle_bookmark(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryGroupToggleBookmarkParams,
+) -> Result<(), String> {
+    history.group_toggle_bookmark(&params.url, params.group_id, params.on)
+}
+
+/// history.bookmark_move: переставить закладку внутри группы (drag&drop).
+#[tauri::command]
+fn history_bookmark_move(
+    history: tauri::State<'_, crate::history::HistoryStore>,
+    params: HistoryBookmarkMoveParams,
+) -> Result<(), String> {
+    history.bookmark_move(&params.url, params.group_id, params.position)
 }
 
 #[tauri::command]
@@ -2688,6 +2901,13 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         history_bookmark_remove,
         history_bookmark_update,
         history_bookmark_list,
+        history_group_list,
+        history_group_add,
+        history_group_rename,
+        history_group_remove,
+        history_group_set_sort,
+        history_group_toggle_bookmark,
+        history_bookmark_move,
         settings_get,
         settings_set,
         settings_get_all,

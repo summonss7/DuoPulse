@@ -17,6 +17,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::bridge::BookmarkGroupRow;
 use crate::history::{HistoryStore, VisitRow};
 use crate::subtitles::cache::{TrackRow, TranslationsCache};
 use crate::translate;
@@ -32,6 +33,9 @@ pub struct ProfileCounts {
     /// Разделы настроек, попавшие в файл/применённые из него.
     pub settings_sections: u32,
     pub bookmarks: u32,
+    /// Группы избранного в файле/применённые (карточка duopulse-058; у файлов
+    /// старых версий поля нет — 0).
+    pub bookmark_groups: u32,
     pub visits: u32,
     pub translated_tracks: u32,
     /// Секретов в файле/записано при импорте (0 — файл без секретов).
@@ -48,6 +52,10 @@ pub struct ProfileFile {
     pub created_at: i64,
     /// Корень settings.json машины-источника (секретов в нём нет — DPAPI).
     pub settings: serde_json::Value,
+    /// Группы избранного (карточка duopulse-058; id — машины-источника,
+    /// импорт мапит по имени; у старых файлов поля нет — пусто).
+    #[serde(default)]
+    pub bookmark_groups: Vec<BookmarkGroupRow>,
     pub bookmarks: Vec<history::HistoryBookmark>,
     pub visits: Vec<VisitRow>,
     pub translated_tracks: Vec<TrackRow>,
@@ -102,6 +110,7 @@ pub fn counts_of(file: &ProfileFile) -> ProfileCounts {
             .filter(|k| file.settings.get(*k).is_some())
             .count() as u32,
         bookmarks: file.bookmarks.len() as u32,
+        bookmark_groups: file.bookmark_groups.len() as u32,
         visits: file.visits.len() as u32,
         translated_tracks: file.translated_tracks.len() as u32,
         secrets: file.secrets.as_ref().map_or(0, |s| {
@@ -140,6 +149,7 @@ pub fn build(
         app_version: env!("CARGO_PKG_VERSION").into(),
         created_at: now_ms(),
         settings,
+        bookmark_groups: history.dump_groups()?,
         bookmarks: history.dump_bookmarks()?,
         visits: history.dump_visits()?,
         translated_tracks: cache.dump()?,
@@ -263,8 +273,11 @@ pub fn apply(
         has_secrets = true;
     }
 
-    // 4) данные
-    counts.bookmarks = history.import_bookmarks(&file.bookmarks)?;
+    // 4) данные (группы раньше закладок — import_bookmarks мапит членства
+    //    по карте import_groups)
+    let group_map = history.import_groups(&file.bookmark_groups)?;
+    counts.bookmark_groups = group_map.len() as u32;
+    counts.bookmarks = history.import_bookmarks(&file.bookmarks, &group_map)?;
     counts.visits = history.import_visits(&file.visits)?;
     counts.translated_tracks = cache.import_rows(&file.translated_tracks)?;
 
@@ -340,7 +353,15 @@ mod tests {
 
         let hist_a = history::HistoryStore::open(&dir_a).unwrap();
         hist_a.visit("https://a.example/", "A").unwrap();
-        hist_a.bookmark_add("https://b.example/", "B").unwrap();
+        hist_a
+            .bookmark_add_to("https://b.example/", "B", None)
+            .unwrap();
+        // группы избранного (карточка duopulse-058): вторая группа + перенос
+        // закладки в неё (первая остаётся группой по умолчанию)
+        let work = hist_a.group_add("Работа").unwrap();
+        hist_a
+            .group_toggle_bookmark("https://b.example/", work.id, true)
+            .unwrap();
         let cache_a = TranslationsCache::open(&dir_a).unwrap();
         cache_a.put(
             "yt:v1",
@@ -360,6 +381,7 @@ mod tests {
         assert!(file.secrets.is_some());
         let raw = serde_json::to_string_pretty(&file).unwrap();
         assert!(raw.contains("\"bookmarks\"") && raw.contains("\"visits\""));
+        assert!(raw.contains("\"bookmarkGroups\""), "группы — в файле");
 
         // машина B: чистый профиль + пустые хранилища
         let hist_b = history::HistoryStore::open(&dir_b).unwrap();
@@ -371,6 +393,7 @@ mod tests {
             "proxy+search+subtitles+privacy"
         );
         assert_eq!(outcome.counts.bookmarks, 1);
+        assert_eq!(outcome.counts.bookmark_groups, 2, "Избранное + Работа");
         assert_eq!(outcome.counts.visits, 1);
         assert_eq!(outcome.counts.translated_tracks, 1);
         assert!(
@@ -403,7 +426,21 @@ mod tests {
         );
         // данные на месте
         assert_eq!(hist_b.list("", 0, 100).unwrap().1, 1);
-        assert_eq!(hist_b.bookmark_list("", 0, 100).unwrap().1, 1);
+        assert_eq!(
+            hist_b
+                .bookmark_list("", history::GroupFilter::All, 0, 100)
+                .unwrap()
+                .1,
+            1
+        );
+        // группы переехали: «Избранное» (default, id другой) + «Работа» с закладкой
+        let groups_b = hist_b.group_list().unwrap();
+        assert_eq!(groups_b.len(), 2);
+        let work_b = groups_b.iter().find(|g| g.name == "Работа").unwrap();
+        assert_eq!(work_b.count, 1);
+        let fav_b = groups_b.iter().find(|g| g.is_default).unwrap();
+        assert_eq!(fav_b.name, "Избранное");
+        assert_eq!(fav_b.count, 1, "b.example состоит в обеих группах");
         assert!(
             cache_b.get("yt:v1", "yt:en", "ru", "deepl", 20).is_some(),
             "повторный просмотр на машине B — из кэша"
@@ -413,6 +450,19 @@ mod tests {
         let again = apply(&dir_b, &parsed, &hist_b, &cache_b).unwrap();
         assert_eq!(again.counts.visits, 0, "дубликаты скипнуты");
         assert_eq!(hist_b.list("", 0, 100).unwrap().1, 1);
+        assert_eq!(
+            hist_b.group_list().unwrap().len(),
+            2,
+            "повторный импорт не плодит группы"
+        );
+        assert_eq!(
+            hist_b
+                .bookmark_list("", history::GroupFilter::Group(work_b.id), 0, 100)
+                .unwrap()
+                .1,
+            1,
+            "членства не дублируются"
+        );
 
         // экспорт БЕЗ секретов: файла хватает на переезд настроек/данных,
         // секретов в файле нет
@@ -443,6 +493,7 @@ mod tests {
             settings: serde_json::json!({
                 "proxy": {"enabled": true, "proto": "socks5", "host": "  ", "port": 1080}
             }),
+            bookmark_groups: vec![],
             bookmarks: vec![],
             visits: vec![],
             translated_tracks: vec![],
@@ -461,6 +512,7 @@ mod tests {
             app_version: "test".into(),
             created_at: 1,
             settings: serde_json::json!({}),
+            bookmark_groups: vec![],
             bookmarks: vec![],
             visits: vec![],
             translated_tracks: vec![TrackRow {
@@ -476,6 +528,41 @@ mod tests {
         };
         let outcome = apply(&dir, &file, &hist, &cache).unwrap();
         assert_eq!(outcome.counts.translated_tracks, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Файл профиля старой версии (до карточки duopulse-058): поля
+    /// bookmarkGroups нет, у закладок нет groups — импорт не падает,
+    /// закладки попадают в группу по умолчанию (как при миграции БД).
+    #[test]
+    fn old_profile_without_groups_imports_to_default_group() {
+        let dir = tmp_dir("old-profile");
+        let hist = history::HistoryStore::open(&dir).unwrap();
+        let cache = TranslationsCache::open(&dir).unwrap();
+        let raw = serde_json::json!({
+            "duopulseProfile": PROFILE_FORMAT,
+            "appVersion": "0.0.1",
+            "createdAt": 1,
+            "settings": {},
+            "bookmarks": [
+                {"url": "https://a.example/", "title": "A", "addedAt": 100},
+                {"url": "https://b.example/", "title": "B", "addedAt": 200}
+            ],
+            "visits": [],
+            "translatedTracks": []
+        })
+        .to_string();
+        let parsed = parse_file(&raw).unwrap();
+        let outcome = apply(&dir, &parsed, &hist, &cache).unwrap();
+        assert_eq!(outcome.counts.bookmarks, 2);
+        assert_eq!(outcome.counts.bookmark_groups, 0, "групп в файле не было");
+        let (marks, total) = hist
+            .bookmark_list("", history::GroupFilter::All, 0, 100)
+            .unwrap();
+        assert_eq!(total, 2);
+        assert!(marks
+            .iter()
+            .all(|m| m.groups.len() == 1 && m.groups[0].name == "Избранное"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

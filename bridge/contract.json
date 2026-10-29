@@ -377,6 +377,15 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "history.bookmark_add: добавить закладку (url — ключ; повторное добавление обновляет заголовок, пустой заголовок сохраняет прежний).",
         "properties": {
+          "groupId": {
+            "default": null,
+            "description": "Группа закладки (карточка duopulse-058): null — группа по умолчанию («Избранное»), id — выбранная в мини-меню звёздочки.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "title": {
             "default": "",
             "type": "string"
@@ -399,6 +408,15 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "history.bookmark_list: закладки для страницы управления.",
         "properties": {
+          "groupId": {
+            "default": null,
+            "description": "Фильтр групп (карточка duopulse-058): null — все; -1 — без группы; id — члены группы в её порядке сортировки.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "limit": {
             "default": 200,
             "format": "uint32",
@@ -425,12 +443,37 @@
       "result": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
+          "BookmarkGroupRef": {
+            "description": "Ссылка на группу в строке закладки: id + имя (для UI-меток и профиля).",
+            "properties": {
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "type": "object"
+          },
           "HistoryBookmark": {
             "properties": {
               "addedAt": {
                 "description": "Добавлена, unix-ms.",
                 "format": "int64",
                 "type": "integer"
+              },
+              "groups": {
+                "default": [],
+                "description": "Группы закладки (карточка duopulse-058; пусто — без группы). В файле профиля id — машины-источника (импорт мапит по имени).",
+                "items": {
+                  "$ref": "#/definitions/BookmarkGroupRef"
+                },
+                "type": "array"
               },
               "title": {
                 "type": "string"
@@ -467,6 +510,35 @@
         "title": "HistoryBookmarkListResult",
         "type": "object"
       }
+    },
+    "history.bookmark_move": {
+      "handler": "history_bookmark_move",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.bookmark_move: переставить закладку внутри группы (drag&drop; позиция 0 = верх, за пределами списка — клампится).",
+        "properties": {
+          "groupId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "position": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "groupId",
+          "position",
+          "url"
+        ],
+        "title": "HistoryBookmarkMoveParams",
+        "type": "object"
+      },
+      "result": null
     },
     "history.bookmark_remove": {
       "handler": "history_bookmark_remove",
@@ -549,6 +621,217 @@
           "urls"
         ],
         "title": "HistoryDeleteUrlsParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.group_add": {
+      "handler": "history_group_add",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.group_add: создать группу (имя уникально).",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "HistoryGroupAddParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Группа закладок для UI: имя, позиция в ряду групп, режим сортировки (manual | title | added), флаг «по умолчанию» и число закладок.",
+        "properties": {
+          "count": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "sortBy": {
+            "description": "manual | title | added.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "id",
+          "isDefault",
+          "name",
+          "position",
+          "sortBy"
+        ],
+        "title": "BookmarkGroupInfo",
+        "type": "object"
+      }
+    },
+    "history.group_list": {
+      "handler": "history_group_list",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "BookmarkGroupInfo": {
+            "description": "Группа закладок для UI: имя, позиция в ряду групп, режим сортировки (manual | title | added), флаг «по умолчанию» и число закладок.",
+            "properties": {
+              "count": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "isDefault": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "position": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sortBy": {
+                "description": "manual | title | added.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "count",
+              "id",
+              "isDefault",
+              "name",
+              "position",
+              "sortBy"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "history.group_list: группы с числом закладок.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/definitions/BookmarkGroupInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "title": "HistoryGroupListResult",
+        "type": "object"
+      }
+    },
+    "history.group_remove": {
+      "handler": "history_group_remove",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.group_remove: удалить группу (закладки остаются; группа по умолчанию не удаляется).",
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "HistoryGroupRemoveParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.group_rename": {
+      "handler": "history_group_rename",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.group_rename: переименовать группу.",
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "HistoryGroupRenameParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.group_set_sort": {
+      "handler": "history_group_set_sort",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.group_set_sort: режим сортировки группы — manual | title | added.",
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sortBy": {
+            "description": "manual | title | added.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sortBy"
+        ],
+        "title": "HistoryGroupSetSortParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "history.group_toggle_bookmark": {
+      "handler": "history_group_toggle_bookmark",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.group_toggle_bookmark: членство закладки в группе вкл/выкл (закладка может состоять в нескольких группах или ни в одной).",
+        "properties": {
+          "groupId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "on": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "groupId",
+          "on",
+          "url"
+        ],
+        "title": "HistoryGroupToggleBookmarkParams",
         "type": "object"
       },
       "result": null
@@ -667,6 +950,13 @@
           "HistoryHit": {
             "description": "Одна подсказка omnibox: источник, адрес и заголовок страницы.",
             "properties": {
+              "group": {
+                "description": "Имена групп закладки «Имя · Имя» (карточка duopulse-058; только у подсказок-закладок, вне групп — null).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "source": {
                 "$ref": "#/definitions/HistorySource"
               },
@@ -1291,6 +1581,13 @@
           "ProfileCounts": {
             "description": "Числа отчёта экспорта/импорта (страница настроек показывает их пользователю).",
             "properties": {
+              "bookmarkGroups": {
+                "default": 0,
+                "description": "Группы избранного в файле/применённые (карточка duopulse-058; у файлов старых версий поля нет — 0).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
               "bookmarks": {
                 "default": 0,
                 "format": "uint32",
@@ -1800,6 +2097,13 @@
           "ProfileCounts": {
             "description": "Числа отчёта экспорта/импорта (страница настроек показывает их пользователю).",
             "properties": {
+              "bookmarkGroups": {
+                "default": 0,
+                "description": "Группы избранного в файле/применённые (карточка duopulse-058; у файлов старых версий поля нет — 0).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
               "bookmarks": {
                 "default": 0,
                 "format": "uint32",
@@ -1845,6 +2149,7 @@
               }
             ],
             "default": {
+              "bookmarkGroups": 0,
               "bookmarks": 0,
               "secrets": 0,
               "settingsSections": 0,

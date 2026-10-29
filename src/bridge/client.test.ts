@@ -44,7 +44,7 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "history.delete_range": { path: ["history", "deleteRange"], params: { fromMs: 0, toMs: 123 } },
   "history.bookmark_add": {
     path: ["history", "bookmarkAdd"],
-    params: { url: "https://example.com/", title: "Example" },
+    params: { url: "https://example.com/", title: "Example", groupId: null },
   },
   "history.bookmark_remove": {
     path: ["history", "bookmarkRemove"],
@@ -56,7 +56,32 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   },
   "history.bookmark_list": {
     path: ["history", "bookmarkList"],
-    params: { query: null, offset: 0, limit: 200 },
+    params: { query: null, groupId: null, offset: 0, limit: 200 },
+  },
+  "history.group_list": { path: ["history", "groupList"] },
+  "history.group_add": {
+    path: ["history", "groupAdd"],
+    params: { name: "Работа" },
+  },
+  "history.group_rename": {
+    path: ["history", "groupRename"],
+    params: { id: 2, name: "Проекты" },
+  },
+  "history.group_remove": {
+    path: ["history", "groupRemove"],
+    params: { id: 2 },
+  },
+  "history.group_set_sort": {
+    path: ["history", "groupSetSort"],
+    params: { id: 2, sortBy: "title" },
+  },
+  "history.group_toggle_bookmark": {
+    path: ["history", "groupToggleBookmark"],
+    params: { url: "https://example.com/", groupId: 2, on: true },
+  },
+  "history.bookmark_move": {
+    path: ["history", "bookmarkMove"],
+    params: { url: "https://example.com/", groupId: 2, position: 0 },
   },
   "nav.go_back": { path: ["nav", "goBack"] },
   "nav.go_forward": { path: ["nav", "goForward"] },

@@ -48,11 +48,20 @@ export interface DuoPulseBridgeContract {
   HistoryBookmarkAddParams: HistoryBookmarkAddParams;
   HistoryBookmarkListParams: HistoryBookmarkListParams;
   HistoryBookmarkListResult: HistoryBookmarkListResult;
+  BookmarkGroupRef: BookmarkGroupRef;
   HistoryBookmark: HistoryBookmark;
+  HistoryBookmarkMoveParams: HistoryBookmarkMoveParams;
   HistoryBookmarkRemoveParams: HistoryBookmarkRemoveParams;
   HistoryBookmarkUpdateParams: HistoryBookmarkUpdateParams;
   HistoryDeleteRangeParams: HistoryDeleteRangeParams;
   HistoryDeleteUrlsParams: HistoryDeleteUrlsParams;
+  HistoryGroupAddParams: HistoryGroupAddParams;
+  BookmarkGroupInfo: BookmarkGroupInfo;
+  HistoryGroupListResult: HistoryGroupListResult;
+  HistoryGroupRemoveParams: HistoryGroupRemoveParams;
+  HistoryGroupRenameParams: HistoryGroupRenameParams;
+  HistoryGroupSetSortParams: HistoryGroupSetSortParams;
+  HistoryGroupToggleBookmarkParams: HistoryGroupToggleBookmarkParams;
   HistoryListParams: HistoryListParams;
   HistoryListResult: HistoryListResult;
   HistoryEntry: HistoryEntry;
@@ -235,6 +244,10 @@ export interface BridgeVersionResult {
  * history.bookmark_add: добавить закладку (url — ключ; повторное добавление обновляет заголовок, пустой заголовок сохраняет прежний).
  */
 export interface HistoryBookmarkAddParams {
+  /**
+   * Группа закладки (карточка duopulse-058): null — группа по умолчанию («Избранное»), id — выбранная в мини-меню звёздочки.
+   */
+  groupId?: number | null;
   title?: string;
   url: string;
 }
@@ -242,6 +255,10 @@ export interface HistoryBookmarkAddParams {
  * history.bookmark_list: закладки для страницы управления.
  */
 export interface HistoryBookmarkListParams {
+  /**
+   * Фильтр групп (карточка duopulse-058): null — все; -1 — без группы; id — члены группы в её порядке сортировки.
+   */
+  groupId?: number | null;
   limit?: number;
   offset?: number;
   query?: string | null;
@@ -255,7 +272,26 @@ export interface HistoryBookmark {
    * Добавлена, unix-ms.
    */
   addedAt: number;
+  /**
+   * Группы закладки (карточка duopulse-058; пусто — без группы). В файле профиля id — машины-источника (импорт мапит по имени).
+   */
+  groups?: BookmarkGroupRef[];
   title: string;
+  url: string;
+}
+/**
+ * Ссылка на группу в строке закладки: id + имя (для UI-меток и профиля).
+ */
+export interface BookmarkGroupRef {
+  id: number;
+  name: string;
+}
+/**
+ * history.bookmark_move: переставить закладку внутри группы (drag&drop; позиция 0 = верх, за пределами списка — клампится).
+ */
+export interface HistoryBookmarkMoveParams {
+  groupId: number;
+  position: number;
   url: string;
 }
 /**
@@ -283,6 +319,63 @@ export interface HistoryDeleteRangeParams {
  */
 export interface HistoryDeleteUrlsParams {
   urls: string[];
+}
+/**
+ * history.group_add: создать группу (имя уникально).
+ */
+export interface HistoryGroupAddParams {
+  name: string;
+}
+/**
+ * Группа закладок для UI: имя, позиция в ряду групп, режим сортировки (manual | title | added), флаг «по умолчанию» и число закладок.
+ */
+export interface BookmarkGroupInfo {
+  count: number;
+  id: number;
+  isDefault: boolean;
+  name: string;
+  position: number;
+  /**
+   * manual | title | added.
+   */
+  sortBy: string;
+}
+/**
+ * history.group_list: группы с числом закладок.
+ */
+export interface HistoryGroupListResult {
+  groups: BookmarkGroupInfo[];
+}
+/**
+ * history.group_remove: удалить группу (закладки остаются; группа по умолчанию не удаляется).
+ */
+export interface HistoryGroupRemoveParams {
+  id: number;
+}
+/**
+ * history.group_rename: переименовать группу.
+ */
+export interface HistoryGroupRenameParams {
+  id: number;
+  name: string;
+}
+/**
+ * history.group_set_sort: режим сортировки группы — manual | title | added.
+ */
+export interface HistoryGroupSetSortParams {
+  id: number;
+  /**
+   * manual | title | added.
+   */
+  sortBy: string;
+}
+/**
+ * history.group_toggle_bookmark: членство закладки в группе вкл/выкл (закладка может состоять в нескольких группах или ни в одной).
+ */
+export interface HistoryGroupToggleBookmarkParams {
+  groupId: number;
+  on: boolean;
+  url: string;
 }
 /**
  * history.list: история для страницы управления — агрегат по URL.
@@ -334,6 +427,10 @@ export interface HistorySearchResult {
  * Одна подсказка omnibox: источник, адрес и заголовок страницы.
  */
 export interface HistoryHit {
+  /**
+   * Имена групп закладки «Имя · Имя» (карточка duopulse-058; только у подсказок-закладок, вне групп — null).
+   */
+  group?: string | null;
   source: HistorySource;
   title: string;
   url: string;
@@ -546,6 +643,10 @@ export interface SettingsExportResult {
  * Числа отчёта экспорта/импорта (страница настроек показывает их пользователю).
  */
 export interface ProfileCounts {
+  /**
+   * Группы избранного в файле/применённые (карточка duopulse-058; у файлов старых версий поля нет — 0).
+   */
+  bookmarkGroups?: number;
   bookmarks?: number;
   /**
    * Секретов в файле/записано при импорте (0 — файл без секретов).

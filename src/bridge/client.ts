@@ -8,14 +8,22 @@ import type {
   AdblockSetEnabledParams,
   AdblockStatusResult,
   AdblockUpdateListsParams,
+  BookmarkGroupInfo,
   BridgeVersionResult,
   HistoryBookmarkAddParams,
   HistoryBookmarkListParams,
   HistoryBookmarkListResult,
+  HistoryBookmarkMoveParams,
   HistoryBookmarkRemoveParams,
   HistoryBookmarkUpdateParams,
   HistoryDeleteRangeParams,
   HistoryDeleteUrlsParams,
+  HistoryGroupAddParams,
+  HistoryGroupListResult,
+  HistoryGroupRemoveParams,
+  HistoryGroupRenameParams,
+  HistoryGroupSetSortParams,
+  HistoryGroupToggleBookmarkParams,
   HistoryListParams,
   HistoryListResult,
   HistorySearchParams,
@@ -115,14 +123,35 @@ export const bridge = {
     deleteUrls: (params: HistoryDeleteUrlsParams) => invoke<void>("history_delete_urls", { params }),
     /** history.delete_range: удалить историю за диапазон времени (unix-ms). */
     deleteRange: (params: HistoryDeleteRangeParams) => invoke<void>("history_delete_range", { params }),
-    /** history.bookmark_add: добавить закладку (upsert по url). */
+    /** history.bookmark_add: добавить закладку (upsert по url); groupId —
+     *  группа (null — «Избранное» по умолчанию), карточка duopulse-058. */
     bookmarkAdd: (params: HistoryBookmarkAddParams) => invoke<void>("history_bookmark_add", { params }),
     /** history.bookmark_remove: удалить закладку (идемпотентна). */
     bookmarkRemove: (params: HistoryBookmarkRemoveParams) => invoke<void>("history_bookmark_remove", { params }),
     /** history.bookmark_update: переименовать закладку. */
     bookmarkUpdate: (params: HistoryBookmarkUpdateParams) => invoke<void>("history_bookmark_update", { params }),
-    /** history.bookmark_list: закладки для страницы управления. */
+    /** history.bookmark_list: закладки (groupId: null — все, -1 — без группы,
+     *  id — члены группы в её порядке сортировки; карточка duopulse-058). */
     bookmarkList: (params: HistoryBookmarkListParams) => invoke<HistoryBookmarkListResult>("history_bookmark_list", { params }),
+    /** history.group_list (duopulse-058): группы избранного с числом закладок. */
+    groupList: () => invoke<HistoryGroupListResult>("history_group_list"),
+    /** history.group_add (duopulse-058): создать группу (имя уникально). */
+    groupAdd: (params: HistoryGroupAddParams) => invoke<BookmarkGroupInfo>("history_group_add", { params }),
+    /** history.group_rename (duopulse-058): переименовать группу. */
+    groupRename: (params: HistoryGroupRenameParams) => invoke<void>("history_group_rename", { params }),
+    /** history.group_remove (duopulse-058): удалить группу (закладки остаются;
+     *  группа по умолчанию не удаляется). */
+    groupRemove: (params: HistoryGroupRemoveParams) => invoke<void>("history_group_remove", { params }),
+    /** history.group_set_sort (duopulse-058): сортировка группы —
+     *  manual (drag&drop) | title | added. */
+    groupSetSort: (params: HistoryGroupSetSortParams) => invoke<void>("history_group_set_sort", { params }),
+    /** history.group_toggle_bookmark (duopulse-058): членство закладки в
+     *  группе вкл/выкл (закладка может быть в нескольких группах или ни в одной). */
+    groupToggleBookmark: (params: HistoryGroupToggleBookmarkParams) =>
+      invoke<void>("history_group_toggle_bookmark", { params }),
+    /** history.bookmark_move (duopulse-058): переставить закладку внутри
+     *  группы (drag&drop; позиция 0 = верх). */
+    bookmarkMove: (params: HistoryBookmarkMoveParams) => invoke<void>("history_bookmark_move", { params }),
   },
   settings: {
     /** settings.get: значение ключа профиля. */

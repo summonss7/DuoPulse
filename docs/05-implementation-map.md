@@ -78,7 +78,9 @@ DuoPulse/
   tabs.{open, close, activate, reopen, list, sleep, wake, restore_session}
   nav.{go_back, go_forward, reload, resolve_omnibox}
   history.{visit, search, list, delete_urls, delete_range,
-           bookmark_add, bookmark_remove, bookmark_update, bookmark_list}
+           bookmark_add, bookmark_remove, bookmark_update, bookmark_list,
+           group_list, group_add, group_rename, group_remove,
+           group_set_sort, group_toggle_bookmark, bookmark_move}
   adblock.{set_enabled(site), status, update_lists}
   vpn.{set_enabled(on), set_mode(off|global|split), status, test_connection,
        import_profile(file), remove_profile(id), list_profiles,
@@ -119,10 +121,16 @@ vitest `src/bridge/client.test.ts` — команды и события). Сло
 на активную вкладку), `nav.{resolve_omnibox, focus_page}` + `history.search`
 (задача 1.3: разбор ввода omnibox — `src-tauri/src/omnibox.rs`, подсказки —
 FTS5-индекс `src-tauri/src/history/`), `history.{visit, list, delete_urls,
-delete_range, bookmark_add, bookmark_remove, bookmark_update, bookmark_list}`
+delete_range, bookmark_add, bookmark_remove, bookmark_update, bookmark_list,
+group_list, group_add, group_rename, group_remove, group_set_sort,
+group_toggle_bookmark, bookmark_move}`
 (задача 1.4: SQLite-хранилище `duopulse.db` в профиле — docs/02 §8; визиты
 пишет Core из on_page_load вкладок, дедуп 60 с, заголовок подтягивается из
-on_title; list — агрегат по URL для страницы управления),
+on_title; list — агрегат по URL для страницы управления; группы избранного —
+карточка duopulse-058: bookmark_add с groupId (null — «Избранное» по
+умолчанию), bookmark_list с groupId (null — все, -1 — без группы, id —
+члены группы в её порядке), bookmark_move — позиции drag&drop, члены группы
+— group_toggle_bookmark; подсказки search несут имена групп «Имя · Имя»),
 `settings.{get, set}`, `vpn.{set_enabled, status, test_connection}`,
 `adblock.{set_enabled, status, update_lists}` (задача 2.1: обёртка adblock-rs
 в `src-tauri/src/adblock/` — сетевая фильтрация из COM-перехватчика
@@ -292,7 +300,9 @@ privacy (clearHistoryOnExit — очистка истории при выход�
 profile.rs — файл профиля `duopulse-profile.json` (формат `duopulseProfile: 1`):
 весь settings.json (переносимые разделы proxy/translate/adblock/search/
 subtitles/appearance/privacy, валидация ДО применения — битый файл ничего
-не меняет), закладки, визиты (дедуп по url+время — повторный импорт
+не меняет), группы избранного + закладки с членствами (карточка
+duopulse-058: группы мапятся по имени — id машин разные, старые файлы без
+поля — закладки в группу по умолчанию), визиты (дедуп по url+время — повторный импорт
 идемпотентен), кэш translated_tracks (upsert; повторный просмотр на новой
 машине — из кэша, DoD 4.2 переживает переезд), секреты (пароль прокси +
 ключи API — только по явному выбору `includeSecrets`: в файле открытым
@@ -588,6 +598,7 @@ Gate-проверки этапов включены в последние кар
 | 1.7 | Спайк многоканального звука 5.1/7.1 (карточка duopulse-006): поканальные тесты + YouTube 5.1 на реальной системе 5.1/7.1 | протокол e2e заполнен; все каналы звучат из правильных динамиков не хуже Chrome/Edge; при провале — карточка-решение и запись в ROADMAP |
 | 1.8 | **✅ выполнено 11.10.2026 (карточка duopulse-009)** Прокси (F-12, инкремент A): настройки SOCKS5/HTTP(S) с аутентификацией, применение через аргументы WebView2 (перезапуск), тумблер и статус в меню (карточка CARDS/009) | браузер ходит через внешний прокси (проверка IP-эхом), без прокси — напрямую; пароль прокси — в DPAPI |
 | 1.9 | **✅ выполнено 27.10.2026 (карточка duopulse-057)** UX первого запуска: полный URL в omnibox на SPA-YouTube (content/url-watch.js → `TabManager::on_spa_url` — адрес вкладки, визит истории, сессия); «открыть в новой вкладке»/target=_blank/средняя кнопка → COM NewWindowRequested открывает вкладку DuoPulse; звёздочка избранного в Navbar + Ctrl+D из контента (`HistoryStore::toggle_bookmark`); кнопка «duo» видна на любом видео; подсказка возможностей на «Новой вкладке» | живой стенд 10/10 (SPA-URL в omnibox/tabs.list/истории; target=_blank и window.open → новые вкладки; звезда вкл/выкл кликом и Ctrl+D), пиксель-проверка залитой звезды #BDFE4F; cargo 243, vitest 187 |
+| 1.10 | **✅ выполнено 29.10.2026 (карточка duopulse-058)** Группы избранного: таблицы `bookmark_groups`/`bookmark_group_items` (миграция плоского списка — все закладки в «Избранное»), команды `history.{group_list, group_add, group_rename, group_remove, group_set_sort, group_toggle_bookmark, bookmark_move}`; страница управления — чипы групп, панель сортировки (вручную drag&drop/по имени/по дате), меню папки строки (закладка в нескольких группах или без), мини-меню звёздочки с выбором группы и «Новая группа…», подсказки omnibox с именами групп; экспорт/импорт профиля переносит группы (мап по имени, старые файлы — в «Избранное») | живой CDP-стенд e2e/bookmarks 23/23 (сид/CRUD/фильтры/сортировки/dnd/меню звёздочки/страница управления), cargo 250 (+7: миграция, CRUD, сортировки, метки поиска, импорт групп и старого профиля), vitest 187 |
 
 ### M2 — скорость
 | # | Задача | DoD |

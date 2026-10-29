@@ -58,10 +58,13 @@ function actionRow(q: string, res: NavResolveOmniboxResult): Row {
 }
 
 function hitRow(h: HistoryHit): Row {
+  // у закладки подсказка справа дополнена именами групп (карточка 058)
+  const sub =
+    h.source === "bookmark" && h.group ? `${h.group} · ${h.url}` : h.url;
   return {
     kind: h.source,
     main: h.title || h.url,
-    sub: h.url,
+    sub,
     url: h.url,
     icon: h.source === "bookmark" ? "bookmark" : "history",
   };
