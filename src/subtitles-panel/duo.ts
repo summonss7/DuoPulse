@@ -31,11 +31,13 @@ import type {
   BaseTrackInfo,
   SubtitlesStyleInfo,
   SubtitlesTranslateProgress,
+  SubtitlesAsrProgress,
   SubtitlesTranslateUnavailable,
   TranslationLangInfo,
 } from "../bridge/gen/types";
 import { presetSets, normalizeTrackId } from "./presets";
 import { cloudLangOptions, translateProgressText, translateUnavailableText } from "./cloud-langs";
+import { asrProgressText } from "./asr-status";
 import { LOOK_PRESETS, matchLookPreset } from "./look-presets";
 
 const err = (e: unknown): void => console.error("duo:", e);
@@ -167,7 +169,7 @@ function renderSet(): void {
     row.dataset.kind = t.source;
     // Файловая часть — после платформенной (3.6), облачные переводы — тоже
     // фиксированы: их составом управляет конвейер (4.2), не set_tracks.
-    const movable = t.source !== "file" && t.source !== "translate";
+    const movable = t.source !== "file" && t.source !== "translate" && t.source !== "asr";
     if (movable) {
       const up = el<HTMLButtonElement>("button", "duo-move", "↑");
       up.type = "button";
@@ -416,7 +418,7 @@ export function initDuo(): void {
       // content-слой применяет без перезагрузки (fast-path, задача 3.7).
       // Файловые и облачные строки фиксированы (set_tracks их не резолвит).
       const ids = state.tracks
-        .filter((t) => t.source !== "file" && t.source !== "translate")
+        .filter((t) => t.source !== "file" && t.source !== "translate" && t.source !== "asr")
         .map((t) => t.id);
       const from = idx;
       const to = act.dataset.act === "up" ? idx - 1 : idx + 1;
@@ -445,12 +447,41 @@ export function initDuo(): void {
       return;
     }
     const ids = state.tracks
-      .filter((t) => t.source !== "file" && t.source !== "translate")
+      .filter((t) => t.source !== "file" && t.source !== "translate" && t.source !== "asr")
       .map((t) => t.id);
     if (ids.length >= 3) return;
     ids.push(select.value);
     void bridge.subtitles.setTracks({ ids }).catch(err);
     select.value = ""; // обратно к подсказке; панель перерисует set_applied
+  });
+
+  // Распознать речь (карточка duopulse-060): кнопка панели → subtitles.asr_start
+  // → Core eval duopulse-asr-request → content добудет URL аудио → конвейер
+  // Core (самофетч → декод → чанки → движок → кэш). Прогресс/итог/ошибки —
+  // событием subtitles:asr_progress (duoAsrMeta, автоскрытие как у перевода).
+  document.getElementById("duoAsrBtn")?.addEventListener("click", () => {
+    const meta = document.getElementById("duoAsrMeta") as HTMLElement;
+    meta.hidden = false;
+    meta.dataset.phase = "transcribing";
+    meta.textContent = "Распознавание запрошено…";
+    void bridge.subtitles.asrStart().catch((ex) => err(ex));
+  });
+  let asrStatusTimer = 0;
+  void listen<SubtitlesAsrProgress>(bridge.events.subtitlesAsrProgress, (ev) => {
+    if (ev.payload.tabId !== state.tabId) return;
+    const text = asrProgressText(ev.payload);
+    if (!text) return;
+    const meta = document.getElementById("duoAsrMeta") as HTMLElement;
+    meta.hidden = false;
+    meta.dataset.phase = ev.payload.phase;
+    meta.textContent = text;
+    window.clearTimeout(asrStatusTimer);
+    const busy = ev.payload.phase === "model" || ev.payload.phase === "audio" || ev.payload.phase === "transcribe";
+    if (!busy) {
+      asrStatusTimer = window.setTimeout(() => {
+        meta.hidden = true;
+      }, 6000);
+    }
   });
 
   // Прогресс облачного перевода (subtitles:translate_progress, задача 4.2):

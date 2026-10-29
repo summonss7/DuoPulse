@@ -78,6 +78,7 @@ import {
   type FileLoadResult,
 } from "./adapters/file";
 import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from "./adapters/cloud";
+import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import { preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, sameMembers } from "./set-defaults";
@@ -147,9 +148,13 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
    * docs/03 §4. Память — последние ключи (LRU): возврат к видео восстанавливает
    * все части. */
   let platformTracks: Track[] = [];
+  let asrTracks: Track[] = [];
   let translateTracks: Track[] = [];
   let fileTracks: Track[] = [];
-  const setMemory = new Map<string, { platform: Track[]; translate: Track[]; files: Track[] }>();
+  const setMemory = new Map<
+    string,
+    { platform: Track[]; asr: Track[]; translate: Track[]; files: Track[] }
+  >();
   const SET_MEMORY_LIMIT = 8;
 
   /** Показ включён (задача 3.7, docs/03 §8 п.2: Alt+D — «выключить, помня
@@ -168,7 +173,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
    * переводы, файлы); при выключенном показе панели показывается тот же
    * «последний набор» — гашенность передаёт флаг enabled. */
   const lastSetTracks = (): Track[] =>
-    combinedTracks([...platformTracks, ...translateTracks], fileTracks).tracks;
+    combinedTracks([...platformTracks, ...asrTracks, ...translateTracks], fileTracks).tracks;
 
   /** Отчёт состояния в Core (задача 3.7): сервис состояния (subtitles.*
    * IPC) и события subtitles:set_applied для кнопки «duo» и панели.
@@ -210,7 +215,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
   /** Применить и запомнить текущее разбиение набора за текущим видео. */
   const applySet = (via: string): void => {
     const { tracks, droppedFiles } = combinedTracks(
-      [...platformTracks, ...translateTracks],
+      [...platformTracks, ...asrTracks, ...translateTracks],
       fileTracks,
     );
     if (droppedFiles > 0) {
@@ -226,7 +231,12 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     if (currentVideo) {
       const key = currentVideo.videoKey;
       setMemory.delete(key); // LRU: освежить порядок
-      setMemory.set(key, { platform: platformTracks, translate: translateTracks, files: fileTracks });
+      setMemory.set(key, {
+        platform: platformTracks,
+        asr: asrTracks,
+        translate: translateTracks,
+        files: fileTracks,
+      });
       while (setMemory.size > SET_MEMORY_LIMIT) {
         setMemory.delete(setMemory.keys().next().value as string);
       }
@@ -247,7 +257,12 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
       return;
     }
     enabled = true;
-    if (platformTracks.length === 0 && translateTracks.length === 0 && fileTracks.length === 0) {
+    if (
+      platformTracks.length === 0 &&
+      asrTracks.length === 0 &&
+      translateTracks.length === 0 &&
+      fileTracks.length === 0
+    ) {
       // Дефолт-набор Alt+D: предпочитаемый язык перевода — из настроек
       // профиля (задача 5.1, window.__DUOPULSE_DEFAULTS__ от Core).
       const ids = defaultSetIds(trackList, preferredLangs());
@@ -350,6 +365,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
         // уточнённый детект следом её поднимет.
         const mem = setMemory.get(video.videoKey);
         platformTracks = mem ? mem.platform : [];
+        asrTracks = mem ? mem.asr : [];
         translateTracks = mem ? mem.translate : [];
         fileTracks = mem ? mem.files : [];
         // Список дорожек принадлежит прошлому видео — сброс до свежего
@@ -384,6 +400,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     if (payload === null || typeof payload !== "object") return;
     if ("clear" in payload && (payload as { clear: unknown }).clear === true) {
       platformTracks = [];
+      asrTracks = [];
       translateTracks = [];
       fileTracks = [];
       applySet("test");
@@ -472,6 +489,9 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     } else if (id.startsWith("cloud:")) {
       translateTracks = translateTracks.filter((t) => t.id !== id);
       applySet("remove");
+    } else if (id.startsWith("asr:")) {
+      asrTracks = asrTracks.filter((t) => t.id !== id);
+      applySet("remove");
     } else {
       platformTracks = platformTracks.filter((t) => t.id !== id);
       applySet("remove");
@@ -511,6 +531,39 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
       // Повтор того же языка — замена, разные языки — разные строки набора.
       translateTracks = [...translateTracks.filter((t) => t.id !== track.id), track];
       applySet("translate");
+    });
+  });
+
+  // Распознать речь видео (карточка duopulse-060: панель → subtitles.asr_start
+  // → Core eval). URL аудио — из контекста страницы: адаптер платформы
+  // (player-ответ YouTube), иначе src «голого» <video> (http(s), не blob —
+  // MSE-плееры вне YouTube в v1 не поддержаны). Конвейер — в Core
+  // (content/adapters/asr.ts); ответ — событием duopulse-asr-track.
+  document.addEventListener("duopulse-asr-request", () => {
+    if (!currentVideo) return;
+    const platform = adapter.audioSource();
+    const el = currentVideo.el as HTMLVideoElement;
+    const naked = [el.currentSrc, el.src].find(
+      (s) => typeof s === "string" && /^https?:/i.test(s),
+    );
+    const source = platform ?? (naked ? { url: naked, lang: "" } : null);
+    if (!source) {
+      postToCore({ duopulse: "asr-begin", reqId: 0, videoKey: currentVideo.videoKey, url: "", lang: "" });
+      return; // Core ответит внятной ошибкой «аудио недоступно»
+    }
+    const videoKeyAtRequest = currentVideo.videoKey;
+    void requestAsrTrack(document, { post: postToCore }, {
+      videoKey: videoKeyAtRequest,
+      url: source.url,
+      lang: source.lang,
+    }).then((reply) => {
+      if (!reply.ok) return;
+      const lang = typeof reply.lang === "string" && reply.lang ? reply.lang : "auto";
+      const track = asrTrackFrom(lang, typeof reply.engine === "string" ? reply.engine : "", reply.cues ?? []);
+      if (!track) return;
+      if (currentVideo?.videoKey !== videoKeyAtRequest) return; // видео сменилось
+      asrTracks = [...asrTracks.filter((t) => t.id !== track.id), track];
+      applySet("asr");
     });
   });
 
@@ -581,9 +634,11 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
       nativeBlanked: boolean;
       offsetHudVisible: boolean;
       dropHintVisible: boolean;
+      asrTracks: { id: string; lang: string; cues: number }[];
       translateTracks: { id: string; lang: string; cues: number }[];
       fileTracks: { id: string; lang: string; cues: number }[];
       cloud: ReturnType<typeof cloudTranslateStatus>;
+      asr: ReturnType<typeof asrStatus>;
     } {
       return {
         videoKey: currentVideo?.videoKey ?? null,
@@ -595,9 +650,11 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
         nativeBlanked: blanker.blanked,
         offsetHudVisible: hud.visible,
         dropHintVisible: dropzone.hintVisible(),
+        asrTracks: asrTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
         translateTracks: translateTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
         fileTracks: fileTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
         cloud: cloudTranslateStatus(),
+        asr: asrStatus(),
       };
     },
     /** Список дорожек текущего видео (null — ещё не получен/не YouTube). */

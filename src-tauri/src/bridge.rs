@@ -502,6 +502,8 @@ pub struct SettingsAll {
     /// Глобальный тумблер блокировщика (исключения сайтов — adblock.status).
     pub adblock_enabled: bool,
     pub translate: crate::translate::TranslateSettings,
+    /// Распознавание речи (карточка duopulse-060): движок/модель/ключ.
+    pub asr: crate::asr::config::AsrSettings,
 }
 
 /// settings.apply: частичный патч разделов (неназванные не меняются).
@@ -558,6 +560,51 @@ pub type SettingsImportResult = crate::settings::profile::ImportOutcome;
 #[serde(rename_all = "camelCase")]
 pub struct TranslateClearCacheResult {
     /// Удалено строк кэша.
+    pub cleared: u32,
+}
+
+// --- карточка duopulse-060: ASR (src/asr/) ------------------------------------
+
+pub type AsrGetSettingsResult = crate::asr::config::AsrSettings;
+
+/// asr.set_settings: value — конфиг без ключа (ключ — только DPAPI);
+/// secret — ключ API облака: None — не менять, Some("") — удалить,
+/// Some(k) — перезаписать.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrSetSettingsParams {
+    pub value: crate::asr::config::AsrConfig,
+    pub secret: Option<String>,
+}
+
+/// asr.test: живая проверка выбранного движка (кнопка «Проверить» настроек
+/// ASR) — короткий WAV тишины в транскрипцию: успех = движок ответил
+/// (тишина без сегментов — нормальный ответ сервера, не ошибка связи).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrTestResult {
+    pub ok: bool,
+    /// Диагностика панели.
+    pub detail: String,
+}
+
+/// asr.prepare: скачать движок whisper-server.exe (если локальный путь не
+/// найден) и модель выбранного размера в профиль — подготовка офлайн-работы.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrPrepareResult {
+    pub ok: bool,
+    pub detail: String,
+    /// Модель на месте (была или скачалась).
+    pub model_ready: bool,
+    /// Движок на месте (был или скачался).
+    pub engine_ready: bool,
+}
+
+/// asr.clear_cache (приватность): очистить кэш ASR-дорожек (asr_tracks).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrClearCacheResult {
     pub cleared: u32,
 }
 
@@ -1324,6 +1371,21 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles.translate_track": { "handler": "subtitles_translate_track",
                                             "params": schema!(SubtitlesTranslateTrackParams),
                                             "result": null },
+            "subtitles.asr_start": { "handler": "subtitles_asr_start",
+                                      "params": null, "result": null },
+            "subtitles.asr_cancel": { "handler": "subtitles_asr_cancel",
+                                       "params": null, "result": null },
+            "asr.get_settings": { "handler": "asr_get_settings", "params": null,
+                                   "result": schema!(AsrGetSettingsResult) },
+            "asr.set_settings": { "handler": "asr_set_settings",
+                                   "params": schema!(AsrSetSettingsParams),
+                                   "result": null },
+            "asr.test": { "handler": "asr_test", "params": null,
+                           "result": schema!(AsrTestResult) },
+            "asr.prepare": { "handler": "asr_prepare", "params": null,
+                              "result": schema!(AsrPrepareResult) },
+            "asr.clear_cache": { "handler": "asr_clear_cache", "params": null,
+                                  "result": schema!(AsrClearCacheResult) },
             "translate.get_settings": { "handler": "translate_get_settings", "params": null,
                                          "result": schema!(TranslateGetSettingsResult) },
             "translate.set_settings": { "handler": "translate_set_settings",
@@ -1356,6 +1418,7 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles:set_applied": { "payload": schema!(SubtitlesSetApplied) },
             "subtitles:translate_progress": { "payload": schema!(SubtitlesTranslateProgress) },
             "subtitles:translate_unavailable": { "payload": schema!(SubtitlesTranslateUnavailable) },
+            "subtitles:asr_progress": { "payload": schema!(crate::asr::pipeline::SubtitlesAsrProgress) },
         },
     })
 }
@@ -1445,6 +1508,10 @@ fn event_names_match_registry() {
             (
                 <crate::translate::watcher::SubtitlesTranslateUnavailableEvent as BridgeEvent>::NAME,
                 schema!(SubtitlesTranslateUnavailable),
+            ),
+            (
+                <crate::asr::pipeline::SubtitlesAsrProgressEvent as BridgeEvent>::NAME,
+                schema!(crate::asr::pipeline::SubtitlesAsrProgress),
             ),
         ]
         .into_iter()
@@ -1853,6 +1920,7 @@ fn settings_get_all(
         proxy: proxy_settings(&proxy_cfg, &dir),
         adblock_enabled: adblock.status().enabled,
         translate: crate::translate::settings_view(&dir),
+        asr: crate::asr::config::settings_view(&dir),
     })
 }
 
@@ -1885,10 +1953,17 @@ fn settings_apply(params: SettingsPatch) -> Result<(), String> {
 fn settings_export(
     history: tauri::State<'_, crate::history::HistoryStore>,
     cache: tauri::State<'_, std::sync::Arc<crate::subtitles::cache::TranslationsCache>>,
+    asr_cache: tauri::State<'_, crate::asr::cache::AsrCache>,
     params: SettingsExportParams,
 ) -> Result<SettingsExportResult, String> {
     let dir = proxy::profile_dir();
-    let file = crate::settings::profile::build(&dir, &history, &cache, params.include_secrets)?;
+    let file = crate::settings::profile::build(
+        &dir,
+        &history,
+        &cache,
+        &asr_cache,
+        params.include_secrets,
+    )?;
     let counts = crate::settings::profile::counts_of(&file);
     let json =
         serde_json::to_string_pretty(&file).map_err(|e| format!("сериализация профиля: {e}"))?;
@@ -1911,13 +1986,14 @@ fn settings_import(
     app: tauri::AppHandle,
     history: tauri::State<'_, crate::history::HistoryStore>,
     cache: tauri::State<'_, std::sync::Arc<crate::subtitles::cache::TranslationsCache>>,
+    asr_cache: tauri::State<'_, crate::asr::cache::AsrCache>,
     params: SettingsImportParams,
 ) -> Result<SettingsImportResult, String> {
     let raw = std::fs::read_to_string(&params.path)
         .map_err(|e| format!("прочитать {}: {}", params.path, e))?;
     let file = crate::settings::profile::parse_file(&raw)?;
     let dir = proxy::profile_dir();
-    let result = crate::settings::profile::apply(&dir, &file, &history, &cache)?;
+    let result = crate::settings::profile::apply(&dir, &file, &history, &cache, &asr_cache)?;
     // Задача 6.1: роутер подхватывает импортированный прокси на лету.
     crate::vpn::router::apply_saved(&app, &dir);
     Ok(result)
@@ -2865,6 +2941,173 @@ fn translate_clear_cache(
     }
 }
 
+// --- карточка duopulse-060: команды ASR (src/asr/) ----------------------------
+
+/// asr.get_settings: снапшот настроек ASR (вкл, движок, модель, ключ есть/нет,
+/// движок/модель на месте).
+#[tauri::command]
+fn asr_get_settings() -> Result<AsrGetSettingsResult, String> {
+    Ok(crate::asr::config::settings_view(&proxy::profile_dir()))
+}
+
+/// asr.set_settings: сохранить конфиг (settings.json, ключ "asr") и секрет
+/// облака (DPAPI). Включённый конфиг валидируется.
+#[tauri::command]
+fn asr_set_settings(params: AsrSetSettingsParams) -> Result<(), String> {
+    crate::asr::config::save_settings(
+        &proxy::profile_dir(),
+        &params.value,
+        params.secret.as_deref(),
+    )
+}
+
+/// asr.test: один живой запрос выбранного движка (кнопка «Проверить»).
+/// Тишина без сегментов — нормальный ответ: ok=true «движок отвечает».
+#[tauri::command]
+async fn asr_test() -> Result<AsrTestResult, String> {
+    let dir = proxy::profile_dir();
+    let probe = tauri::async_runtime::spawn_blocking(move || {
+        let cfg = crate::asr::config::load_config(&dir);
+        let transport = crate::asr::engine::UreqAsrTransport::new();
+        let endpoint = match cfg.provider {
+            crate::asr::config::AsrProviderId::Local => {
+                let base = crate::asr::server::global()
+                    .ensure(&dir, &cfg, &transport)
+                    .map_err(crate::asr::engine::AsrError::Config)?;
+                crate::asr::engine::AsrEndpoint::LocalWhisper { base_url: base }
+            }
+            crate::asr::config::AsrProviderId::Openai => {
+                let key = crate::asr::config::load_api_key(&dir)
+                    .filter(|k| !k.trim().is_empty())
+                    .ok_or_else(|| {
+                        crate::asr::engine::AsrError::Config(
+                            "нет ключа API — сохраните в настройках ASR".into(),
+                        )
+                    })?;
+                crate::asr::engine::AsrEndpoint::OpenAiCompatible {
+                    base_url: cfg.openai_base_url.trim().trim_end_matches('/').to_string(),
+                    key,
+                    model: cfg.openai_model.trim().to_string(),
+                }
+            }
+        };
+        // 1 с тишины: проверка связи, не качества
+        let wav =
+            crate::asr::decode::pcm_to_wav(&vec![0i16; crate::asr::decode::TARGET_RATE as usize]);
+        crate::asr::engine::transcribe_once(&transport, &endpoint, &wav, "en", None)
+            .map(|_| String::new())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    match probe {
+        Ok(_) => Ok(AsrTestResult {
+            ok: true,
+            detail: "движок отвечает".into(),
+        }),
+        Err(crate::asr::engine::AsrError::BadResponse(m)) if m.contains("речь не распознана") => {
+            Ok(AsrTestResult {
+                ok: true,
+                detail: "движок отвечает (тишина — без сегментов)".into(),
+            })
+        }
+        Err(e) => Ok(AsrTestResult {
+            ok: false,
+            detail: e.message(),
+        }),
+    }
+}
+
+/// asr.prepare: скачать движок и/или модель локального whisper в профиль
+/// (кнопка настроек — подготовка к офлайн-распознаванию). Блокирующее —
+/// spawn_blocking; прогресс скачивания модели — событие subtitles:asr_progress
+/// (tabId="", фаза model).
+#[tauri::command]
+async fn asr_prepare() -> Result<AsrPrepareResult, String> {
+    let dir = proxy::profile_dir();
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        let cfg = crate::asr::config::load_config(&dir);
+        let mut detail = String::new();
+        let engine_ready = match crate::asr::server::engine_exe_path(&dir, &cfg) {
+            Some(p) if p.is_file() => true,
+            _ => match crate::asr::server::download_engine(&dir) {
+                Ok(_) => true,
+                Err(e) => {
+                    detail = format!("движок: {e}");
+                    false
+                }
+            },
+        };
+        let model_ready = match crate::asr::server::model_path(&dir, cfg.local_model) {
+            p if p.is_file() => true,
+            _ => match crate::asr::server::download_model(&dir, cfg.local_model, &mut |_, _| {}) {
+                Ok(_) => true,
+                Err(e) => {
+                    if !detail.is_empty() {
+                        detail.push_str("; ");
+                    }
+                    detail.push_str(&format!("модель: {e}"));
+                    false
+                }
+            },
+        };
+        let ok = engine_ready && model_ready;
+        if detail.is_empty() {
+            detail = "движок и модель готовы".into();
+        }
+        AsrPrepareResult {
+            ok,
+            detail,
+            model_ready,
+            engine_ready,
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(prepared)
+}
+
+/// asr.clear_cache (приватность): очистить кэш ASR-дорожек — повторное
+/// распознавание снова скачает аудио и пройдёт движок.
+#[tauri::command]
+fn asr_clear_cache(cache: tauri::State<'_, crate::asr::cache::AsrCache>) -> AsrClearCacheResult {
+    AsrClearCacheResult {
+        cleared: cache.clear() as u32,
+    }
+}
+
+/// subtitles.asr_start: распознать речь видео активной вкладки (карточка
+/// duopulse-060). URL аудио знает content-слой (контекст страницы) — eval
+/// диспатчит duopulse-asr-request, content ответит WebMessage'м «asr-begin»
+/// (конвейер — src/asr/pipeline.rs). Прогресс/итог — события
+/// subtitles:asr_progress, команда возвращается сразу.
+#[tauri::command]
+fn subtitles_asr_start(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+) -> Result<(), String> {
+    let cfg = crate::asr::config::load_config(&proxy::profile_dir());
+    if !cfg.enabled {
+        return Err("распознавание речи выключено — включите в настройках ASR".into());
+    }
+    eval_active_event(
+        &app,
+        &manager,
+        "duopulse-asr-request",
+        &serde_json::json!({}),
+    )
+}
+
+/// subtitles.asr_cancel: отменить распознавание активной вкладки (уход с
+/// видео отменяет конвейер сам — поколением в AsrJobs).
+#[tauri::command]
+fn subtitles_asr_cancel(
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    jobs: tauri::State<'_, std::sync::Arc<crate::asr::pipeline::AsrJobs>>,
+) -> Result<(), String> {
+    jobs.bump(&active_tab_id(&manager));
+    Ok(())
+}
+
 fn save_proxy(
     app: &tauri::AppHandle,
     cfg: &proxy::ProxyConfig,
@@ -2951,6 +3194,13 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         subtitles_set_style,
         subtitles_remove_track,
         subtitles_translate_track,
+        subtitles_asr_start,
+        subtitles_asr_cancel,
+        asr_get_settings,
+        asr_set_settings,
+        asr_test,
+        asr_prepare,
+        asr_clear_cache,
         translate_get_settings,
         translate_set_settings,
         translate_test,

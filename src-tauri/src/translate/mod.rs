@@ -16,7 +16,9 @@
 pub(crate) mod config;
 mod deepl;
 mod google;
-mod http;
+/// HTTP-слой pub(crate): типы HttpResponse/TransportError переиспользует
+/// ASR-движок (карточка duopulse-060, src/asr/engine.rs).
+pub(crate) mod http;
 mod libre;
 pub(crate) mod pipeline;
 pub(crate) mod watcher;

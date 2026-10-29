@@ -4078,3 +4078,78 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
   гибрид (рекомендовано) / только локальный whisper.cpp / только облако.
   Карточка 060 — wait/blocked до ответа.
 - Коммит: e33387e — chore(research): duopulse-060 — ASR-спайк, e2e/asr-spike/, вопрос автору; карточка wait/blocked.
+
+## 29.10.2026 13:30 — 18:35 — duopulse-060: ASR-реализация — субтитры из речи для видео без дорожек (гибрид по решению автора)
+- Что изменено (решение автора от 29.10.2026 13:25: локальный whisper.cpp
+  всегда + облачный провайдер по ключу OpenAI/Groq/свой whisper-server,
+  выбор в настройках):
+  - Core `src-tauri/src/asr/` (+1930 строк, 6 модулей): engine.rs — единый
+    запрос «WAV 16 кГц моно → сегменты» поверх локального whisper-server
+    (`/inference`) и OpenAI-совместимого облака (`/audio/transcriptions`,
+    Bearer-ключ; ретраи сеть/429/5xx, разбор verbose_json; маппинг имён
+    языков whisper «english»→«en», 85 имён); decode.rs — symphonia
+    (AAC/m4a, mp3, wav, flac, ogg/vorbis; без ffmpeg в поставке) → PCM
+    16 кГц моно (сведение каналов средним, линейный ресемпл), чанки ≤ 5 мин
+    (прогресс/отмена между запросами, лимит файла облаков); server.rs —
+    жизненный цикл whisper-server.exe (порт 127.0.0.1, health-check до 60 с,
+    гашение через 10 мин простоя и при выходе приложения; поиск: настройка →
+    профиль → рядом с exe; скачивание движка/модели по требованию, проверка
+    размера); cache.rs — SQLite asr_tracks в duopulse.db (UNIQUE videoKey+
+    engine+lang, LRU 120, any-lang-lookup при авто-языке, дамп/импорт);
+    config.rs — раздел "asr" settings.json (enabled, provider, localModel
+    base/small, localEnginePath, openaiBaseUrl/Model), ключ облака — только
+    DPAPI (asr/keys/openai.bin), валидация; pipeline.rs — конвейер
+    WebMessage «asr-begin»: самофетч аудио тем же сетевым путём, что WebView2
+    (SOCKS5-роутер, потолок 250 МБ) → декод → чанки → движок (prompt-хвост
+    для связности) → кэш → реплай document-событием duopulse-asr-track
+    (cues camelCase — паттерн translate-track) + события прогресса
+    subtitles:asr_progress; отмена поколениями AsrJobs (новый запрос/уход
+    с видео/команда asr_cancel).
+  - Интеграция Core: main.rs (WebMessage-роут, состояние AsrCache/AsrJobs,
+    shutdown сервера при выходе), bridge.rs (+7 команд: subtitles.asr_start/
+  asr_cancel, asr.get/set_settings, asr.test — живая проба тишины,
+    asr.prepare — скачивание движка+модели, asr.clear_cache; +1 событие;
+    SettingsAll.asr), профиль (profile.rs) — asr_tracks и ключ ASR в
+    экспорте/импорте; Cargo.toml +symphonia (MPL-2.0, фичи по кодекам).
+  - Content-слой: content/adapters/asr.ts (запрос по reqId, слушатель
+    duopulse-asr-track, asrTrackFrom — дорожка asr:<lang> role original),
+    youtube.ts audioSource() (audio-only adaptiveFormats, приоритет
+    m4a/AAC по битрейту, язык — оригинал аудиодорожки; зашифрованные/нет
+    URL → null), duopulse-content.ts — asr-часть набора (память набора,
+    duopulse-asr-request: платформа или src «голого» видео), типы source
+    "asr".
+  - UI: duo-панель — кнопка «Распознать речь (ASR)…» под набором +
+    статус-строка (asr-status.ts: фазы «Скачивание модели/аудио…»,
+    «Распознавание… N/M», «Готово: распознано N реплик» / «из кэша»,
+    ошибки; автоскрытие 6 с); страница настроек — раздел «Распознавание
+    речи (ASR)»: тумблер, провайдер local/openai, модель base/small, путь
+    движка, base URL/модель облака, ключ (DPAPI, удалить), «Проверить»,
+    «Скачать движок и модель».
+  - Документация: docs/03 §3.4 (конвейер, приватность, лицензии,
+    ограничения v1), §6 (source asr), §8 (кнопка/настройки); README —
+    строка функций + настройки/профиль; ROADMAP — запись карточки.
+- Как проверено: e2e/asr/run.mjs — живой стенд 10/10 (SAPI-озвучённое
+  видео без дорожек: детект → кнопка → asr.getSettings → конвейер
+  локального whisper (13 cue, фразы скрипта) → дорожка asr:en в наборе и
+  на плашке → снапшот Core source=asr → повтор из кэша → отмена → журнал
+  Core; стенд генерит speech.mp4 сам, engine/model из env-путей спайка).
+  Первый прогон поймал 3 бага — cues snake_case в реплае (дорожка не
+  попадала в набор), detected-язык «english» вместо кода (asr:english),
+  кэш-промах при lang="" (повтор гнал конвейер заново) — исправлены
+  (cues_json camelCase, normalize_lang, any-lang-lookup кэша), плюс стенд
+  читал несуществующее engine.rows → activeRows. Движок скачивается zip'ом
+  (exe + 5 DLL mingw-рантайма — голый exe не стартует), распаковка с
+  защитой zip-slip; архив опубликован в публичном репозитории фидов
+  summonss7/duopulse-updates (engine/whisper-server-win64.zip, ~3 МБ,
+  https://summonss7.github.io/duopulse-updates/engine/… — репозиторий
+  DuoPulse приватный, его release-ссылки анонимно не читаются, проверено
+  curl: приватный релиз → 404, Pages-URL → 200); попутно починен
+  killOurExes стенда (экранирование \\ в PS-строке ломало матчинг путей —
+  whisper-server оставался жив после прогона). Юнит: cargo 280 ok
+  (+29: engine multipart/ретраи/parse, decode ресемпл/WAV/чанки, server
+  пути/аргументы/размер/распаковка zip движка, config roundtrip/DPAPI/
+  валидация, cache LRU/импорт, pipeline офсеты чанков/поколения/
+  normalize_lang), vitest 208 ok (+9), clippy/fmt/tsc чисто, контракт v11
+  без bump (gen-bridge синхронен). Финальный контрольный прогон стенда —
+  10/10 без остаточных процессов.
+- Коммит: см. ниже (запись дополнится хешем коммитом итога).

@@ -34,6 +34,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod adblock;
+mod asr;
 mod bridge;
 mod history;
 mod omnibox;
@@ -534,6 +535,12 @@ unsafe fn referer_of(
 ///   (src/translate/pipeline.rs: батчинг ≤ 2 КБ, контекст пачки, кэш SQLite,
 ///   событие subtitles:translate_progress) и отвечает document-событием
 ///   duopulse-translate-track eval'ом активной вкладки;
+/// - «asr-begin» — распознавание речи (карточка duopulse-060): content-слой
+///   добыл URL аудио в контексте страницы (адаптер YouTube / src видео),
+///   Core скачивает его тем же сетевым путём (SOCKS5-роутер), декодирует,
+///   транскрибирует (локальный whisper-server / OpenAI-совместимое облако,
+///   src/asr/pipeline.rs), кэширует и отвечает document-событием
+///   duopulse-asr-track; прогресс — событие subtitles:asr_progress;
 /// - прочие (IPC tauri обрабатывает свои параллельно) игнорируются.
 #[cfg(windows)]
 unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
@@ -696,6 +703,12 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 // Обработчик сразу уходит в spawn_blocking ( COM-поток не
                 // блокируем), прогресс — событием subtitles:translate_progress.
                 translate::handle_translate_request(&app, &tab_id, &parsed);
+            } else if parsed["duopulse"] == "asr-begin" {
+                // Распознавание речи (карточка duopulse-060): URL аудио — у
+                // content-слоя, конвейер (самофетч → декод → чанки → движок →
+                // кэш) — src/asr/pipeline.rs; обработчик сразу уходит в
+                // spawn_blocking, прогресс — subtitles:asr_progress.
+                asr::pipeline::handle_asr_begin(&app, &tab_id, &parsed);
             } else if parsed["duopulse"] == "cosmetic" {
                 if let Some(url) = parsed["url"].as_str() {
                     let res = app
@@ -1122,6 +1135,12 @@ fn main() {
     // Очередь переводов в работе (задача 4.3): дедуп запросов по ключу и
     // офлайн-цикл автоповтора (watcher.rs, docs/01 §5.4).
     let translation_jobs = std::sync::Arc::new(translate::watcher::TranslationJobs::default());
+    // Кэш ASR-дорожек (карточка duopulse-060): та же duopulse.db, таблица
+    // asr_tracks — повторный просмотр видео без скачивания аудио; поколения
+    // задач ASR — отмена конвейера при новом запросе/уходе с видео.
+    let asr_cache = asr::cache::AsrCache::open(&profile_dir)
+        .expect("открыть/создать таблицу asr_tracks в duopulse.db");
+    let asr_jobs = std::sync::Arc::new(asr::pipeline::AsrJobs::default());
     // Split-правила и vpn-режим (задача 6.3, docs/02 §6.2): vpn/split-rules.json,
     // общий стор IPC ↔ роутер — правки действуют на новые соединения сразу.
     let rules_store = vpn::rules::RuleStore::load(&profile_dir);
@@ -1156,6 +1175,8 @@ fn main() {
         .manage(subtitles::service::SubtitlesService::new())
         .manage(translations_cache)
         .manage(translation_jobs)
+        .manage(asr_cache)
+        .manage(asr_jobs)
         .manage(updater::UpdaterService::new())
         .manage(router)
         .manage(rules_store)
@@ -1264,6 +1285,9 @@ fn main() {
         .expect("ошибка сборки DuoPulse")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                // Локальный whisper-server ASR (карточка duopulse-060): гасим
+                // дочерний процесс, чтобы не остался висеть после выхода.
+                asr::server::global().shutdown();
                 // Сохранение сессии при выходе (задача 1.6): при закрытии окна
                 // (ExitRequested) и на финальном Exit (в т.ч. после app.restart).
                 // Запись идемпотентна — менеджер вкладок в момент выхода ещё жив,

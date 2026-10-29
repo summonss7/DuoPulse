@@ -528,6 +528,43 @@ export class YouTubeAdapter implements Adapter {
     return videoKeyFor(href, undefined).startsWith("yt:");
   }
 
+  /** Аудио-поток для ASR (карточка duopulse-060): audio-only формат
+   *  player-ответа (streamingData.adaptiveFormats). Предпочтение m4a/AAC
+   *  (декодер Core — symphonia, opus не умеет), из них — максимальный битрейт
+   *  с прямым url; URL зашифрованы (signatureCipher) или отсутствуют — null
+   *  (Core их не добудет, панель предложит ручной путь). Язык — оригинал
+   *  аудио (audioTracks.original), иначе пусто (whisper определит сам). */
+  audioSource(): { url: string; lang: string } | null {
+    const found = this.playerResponse();
+    if (!found) return null;
+    const formats = (found.response as { streamingData?: { adaptiveFormats?: unknown } })
+      ?.streamingData?.adaptiveFormats;
+    if (!Array.isArray(formats)) return null;
+    interface AudioFormat {
+      mimeType?: unknown;
+      url?: unknown;
+      bitrate?: unknown;
+    }
+    const audios = formats.filter((f): f is AudioFormat => {
+      if (!f || typeof f !== "object") return false;
+      const mime = (f as AudioFormat).mimeType;
+      const url = (f as AudioFormat).url;
+      return (
+        typeof mime === "string" &&
+        mime.startsWith("audio/") &&
+        typeof url === "string" &&
+        url.length > 0
+      );
+    });
+    if (audios.length === 0) return null;
+    const score = (f: AudioFormat): number =>
+      (typeof f.mimeType === "string" && f.mimeType.startsWith("audio/mp4") ? 1_000_000_000 : 0) +
+      (typeof f.bitrate === "number" ? f.bitrate : 0);
+    const best = audios.reduce((a, b) => (score(b) > score(a) ? b : a));
+    const langs = originalLangsOf(found.response);
+    return { url: best.url as string, lang: langs.values().next().value ?? "" };
+  }
+
   private playerResponse(): { response: unknown; path: string } | null {
     const el = this.opts.win.document.getElementById("movie_player") as PlayerElement | null;
     if (el && typeof el.getPlayerResponse === "function") {

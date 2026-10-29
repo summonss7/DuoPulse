@@ -351,6 +351,240 @@
       "params": null,
       "result": null
     },
+    "asr.clear_cache": {
+      "handler": "asr_clear_cache",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "asr.clear_cache (приватность): очистить кэш ASR-дорожек (asr_tracks).",
+        "properties": {
+          "cleared": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cleared"
+        ],
+        "title": "AsrClearCacheResult",
+        "type": "object"
+      }
+    },
+    "asr.get_settings": {
+      "handler": "asr_get_settings",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "AsrProviderId": {
+            "description": "Движок распознавания (решение автора 29.10.2026 — гибрид; выбор в настройках): локальный whisper.cpp (приватно, офлайн) или облачный OpenAI-совместимый API (OpenAI / Groq / свой whisper-server).",
+            "enum": [
+              "local",
+              "openai"
+            ],
+            "type": "string"
+          },
+          "LocalModelSize": {
+            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).",
+            "enum": [
+              "base",
+              "small"
+            ],
+            "type": "string"
+          }
+        },
+        "description": "Значение asr.get_settings для UI: конфиг + факт наличия ключа (сами ключи наружу не отдаются) + состояние локального движка (exe/модель на месте).",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "engineFound": {
+            "description": "whisper-server.exe найден (путь/профиль/рядом с exe).",
+            "type": "boolean"
+          },
+          "hasApiKey": {
+            "description": "Ключ API облака сохранён (DPAPI).",
+            "type": "boolean"
+          },
+          "localEnginePath": {
+            "type": "string"
+          },
+          "localModel": {
+            "$ref": "#/definitions/LocalModelSize"
+          },
+          "modelDownloaded": {
+            "description": "Модель локального движка скачана в профиль.",
+            "type": "boolean"
+          },
+          "openaiBaseUrl": {
+            "type": "string"
+          },
+          "openaiModel": {
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/definitions/AsrProviderId"
+          }
+        },
+        "required": [
+          "enabled",
+          "engineFound",
+          "hasApiKey",
+          "localEnginePath",
+          "localModel",
+          "modelDownloaded",
+          "openaiBaseUrl",
+          "openaiModel",
+          "provider"
+        ],
+        "title": "AsrSettings",
+        "type": "object"
+      }
+    },
+    "asr.prepare": {
+      "handler": "asr_prepare",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "asr.prepare: скачать движок whisper-server.exe (если локальный путь не найден) и модель выбранного размера в профиль — подготовка офлайн-работы.",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "engineReady": {
+            "description": "Движок на месте (был или скачался).",
+            "type": "boolean"
+          },
+          "modelReady": {
+            "description": "Модель на месте (была или скачалась).",
+            "type": "boolean"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "detail",
+          "engineReady",
+          "modelReady",
+          "ok"
+        ],
+        "title": "AsrPrepareResult",
+        "type": "object"
+      }
+    },
+    "asr.set_settings": {
+      "handler": "asr_set_settings",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "AsrConfig": {
+            "description": "Конфиг ASR в settings.json. Ключ API сюда НЕ пишется — только DPAPI.",
+            "properties": {
+              "enabled": {
+                "description": "ASR разрешён (кнопка «Распознать речь» в панели).",
+                "type": "boolean"
+              },
+              "localEnginePath": {
+                "default": "",
+                "description": "Путь к whisper-server.exe (пусто — искать: профиль → рядом с приложением → скачивание по требованию).",
+                "type": "string"
+              },
+              "localModel": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/LocalModelSize"
+                  }
+                ],
+                "default": "base",
+                "description": "Размер локальной модели whisper."
+              },
+              "openaiBaseUrl": {
+                "default": "https://api.openai.com/v1",
+                "description": "Base URL OpenAI-совместимого API (без /audio/transcriptions).",
+                "type": "string"
+              },
+              "openaiModel": {
+                "default": "whisper-1",
+                "description": "Модель облачного провайдера (whisper-1, whisper-large-v3-turbo, …).",
+                "type": "string"
+              },
+              "provider": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/AsrProviderId"
+                  }
+                ],
+                "description": "Выбранный движок."
+              }
+            },
+            "required": [
+              "enabled",
+              "provider"
+            ],
+            "type": "object"
+          },
+          "AsrProviderId": {
+            "description": "Движок распознавания (решение автора 29.10.2026 — гибрид; выбор в настройках): локальный whisper.cpp (приватно, офлайн) или облачный OpenAI-совместимый API (OpenAI / Groq / свой whisper-server).",
+            "enum": [
+              "local",
+              "openai"
+            ],
+            "type": "string"
+          },
+          "LocalModelSize": {
+            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).",
+            "enum": [
+              "base",
+              "small"
+            ],
+            "type": "string"
+          }
+        },
+        "description": "asr.set_settings: value — конфиг без ключа (ключ — только DPAPI); secret — ключ API облака: None — не менять, Some(\"\") — удалить, Some(k) — перезаписать.",
+        "properties": {
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "$ref": "#/definitions/AsrConfig"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "AsrSetSettingsParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "asr.test": {
+      "handler": "asr_test",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "asr.test: живая проверка выбранного движка (кнопка «Проверить» настроек ASR) — короткий WAV тишины в транскрипцию: успех = движок ответил (тишина без сегментов — нормальный ответ сервера, не ошибка связи).",
+        "properties": {
+          "detail": {
+            "description": "Диагностика панели.",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "detail",
+          "ok"
+        ],
+        "title": "AsrTestResult",
+        "type": "object"
+      }
+    },
     "bridge.version": {
       "handler": "bridge_version",
       "params": null,
@@ -1611,6 +1845,13 @@
           "ProfileCounts": {
             "description": "Числа отчёта экспорта/импорта (страница настроек показывает их пользователю).",
             "properties": {
+              "asrTracks": {
+                "default": 0,
+                "description": "ASR-дорожки в файле/применённые (карточка duopulse-060; у старых файлов поля нет — 0).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
               "bookmarkGroups": {
                 "default": 0,
                 "description": "Группы избранного в файле/применённые (карточка duopulse-058; у файлов старых версий поля нет — 0).",
@@ -1772,11 +2013,74 @@
             },
             "type": "object"
           },
+          "AsrProviderId": {
+            "description": "Движок распознавания (решение автора 29.10.2026 — гибрид; выбор в настройках): локальный whisper.cpp (приватно, офлайн) или облачный OpenAI-совместимый API (OpenAI / Groq / свой whisper-server).",
+            "enum": [
+              "local",
+              "openai"
+            ],
+            "type": "string"
+          },
+          "AsrSettings": {
+            "description": "Значение asr.get_settings для UI: конфиг + факт наличия ключа (сами ключи наружу не отдаются) + состояние локального движка (exe/модель на месте).",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "engineFound": {
+                "description": "whisper-server.exe найден (путь/профиль/рядом с exe).",
+                "type": "boolean"
+              },
+              "hasApiKey": {
+                "description": "Ключ API облака сохранён (DPAPI).",
+                "type": "boolean"
+              },
+              "localEnginePath": {
+                "type": "string"
+              },
+              "localModel": {
+                "$ref": "#/definitions/LocalModelSize"
+              },
+              "modelDownloaded": {
+                "description": "Модель локального движка скачана в профиль.",
+                "type": "boolean"
+              },
+              "openaiBaseUrl": {
+                "type": "string"
+              },
+              "openaiModel": {
+                "type": "string"
+              },
+              "provider": {
+                "$ref": "#/definitions/AsrProviderId"
+              }
+            },
+            "required": [
+              "enabled",
+              "engineFound",
+              "hasApiKey",
+              "localEnginePath",
+              "localModel",
+              "modelDownloaded",
+              "openaiBaseUrl",
+              "openaiModel",
+              "provider"
+            ],
+            "type": "object"
+          },
           "DeeplPlan": {
             "description": "Тариф DeepL: free — api-free.deepl.com (500 тыс. знаков/мес), pro — api.deepl.com; отличается только хост эндпоинта.",
             "enum": [
               "free",
               "pro"
+            ],
+            "type": "string"
+          },
+          "LocalModelSize": {
+            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).",
+            "enum": [
+              "base",
+              "small"
             ],
             "type": "string"
           },
@@ -2073,6 +2377,14 @@
           "appearance": {
             "$ref": "#/definitions/AppearanceConfig"
           },
+          "asr": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/AsrSettings"
+              }
+            ],
+            "description": "Распознавание речи (карточка duopulse-060): движок/модель/ключ."
+          },
           "engines": {
             "items": {
               "$ref": "#/definitions/SearchEngineInfo"
@@ -2122,6 +2434,7 @@
         "required": [
           "adblockEnabled",
           "appearance",
+          "asr",
           "engines",
           "privacy",
           "proxy",
@@ -2157,6 +2470,13 @@
           "ProfileCounts": {
             "description": "Числа отчёта экспорта/импорта (страница настроек показывает их пользователю).",
             "properties": {
+              "asrTracks": {
+                "default": 0,
+                "description": "ASR-дорожки в файле/применённые (карточка duopulse-060; у старых файлов поля нет — 0).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
               "bookmarkGroups": {
                 "default": 0,
                 "description": "Группы избранного в файле/применённые (карточка duopulse-058; у файлов старых версий поля нет — 0).",
@@ -2209,6 +2529,7 @@
               }
             ],
             "default": {
+              "asrTracks": 0,
               "bookmarkGroups": 0,
               "bookmarks": 0,
               "secrets": 0,
@@ -2313,6 +2634,16 @@
         "title": "SettingsSetParams",
         "type": "object"
       },
+      "result": null
+    },
+    "subtitles.asr_cancel": {
+      "handler": "subtitles_asr_cancel",
+      "params": null,
+      "result": null
+    },
+    "subtitles.asr_start": {
+      "handler": "subtitles_asr_start",
+      "params": null,
       "result": null
     },
     "subtitles.list_tracks": {
@@ -4744,6 +5075,58 @@
           "ms"
         ],
         "title": "PerfTabSwitchMs",
+        "type": "object"
+      }
+    },
+    "subtitles:asr_progress": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "done": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "engine": {
+            "description": "Движок конвейера: \"local:whisper\" / \"openai:<model>\".",
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fromCache": {
+            "description": "Дорожка отдана из кэша — сети не было.",
+            "type": "boolean"
+          },
+          "phase": {
+            "description": "model | audio | decode | transcribe | done | error.",
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "total": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "videoKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "done",
+          "engine",
+          "fromCache",
+          "phase",
+          "tabId",
+          "total",
+          "videoKey"
+        ],
+        "title": "SubtitlesAsrProgress",
         "type": "object"
       }
     },

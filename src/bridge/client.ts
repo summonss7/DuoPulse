@@ -8,6 +8,11 @@ import type {
   AdblockSetEnabledParams,
   AdblockStatusResult,
   AdblockUpdateListsParams,
+  AsrClearCacheResult,
+  AsrPrepareResult,
+  AsrSetSettingsParams,
+  AsrSettings,
+  AsrTestResult,
   BookmarkGroupInfo,
   BridgeVersionResult,
   HistoryBookmarkAddParams,
@@ -252,6 +257,25 @@ export const bridge = {
      *  прогресс/итог — событие subtitles:translate_progress. */
     translateTrack: (params: SubtitlesTranslateTrackParams) =>
       invoke<void>("subtitles_translate_track", { params }),
+    /** subtitles.asr_start (карточка duopulse-060): распознать речь видео
+     *  активной вкладки — дорожка asr:<lang> для видео без дорожек платформы;
+     *  прогресс/итог — событие subtitles:asr_progress. */
+    asrStart: () => invoke<void>("subtitles_asr_start"),
+    /** subtitles.asr_cancel: отменить распознавание активной вкладки. */
+    asrCancel: () => invoke<void>("subtitles_asr_cancel"),
+  },
+  asr: {
+    /** asr.get_settings: конфиг ASR + наличие ключа/движка/модели. */
+    getSettings: () => invoke<AsrSettings>("asr_get_settings"),
+    /** asr.set_settings: сохранить конфиг; secret — ключ облака в DPAPI
+     *  (undefined — не менять, "" — удалить). */
+    setSettings: (params: AsrSetSettingsParams) => invoke<void>("asr_set_settings", { params }),
+    /** asr.test: живая проверка выбранного движка (кнопка «Проверить»). */
+    test: () => invoke<AsrTestResult>("asr_test"),
+    /** asr.prepare: скачать движок whisper-server и модель в профиль. */
+    prepare: () => invoke<AsrPrepareResult>("asr_prepare"),
+    /** asr.clear_cache (приватность): очистить кэш ASR-дорожек. */
+    clearCache: () => invoke<AsrClearCacheResult>("asr_clear_cache"),
   },
   translate: {
     /** translate.get_settings: конфиг перевода + наличие ключей в DPAPI (4.1). */
@@ -320,5 +344,8 @@ export const bridge = {
      *  docs/01 §5.4): офлайн или нет провайдера; willRetry — Core повторит
      *  сам при появлении сети. */
     subtitlesTranslateUnavailable: "subtitles:translate_unavailable",
+    /** subtitles.asr_progress (карточка duopulse-060): конвейер
+     *  распознавания речи — фазы model/audio/decode/transcribe/done/error. */
+    subtitlesAsrProgress: "subtitles:asr_progress",
   } as const,
 };

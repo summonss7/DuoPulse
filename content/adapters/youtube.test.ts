@@ -549,3 +549,61 @@ describe("гашение нативных субтитров плеера (docs/
     expect(doc.css).toHaveLength(1); // правило остаётся, CSS не активен без класса
   });
 });
+
+// --- карточка duopulse-060: аудио-поток для ASR -------------------------------
+
+describe("audioSource: audio-only формат player-ответа (карточка duopulse-060)", () => {
+  const audioFormats = (extra: Record<string, unknown>[] = []) => ({
+    videoDetails: { videoId: "TEST" },
+    audioTracks: [{ languageCode: "ru", original: true }],
+    streamingData: {
+      adaptiveFormats: [
+        { mimeType: "video/mp4; codecs=avc1", url: "https://v.example/v", bitrate: 800_000 },
+        { mimeType: "audio/webm; codecs=opus", url: "https://a.example/opus", bitrate: 160_000 },
+        { mimeType: "audio/mp4; codecs=mp4a.40.2", url: "https://a.example/m4a", bitrate: 130_000 },
+        ...extra,
+      ],
+    },
+  });
+
+  it("предпочитает m4a/AAC (декодер Core без opus) и берёт язык оригинала", () => {
+    const adapter = new YouTubeAdapter({
+      win: makeWindow({ href: "https://www.youtube.com/watch?v=TEST", playerResponse: audioFormats() }),
+    });
+    const src = adapter.audioSource();
+    expect(src).not.toBeNull();
+    expect(src!.url).toBe("https://a.example/m4a");
+    expect(src!.lang).toBe("ru");
+  });
+
+  it("без m4a берёт опус высшего битрейта; зашифрованные URL пропускает", () => {
+    const response = {
+      videoDetails: { videoId: "TEST" },
+      streamingData: {
+        adaptiveFormats: [
+          { mimeType: "audio/webm; codecs=opus", url: "https://a.example/opus-lo", bitrate: 90_000 },
+          { mimeType: "audio/webm; codecs=opus", url: "https://a.example/opus-hi", bitrate: 200_000 },
+          { mimeType: "audio/mp4", signatureCipher: "s=..&url=..", bitrate: 999_999 },
+        ],
+      },
+    };
+    const adapter = new YouTubeAdapter({
+      win: makeWindow({ href: "https://www.youtube.com/watch?v=TEST", playerResponse: response }),
+    });
+    expect(adapter.audioSource()?.url).toBe("https://a.example/opus-hi");
+  });
+
+  it("нет аудио-форматов / нет player-ответа — null", () => {
+    const adapter = new YouTubeAdapter({
+      win: makeWindow({
+        href: "https://www.youtube.com/watch?v=TEST",
+        playerResponse: { videoDetails: { videoId: "TEST" }, streamingData: { adaptiveFormats: [] } },
+      }),
+    });
+    expect(adapter.audioSource()).toBeNull();
+    const empty = new YouTubeAdapter({
+      win: makeWindow({ href: "https://www.youtube.com/watch?v=TEST" }),
+    });
+    expect(empty.audioSource()).toBeNull();
+  });
+});

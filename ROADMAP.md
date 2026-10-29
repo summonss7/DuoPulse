@@ -532,3 +532,39 @@
   клампы цветов, hexToRgba, пресеты, rowStyleFor со стилем). Контракт v11
   без bump (опциональные поля). Остались карточки 060 (ASR), 061 (SSAI —
   решение за автором).
+
+- 2026-10-29 — **карточка duopulse-060 выполнена: субтитры для видео без
+  дорожек — генерация распознаванием речи (ASR; решение автора 29.10.2026 —
+  гибрид: локальный whisper.cpp + облачный провайдер по ключу)**. Новый модуль
+  Core `src-tauri/src/asr/` (engine/cache/config/decode/server/pipeline):
+  конвейер WebMessage «asr-begin» (content добывает URL аудио: YouTube —
+  audio-only из streamingData player-ответа с предпочтением m4a/AAC, «голое»
+  `<video src>` — напрямую) → самофетч через SOCKS5-роутер (потолок 250 МБ) →
+  декод symphonia (AAC/mp3/wav/flac/ogg; без ffmpeg) в PCM 16 кГц моно →
+  чанки ≤ 5 мин с prompt-хвостом → движок: локальный whisper-server.exe
+  (управление процессом: подъём по требованию, health-check, гашение после
+  10 мин простоя и при выходе; модель ggml base/small скачивается в профиль)
+  или OpenAI-совместимое облако /audio/transcriptions (ключ — DPAPI) →
+  дорожка `asr:<lang>` role original в наборе → кэш SQLite asr_tracks
+  (videoKey, engine, lang), LRU 120, any-lang-lookup для автоопределённого
+  языка (повтор даёт ту же дорожку). Отмена — поколениями (новый запрос/уход
+  с видео). Прогресс — событие subtitles:asr_progress (model/audio/decode/
+  transcribe/done/error), duo-панель: кнопка «Распознать речь (ASR)…» под
+  набором + статус-строка; настройки duopulse://settings — раздел ASR
+  (провайдер, модель, base URL, ключ DPAPI, «Проверить», «Скачать движок и
+  модель», очистка кэша); язык whisper («english») нормализуется в ISO-коды
+  (маппинг 85 имён). Профиль: asr_tracks + ключ ASR переезжают экспортом/
+  импортом. Контракт v11 без bump (+7 команд subtitles.asr_* / asr.*,
+  +1 событие). Проверено: e2e/asr 10/10 (живой стенд: SAPI-видео без дорожек
+  → кнопка → конвейер локального whisper → asr:en 13 cue на плашке,
+  осмысленный транскрипт, кэш-хит, отмена, журнал; попутно стенд поймал 3
+  бага первого прогона — cues snake_case в реплае, «english» вместо «en»,
+  промах кэш-ключа при авто-языке — исправлены), cargo 279 (+28:
+  engine/cache/config/decode/server/pipeline на mock-транспортах), vitest
+  208 (+9: адаптер asr, asrTrackFrom, asrProgressText, audioSource YouTube),
+  clippy/fmt/tsc чисто. Движок — zip whisper-server.exe + 5 DLL
+  mingw-рантайма (голый exe не стартует) в публичном репозитории фидов
+  summonss7/duopulse-updates (engine/; GitHub Pages — приватные
+  release-ссылки DuoPulse анонимно не читаются), распаковка с защитой
+  zip-slip; модели — HuggingFace по требованию. Дорога: карточек-пожеланий из 057
+  осталась 061 (SSAI — решение за автором).

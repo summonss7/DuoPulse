@@ -2,6 +2,14 @@
 // Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 11); регенерация: npm run gen:bridge.
 
 /**
+ * Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).
+ */
+export type LocalModelSize = "base" | "small";
+/**
+ * Движок распознавания (решение автора 29.10.2026 — гибрид; выбор в настройках): локальный whisper.cpp (приватно, офлайн) или облачный OpenAI-совместимый API (OpenAI / Groq / свой whisper-server).
+ */
+export type AsrProviderId = "local" | "openai";
+/**
  * Откуда подсказка: посещение из истории или закладка.
  */
 export type HistorySource = "history" | "bookmark";
@@ -44,6 +52,14 @@ export interface DuoPulseBridgeContract {
   AdblockStatusResult: AdblockStatusResult;
   AdblockListInfo: AdblockListInfo;
   AdblockUpdateListsParams: AdblockUpdateListsParams;
+  AsrClearCacheResult: AsrClearCacheResult;
+  AsrSettings: AsrSettings;
+  AsrProviderId: AsrProviderId;
+  LocalModelSize: LocalModelSize;
+  AsrPrepareResult: AsrPrepareResult;
+  AsrSetSettingsParams: AsrSetSettingsParams;
+  AsrConfig: AsrConfig;
+  AsrTestResult: AsrTestResult;
   BridgeVersionResult: BridgeVersionResult;
   HistoryBookmarkAddParams: HistoryBookmarkAddParams;
   HistoryBookmarkListParams: HistoryBookmarkListParams;
@@ -157,6 +173,7 @@ export interface DuoPulseBridgeContract {
   PageVideoDetected: PageVideoDetected;
   PerfStartupMs: PerfStartupMs;
   PerfTabSwitchMs: PerfTabSwitchMs;
+  SubtitlesAsrProgress: SubtitlesAsrProgress;
   SubtitlesSetApplied: SubtitlesSetApplied;
   SubtitlesTracksReady: SubtitlesTracksReady;
   SubtitlesTranslateProgress: SubtitlesTranslateProgress;
@@ -233,6 +250,96 @@ export interface AdblockUpdateListsParams {
    * true — качать даже непротухшие (кнопка «Обновить списки»).
    */
   force?: boolean;
+}
+/**
+ * asr.clear_cache (приватность): очистить кэш ASR-дорожек (asr_tracks).
+ */
+export interface AsrClearCacheResult {
+  cleared: number;
+}
+/**
+ * Значение asr.get_settings для UI: конфиг + факт наличия ключа (сами ключи наружу не отдаются) + состояние локального движка (exe/модель на месте).
+ */
+export interface AsrSettings {
+  enabled: boolean;
+  /**
+   * whisper-server.exe найден (путь/профиль/рядом с exe).
+   */
+  engineFound: boolean;
+  /**
+   * Ключ API облака сохранён (DPAPI).
+   */
+  hasApiKey: boolean;
+  localEnginePath: string;
+  localModel: LocalModelSize;
+  /**
+   * Модель локального движка скачана в профиль.
+   */
+  modelDownloaded: boolean;
+  openaiBaseUrl: string;
+  openaiModel: string;
+  provider: AsrProviderId;
+}
+/**
+ * asr.prepare: скачать движок whisper-server.exe (если локальный путь не найден) и модель выбранного размера в профиль — подготовка офлайн-работы.
+ */
+export interface AsrPrepareResult {
+  detail: string;
+  /**
+   * Движок на месте (был или скачался).
+   */
+  engineReady: boolean;
+  /**
+   * Модель на месте (была или скачалась).
+   */
+  modelReady: boolean;
+  ok: boolean;
+}
+/**
+ * asr.set_settings: value — конфиг без ключа (ключ — только DPAPI); secret — ключ API облака: None — не менять, Some("") — удалить, Some(k) — перезаписать.
+ */
+export interface AsrSetSettingsParams {
+  secret?: string | null;
+  value: AsrConfig;
+}
+/**
+ * Конфиг ASR в settings.json. Ключ API сюда НЕ пишется — только DPAPI.
+ */
+export interface AsrConfig {
+  /**
+   * ASR разрешён (кнопка «Распознать речь» в панели).
+   */
+  enabled: boolean;
+  /**
+   * Путь к whisper-server.exe (пусто — искать: профиль → рядом с приложением → скачивание по требованию).
+   */
+  localEnginePath?: string;
+  /**
+   * Размер локальной модели whisper.
+   */
+  localModel?: LocalModelSize & string;
+  /**
+   * Base URL OpenAI-совместимого API (без /audio/transcriptions).
+   */
+  openaiBaseUrl?: string;
+  /**
+   * Модель облачного провайдера (whisper-1, whisper-large-v3-turbo, …).
+   */
+  openaiModel?: string;
+  /**
+   * Выбранный движок.
+   */
+  provider: AsrProviderId;
+}
+/**
+ * asr.test: живая проверка выбранного движка (кнопка «Проверить» настроек ASR) — короткий WAV тишины в транскрипцию: успех = движок ответил (тишина без сегментов — нормальный ответ сервера, не ошибка связи).
+ */
+export interface AsrTestResult {
+  /**
+   * Диагностика панели.
+   */
+  detail: string;
+  ok: boolean;
 }
 /**
  * bridge.version: версия контракта живого приложения (диагностика, e2e).
@@ -664,6 +771,10 @@ export interface SettingsExportResult {
  */
 export interface ProfileCounts {
   /**
+   * ASR-дорожки в файле/применённые (карточка duopulse-060; у старых файлов поля нет — 0).
+   */
+  asrTracks?: number;
+  /**
    * Группы избранного в файле/применённые (карточка duopulse-058; у файлов старых версий поля нет — 0).
    */
   bookmarkGroups?: number;
@@ -705,6 +816,10 @@ export interface SettingsAll {
    */
   adblockEnabled: boolean;
   appearance: AppearanceConfig;
+  /**
+   * Распознавание речи (карточка duopulse-060): движок/модель/ключ.
+   */
+  asr: AsrSettings;
   engines: SearchEngineInfo[];
   privacy: PrivacyConfig;
   proxy: ProxySettings;
@@ -1369,6 +1484,25 @@ export interface PerfStartupMs {
  */
 export interface PerfTabSwitchMs {
   ms: number;
+}
+export interface SubtitlesAsrProgress {
+  done: number;
+  /**
+   * Движок конвейера: "local:whisper" / "openai:<model>".
+   */
+  engine: string;
+  error?: string | null;
+  /**
+   * Дорожка отдана из кэша — сети не было.
+   */
+  fromCache: boolean;
+  /**
+   * model | audio | decode | transcribe | done | error.
+   */
+  phase: string;
+  tabId: string;
+  total: number;
+  videoKey: string;
 }
 /**
  * subtitles:set_applied: состояние показа вкладки изменилось (состав набора, включён ли показ, сдвиг, стиль; docs/05 §2) — кнопка «duo» (выкл/1/дуо/три) и панель обновляются событием; via — источник изменения (телеметрия: alt-d/panel/select/drop/video/lost/…).

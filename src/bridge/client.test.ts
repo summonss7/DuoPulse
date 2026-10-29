@@ -154,6 +154,26 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["subtitles", "translateTrack"],
     params: { targetLang: "ru" },
   },
+  "subtitles.asr_start": { path: ["subtitles", "asrStart"] },
+  "subtitles.asr_cancel": { path: ["subtitles", "asrCancel"] },
+  "asr.get_settings": { path: ["asr", "getSettings"] },
+  "asr.set_settings": {
+    path: ["asr", "setSettings"],
+    params: {
+      value: {
+        enabled: true,
+        provider: "local",
+        localModel: "base",
+        localEnginePath: "",
+        openaiBaseUrl: "https://api.openai.com/v1",
+        openaiModel: "whisper-1",
+      },
+      secret: null,
+    },
+  },
+  "asr.test": { path: ["asr", "test"] },
+  "asr.prepare": { path: ["asr", "prepare"] },
+  "asr.clear_cache": { path: ["asr", "clearCache"] },
   "translate.get_settings": { path: ["translate", "getSettings"] },
   "translate.set_settings": {
     path: ["translate", "setSettings"],

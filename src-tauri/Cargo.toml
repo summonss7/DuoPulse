@@ -103,6 +103,27 @@ smoltcp = { version = "0.14", default-features = false, features = [
 # не хватает на пачки сегментов TCP-окна — потери и ретрансмиссии (задача 6.2,
 # замер пропускной способности). Уже в дереве (транзитивно), без новых загрузок.
 socket2 = "0.6"
+# Декодирование аудио для ASR (карточка duopulse-060): самофетч-байты аудио
+# дорожки (m4a/AAC — основной путь YouTube-адаптера, mp3, wav, ogg/vorbis,
+# flac) → PCM 16 кГц моно для whisper. Чистый Rust, без ffmpeg в поставке;
+# лицензия MPL-2.0 (совместима с GPL-3.0 при использовании как зависимости).
+# Ограничение: Opus-дорожки (webm) symphonia не декодирует — адаптер берёт
+# m4a/AAC-итаг, «голое» видео webm/opus в v1 не поддержано.
+symphonia = { version = "0.5", default-features = false, features = [
+    "aac",
+    "isomp4",
+    "ogg",
+    "pcm",
+    "wav",
+    "mp3",
+    "vorbis",
+    "flac",
+] }
+# Распаковка zip-движка whisper-server (карточка duopulse-060): mingw-сборка —
+# это exe + 5 DLL (libgcc/libstdc++/libwinpthread/libgomp/libdl), релиз
+# engine-whisper-1 пакует их одним архивом. Уже в дереве (транзитивно),
+# без новых загрузок; deflate-only — больше zip'у в Core ничего не надо.
+zip = { version = "4", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 # Loopback-стенд WireGuard для маршрутных тестов (задача 6.6, карточка

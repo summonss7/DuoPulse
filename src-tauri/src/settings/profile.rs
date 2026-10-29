@@ -17,6 +17,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::asr::cache::{AsrCache, AsrTrackRow};
 use crate::bridge::BookmarkGroupRow;
 use crate::history::{HistoryStore, VisitRow};
 use crate::subtitles::cache::{TrackRow, TranslationsCache};
@@ -38,6 +39,10 @@ pub struct ProfileCounts {
     pub bookmark_groups: u32,
     pub visits: u32,
     pub translated_tracks: u32,
+    /// ASR-дорожки в файле/применённые (карточка duopulse-060; у старых
+    /// файлов поля нет — 0).
+    #[serde(default)]
+    pub asr_tracks: u32,
     /// Секретов в файле/записано при импорте (0 — файл без секретов).
     pub secrets: u32,
 }
@@ -59,6 +64,9 @@ pub struct ProfileFile {
     pub bookmarks: Vec<history::HistoryBookmark>,
     pub visits: Vec<VisitRow>,
     pub translated_tracks: Vec<TrackRow>,
+    /// ASR-дорожки (карточка duopulse-060; у старых файлов поля нет — пусто).
+    #[serde(default)]
+    pub asr_tracks: Vec<AsrTrackRow>,
     /// Секреты открытым текстом — только при экспорте с явного согласия.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secrets: Option<ProfileSecrets>,
@@ -73,6 +81,9 @@ pub struct ProfileSecrets {
     pub proxy_password: Option<String>,
     /// Ключи API провайдеров перевода: id провайдера → ключ.
     pub translate_api_keys: std::collections::BTreeMap<String, String>,
+    /// Ключ API облачного ASR (карточка duopulse-060).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asr_api_key: Option<String>,
 }
 
 /// Разделы settings.json, переносимые профилем: неизвестные (от более новой
@@ -81,6 +92,7 @@ pub struct ProfileSecrets {
 const PORTABLE_SETTINGS_KEYS: &[&str] = &[
     "proxy",
     "translate",
+    "asr",
     "adblock",
     "search",
     "subtitles",
@@ -113,8 +125,11 @@ pub fn counts_of(file: &ProfileFile) -> ProfileCounts {
         bookmark_groups: file.bookmark_groups.len() as u32,
         visits: file.visits.len() as u32,
         translated_tracks: file.translated_tracks.len() as u32,
+        asr_tracks: file.asr_tracks.len() as u32,
         secrets: file.secrets.as_ref().map_or(0, |s| {
-            s.proxy_password.as_deref().map_or(0, |_| 1) + s.translate_api_keys.len() as u32
+            s.proxy_password.as_deref().map_or(0, |_| 1)
+                + s.translate_api_keys.len() as u32
+                + s.asr_api_key.as_deref().map_or(0, |_| 1)
         }),
     }
 }
@@ -125,6 +140,7 @@ pub fn build(
     dir: &std::path::Path,
     history: &HistoryStore,
     cache: &TranslationsCache,
+    asr_cache: &AsrCache,
     include_secrets: bool,
 ) -> Result<ProfileFile, String> {
     let settings = super::load_root(dir);
@@ -140,6 +156,7 @@ pub fn build(
         Some(ProfileSecrets {
             proxy_password: proxy::load_password(dir).filter(|p| !p.is_empty()),
             translate_api_keys: keys,
+            asr_api_key: crate::asr::config::load_api_key(dir).filter(|k| !k.is_empty()),
         })
     } else {
         None
@@ -153,6 +170,7 @@ pub fn build(
         bookmarks: history.dump_bookmarks()?,
         visits: history.dump_visits()?,
         translated_tracks: cache.dump()?,
+        asr_tracks: asr_cache.dump()?,
         secrets,
     })
 }
@@ -186,6 +204,7 @@ pub fn apply(
     file: &ProfileFile,
     history: &HistoryStore,
     cache: &TranslationsCache,
+    asr_cache: &AsrCache,
 ) -> Result<ImportOutcome, String> {
     // 1) валидация переносимых разделов до любых записей
     let mut sections = 0u32;
@@ -207,6 +226,13 @@ pub fn apply(
                 if cfg.enabled {
                     cfg.validate()
                         .map_err(|e| format!("translate в файле: {e}"))?;
+                }
+            }
+            "asr" => {
+                let cfg: crate::asr::config::AsrConfig = serde_json::from_value(value.clone())
+                    .map_err(|e| format!("раздел asr в файле не читается: {e}"))?;
+                if cfg.enabled {
+                    cfg.validate().map_err(|e| format!("asr в файле: {e}"))?;
                 }
             }
             "search" => {
@@ -270,6 +296,10 @@ pub fn apply(
             translate::config::save_api_key(dir, provider, key)?;
             counts.secrets += 1;
         }
+        if let Some(key) = secrets.asr_api_key.as_deref().filter(|k| !k.is_empty()) {
+            crate::asr::config::save_api_key(dir, key)?;
+            counts.secrets += 1;
+        }
         has_secrets = true;
     }
 
@@ -280,6 +310,7 @@ pub fn apply(
     counts.bookmarks = history.import_bookmarks(&file.bookmarks, &group_map)?;
     counts.visits = history.import_visits(&file.visits)?;
     counts.translated_tracks = cache.import_rows(&file.translated_tracks)?;
+    counts.asr_tracks = asr_cache.import_rows(&file.asr_tracks)?;
 
     Ok(ImportOutcome {
         counts,
@@ -375,9 +406,22 @@ mod tests {
             }],
             10,
         );
+        // ASR-дорожка (карточка duopulse-060) — тоже переезжает
+        let asr_a = AsrCache::open(&dir_a).unwrap();
+        asr_a.put(
+            "yt:v1",
+            "local:whisper",
+            "en",
+            &[Cue {
+                start_ms: 0,
+                end_ms: 2,
+                text: "hello".into(),
+            }],
+            12,
+        );
 
         // экспорт с секретами
-        let file = build(&dir_a, &hist_a, &cache_a, true).unwrap();
+        let file = build(&dir_a, &hist_a, &cache_a, &asr_a, true).unwrap();
         assert!(file.secrets.is_some());
         let raw = serde_json::to_string_pretty(&file).unwrap();
         assert!(raw.contains("\"bookmarks\"") && raw.contains("\"visits\""));
@@ -386,8 +430,9 @@ mod tests {
         // машина B: чистый профиль + пустые хранилища
         let hist_b = history::HistoryStore::open(&dir_b).unwrap();
         let cache_b = TranslationsCache::open(&dir_b).unwrap();
+        let asr_b = AsrCache::open(&dir_b).unwrap();
         let parsed = parse_file(&raw).unwrap();
-        let outcome = apply(&dir_b, &parsed, &hist_b, &cache_b).unwrap();
+        let outcome = apply(&dir_b, &parsed, &hist_b, &cache_b, &asr_b).unwrap();
         assert_eq!(
             outcome.counts.settings_sections, 4,
             "proxy+search+subtitles+privacy"
@@ -396,6 +441,11 @@ mod tests {
         assert_eq!(outcome.counts.bookmark_groups, 2, "Избранное + Работа");
         assert_eq!(outcome.counts.visits, 1);
         assert_eq!(outcome.counts.translated_tracks, 1);
+        assert_eq!(outcome.counts.asr_tracks, 1, "ASR-дорожка переехала");
+        assert!(
+            asr_b.get("yt:v1", "local:whisper", "en", 20).is_some(),
+            "кэш-хит ASR на новой машине"
+        );
         assert!(
             !outcome.needs_restart,
             "прокси применяется роутером сразу (задача 6.1)"
@@ -447,7 +497,7 @@ mod tests {
         );
 
         // повторный импорт того же файла — идемпотентен
-        let again = apply(&dir_b, &parsed, &hist_b, &cache_b).unwrap();
+        let again = apply(&dir_b, &parsed, &hist_b, &cache_b, &asr_b).unwrap();
         assert_eq!(again.counts.visits, 0, "дубликаты скипнуты");
         assert_eq!(hist_b.list("", 0, 100).unwrap().1, 1);
         assert_eq!(
@@ -466,7 +516,7 @@ mod tests {
 
         // экспорт БЕЗ секретов: файла хватает на переезд настроек/данных,
         // секретов в файле нет
-        let plain = build(&dir_a, &hist_a, &cache_a, false).unwrap();
+        let plain = build(&dir_a, &hist_a, &cache_a, &asr_a, false).unwrap();
         assert!(plain.secrets.is_none());
         assert!(!serde_json::to_string(&plain).unwrap().contains("p@ss"));
 
@@ -479,6 +529,7 @@ mod tests {
         let dir = tmp_dir("invalid");
         let hist = history::HistoryStore::open(&dir).unwrap();
         let cache = TranslationsCache::open(&dir).unwrap();
+        let asr = AsrCache::open(&dir).unwrap();
 
         // не-JSON и чужая версия формата — отказ
         assert!(parse_file("{ не json").is_err());
@@ -497,9 +548,10 @@ mod tests {
             bookmarks: vec![],
             visits: vec![],
             translated_tracks: vec![],
+            asr_tracks: vec![],
             secrets: None,
         };
-        assert!(apply(&dir, &file, &hist, &cache).is_err());
+        assert!(apply(&dir, &file, &hist, &cache, &asr).is_err());
         assert!(
             !dir.join("settings.json").exists()
                 || crate::settings::load_root(&dir).get("proxy").is_none(),
@@ -524,9 +576,10 @@ mod tests {
                 cue_count: 0,
                 last_used_at: 1,
             }],
+            asr_tracks: vec![],
             secrets: None,
         };
-        let outcome = apply(&dir, &file, &hist, &cache).unwrap();
+        let outcome = apply(&dir, &file, &hist, &cache, &asr).unwrap();
         assert_eq!(outcome.counts.translated_tracks, 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -539,6 +592,7 @@ mod tests {
         let dir = tmp_dir("old-profile");
         let hist = history::HistoryStore::open(&dir).unwrap();
         let cache = TranslationsCache::open(&dir).unwrap();
+        let asr = AsrCache::open(&dir).unwrap();
         let raw = serde_json::json!({
             "duopulseProfile": PROFILE_FORMAT,
             "appVersion": "0.0.1",
@@ -553,7 +607,7 @@ mod tests {
         })
         .to_string();
         let parsed = parse_file(&raw).unwrap();
-        let outcome = apply(&dir, &parsed, &hist, &cache).unwrap();
+        let outcome = apply(&dir, &parsed, &hist, &cache, &asr).unwrap();
         assert_eq!(outcome.counts.bookmarks, 2);
         assert_eq!(outcome.counts.bookmark_groups, 0, "групп в файле не было");
         let (marks, total) = hist

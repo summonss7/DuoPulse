@@ -407,6 +407,164 @@ export function initSettingsPage(): void {
       .catch((e2) => (trStatus.textContent = String(e2)));
   });
 
+  // --- 4a. Распознавание речи (карточка duopulse-060) -------------------------
+  const asr = section(
+    "Распознавание речи (ASR)",
+    "Субтитры для видео без дорожек: локальный whisper (приватно, офлайн) или OpenAI-совместимое облако (OpenAI/Groq/свой сервер); ключ — в DPAPI.",
+  );
+  const asrEnabled = document.createElement("input");
+  asrEnabled.type = "checkbox";
+  const asrEnabledLabel = el("label", "set-check");
+  asrEnabledLabel.append(asrEnabled, Object.assign(el("span"), { textContent: " Разрешить распознавание речи" }));
+  const asrProvider = document.createElement("select");
+  for (const [value, text] of [
+    ["local", "Локальный whisper (офлайн)"],
+    ["openai", "Облако (OpenAI-совместимое)"],
+  ] as const) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = text;
+    asrProvider.append(opt);
+  }
+  const asrModel = document.createElement("select");
+  const mBase = document.createElement("option");
+  mBase.value = "base";
+  mBase.textContent = "base — 148 МБ, быстрее";
+  const mSmall = document.createElement("option");
+  mSmall.value = "small";
+  mSmall.textContent = "small — 488 МБ, точнее (ru)";
+  asrModel.append(mBase, mSmall);
+  const asrModelField = field("Модель whisper", asrModel);
+  const asrEnginePath = document.createElement("input");
+  asrEnginePath.type = "text";
+  asrEnginePath.placeholder = "пусто — авто (профиль/рядом с приложением)";
+  asrEnginePath.spellcheck = false;
+  const asrEnginePathField = field("Путь whisper-server.exe", asrEnginePath);
+  const asrUrl = document.createElement("input");
+  asrUrl.type = "text";
+  asrUrl.placeholder = "https://api.openai.com/v1";
+  asrUrl.spellcheck = false;
+  const asrUrlField = field("Base URL API", asrUrl);
+  const asrCloudModel = document.createElement("input");
+  asrCloudModel.type = "text";
+  asrCloudModel.placeholder = "whisper-1";
+  asrCloudModel.spellcheck = false;
+  const asrCloudModelField = field("Модель облака", asrCloudModel);
+  const asrKey = document.createElement("input");
+  asrKey.type = "password";
+  asrKey.autocomplete = "new-password";
+  asrKey.placeholder = "ключ";
+  const asrKeyClear = document.createElement("button");
+  asrKeyClear.type = "button";
+  asrKeyClear.className = "link";
+  asrKeyClear.textContent = "удалить";
+  const asrKeyField = field("Ключ API", asrKey);
+  asrKeyField.querySelector(".set-field-name")?.append(asrKeyClear);
+  const asrStatus = el("div", "set-status");
+  const asrSave = document.createElement("button");
+  asrSave.type = "button";
+  asrSave.className = "primary";
+  asrSave.textContent = "Сохранить";
+  const asrTest = document.createElement("button");
+  asrTest.type = "button";
+  asrTest.className = "ghost";
+  asrTest.textContent = "Проверить";
+  const asrPrepare = document.createElement("button");
+  asrPrepare.type = "button";
+  asrPrepare.className = "ghost";
+  asrPrepare.textContent = "Скачать движок и модель";
+  const asrRow = el("div", "set-row");
+  asrRow.append(asrSave, asrTest, asrPrepare, asrStatus);
+  asr.body.append(
+    asrEnabledLabel,
+    field("Движок", asrProvider),
+    asrModelField,
+    asrEnginePathField,
+    asrUrlField,
+    asrCloudModelField,
+    asrKeyField,
+    asrRow,
+  );
+  const asrVis = (): void => {
+    const local = asrProvider.value === "local";
+    asrModelField.hidden = !local;
+    asrEnginePathField.hidden = !local;
+    asrUrlField.hidden = local;
+    asrCloudModelField.hidden = local;
+    asrKeyField.hidden = local;
+    asrKeyClear.hidden = !asrKeySaved;
+    asrKey.placeholder = asrKeySaved ? "сохранён — пусто = не менять" : "ключ";
+  };
+  asrProvider.addEventListener("change", asrVis);
+  let asrKeySaved = false;
+  let asrEngineReady = false;
+  let asrModelReady = false;
+
+  const asrForm = () => ({
+    value: {
+      enabled: asrEnabled.checked,
+      provider: asrProvider.value as "local" | "openai",
+      localModel: asrModel.value as "base" | "small",
+      localEnginePath: asrEnginePath.value.trim(),
+      openaiBaseUrl: asrUrl.value.trim(),
+      openaiModel: asrCloudModel.value.trim(),
+    },
+    secret: asrKey.value === "" ? undefined : asrKey.value,
+  });
+  const asrApply = async (): Promise<boolean> => {
+    const { value, secret } = asrForm();
+    try {
+      await bridge.asr.setSettings({ value, secret });
+    } catch (e) {
+      asrStatus.textContent = String(e);
+      return false;
+    }
+    asrKey.value = "";
+    await loadAsr();
+    return true;
+  };
+  asrSave.addEventListener("click", () => {
+    void asrApply().then((ok) => {
+      if (ok) asrStatus.textContent = "Сохранено.";
+    });
+  });
+  asrTest.addEventListener("click", () => {
+    asrStatus.textContent = "Проверяю…";
+    void asrApply().then((ok) => {
+      if (!ok) return;
+      void bridge.asr
+        .test()
+        .then((res) => {
+          asrStatus.textContent = res.ok ? "Движок отвечает." : res.detail;
+        })
+        .catch((e) => (asrStatus.textContent = String(e)));
+    });
+  });
+  asrPrepare.addEventListener("click", () => {
+    asrStatus.textContent = "Скачиваю… (движок ~3 МБ, модель 148/488 МБ)";
+    void asrApply().then((ok) => {
+      if (!ok) return;
+      void bridge.asr
+        .prepare()
+        .then((res) => {
+          asrStatus.textContent = res.ok ? "Готово: движок и модель на месте." : res.detail;
+          return loadAsr();
+        })
+        .catch((e) => (asrStatus.textContent = String(e)));
+    });
+  });
+  asrKeyClear.addEventListener("click", (e) => {
+    e.preventDefault();
+    void bridge.asr
+      .setSettings({ value: { ...asrForm().value }, secret: "" })
+      .then(() => {
+        asrKeySaved = false;
+        asrVis();
+        asrStatus.textContent = "Ключ удалён.";
+      })
+      .catch((e2) => (asrStatus.textContent = String(e2)));
+  });
+
   // --- 5. Прокси / VPN --------------------------------------------------------
   const proxy = section(
     "Прокси / VPN",
@@ -924,9 +1082,23 @@ export function initSettingsPage(): void {
   profileRow.append(exportBtn, importBtn, profileStatus);
   profile.body.append(secretsLabel, secretsWarn, profileRow);
 
-  root.append(appearance.root, search.root, subs.root, tr.root, proxy.root, split.root, privacy.root, upd.root, profile.root);
+  root.append(appearance.root, search.root, subs.root, tr.root, asr.root, proxy.root, split.root, privacy.root, upd.root, profile.root);
 
   // --- загрузка ---------------------------------------------------------------
+
+  const loadAsr = async (): Promise<void> => {
+    const st = await bridge.asr.getSettings();
+    asrEnabled.checked = st.enabled;
+    asrProvider.value = st.provider;
+    asrModel.value = st.localModel;
+    asrEnginePath.value = st.localEnginePath;
+    asrUrl.value = st.openaiBaseUrl;
+    asrCloudModel.value = st.openaiModel;
+    asrKeySaved = st.hasApiKey;
+    asrEngineReady = st.engineFound;
+    asrModelReady = st.modelDownloaded;
+    asrVis();
+  };
 
   const loadTranslate = async (): Promise<void> => {
     const st = await bridge.translate.getSettings();
@@ -997,6 +1169,7 @@ export function initSettingsPage(): void {
       err(e);
     }
     await loadTranslate().catch(err);
+    await loadAsr().catch(err);
     await loadProxy().catch(err);
     await loadVpnRules().catch(err);
     // Начальный статус туннеля (задача 6.4): дальше строку ведёт событие
