@@ -4039,3 +4039,41 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
   журнале карточки); Edge-зонд 3 запуска; node --check p07.mjs чисто;
   правок Rust/TS-кода продукта нет (cargo/vitest не гонялись — не менялись).
 - Коммит: 9898704 — chore(adblock): duopulse-061 — замер P-07/SSAI, гейт Edge, ревизия списков, стенд p07, вопрос автору; карточка 061 — wait/blocked до ответа.
+
+## 29.10.2026 08:49 — 13:24 — duopulse-060: субтитры для видео без дорожек — ASR-спайк (замеры whisper/Vosk, облако, feasibility аудио YouTube), вопрос автору
+- Что изменено: код продукта не менялся; добавлен e2e/asr-spike/ — протокол
+  исследования со скриптами и результатами (PROTOCOL.md, gen-en-tts.ps1,
+  run-whisper2.py, run-vosk.py, compute-wer.py, results/ — JSON замеров,
+  транскрипты, эталоны en; 158 КБ). Карточка CARDS/060: критерий
+  «исследованы варианты» закрыт, карточка → blocked/wait
+  (duopulse_060_choice_20261029) — выбор архитектуры за автором.
+- Содержание исследования (детали — PROTOCOL.md):
+  - whisper.cpp (master 28.10.2026, GNU-тулчейн, 8 нитей): модели
+    tiny/base/small 78/148/488 МБ; RTF 15–21×/9–14×/3,8–5,7× (30-мин
+    ролик ≈ 2/3,4/8 мин счёта). Vosk small 40–45 МБ, RTF 17–26×, без
+    пунктуации, ru ≈ whisper-base.
+  - WER: en (SAPI, 2 диктора) — whisper 3–8 % любом размером; ru (LibriVox
+    «Белкин», эталон Wikisource, цифры завышены несовпадением изданий) —
+    tiny 39 % (непригоден), base 28 % (читаем), small 14 %, vosk-ru 31 %.
+  - Найдена и исправлена ошибка утреннего прогона: whisper-cli `-nt` терял
+    середину и галлюцинировал (en_zira все размеры, ru base); корректный
+    путь — вывод с таймстампами (прод тоже только с ними).
+  - Аудио YouTube: серверный innertube закрыт (WEB UNPLAYABLE, ANDROID 400);
+    рабочие пути — player response в контексте страницы (streamingData.
+    adaptiveFormats рядом с captionTracks) или перехват живых googlevideo-URL
+    COM-слоем + самофетч ureq через SOCKS5-роутер (прецедент replace.rs);
+    декод — symphonia, без ffmpeg в поставке.
+  - Облако: Groq whisper-large-v3-turbo $0,04/час, OpenAI $0,36/час;
+    API идентичен (multipart /audio/transcriptions), его же даёт локальный
+    whisper-server ⇒ один провайдер «OpenAI-совместимый ASR» (ключ в DPAPI
+    по образцу translate) покрывает облако и локальный гибрид.
+  - Дизайн-предложение: кнопка «Распознать речь» в duo-панели, дорожка
+    asr:<lang>, прогресс событием subtitles:asr_progress, кэш SQLite
+    asr_tracks по образцу translated_tracks, модель по требованию,
+    лицензии MIT/Apache-2.0. v1: YouTube + «голые» <video src>.
+- Как проверено: прогоны run-whisper2.py/run-vosk.py на эталонной машине
+  (results/*.json), WER compute-wer.py, curl-проверки innertube WEB/ANDROID;
+  правок продукта нет — cargo/vitest не гонялись (не менялись).
+- Вопрос автору отправлен в «Хаб ИИ» Aila (id duopulse_060_choice_20261029):
+  гибрид (рекомендовано) / только локальный whisper.cpp / только облако.
+  Карточка 060 — wait/blocked до ответа.

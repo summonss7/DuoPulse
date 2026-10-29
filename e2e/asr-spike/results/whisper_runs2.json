@@ -1,0 +1,101 @@
+[
+ {
+  "engine": "whisper.cpp",
+  "model": "tiny",
+  "audio": "en_david",
+  "lang": "en",
+  "audio_s": 79.5,
+  "wall_s": 3.78,
+  "rtf": 21.04,
+  "returncode": 0,
+  "words": 197
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "tiny",
+  "audio": "en_zira",
+  "lang": "en",
+  "audio_s": 71.7,
+  "wall_s": 3.76,
+  "rtf": 19.04,
+  "returncode": 0,
+  "words": 193
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "tiny",
+  "audio": "ru_belkin",
+  "lang": "ru",
+  "audio_s": 150.0,
+  "wall_s": 10.21,
+  "rtf": 14.69,
+  "returncode": 0,
+  "words": 333
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "base",
+  "audio": "en_david",
+  "lang": "en",
+  "audio_s": 79.5,
+  "wall_s": 5.65,
+  "rtf": 14.07,
+  "returncode": 0,
+  "words": 197
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "base",
+  "audio": "en_zira",
+  "lang": "en",
+  "audio_s": 71.7,
+  "wall_s": 5.53,
+  "rtf": 12.96,
+  "returncode": 0,
+  "words": 193
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "base",
+  "audio": "ru_belkin",
+  "lang": "ru",
+  "audio_s": 150.0,
+  "wall_s": 16.91,
+  "rtf": 8.87,
+  "returncode": 0,
+  "words": 337
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "small",
+  "audio": "en_david",
+  "lang": "en",
+  "audio_s": 79.5,
+  "wall_s": 13.9,
+  "rtf": 5.72,
+  "returncode": 0,
+  "words": 196
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "small",
+  "audio": "en_zira",
+  "lang": "en",
+  "audio_s": 71.7,
+  "wall_s": 13.44,
+  "rtf": 5.33,
+  "returncode": 0,
+  "words": 192
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "small",
+  "audio": "ru_belkin",
+  "lang": "ru",
+  "audio_s": 150.0,
+  "wall_s": 39.02,
+  "rtf": 3.84,
+  "returncode": 0,
+  "words": 343
+ }
+]

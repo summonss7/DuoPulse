@@ -1,0 +1,26 @@
+[
+ {
+  "engine": "vosk",
+  "model": "vosk-small-en",
+  "audio": "en_david",
+  "audio_s": 79.5,
+  "wall_s": 4.46,
+  "rtf": 17.82
+ },
+ {
+  "engine": "vosk",
+  "model": "vosk-small-en",
+  "audio": "en_zira",
+  "audio_s": 71.7,
+  "wall_s": 4.16,
+  "rtf": 17.22
+ },
+ {
+  "engine": "vosk",
+  "model": "vosk-small-ru",
+  "audio": "ru_belkin",
+  "audio_s": 150.0,
+  "wall_s": 5.72,
+  "rtf": 26.24
+ }
+]

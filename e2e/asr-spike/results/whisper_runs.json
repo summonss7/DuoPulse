@@ -1,0 +1,137 @@
+[
+ {
+  "engine": "whisper.cpp",
+  "model": "tiny",
+  "audio": "en_david",
+  "lang": "en",
+  "audio_s": 79.5,
+  "wall_s": 3.05,
+  "rtf": 26.06,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time =  2072.83 ms /  1050 runs (     1.97 ms per run)",
+   "whisper_print_timings:   prompt time =    94.62 ms /   264 runs (     0.36 ms per run)",
+   "whisper_print_timings:    total time =  3016.93 ms"
+  ]
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "tiny",
+  "audio": "en_zira",
+  "lang": "en",
+  "audio_s": 71.7,
+  "wall_s": 2.63,
+  "rtf": 27.22,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time =  1652.40 ms /   768 runs (     2.15 ms per run)",
+   "whisper_print_timings:   prompt time =    89.79 ms /   228 runs (     0.39 ms per run)",
+   "whisper_print_timings:    total time =  2600.69 ms"
+  ]
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "tiny",
+  "audio": "ru_belkin",
+  "lang": "ru",
+  "audio_s": 150.0,
+  "wall_s": 9.12,
+  "rtf": 16.45,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time =  6843.17 ms /  3629 runs (     1.89 ms per run)",
+   "whisper_print_timings:   prompt time =   275.82 ms /   838 runs (     0.33 ms per run)",
+   "whisper_print_timings:    total time =  9083.07 ms"
+  ]
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "base",
+  "audio": "en_david",
+  "lang": "en",
+  "audio_s": 79.5,
+  "wall_s": 4.76,
+  "rtf": 16.7,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time =  3065.92 ms /   854 runs (     3.59 ms per run)",
+   "whisper_print_timings:   prompt time =   156.77 ms /   254 runs (     0.62 ms per run)",
+   "whisper_print_timings:    total time =  4725.28 ms"
+  ]
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "base",
+  "audio": "en_zira",
+  "lang": "en",
+  "audio_s": 71.7,
+  "wall_s": 4.55,
+  "rtf": 15.75,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time =  2854.16 ms /   694 runs (     4.11 ms per run)",
+   "whisper_print_timings:   prompt time =   149.70 ms /   241 runs (     0.62 ms per run)",
+   "whisper_print_timings:    total time =  4510.55 ms"
+  ]
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "base",
+  "audio": "ru_belkin",
+  "lang": "ru",
+  "audio_s": 150.0,
+  "wall_s": 8.48,
+  "rtf": 17.7,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time =  5336.32 ms /   978 runs (     5.46 ms per run)",
+   "whisper_print_timings:   prompt time =   159.89 ms /   193 runs (     0.83 ms per run)",
+   "whisper_print_timings:    total time =  8439.03 ms"
+  ]
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "small",
+  "audio": "en_david",
+  "lang": "en",
+  "audio_s": 79.5,
+  "wall_s": 11.57,
+  "rtf": 6.87,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time =  4333.29 ms /   503 runs (     8.61 ms per run)",
+   "whisper_print_timings:   prompt time =   393.30 ms /   254 runs (     1.55 ms per run)",
+   "whisper_print_timings:    total time = 11516.28 ms"
+  ]
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "small",
+  "audio": "en_zira",
+  "lang": "en",
+  "audio_s": 71.7,
+  "wall_s": 8.24,
+  "rtf": 8.7,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time =  3210.97 ms /   345 runs (     9.31 ms per run)",
+   "whisper_print_timings:   prompt time =   404.90 ms /   227 runs (     1.78 ms per run)",
+   "whisper_print_timings:    total time =  8190.50 ms"
+  ]
+ },
+ {
+  "engine": "whisper.cpp",
+  "model": "small",
+  "audio": "ru_belkin",
+  "lang": "ru",
+  "audio_s": 150.0,
+  "wall_s": 28.91,
+  "rtf": 5.19,
+  "returncode": 0,
+  "stderr_tail": [
+   "whisper_print_timings:   batchd time = 18424.08 ms /  2357 runs (     7.82 ms per run)",
+   "whisper_print_timings:   prompt time =  1145.76 ms /   813 runs (     1.41 ms per run)",
+   "whisper_print_timings:    total time = 28861.61 ms"
+  ]
+ }
+]

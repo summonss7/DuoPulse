@@ -1,0 +1,74 @@
+[
+ {
+  "engine": "whisper",
+  "model": "tiny",
+  "audio": "en_david",
+  "ref_words": 203,
+  "hyp_words": 198,
+  "wer_pct": 7.4
+ },
+ {
+  "engine": "whisper",
+  "model": "tiny",
+  "audio": "en_zira",
+  "ref_words": 194,
+  "hyp_words": 193,
+  "wer_pct": 4.1
+ },
+ {
+  "engine": "whisper",
+  "model": "tiny",
+  "audio": "ru_belkin",
+  "ref_words": 338,
+  "hyp_words": 338,
+  "wer_pct": 39.1
+ },
+ {
+  "engine": "whisper",
+  "model": "base",
+  "audio": "en_david",
+  "ref_words": 203,
+  "hyp_words": 198,
+  "wer_pct": 7.9
+ },
+ {
+  "engine": "whisper",
+  "model": "base",
+  "audio": "en_zira",
+  "ref_words": 194,
+  "hyp_words": 193,
+  "wer_pct": 3.1
+ },
+ {
+  "engine": "whisper",
+  "model": "base",
+  "audio": "ru_belkin",
+  "ref_words": 342,
+  "hyp_words": 342,
+  "wer_pct": 28.4
+ },
+ {
+  "engine": "whisper",
+  "model": "small",
+  "audio": "en_david",
+  "ref_words": 203,
+  "hyp_words": 197,
+  "wer_pct": 7.9
+ },
+ {
+  "engine": "whisper",
+  "model": "small",
+  "audio": "en_zira",
+  "ref_words": 194,
+  "hyp_words": 192,
+  "wer_pct": 3.1
+ },
+ {
+  "engine": "whisper",
+  "model": "small",
+  "audio": "ru_belkin",
+  "ref_words": 348,
+  "hyp_words": 348,
+  "wer_pct": 13.8
+ }
+]
