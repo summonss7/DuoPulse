@@ -24,16 +24,22 @@ import type {
   VpnRulesResult,
   VpnStateChanged,
 } from "../bridge/gen/types";
+import { LOOK_PRESETS, matchLookPreset, type LookSource } from "../subtitles-panel/look-presets";
 
 const err = (e: unknown): void => console.error("settings-page:", e);
 
-/** Стиль-патч субтитров из формы (числа — с клампами content-слоя в Core). */
+/** Стиль-патч субтитров из формы (числа/цвета — с клампами Core/content). */
 interface SubtitlesForm {
   lang: string;
   fontScalePct: number;
   position: string;
   marginPct: number;
   plateOpacity: number;
+  originalColor: string;
+  translationColor: string;
+  mutedColor: string;
+  plateColor: string;
+  textStroke: boolean;
 }
 
 const el = (tag: string, cls?: string): HTMLElement => {
@@ -173,6 +179,56 @@ export function initSettingsPage(): void {
   posBottom.addEventListener("click", () => segSet("bottom"));
   posTop.addEventListener("click", () => segSet("top"));
 
+  // Вид плашки (карточка duopulse-059): пресет-чипы заполняют форму цветов,
+  // точные цвета — пипетки input[type=color]; живой предпросмотр — DuoPulse
+  // на любом видео, здесь задаётся только дефолт для новых вкладок.
+  const lookColors = {
+    originalColor: document.createElement("input"),
+    translationColor: document.createElement("input"),
+    mutedColor: document.createElement("input"),
+    plateColor: document.createElement("input"),
+  } as const;
+  for (const input of Object.values(lookColors)) input.type = "color";
+  const strokeCheck = document.createElement("input");
+  strokeCheck.type = "checkbox";
+  const strokeLabel = el("label", "set-check");
+  strokeLabel.append(strokeCheck, Object.assign(el("span"), { textContent: " Обводка текста (читаемость на светлом видео)" }));
+  const lookForm = (): LookSource => ({
+    originalColor: lookColors.originalColor.value,
+    translationColor: lookColors.translationColor.value,
+    mutedColor: lookColors.mutedColor.value,
+    plateColor: lookColors.plateColor.value,
+    textStroke: strokeCheck.checked,
+    plateOpacity: Number(opacity.value),
+  });
+  const lookSeg = el("div", "set-look-chips");
+  const lookChips: Record<string, HTMLButtonElement> = {};
+  for (const p of LOOK_PRESETS) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.textContent = p.label;
+    chip.addEventListener("click", () => {
+      lookColors.originalColor.value = p.patch.originalColor;
+      lookColors.translationColor.value = p.patch.translationColor;
+      lookColors.mutedColor.value = p.patch.mutedColor;
+      lookColors.plateColor.value = p.patch.plateColor;
+      strokeCheck.checked = p.patch.textStroke;
+      opacity.value = String(p.patch.plateOpacity);
+      opacityVal.textContent = pct(p.patch.plateOpacity * 100);
+      markLookChip();
+    });
+    lookSeg.append(chip);
+    lookChips[p.id] = chip;
+  }
+  /** Подсветка чипа пресета, совпадающего с формой (иначе — ничего). */
+  const markLookChip = (): void => {
+    const active = matchLookPreset(lookForm());
+    for (const p of LOOK_PRESETS) lookChips[p.id].classList.toggle("on", active?.id === p.id);
+  };
+  for (const input of Object.values(lookColors)) input.addEventListener("input", markLookChip);
+  strokeCheck.addEventListener("change", markLookChip);
+  opacity.addEventListener("input", markLookChip);
+
   const subsStatus = el("div", "set-status");
   const subsSave = document.createElement("button");
   subsSave.type = "button";
@@ -184,6 +240,12 @@ export function initSettingsPage(): void {
     field("Позиция плашки", posSeg),
     field("Отступ от края видео", margin),
     field("Непрозрачность подложки", opacity),
+    lookSeg,
+    field("Цвет оригинала", lookColors.originalColor),
+    field("Цвет перевода", lookColors.translationColor),
+    field("Цвет третьих строк", lookColors.mutedColor),
+    field("Цвет подложки", lookColors.plateColor),
+    strokeLabel,
   );
   const subsRow = el("div", "set-row");
   subsRow.append(subsSave, subsStatus);
@@ -197,7 +259,7 @@ export function initSettingsPage(): void {
     fontScalePct: Number(scale.value),
     position: posTop.classList.contains("on") ? "top" : "bottom",
     marginPct: Number(margin.value),
-    plateOpacity: Number(opacity.value),
+    ...lookForm(),
   });
   subsSave.addEventListener("click", () => {
     const form = subsForm();
@@ -214,6 +276,11 @@ export function initSettingsPage(): void {
             position: form.position,
             marginPct: form.marginPct,
             plateOpacity: form.plateOpacity,
+            originalColor: form.originalColor,
+            translationColor: form.translationColor,
+            mutedColor: form.mutedColor,
+            plateColor: form.plateColor,
+            textStroke: form.textStroke,
           },
         },
       })
@@ -914,6 +981,12 @@ export function initSettingsPage(): void {
       marginVal.textContent = pct(st.marginPct ?? 6);
       opacity.value = String(st.plateOpacity ?? 0.78);
       opacityVal.textContent = pct((st.plateOpacity ?? 0.78) * 100);
+      lookColors.originalColor.value = st.originalColor ?? "#ffffff";
+      lookColors.translationColor.value = st.translationColor ?? "#bdfe4f";
+      lookColors.mutedColor.value = st.mutedColor ?? "#ffffff";
+      lookColors.plateColor.value = st.plateColor ?? "#0a0e17";
+      strokeCheck.checked = st.textStroke ?? true;
+      markLookChip();
       clearHist.checked = all.privacy.clearHistoryOnExit ?? false;
       const up = all.updater;
       updChannel.value = up.channel ?? "stable";

@@ -59,7 +59,8 @@ pub struct AppliedTrackInfo {
 }
 
 /// Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей
-/// применяет; здесь — последнее сообщённое значение.
+/// применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и
+/// обводка — карточка duopulse-059.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtitlesStyleInfo {
@@ -71,6 +72,16 @@ pub struct SubtitlesStyleInfo {
     pub margin_pct: u32,
     /// Непрозрачность подложки, 0–1 (гайд 06 §6).
     pub plate_opacity: f64,
+    /// Цвет строки оригинала, hex #rrggbb.
+    pub original_color: String,
+    /// Цвет строки перевода, hex #rrggbb.
+    pub translation_color: String,
+    /// Цвет третьей и далее строк, hex #rrggbb.
+    pub muted_color: String,
+    /// Цвет подложки-плашки, hex #rrggbb.
+    pub plate_color: String,
+    /// Тёмная обводка строк (читаемость на светлом видео).
+    pub text_stroke: bool,
 }
 
 impl Default for SubtitlesStyleInfo {
@@ -80,6 +91,11 @@ impl Default for SubtitlesStyleInfo {
             position: "bottom".to_string(),
             margin_pct: 6,
             plate_opacity: 0.78,
+            original_color: "#ffffff".to_string(),
+            translation_color: "#bdfe4f".to_string(),
+            muted_color: "#ffffff".to_string(),
+            plate_color: "#0a0e17".to_string(),
+            text_stroke: true,
         }
     }
 }

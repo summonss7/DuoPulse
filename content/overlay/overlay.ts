@@ -32,7 +32,8 @@ import {
 } from "./style";
 
 const OVERLAY_ATTR = "data-duopulse-subtitles";
-/** Тёмная обводка строк для читаемости на светлом видео (гайд 06 §6: 2px). */
+/** Тёмная обводка строк для читаемости на светлом видео (гайд 06 §6: 2px);
+ * вкл/выкл — настройка стиля textStroke (карточка 059), цвет неизменен. */
 const TEXT_STROKE = "2px rgba(5,8,12,0.85)";
 
 export interface SubtitlesOverlayOptions {
@@ -102,14 +103,21 @@ export class SubtitlesOverlay {
   }
 
   /** Изменить настройки отображения (клампы — mergeStyle); применяется к
-   * уже созданной плашке немедленно. */
+   * уже созданной плашке немедленно: цвета/обводка перекрашивают строки
+   * на месте (карточка 059), без пересоздания узлов. */
   setStyle(patch: Partial<SubtitleStyle>): void {
+    const lookChanged =
+      patch.originalColor !== undefined ||
+      patch.translationColor !== undefined ||
+      patch.mutedColor !== undefined ||
+      patch.textStroke !== undefined;
     this.style = mergeStyle(this.style, patch);
     // Ручной масштаб — база авто-подгона: стартуем с него, fit при показе
     // уменьшит под потолок (колесо/панель работают поверх, карточка 046).
     this.autoPct = this.style.fontScalePct;
     this.fitDirty = true;
     if (this.plate) this.applyPlateStyle();
+    if (lookChanged) this.applyRowStyles();
     if (this.container && this.video && this.visible) this.positionOver(this.video);
     this.opts.onStyleChange?.(this.styleInfo());
   }
@@ -133,19 +141,35 @@ export class SubtitlesOverlay {
           el.className = "duopulse-subtitles-row";
           el.dataset.trackId = row.trackId;
           el.textContent = row.text;
-          const rs = rowStyleFor(i);
-          const s = el.style;
-          s.color = rs.color;
-          s.fontSize = `${rs.fontScale}em`; // относительный кегль (docs/03 §5)
-          s.fontWeight = String(rs.weight);
-          s.webkitTextStroke = TEXT_STROKE;
-          s.paintOrder = "stroke fill"; // обводка за заливкой — глифы не съедает
+          this.applyRowStyle(el, i);
           return el;
         }),
       );
     }
     this.rows = rows;
     this.fitDirty = true; // текст сменился — высота могла измениться
+  }
+
+  /** Стиль одного элемента строки по номеру дорожки (цвета — из this.style,
+   * карточка 059; кегль/вес — словарь гайда 06 §6). */
+  private applyRowStyle(el: HTMLElement, index: number): void {
+    const rs = rowStyleFor(index, this.style);
+    const s = el.style;
+    s.color = rs.color;
+    s.fontSize = `${rs.fontScale}em`; // относительный кегль (docs/03 §5)
+    s.fontWeight = String(rs.weight);
+    s.webkitTextStroke = this.style.textStroke ? TEXT_STROKE : "";
+    s.paintOrder = "stroke fill"; // обводка за заливкой — глифы не съедает
+  }
+
+  /** Перекрасить живые строки после смены вида (карточка 059): без
+   * пересоздания узлов — контейнер/строки живут, fade не перезапускается. */
+  private applyRowStyles(): void {
+    if (!this.rowsEl) return;
+    for (let i = 0; i < this.rowsEl.children.length; i++) {
+      this.applyRowStyle(this.rowsEl.children[i] as HTMLElement, i);
+    }
+    this.fitDirty = true; // обводка меняет метрики строк слабо, но честно
   }
 
   /** Плашка по прямоугольнику видео (fixed): низ/верх по центру, отступ
@@ -199,7 +223,7 @@ export class SubtitlesOverlay {
     if (!this.plate) return;
     const p = this.plate.style;
     p.fontSize = plateFontSizeCss(this.autoPct);
-    p.background = plateBackground(this.style.plateOpacity);
+    p.background = plateBackground(this.style.plateOpacity, this.style.plateColor);
   }
 
   private ensureDom(): void {

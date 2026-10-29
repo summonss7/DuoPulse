@@ -200,6 +200,8 @@ pub fn save_search(dir: &Path, cfg: &SearchConfig) -> Result<(), String> {
 
 /// Стиль плашки для новых вкладок: значения — та же модель, что в content-
 /// оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle).
+/// Цвета строк/плашки и обводка — карточка duopulse-059; serde(default) на
+/// контейнере: старые settings.json без новых полей читаются с дефолтами.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SubtitlesStyleDefaults {
@@ -211,6 +213,33 @@ pub struct SubtitlesStyleDefaults {
     pub margin_pct: u32,
     /// Непрозрачность подложки, 0.2–1.
     pub plate_opacity: f64,
+    /// Цвет строки оригинала, hex #rrggbb.
+    pub original_color: String,
+    /// Цвет строки перевода, hex #rrggbb.
+    pub translation_color: String,
+    /// Цвет третьей и далее строк, hex #rrggbb.
+    pub muted_color: String,
+    /// Цвет подложки-плашки, hex #rrggbb.
+    pub plate_color: String,
+    /// Тёмная обводка строк для читаемости на светлом видео.
+    pub text_stroke: bool,
+}
+
+/// hex #rgb/#rrggbb → канонический #rrggbb ( lowercase); прочее — None.
+fn normalize_hex_color(value: &str) -> Option<String> {
+    let s = value.trim().to_ascii_lowercase();
+    let hex = s.strip_prefix('#')?;
+    if hex.len() == 3 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        let b = hex.as_bytes();
+        return Some(format!(
+            "#{}{}{}{}{}{}",
+            b[0] as char, b[0] as char, b[1] as char, b[1] as char, b[2] as char, b[2] as char
+        ));
+    }
+    if hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Some(format!("#{hex}"));
+    }
+    None
 }
 
 impl Default for SubtitlesStyleDefaults {
@@ -220,6 +249,11 @@ impl Default for SubtitlesStyleDefaults {
             position: "bottom".into(),
             margin_pct: 6,
             plate_opacity: 0.78,
+            original_color: "#ffffff".into(),
+            translation_color: "#bdfe4f".into(),
+            muted_color: "#ffffff".into(),
+            plate_color: "#0a0e17".into(),
+            text_stroke: true,
         }
     }
 }
@@ -246,7 +280,8 @@ impl Default for SubtitlesConfig {
 
 impl SubtitlesConfig {
     /// Нормализация перед сохранением: язык — нижний регистр, позиция —
-    /// известное значение, кегль/отступ/непрозрачность — клампы content-слоя.
+    /// известное значение, кегль/отступ/непрозрачность — клампы content-слоя;
+    /// цвета — канонический #rrggbb (мусор — дефолт, карточка 059).
     pub fn normalized(mut self) -> Self {
         self.default_translation_lang = self.default_translation_lang.trim().to_ascii_lowercase();
         if self.default_translation_lang.is_empty() {
@@ -258,6 +293,15 @@ impl SubtitlesConfig {
         self.style.font_scale_pct = self.style.font_scale_pct.clamp(75, 300);
         self.style.margin_pct = self.style.margin_pct.min(25);
         self.style.plate_opacity = self.style.plate_opacity.clamp(0.2, 1.0);
+        let defaults = SubtitlesStyleDefaults::default();
+        let fix = |v: String, fallback: &str| {
+            normalize_hex_color(&v).unwrap_or_else(|| fallback.to_string())
+        };
+        self.style.original_color = fix(self.style.original_color, &defaults.original_color);
+        self.style.translation_color =
+            fix(self.style.translation_color, &defaults.translation_color);
+        self.style.muted_color = fix(self.style.muted_color, &defaults.muted_color);
+        self.style.plate_color = fix(self.style.plate_color, &defaults.plate_color);
         self
     }
 }
@@ -284,6 +328,11 @@ pub fn content_defaults_script(dir: &Path) -> String {
                 "position": subs.style.position,
                 "marginPct": subs.style.margin_pct,
                 "plateOpacity": subs.style.plate_opacity,
+                "originalColor": subs.style.original_color,
+                "translationColor": subs.style.translation_color,
+                "mutedColor": subs.style.muted_color,
+                "plateColor": subs.style.plate_color,
+                "textStroke": subs.style.text_stroke,
             },
         },
     });
@@ -513,6 +562,11 @@ mod tests {
                 position: "top".into(),
                 margin_pct: 90,
                 plate_opacity: 5.0,
+                original_color: "#FFDD33".into(),
+                translation_color: "red".into(), // не hex — дефолт
+                muted_color: "#fC3".into(),
+                plate_color: "#000".into(),
+                text_stroke: false,
             },
         }
         .normalized();
@@ -521,6 +575,14 @@ mod tests {
         assert_eq!(cfg.style.position, "top");
         assert_eq!(cfg.style.margin_pct, 25, "кламп отступа");
         assert_eq!(cfg.style.plate_opacity, 1.0, "кламп непрозрачности");
+        assert_eq!(cfg.style.original_color, "#ffdd33", "#RRGGBB → lower");
+        assert_eq!(
+            cfg.style.translation_color, "#bdfe4f",
+            "мусор — фирменный дефолт"
+        );
+        assert_eq!(cfg.style.muted_color, "#ffcc33", "#RGB разворачивается");
+        assert_eq!(cfg.style.plate_color, "#000000");
+        assert!(!cfg.style.text_stroke);
         // неизвестная позиция и пустой язык — к дефолтам
         let cfg = SubtitlesConfig {
             default_translation_lang: String::new(),
@@ -540,6 +602,28 @@ mod tests {
     }
 
     #[test]
+    fn subtitles_config_old_file_without_colors_gets_defaults() {
+        // settings.json до duopulse-059: раздел без полей цветов — дефолты,
+        // serde(default) контейнера добирает их из Default::default().
+        let dir = tmp_dir("subs-old");
+        write_key(
+            &dir,
+            "subtitles",
+            &serde_json::json!({"defaultTranslationLang": "de",
+                                 "style": {"fontScalePct": 140, "position": "top",
+                                           "marginPct": 8, "plateOpacity": 0.9}}),
+        )
+        .unwrap();
+        let cfg = load_subtitles(&dir);
+        assert_eq!(cfg.style.font_scale_pct, 140);
+        assert_eq!(cfg.style.original_color, "#ffffff");
+        assert_eq!(cfg.style.translation_color, "#bdfe4f");
+        assert_eq!(cfg.style.plate_color, "#0a0e17");
+        assert!(cfg.style.text_stroke);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn content_defaults_script_is_valid_json_literal() {
         let dir = tmp_dir("script");
         save_subtitles(
@@ -551,6 +635,11 @@ mod tests {
                     position: "top".into(),
                     margin_pct: 4,
                     plate_opacity: 0.9,
+                    original_color: "#ffdd33".into(),
+                    translation_color: "#ffffff".into(),
+                    muted_color: "#ffdd33".into(),
+                    plate_color: "#000000".into(),
+                    text_stroke: false,
                 },
             },
         )
@@ -562,6 +651,9 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(json).expect("JSON-литерал валиден");
         assert_eq!(parsed["subtitles"]["defaultTranslationLang"], "uk");
         assert_eq!(parsed["subtitles"]["style"]["fontScalePct"], 120);
+        assert_eq!(parsed["subtitles"]["style"]["originalColor"], "#ffdd33");
+        assert_eq!(parsed["subtitles"]["style"]["plateColor"], "#000000");
+        assert_eq!(parsed["subtitles"]["style"]["textStroke"], false);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

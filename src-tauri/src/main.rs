@@ -836,6 +836,7 @@ fn parse_set_state(value: &serde_json::Value) -> subtitles::service::TabSubtitle
     }
     if let Some(style) = value["style"].as_object() {
         let style = serde_json::Value::Object(style.clone());
+        let defaults = subtitles::service::SubtitlesStyleInfo::default();
         st.style = subtitles::service::SubtitlesStyleInfo {
             font_scale_pct: json_u32(&style, "fontScalePct"),
             position: {
@@ -848,7 +849,38 @@ fn parse_set_state(value: &serde_json::Value) -> subtitles::service::TabSubtitle
             },
             margin_pct: json_u32(&style, "marginPct"),
             plate_opacity: style["plateOpacity"].as_f64().unwrap_or(0.78),
+            // Цвета/обводка (карточка 059): старые бандлы их не шлют — дефолты;
+            // канонизацию делает content-слой, здесь — снисходительный разбор.
+            original_color: json_str(&style, "originalColor"),
+            translation_color: {
+                let c = json_str(&style, "translationColor");
+                if c.is_empty() {
+                    defaults.translation_color
+                } else {
+                    c
+                }
+            },
+            muted_color: {
+                let c = json_str(&style, "mutedColor");
+                if c.is_empty() {
+                    defaults.muted_color
+                } else {
+                    c
+                }
+            },
+            plate_color: {
+                let c = json_str(&style, "plateColor");
+                if c.is_empty() {
+                    defaults.plate_color
+                } else {
+                    c
+                }
+            },
+            text_stroke: style["textStroke"].as_bool().unwrap_or(true),
         };
+        if st.style.original_color.is_empty() {
+            st.style.original_color = defaults.original_color;
+        }
     }
     st
 }

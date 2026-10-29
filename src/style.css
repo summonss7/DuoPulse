@@ -2153,6 +2153,41 @@ body.internal-page {
   color: var(--accent-neon);
   border-color: var(--accent-neon);
 }
+/* Цвета строк/подложки и обводка (карточка duopulse-059): компактная
+   сетка «подпись + пипетка»; input[type=color] — квадрат с рамкой. */
+.duo-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 10px;
+}
+.duo-color {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.duo-color input[type="color"] {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  cursor: pointer;
+}
+.duo-color input[type="color"]:focus-visible {
+  border-color: var(--accent-neon);
+  box-shadow: var(--focus-ring-soft);
+}
+.duo-color.duo-stroke {
+  cursor: default;
+}
+.duo-color.duo-stroke input {
+  accent-color: var(--accent-neon);
+}
 input[type="range"] {
   accent-color: var(--accent-neon); /* бегунки слайдеров — фирменный лайм */
 }
@@ -2380,6 +2415,38 @@ input[type="range"] {
 .set-seg button.on {
   color: var(--accent-neon);
   border-color: var(--accent-neon);
+}
+/* Пресеты вида плашки и пипетки цветов (карточка duopulse-059) */
+.set-look-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.set-look-chips button {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.set-look-chips button:hover {
+  background: var(--hover-neutral);
+}
+.set-look-chips button.on {
+  color: var(--accent-neon);
+  border-color: var(--accent-neon);
+}
+.set-field input[type="color"] {
+  width: 46px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  cursor: pointer;
 }
 .set-check {
   display: flex;

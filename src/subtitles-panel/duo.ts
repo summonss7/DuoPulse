@@ -29,12 +29,14 @@ import { bridge } from "../bridge";
 import type {
   AppliedTrackInfo,
   BaseTrackInfo,
+  SubtitlesStyleInfo,
   SubtitlesTranslateProgress,
   SubtitlesTranslateUnavailable,
   TranslationLangInfo,
 } from "../bridge/gen/types";
 import { presetSets, normalizeTrackId } from "./presets";
 import { cloudLangOptions, translateProgressText, translateUnavailableText } from "./cloud-langs";
+import { LOOK_PRESETS, matchLookPreset } from "./look-presets";
 
 const err = (e: unknown): void => console.error("duo:", e);
 const btn = document.getElementById("duoBtn") as HTMLButtonElement;
@@ -57,8 +59,8 @@ interface DuoState {
   base: BaseTrackInfo[];
   translations: TranslationLangInfo[];
   offsetMs: number;
-  fontScalePct: number;
-  position: string;
+  /** Стиль плашки целиком (карточка 059: цвета/обводка — в придачу к размеру). */
+  style: SubtitlesStyleInfo;
 }
 
 const state: DuoState = {
@@ -70,8 +72,17 @@ const state: DuoState = {
   base: [],
   translations: [],
   offsetMs: 0,
-  fontScalePct: 100,
-  position: "bottom",
+  style: {
+    fontScalePct: 100,
+    position: "bottom",
+    marginPct: 6,
+    plateOpacity: 0.78,
+    originalColor: "#ffffff",
+    translationColor: "#bdfe4f",
+    mutedColor: "#ffffff",
+    plateColor: "#0a0e17",
+    textStroke: true,
+  },
 };
 
 /** Нормализованный id для сравнения наборов: перевод «yt:en+ru» ≡ «ru». */
@@ -255,11 +266,38 @@ function renderOffset(): void {
 function renderStyle(): void {
   const slider = document.getElementById("duoScale") as HTMLInputElement;
   const val = document.getElementById("duoScaleVal") as HTMLElement;
-  slider.value = String(state.fontScalePct);
-  val.textContent = `${state.fontScalePct}%`;
+  slider.value = String(state.style.fontScalePct);
+  val.textContent = `${state.style.fontScalePct}%`;
   for (const b of (document.getElementById("duoPosition") as HTMLElement).children) {
-    (b as HTMLElement).dataset.on = String((b as HTMLElement).dataset.pos === state.position);
+    (b as HTMLElement).dataset.on = String((b as HTMLElement).dataset.pos === state.style.position);
   }
+  renderLook();
+}
+
+/** Пресеты вида + точные цвета (карточка 059): чипы с подсветкой активного
+ *  (несовпадение — «Свои»), input[type=color] и тумблер обводки. */
+function renderLook(): void {
+  const box = document.getElementById("duoLookPresets") as HTMLElement;
+  box.replaceChildren();
+  const active = matchLookPreset(state.style);
+  for (const p of LOOK_PRESETS) {
+    const chip = el<HTMLButtonElement>("button", "duo-chip", p.label);
+    chip.type = "button";
+    chip.dataset.look = p.id;
+    chip.dataset.on = String(active?.id === p.id);
+    box.append(chip);
+  }
+  const custom = el<HTMLButtonElement>("button", "duo-chip", "Свои");
+  custom.type = "button";
+  custom.dataset.look = "custom";
+  custom.dataset.on = String(active === null);
+  custom.title = "Текущие цвета не совпадают с пресетами";
+  box.append(custom);
+  (document.getElementById("duoColorOriginal") as HTMLInputElement).value = state.style.originalColor;
+  (document.getElementById("duoColorTranslation") as HTMLInputElement).value = state.style.translationColor;
+  (document.getElementById("duoColorMuted") as HTMLInputElement).value = state.style.mutedColor;
+  (document.getElementById("duoColorPlate") as HTMLInputElement).value = state.style.plateColor;
+  (document.getElementById("duoStroke") as HTMLInputElement).checked = state.style.textStroke;
 }
 
 function render(): void {
@@ -282,8 +320,7 @@ async function refresh(): Promise<void> {
     state.base = st.base;
     state.translations = st.translations;
     state.offsetMs = st.offsetMs;
-    state.fontScalePct = st.style.fontScalePct;
-    state.position = st.style.position;
+    state.style = st.style;
     render();
   } catch (e) {
     err(e);
@@ -504,6 +541,34 @@ export function initDuo(): void {
     if (b?.dataset.pos) void bridge.subtitles.setStyle({ style: { position: b.dataset.pos } }).catch(err);
   });
 
+  // Вид плашки (карточка 059): пресеты — одним патчем всех полей вида,
+  // цвета строк/подложки и обводка — точечно; применение живое (set-style →
+  // оверлей перекрашивает строки на месте, set_applied вернёт снапшот).
+  (document.getElementById("duoLookPresets") as HTMLElement).addEventListener("click", (e) => {
+    const chip = (e.target as HTMLElement).closest<HTMLElement>("[data-look]");
+    if (!chip?.dataset.look || chip.dataset.look === "custom") return;
+    const preset = LOOK_PRESETS.find((p) => p.id === chip.dataset.look);
+    if (preset) void bridge.subtitles.setStyle({ style: { ...preset.patch } }).catch(err);
+  });
+  const colorField = (id: string, field: "originalColor" | "translationColor" | "mutedColor" | "plateColor"): void => {
+    const input = document.getElementById(id) as HTMLInputElement;
+    const apply = (): void => {
+      const patch: Partial<Record<typeof field, string>> = { [field]: input.value };
+      void bridge.subtitles.setStyle({ style: patch }).catch(err);
+    };
+    input.addEventListener("input", apply); // живой отклик пипетки WebView2
+    input.addEventListener("change", apply);
+  };
+  colorField("duoColorOriginal", "originalColor");
+  colorField("duoColorTranslation", "translationColor");
+  colorField("duoColorMuted", "mutedColor");
+  colorField("duoColorPlate", "plateColor");
+  (document.getElementById("duoStroke") as HTMLInputElement).addEventListener("change", (e) => {
+    void bridge.subtitles
+      .setStyle({ style: { textStroke: (e.target as HTMLInputElement).checked } })
+      .catch(err);
+  });
+
   // События Core → UI: только активная вкладка (остальные фильтруем).
   void listen(bridge.events.tabsUpdated, () => void refresh());
   void listen<import("../bridge/gen/types").PageVideoDetected>(
@@ -535,8 +600,7 @@ export function initDuo(): void {
       state.enabled = ev.payload.enabled;
       state.tracks = ev.payload.tracks;
       state.offsetMs = ev.payload.offsetMs;
-      state.fontScalePct = ev.payload.style.fontScalePct;
-      state.position = ev.payload.style.position;
+      state.style = ev.payload.style;
       render();
       // Alt+D «показать/скрыть панель» (карточка duopulse-028): вслед за
       // переключением показа — панель открывается/закрывается.

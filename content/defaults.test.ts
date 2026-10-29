@@ -36,7 +36,15 @@ describe("baseStyle (задача 5.1)", () => {
     const style = baseStyle(
       win({
         subtitles: {
-          style: { fontScalePct: 130, position: "top", marginPct: 4, plateOpacity: 0.9 },
+          style: {
+            fontScalePct: 130,
+            position: "top",
+            marginPct: 4,
+            plateOpacity: 0.9,
+            originalColor: "#FFDD33",
+            plateColor: "#000000",
+            textStroke: false,
+          },
         },
       }),
     );
@@ -45,6 +53,11 @@ describe("baseStyle (задача 5.1)", () => {
       position: "top",
       marginPct: 4,
       plateOpacity: 0.9,
+      originalColor: "#ffdd33",
+      translationColor: "#bdfe4f",
+      mutedColor: "#ffffff",
+      plateColor: "#000000",
+      textStroke: false,
     });
   });
 
@@ -55,6 +68,14 @@ describe("baseStyle (задача 5.1)", () => {
     expect(style.fontScalePct).toBe(300);
     expect(style.position).toBe("bottom");
     expect(style.marginPct).toBe(25);
+  });
+
+  it("старые settings.json без цветов — фирменные дефолты (карточка 059)", () => {
+    const style = baseStyle(
+      win({ subtitles: { style: { originalColor: "красный", textStroke: 1 as unknown as boolean } } }),
+    );
+    expect(style.originalColor).toBe("#ffffff");
+    expect(style.textStroke).toBe(true);
   });
 
   it("без дефолтов — прежние значения content-слоя", () => {

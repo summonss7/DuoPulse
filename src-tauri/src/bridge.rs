@@ -849,7 +849,8 @@ pub struct SubtitlesTranslateTrackParams {
 }
 
 /// Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля
-/// не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4).
+/// не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета
+/// строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtitlesStylePatch {
@@ -861,6 +862,16 @@ pub struct SubtitlesStylePatch {
     pub margin_pct: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plate_opacity: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub translation_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plate_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_stroke: Option<bool>,
 }
 
 /// subtitles.set_style: стиль плашки активной вкладки (размер/позиция

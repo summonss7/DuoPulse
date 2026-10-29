@@ -588,7 +588,7 @@ export interface SubtitlesConfig {
   style?: SubtitlesStyleDefaults;
 }
 /**
- * Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle).
+ * Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle). Цвета строк/плашки и обводка — карточка duopulse-059; serde(default) на контейнере: старые settings.json без новых полей читаются с дефолтами.
  */
 export interface SubtitlesStyleDefaults {
   /**
@@ -600,6 +600,18 @@ export interface SubtitlesStyleDefaults {
    */
   marginPct?: number;
   /**
+   * Цвет третьей и далее строк, hex #rrggbb.
+   */
+  mutedColor?: string;
+  /**
+   * Цвет строки оригинала, hex #rrggbb.
+   */
+  originalColor?: string;
+  /**
+   * Цвет подложки-плашки, hex #rrggbb.
+   */
+  plateColor?: string;
+  /**
    * Непрозрачность подложки, 0.2–1.
    */
   plateOpacity?: number;
@@ -607,6 +619,14 @@ export interface SubtitlesStyleDefaults {
    * Позиция плашки: bottom|top.
    */
   position?: string;
+  /**
+   * Тёмная обводка строк для читаемости на светлом видео.
+   */
+  textStroke?: boolean;
+  /**
+   * Цвет строки перевода, hex #rrggbb.
+   */
+  translationColor?: string;
 }
 /**
  * Раздел "updater" settings.json (задача 5.2). Появился после v2 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).
@@ -831,7 +851,7 @@ export interface BaseTrackInfo {
   translatable: boolean;
 }
 /**
- * Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение.
+ * Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059.
  */
 export interface SubtitlesStyleInfo {
   /**
@@ -843,6 +863,18 @@ export interface SubtitlesStyleInfo {
    */
   marginPct: number;
   /**
+   * Цвет третьей и далее строк, hex #rrggbb.
+   */
+  mutedColor: string;
+  /**
+   * Цвет строки оригинала, hex #rrggbb.
+   */
+  originalColor: string;
+  /**
+   * Цвет подложки-плашки, hex #rrggbb.
+   */
+  plateColor: string;
+  /**
    * Непрозрачность подложки, 0–1 (гайд 06 §6).
    */
   plateOpacity: number;
@@ -850,6 +882,14 @@ export interface SubtitlesStyleInfo {
    * bottom | top.
    */
   position: string;
+  /**
+   * Тёмная обводка строк (читаемость на светлом видео).
+   */
+  textStroke: boolean;
+  /**
+   * Цвет строки перевода, hex #rrggbb.
+   */
+  translationColor: string;
 }
 /**
  * Дорожка применённого набора (зеркало set-state content-слоя): панель показывает состав/порядок, кнопка «duo» — количество (выкл/1/дуо/три).
@@ -928,13 +968,18 @@ export interface SubtitlesSetStyleParams {
   style: SubtitlesStylePatch;
 }
 /**
- * Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4).
+ * Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool).
  */
 export interface SubtitlesStylePatch {
   fontScalePct?: number | null;
   marginPct?: number | null;
+  mutedColor?: string | null;
+  originalColor?: string | null;
+  plateColor?: string | null;
   plateOpacity?: number | null;
   position?: string | null;
+  textStroke?: boolean | null;
+  translationColor?: string | null;
 }
 /**
  * subtitles.set_tracks: применить платформенную часть набора активной вкладки (порядок id = порядок строк на плашке; content-слой тот же состав в другом порядке переставляет без перезагрузки дорожек).

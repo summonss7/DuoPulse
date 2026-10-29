@@ -1,6 +1,7 @@
 // Юнит-тесты стиля плашки (задача 3.4): клампы настроек, шаг колесом,
 // стили строк по гайду 06 §6, градиент подложки, кегль от масштаба,
-// авто-подгон кегля при переполнении (карточка 046).
+// авто-подгон кегля при переполнении (карточка 046); цвета строк/плашки
+// и обводка (карточка duopulse-059).
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SUBTITLE_STYLE,
@@ -8,7 +9,9 @@ import {
   PLATE_MAX_SHARE,
   SCALE_MAX_PCT,
   SCALE_MIN_PCT,
+  clampColor,
   fitStepPct,
+  hexToRgba,
   mergeStyle,
   plateBackground,
   plateFontSizeCss,
@@ -17,12 +20,17 @@ import {
 } from "./style";
 
 describe("mergeStyle — настройки отображения с клампами", () => {
-  it("дефолт: низ, масштаб 100%, отступ 6%, подложка 0,78 (гайд 06 §6)", () => {
+  it("дефолт: низ, масштаб 100%, отступ 6%, подложка 0,78, фирменные цвета, обводка (гайд 06 §6)", () => {
     expect(DEFAULT_SUBTITLE_STYLE).toEqual({
       fontScalePct: 100,
       position: "bottom",
       marginPct: 6,
       plateOpacity: 0.78,
+      originalColor: "#ffffff",
+      translationColor: "#bdfe4f",
+      mutedColor: "#ffffff",
+      plateColor: "#0a0e17",
+      textStroke: true,
     });
   });
 
@@ -56,6 +64,46 @@ describe("mergeStyle — настройки отображения с кламп
   });
 });
 
+describe("clampColor/hexToRgba — цвета строк и подложки (карточка 059)", () => {
+  it("#RGB и #RRGGBB канонизируются к #rrggbb", () => {
+    expect(clampColor("#FFDD33", "#000000")).toBe("#ffdd33");
+    expect(clampColor("#fC3", "#000000")).toBe("#ffcc33");
+    expect(clampColor(" #BdFe4F ", "#000000")).toBe("#bdfe4f");
+  });
+
+  it("мусор игнорируется — fallback (старые settings.json, тест-хуки)", () => {
+    expect(clampColor("red", "#0a0e17")).toBe("#0a0e17");
+    expect(clampColor("rgb(1,2,3)", "#0a0e17")).toBe("#0a0e17");
+    expect(clampColor("#12345", "#0a0e17")).toBe("#0a0e17");
+    expect(clampColor(42, "#0a0e17")).toBe("#0a0e17");
+    expect(clampColor(undefined, "#0a0e17")).toBe("#0a0e17");
+  });
+
+  it("hex → rgba: прозрачность строк и градиента", () => {
+    expect(hexToRgba("#0a0e17", 0.78)).toBe("rgba(10,14,23,0.780)");
+    expect(hexToRgba("#ffffff", 0.75)).toBe("rgba(255,255,255,0.750)");
+  });
+
+  it("патч цветов применяется с клампами, чужие типы — базовые значения", () => {
+    const brand = mergeStyle(DEFAULT_SUBTITLE_STYLE, {
+      originalColor: "#FFDD33",
+      plateColor: "#000000",
+      textStroke: false,
+    });
+    expect(brand.originalColor).toBe("#ffdd33");
+    expect(brand.plateColor).toBe("#000000");
+    expect(brand.textStroke).toBe(false);
+    const junk = mergeStyle(brand, {
+      originalColor: 42 as unknown as string,
+      plateColor: "жёлтый",
+      textStroke: "да" as unknown as boolean,
+    });
+    expect(junk.originalColor).toBe("#ffdd33");
+    expect(junk.plateColor).toBe("#000000");
+    expect(junk.textStroke).toBe(false);
+  });
+});
+
 describe("stepScale — колесо мыши (шаг 10%, границы 75–300)", () => {
   it("вверх/вниз на шаг", () => {
     expect(stepScale(100, 1)).toBe(110);
@@ -72,18 +120,36 @@ describe("stepScale — колесо мыши (шаг 10%, границы 75–3
   });
 });
 
-describe("rowStyleFor — строки набора по гайду 06 §6", () => {
-  it("первая — оригинал: белый, 100% кегля, вес 500", () => {
-    expect(rowStyleFor(0)).toEqual({ color: "#FFFFFF", fontScale: 1, weight: 500 });
+describe("rowStyleFor — строки набора по гайду 06 §6, цвета из стиля (059)", () => {
+  it("фирменный вид: белый 500 / лайм #BDFE4F / приглушённый белый с alpha 0.75", () => {
+    expect(rowStyleFor(0, DEFAULT_SUBTITLE_STYLE)).toEqual({
+      color: "#ffffff",
+      fontScale: 1,
+      weight: 500,
+    });
+    expect(rowStyleFor(1, DEFAULT_SUBTITLE_STYLE)).toEqual({
+      color: "#bdfe4f",
+      fontScale: 0.85,
+      weight: 400,
+    });
+    expect(rowStyleFor(2, DEFAULT_SUBTITLE_STYLE)).toEqual({
+      color: "rgba(255,255,255,0.750)",
+      fontScale: 0.75,
+      weight: 400,
+    });
+    expect(rowStyleFor(5, DEFAULT_SUBTITLE_STYLE)).toEqual(rowStyleFor(2, DEFAULT_SUBTITLE_STYLE));
   });
 
-  it("вторая — перевод: фирменный лайм #BDFE4F, 85% кегля, вес 400", () => {
-    expect(rowStyleFor(1)).toEqual({ color: "#BDFE4F", fontScale: 0.85, weight: 400 });
-  });
-
-  it("третья и далее — приглушённые: белый 75% прозрачности, 75% кегля", () => {
-    expect(rowStyleFor(2)).toEqual({ color: "rgba(255,255,255,0.75)", fontScale: 0.75, weight: 400 });
-    expect(rowStyleFor(5)).toEqual(rowStyleFor(2));
+  it("пресет «жёлтый TV»: цвета строк берутся из стиля", () => {
+    const tv = {
+      ...DEFAULT_SUBTITLE_STYLE,
+      originalColor: "#ffdd33",
+      translationColor: "#ffffff",
+      mutedColor: "#ffdd33",
+    };
+    expect(rowStyleFor(0, tv).color).toBe("#ffdd33");
+    expect(rowStyleFor(1, tv).color).toBe("#ffffff");
+    expect(rowStyleFor(2, tv).color).toBe("rgba(255,221,51,0.750)");
   });
 });
 
@@ -131,7 +197,15 @@ describe("fitStepPct — авто-уменьшение кегля при пер�
 
 describe("подложка и кегль", () => {
   it("градиент: сине-чёрный rgba(10,14,23,.78) → прозрачный (гайд 06 §6)", () => {
-    expect(plateBackground(0.78)).toBe("linear-gradient(rgba(10,14,23,0.780), rgba(10,14,23,0))");
+    expect(plateBackground(0.78, "#0a0e17")).toBe(
+      "linear-gradient(rgba(10,14,23,0.780), rgba(10,14,23,0.000))",
+    );
+  });
+
+  it("цвет подложки настраивается: чёрный пресет — rgba(0,0,0,…)", () => {
+    expect(plateBackground(0.9, "#000000")).toBe(
+      "linear-gradient(rgba(0,0,0,0.900), rgba(0,0,0,0.000))",
+    );
   });
 
   it("базовый кегль = clamp от ширины видео × масштаб пользователя", () => {

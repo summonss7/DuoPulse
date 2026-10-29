@@ -142,6 +142,7 @@
           <button type="button" id="duoOffsetReset" class="link">Сброс</button>
         </div>
         <div class="duo-section-title">Вид плашки</div>
+        <div class="duo-presets" id="duoLookPresets"></div>
         <div class="duo-style">
           <label class="duo-field">
             <span>Размер</span>
@@ -155,6 +156,15 @@
               <button type="button" data-pos="top">Верх</button>
             </div>
           </div>
+        </div>
+        <div class="duo-colors" id="duoColors" title="Цвета строк набора и подложки-плашки">
+          <label class="duo-color">Оригинал<input type="color" id="duoColorOriginal" value="#ffffff" /></label>
+          <label class="duo-color">Перевод<input type="color" id="duoColorTranslation" value="#bdfe4f" /></label>
+          <label class="duo-color">Третьи<input type="color" id="duoColorMuted" value="#ffffff" /></label>
+          <label class="duo-color">Плашка<input type="color" id="duoColorPlate" value="#0a0e17" /></label>
+          <label class="duo-color duo-stroke" title="Тёмная обводка текста — читаемость на светлом видео">
+            <input type="checkbox" id="duoStroke" checked /><span>Обводка</span>
+          </label>
         </div>
       </div>
       <div id="vpnPanel" class="vpn-panel" hidden role="dialog" aria-label="Панель VPN">

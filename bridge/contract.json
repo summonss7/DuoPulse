@@ -1423,15 +1423,20 @@
                 "default": {
                   "fontScalePct": 100,
                   "marginPct": 6,
+                  "mutedColor": "#ffffff",
+                  "originalColor": "#ffffff",
+                  "plateColor": "#0a0e17",
                   "plateOpacity": 0.78,
-                  "position": "bottom"
+                  "position": "bottom",
+                  "textStroke": true,
+                  "translationColor": "#bdfe4f"
                 }
               }
             },
             "type": "object"
           },
           "SubtitlesStyleDefaults": {
-            "description": "Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle).",
+            "description": "Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle). Цвета строк/плашки и обводка — карточка duopulse-059; serde(default) на контейнере: старые settings.json без новых полей читаются с дефолтами.",
             "properties": {
               "fontScalePct": {
                 "default": 100,
@@ -1447,6 +1452,21 @@
                 "minimum": 0.0,
                 "type": "integer"
               },
+              "mutedColor": {
+                "default": "#ffffff",
+                "description": "Цвет третьей и далее строк, hex #rrggbb.",
+                "type": "string"
+              },
+              "originalColor": {
+                "default": "#ffffff",
+                "description": "Цвет строки оригинала, hex #rrggbb.",
+                "type": "string"
+              },
+              "plateColor": {
+                "default": "#0a0e17",
+                "description": "Цвет подложки-плашки, hex #rrggbb.",
+                "type": "string"
+              },
               "plateOpacity": {
                 "default": 0.78,
                 "description": "Непрозрачность подложки, 0.2–1.",
@@ -1456,6 +1476,16 @@
               "position": {
                 "default": "bottom",
                 "description": "Позиция плашки: bottom|top.",
+                "type": "string"
+              },
+              "textStroke": {
+                "default": true,
+                "description": "Тёмная обводка строк для читаемости на светлом видео.",
+                "type": "boolean"
+              },
+              "translationColor": {
+                "default": "#bdfe4f",
+                "description": "Цвет строки перевода, hex #rrggbb.",
                 "type": "string"
               }
             },
@@ -1882,15 +1912,20 @@
                 "default": {
                   "fontScalePct": 100,
                   "marginPct": 6,
+                  "mutedColor": "#ffffff",
+                  "originalColor": "#ffffff",
+                  "plateColor": "#0a0e17",
                   "plateOpacity": 0.78,
-                  "position": "bottom"
+                  "position": "bottom",
+                  "textStroke": true,
+                  "translationColor": "#bdfe4f"
                 }
               }
             },
             "type": "object"
           },
           "SubtitlesStyleDefaults": {
-            "description": "Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle).",
+            "description": "Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle). Цвета строк/плашки и обводка — карточка duopulse-059; serde(default) на контейнере: старые settings.json без новых полей читаются с дефолтами.",
             "properties": {
               "fontScalePct": {
                 "default": 100,
@@ -1906,6 +1941,21 @@
                 "minimum": 0.0,
                 "type": "integer"
               },
+              "mutedColor": {
+                "default": "#ffffff",
+                "description": "Цвет третьей и далее строк, hex #rrggbb.",
+                "type": "string"
+              },
+              "originalColor": {
+                "default": "#ffffff",
+                "description": "Цвет строки оригинала, hex #rrggbb.",
+                "type": "string"
+              },
+              "plateColor": {
+                "default": "#0a0e17",
+                "description": "Цвет подложки-плашки, hex #rrggbb.",
+                "type": "string"
+              },
               "plateOpacity": {
                 "default": 0.78,
                 "description": "Непрозрачность подложки, 0.2–1.",
@@ -1915,6 +1965,16 @@
               "position": {
                 "default": "bottom",
                 "description": "Позиция плашки: bottom|top.",
+                "type": "string"
+              },
+              "textStroke": {
+                "default": true,
+                "description": "Тёмная обводка строк для читаемости на светлом видео.",
+                "type": "boolean"
+              },
+              "translationColor": {
+                "default": "#bdfe4f",
+                "description": "Цвет строки перевода, hex #rrggbb.",
                 "type": "string"
               }
             },
@@ -2329,7 +2389,7 @@
             "type": "object"
           },
           "SubtitlesStyleInfo": {
-            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение.",
+            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059.",
             "properties": {
               "fontScalePct": {
                 "description": "Масштаб кегля, %: 75–300 (docs/03 §5).",
@@ -2343,6 +2403,18 @@
                 "minimum": 0.0,
                 "type": "integer"
               },
+              "mutedColor": {
+                "description": "Цвет третьей и далее строк, hex #rrggbb.",
+                "type": "string"
+              },
+              "originalColor": {
+                "description": "Цвет строки оригинала, hex #rrggbb.",
+                "type": "string"
+              },
+              "plateColor": {
+                "description": "Цвет подложки-плашки, hex #rrggbb.",
+                "type": "string"
+              },
               "plateOpacity": {
                 "description": "Непрозрачность подложки, 0–1 (гайд 06 §6).",
                 "format": "double",
@@ -2351,13 +2423,26 @@
               "position": {
                 "description": "bottom | top.",
                 "type": "string"
+              },
+              "textStroke": {
+                "description": "Тёмная обводка строк (читаемость на светлом видео).",
+                "type": "boolean"
+              },
+              "translationColor": {
+                "description": "Цвет строки перевода, hex #rrggbb.",
+                "type": "string"
               }
             },
             "required": [
               "fontScalePct",
               "marginPct",
+              "mutedColor",
+              "originalColor",
+              "plateColor",
               "plateOpacity",
-              "position"
+              "position",
+              "textStroke",
+              "translationColor"
             ],
             "type": "object"
           },
@@ -2552,7 +2637,7 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
           "SubtitlesStylePatch": {
-            "description": "Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4).",
+            "description": "Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool).",
             "properties": {
               "fontScalePct": {
                 "format": "uint32",
@@ -2570,6 +2655,24 @@
                   "null"
                 ]
               },
+              "mutedColor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "originalColor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "plateColor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "plateOpacity": {
                 "format": "double",
                 "type": [
@@ -2578,6 +2681,18 @@
                 ]
               },
               "position": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "textStroke": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "translationColor": {
                 "type": [
                   "string",
                   "null"
@@ -4668,7 +4783,7 @@
             "type": "object"
           },
           "SubtitlesStyleInfo": {
-            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение.",
+            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059.",
             "properties": {
               "fontScalePct": {
                 "description": "Масштаб кегля, %: 75–300 (docs/03 §5).",
@@ -4682,6 +4797,18 @@
                 "minimum": 0.0,
                 "type": "integer"
               },
+              "mutedColor": {
+                "description": "Цвет третьей и далее строк, hex #rrggbb.",
+                "type": "string"
+              },
+              "originalColor": {
+                "description": "Цвет строки оригинала, hex #rrggbb.",
+                "type": "string"
+              },
+              "plateColor": {
+                "description": "Цвет подложки-плашки, hex #rrggbb.",
+                "type": "string"
+              },
               "plateOpacity": {
                 "description": "Непрозрачность подложки, 0–1 (гайд 06 §6).",
                 "format": "double",
@@ -4690,13 +4817,26 @@
               "position": {
                 "description": "bottom | top.",
                 "type": "string"
+              },
+              "textStroke": {
+                "description": "Тёмная обводка строк (читаемость на светлом видео).",
+                "type": "boolean"
+              },
+              "translationColor": {
+                "description": "Цвет строки перевода, hex #rrggbb.",
+                "type": "string"
               }
             },
             "required": [
               "fontScalePct",
               "marginPct",
+              "mutedColor",
+              "originalColor",
+              "plateColor",
               "plateOpacity",
-              "position"
+              "position",
+              "textStroke",
+              "translationColor"
             ],
             "type": "object"
           }

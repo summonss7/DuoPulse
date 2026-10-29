@@ -87,6 +87,13 @@
 //      обращений к живому моку, статус «из кэша»);
 //  55) gate M4: перевод cue-таблицы 420 реплик ≤ 30 с (мок с латентностью
 //      400 мс/пачка — верхняя оценка реального API).
+// Карточка duopulse-059 (стиль: цвета строк/плашки, пресеты вида, обводка):
+//  56) duo-панель: чипы пресетов вида + пипетки цветов отражают стиль;
+//  57) пресет «Жёлтый TV»: живая перекраска строк/плашки, узлы не пересозданы;
+//  58) ручной цвет строки (IPC-патч) — пресет честно слетает на «Свои»;
+//  59) обводка выкл/вкл (0px ↔ 2px), возврат «Фирменного» чипом;
+//  60) subtitles.list_tracks несёт цвета/обводку (сервис Core);
+//  61) дефолтный вид из настроек переносится на новые вкладки (tabs.open).
 //
 // CDP подключается к контентной вкладке (спящий режим выключен
 // DUOPULSE_SLEEP_AFTER_SECS=0 — отладчик не мешает).
@@ -1714,14 +1721,16 @@ try {
   await waitForPage(tab, `window.__duopulseContent?.state().enabled === true`, 5000, "setEnabled(true)");
 
   // (38) subtitles.remove_track: снять дорожку панели («×») — набор пуст,
-  // кнопка «duo» скрывается (видео без дорожек, docs/03 §8 п.1).
+  // кнопка «duo» остаётся видимой на найденном видео (карточка duopulse-057:
+  // вход в субтитры нужен и без дорожек — файлы/перевод/стиль), data-count=0.
   await evalIn(ui3, `window.__duopulse.subtitles.removeTrack(${JSON.stringify({ id: "test:ru" })})`);
   await waitForPage(tab, `window.__duopulseContent?.state().engine.trackCount === 0`, 5000, "дорожка снята");
   await sleep(400);
   check(
-    "subtitles.remove_track: дорожка снята, кнопка «duo» скрылась (нет дорожек)",
+    "subtitles.remove_track: дорожка снята, кнопка «duo» видна (видео живо), data-count=0",
     (await stateOf(tab)).engine.trackCount === 0 &&
-      (await evalIn(ui3, `document.getElementById("duoBtn").hidden`)) === true,
+      (await evalIn(ui3, `document.getElementById("duoBtn").hidden`)) === false &&
+      (await evalIn(ui3, `document.getElementById("duoBtn").dataset.count`)) === "0",
   );
   // вернуть платформенную часть тест-хуком (кнопка снова видна)
   await evalIn(tab, `document.dispatchEvent(new CustomEvent("duopulse-test-track"))`);
@@ -1785,6 +1794,285 @@ try {
   await evalIn(ui3, `window.__duopulse.subtitles.setOffset({ offsetMs: 0 })`);
   await evalIn(ui3, `window.__duopulse.subtitles.setStyle({ style: { fontScalePct: 100, position: "bottom" } })`);
   await waitForPage(tab, `window.__duopulseContent?.state().style.position === "bottom"`, 5000, "стиль возвращён");
+
+  // ===== duopulse-059: цвета строк/плашки, пресеты вида, обводка ==========
+  // Панель duo открыта (с 40), активная вкладка — сайт-3 с duo-набором
+  // (test:ru + test:en, cue 6–8 с). Проверки: чипы пресетов и пипетки,
+  // живая перекраска пресетом «Жёлтый TV», ручной цвет, обводка, снапшот
+  // Core и перенос дефолтов из настроек на новую вкладку.
+
+  // (56) чипы пресетов вида + пипетки отражают текущий (фирменный) стиль
+  const lookUi = await evalIn(
+    ui3,
+    `(function () {
+       const chips = Array.from(document.querySelectorAll("#duoLookPresets .duo-chip"))
+         .map((c) => ({ look: c.dataset.look, on: c.dataset.on }));
+       return { chips,
+                original: document.getElementById("duoColorOriginal").value,
+                translation: document.getElementById("duoColorTranslation").value,
+                muted: document.getElementById("duoColorMuted").value,
+                plate: document.getElementById("duoColorPlate").value,
+                stroke: document.getElementById("duoStroke").checked };
+     })()`,
+  );
+  check(
+    "(56) duo-панель: 4 чипа вида (Фирменный/Ч-б/Жёлтый TV/Свои), активен «Фирменный», пипетки — фирменные цвета",
+    lookUi.chips.length === 4 &&
+      lookUi.chips.find((c) => c.look === "brand")?.on === "true" &&
+      lookUi.chips.filter((c) => c.on === "true").length === 1 &&
+      lookUi.original === "#ffffff" &&
+      lookUi.translation === "#bdfe4f" &&
+      lookUi.muted === "#ffffff" &&
+      lookUi.plate === "#0a0e17" &&
+      lookUi.stroke === true,
+    JSON.stringify(lookUi),
+  );
+
+  // (57) пресет «Жёлтый TV»: перекраска живая (узлы строк живы), фон плашки
+  // чёрный 0.85, обводка 2px; чип tv подсвечен, пипетки обновились.
+  // Набор — trio (оригинал/перевод/третья): проверяем все три цвета строк.
+  await seekTo(tab, 7.0);
+  await evalIn(
+    tab,
+    `(function () {
+       window.__DUOPULSE_TEST_TRACK__ = [
+         { id: "test:ru", source: "test", lang: "ru", role: "original",
+           cues: [{ startMs: 6000, endMs: 8000, text: "Строка оригинала" }] },
+         { id: "test:en", source: "test", lang: "en", role: "translation",
+           cues: [{ startMs: 6000, endMs: 8000, text: "Translation line" }] },
+         { id: "test:es", source: "test", lang: "es", role: "translation",
+           cues: [{ startMs: 6000, endMs: 8000, text: "Línea tercera" }] }
+       ];
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return true;
+     })()`,
+  );
+  await waitForPage(
+    tab,
+    `document.querySelectorAll("[data-duopulse-subtitles] .duopulse-subtitles-row").length === 3`,
+    5000,
+    "trio-набор для пресета (57)",
+  );
+  await evalIn(tab, `document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row").dataset.dpE2eMark = "row0"`);
+  await evalIn(ui3, `document.querySelector('#duoLookPresets [data-look="tv"]').click()`);
+  await waitForPage(tab, `window.__duopulseContent?.state().style.originalColor === "#ffdd33"`, 5000, "tv-пресет применился");
+  const tvLook = await evalIn(
+    tab,
+    `(function () {
+       const plate = document.querySelector("[data-duopulse-subtitles] > div");
+       const rows = document.querySelectorAll("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       const cs = Array.from(rows).map((r) => getComputedStyle(r));
+       return { colors: cs.map((c) => c.color),
+                bg: getComputedStyle(plate).backgroundImage,
+                stroke: cs[0]?.webkitTextStrokeWidth,
+                marked: rows[0]?.dataset.dpE2eMark === "row0",
+                style: window.__duopulseContent.state().style };
+     })()`,
+  );
+  const tvChip = await evalIn(
+    ui3,
+    `(function () {
+       return { on: Array.from(document.querySelectorAll("#duoLookPresets .duo-chip"))
+                  .filter((c) => c.dataset.on === "true").map((c) => c.dataset.look),
+                original: document.getElementById("duoColorOriginal").value,
+                plate: document.getElementById("duoColorPlate").value };
+     })()`,
+  );
+  check(
+    "(57) пресет «Жёлтый TV»: строки жёлтый/белый/приглушённый, плашка чёрная 0.85, обводка 2px, узлы живы, чип подсвечен",
+    tvLook.colors[0] === "rgb(255, 221, 51)" &&
+      tvLook.colors[1] === "rgb(255, 255, 255)" &&
+      tvLook.colors[2] === "rgba(255, 221, 51, 0.75)" &&
+      tvLook.bg.includes("rgba(0, 0, 0, 0.85)") &&
+      tvLook.stroke === "2px" &&
+      tvLook.marked === true &&
+      tvLook.style.plateColor === "#000000" &&
+      tvLook.style.textStroke === true &&
+      tvLook.style.plateOpacity === 0.85 &&
+      JSON.stringify(tvChip.on) === JSON.stringify(["tv"]) &&
+      tvChip.original === "#ffdd33" &&
+      tvChip.plate === "#000000",
+    `цвета ${tvLook.colors.join(" | ")}; фон ${tvLook.bg.slice(0, 44)}…; чип ${JSON.stringify(tvChip.on)}`,
+  );
+  {
+    const shotTv = await tab.send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(path.join(OUT_DIR, "shot-overlay-tv-look.png"), Buffer.from(shotTv.data, "base64"));
+    check("скриншот пресета «Жёлтый TV» сохранён (shot-overlay-tv-look.png)", fs.existsSync(path.join(OUT_DIR, "shot-overlay-tv-look.png")));
+  }
+
+  // (58) ручной цвет строки через IPC-патч: перекраска на месте (метка узла
+  // жива), пресет слетел на «Свои» (ни один не подсвечен, кроме custom).
+  await evalIn(ui3, `window.__duopulse.subtitles.setStyle(${JSON.stringify({ style: { originalColor: "#00ffaa" } })})`);
+  await waitForPage(tab, `window.__duopulseContent?.state().style.originalColor === "#00ffaa"`, 5000, "ручной цвет применился");
+  const manualLook = await evalIn(
+    tab,
+    `(function () {
+       const row = document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       return { color: getComputedStyle(row).color, marked: row.dataset.dpE2eMark === "row0" };
+     })()`,
+  );
+  const manualChip = await evalIn(
+    ui3,
+    `Array.from(document.querySelectorAll("#duoLookPresets .duo-chip")).filter((c) => c.dataset.on === "true").map((c) => c.dataset.look)`,
+  );
+  check(
+    "(58) ручной цвет оригинала (IPC-патч): строка перекрашена на месте, пресет честно слетел на «Свои»",
+    manualLook.color === "rgb(0, 255, 170)" &&
+      manualLook.marked === true &&
+      JSON.stringify(manualChip) === JSON.stringify(["custom"]),
+    `цвет ${manualLook.color}, чип ${JSON.stringify(manualChip)}`,
+  );
+
+  // (59) обводка выкл/вкл: тумблер панели → webkitTextStrokeWidth 0px;
+  // клик «Фирменный» возвращает вид целиком (цвета+обводка+прозрачность).
+  await evalIn(
+    ui3,
+    `(function () {
+       const c = document.getElementById("duoStroke");
+       c.checked = false;
+       c.dispatchEvent(new Event("change", { bubbles: true }));
+       return true;
+     })()`,
+  );
+  await waitForPage(tab, `window.__duopulseContent?.state().style.textStroke === false`, 5000, "обводка выключена");
+  const noStroke = await evalIn(
+    tab,
+    `(function () {
+       const row = document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       return { stroke: getComputedStyle(row).webkitTextStrokeWidth,
+                color: getComputedStyle(row).color };
+     })()`,
+  );
+  check(
+    "(59a) тумблер «Обводка» выкл: обводка 0px, цвета не тронуты (ручной #00ffaa жив)",
+    noStroke.stroke === "0px" && noStroke.color === "rgb(0, 255, 170)",
+    `stroke=${noStroke.stroke}, цвет ${noStroke.color}`,
+  );
+  await evalIn(ui3, `document.querySelector('#duoLookPresets [data-look="brand"]').click()`);
+  await waitForPage(tab, `window.__duopulseContent?.state().style.originalColor === "#ffffff"`, 5000, "фирменный вид возвращён");
+  const brandBack = await evalIn(
+    tab,
+    `(function () {
+       const row = document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       const plate = document.querySelector("[data-duopulse-subtitles] > div");
+       return { color: getComputedStyle(row).color, stroke: getComputedStyle(row).webkitTextStrokeWidth,
+                bg: getComputedStyle(plate).backgroundImage };
+     })()`,
+  );
+  check(
+    "(59b) клик «Фирменный»: полный возврат вида (белый/лайм, обводка 2px, сине-чёрный градиент)",
+    brandBack.color === "rgb(255, 255, 255)" &&
+      brandBack.stroke === "2px" &&
+      brandBack.bg.includes("rgba(10, 14, 23, 0.78)"),
+    `цвет ${brandBack.color}, stroke=${brandBack.stroke}`,
+  );
+
+  // (60) снапшот Core (subtitles.list_tracks) несёт новые поля стиля —
+  // сервис Rust принял set-state с цветами (parse_set_state, карточка 059).
+  await evalIn(ui3, `window.__duopulse.subtitles.setStyle(${JSON.stringify({ style: { originalColor: "#112233", plateColor: "#000000", textStroke: false } })})`);
+  await waitForPage(tab, `window.__duopulseContent?.state().style.originalColor === "#112233"`, 5000, "цвет ушёл в Core");
+  await sleep(400); // set-state → сервис
+  const snapLook = await evalIn(ui3, `window.__duopulse.subtitles.listTracks()`);
+  check(
+    "(60) subtitles.list_tracks: снапшот стиля несёт цвета/обводку (сервис Core)",
+    snapLook.style.originalColor === "#112233" &&
+      snapLook.style.translationColor === "#bdfe4f" &&
+      snapLook.style.plateColor === "#000000" &&
+      snapLook.style.textStroke === false &&
+      snapLook.style.fontScalePct === 100,
+    JSON.stringify(snapLook.style),
+  );
+
+  // (61) дефолтный вид из настроек переносится на новые вкладки:
+  // settings.apply (экзотические цвета, обводка выкл) → tabs.open(site2) →
+  // initialization-скрипт кладёт __DUOPULSE_DEFAULTS__ → оверлей новой
+  // вкладки стартует с дефолтного вида (baseStyle, карточка 059).
+  await evalIn(
+    ui3,
+    `window.__duopulse.settings.apply(${JSON.stringify({
+      subtitles: {
+        defaultTranslationLang: "ru",
+        style: {
+          fontScalePct: 100,
+          position: "bottom",
+          marginPct: 6,
+          plateOpacity: 0.78,
+          originalColor: "#123456",
+          translationColor: "#654321",
+          mutedColor: "#abcdef",
+          plateColor: "#000000",
+          textStroke: false,
+        },
+      },
+    })})`,
+  );
+  const opened = await evalIn(ui3, `window.__duopulse.tabs.open(${JSON.stringify({ url: `${pageUrl}site2.html` })})`);
+  const newTabId = opened.tabs.find((t) => t.active)?.id ?? null;
+  let tab2Target = null;
+  for (let i = 0; i < 40 && !tab2Target; i++) {
+    const list = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
+    tab2Target = list.find((t) => t.type === "page" && t.url.includes("site2.html"));
+    if (!tab2Target) await sleep(500);
+  }
+  if (!tab2Target) throw new Error("CDP-цель новой вкладки (site2) не найдена");
+  const tab2 = connect(tab2Target.webSocketDebuggerUrl);
+  await waitForPage(tab2, `typeof window.__duopulseContent === "object"`, 10000, "бандл новой вкладки (61)");
+  await waitForPage(tab2, `document.getElementById("v")?.readyState >= 1`, 10000, "метаданные новой вкладки (61)");
+  await evalIn(
+    tab2,
+    `(function () {
+       window.__DUOPULSE_TEST_TRACK__ = { id: "test:ru", source: "test", lang: "ru", role: "original",
+         cues: [{ startMs: 1000, endMs: 3000, text: "Реплика новой вкладки" }] };
+       document.dispatchEvent(new CustomEvent("duopulse-test-track"));
+       return true;
+     })()`,
+  );
+  await seekTo(tab2, 2.0);
+  const defStyle = await evalIn(
+    tab2,
+    `(function () {
+       const row = document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row");
+       return { style: window.__duopulseContent.state().style,
+                color: row ? getComputedStyle(row).color : null,
+                stroke: row ? getComputedStyle(row).webkitTextStrokeWidth : null };
+     })()`,
+  );
+  check(
+    "(61) дефолтный вид из настроек перенесён на новую вкладку (цвета/плашка/обводка оверлея)",
+    defStyle.style.originalColor === "#123456" &&
+      defStyle.style.translationColor === "#654321" &&
+      defStyle.style.mutedColor === "#abcdef" &&
+      defStyle.style.plateColor === "#000000" &&
+      defStyle.style.textStroke === false &&
+      defStyle.color === "rgb(18, 52, 86)" &&
+      defStyle.stroke === "0px",
+    `цвет строки ${defStyle.color}, stroke=${defStyle.stroke}, style=${JSON.stringify(defStyle.style)}`,
+  );
+  tab2.close();
+  // закрыть вкладку (активной вернётся сайт-3) и вернуть фирменные дефолты
+  // настроек — стенд не должен наследовать экзотику последующим прогонам.
+  if (newTabId) await evalIn(ui3, `window.__duopulse.tabs.close(${JSON.stringify({ id: newTabId })})`);
+  await evalIn(
+    ui3,
+    `window.__duopulse.settings.apply(${JSON.stringify({
+      subtitles: {
+        defaultTranslationLang: "ru",
+        style: {
+          fontScalePct: 100,
+          position: "bottom",
+          marginPct: 6,
+          plateOpacity: 0.78,
+          originalColor: "#ffffff",
+          translationColor: "#bdfe4f",
+          mutedColor: "#ffffff",
+          plateColor: "#0a0e17",
+          textStroke: true,
+        },
+      },
+    })})`,
+  );
+  await evalIn(ui3, `document.querySelector('#duoLookPresets [data-look="brand"]').click()`);
+  await waitForPage(tab, `window.__duopulseContent?.state().style.originalColor === "#ffffff"`, 5000, "фирменный вид сайта-3 возвращён");
 
   // (41) события Core: subtitles:set_applied накапливаются в dev-журнале UI
   // (все изменения 35–40 долетели с актуальным составом).
