@@ -127,10 +127,20 @@ struct ListDef {
     name: String,
     /// http(s)-адрес или путь к локальному файлу.
     source: String,
-    /// Списку доверяют trusted-скриптлеты (`trusted-*`, карточка 050):
+    /// Списку доверяют trusted-скриптлеты (`trusted-*`, карточки 050/061):
     /// uBO-кураторский список и наш встроенный compat — тот же уровень
     /// доверия, что даёт им сам uBO; EasyList и env-списки (e2e) — нет.
     trusted: bool,
+}
+
+/// Право на trusted-скриптлеты ВКЛЮЧЕНО решением автора 29.10.2026 (карточка
+/// 061, вопрос duopulse_061_choice_20261029): живые trusted-replace-xhr-
+/// response uBO убирают SSAI-рекламу в части свежих сессий (замер 050: 2/3,
+/// P-07 19% ≤ 60%), плата — обёртки fetch/XHR на youtube-документах (~+8%
+/// к P-08, замер 050); откат — убрать имя из списка ниже. До 29.10 доверие
+/// было выключено экспериментом 050 (решение А автора от 22.10).
+fn trusted_list(name: &str) -> bool {
+    matches!(name, "ublock-ads" | "duopulse-compat")
 }
 
 /// Реестр источников: DUOPULSE_ADBLOCK_LISTS (e2e) или DEFAULT_LISTS +
@@ -143,18 +153,13 @@ fn list_defs() -> Vec<ListDef> {
             .map(|(n, s)| ListDef {
                 name: (*n).into(),
                 source: (*s).into(),
-                // ДОВЕРИЕ ВЫКЛЮЧЕНО (эксперимент 050): инъекция живых
-                // trusted-replace-xhr-response uBO добавляла ~300 мс к
-                // старту (P-08 4674–4725 vs контроль 4239–4381) — обёртки
-                // fetch/XHR на каждом youtube-документе; преролл на жёсткой
-                // навигации и так не убивали. Включение — за автором.
-                trusted: false,
+                trusted: trusted_list(n),
             })
             .collect();
         defs.push(ListDef {
             name: "duopulse-compat".into(),
             source: COMPAT_SOURCE.into(),
-            trusted: false,
+            trusted: trusted_list("duopulse-compat"),
         });
         return defs;
     };
@@ -1436,6 +1441,24 @@ mod tests {
         );
         let _guard = EnvGuard::set("DUOPULSE_ADBLOCK_LISTS", "  ");
         assert!(list_defs().is_empty());
+    }
+
+    #[test]
+    fn default_lists_trusted_marks() {
+        // Решение автора 29.10.2026 (карточка 061): доверие включено только
+        // кураторским источникам uBO и нашему compat; EasyList и env-списки
+        // (e2e) — без доверия (как в самом uBO)
+        let _env = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("DUOPULSE_ADBLOCK_LISTS");
+        let defs = list_defs();
+        let by_name = |n: &str| defs.iter().find(|d| d.name == n).map(|d| d.trusted);
+        assert_eq!(
+            by_name("ublock-ads"),
+            Some(true),
+            "uBO-кураторский список доверен"
+        );
+        assert_eq!(by_name("duopulse-compat"), Some(true), "compat доверен");
+        assert_eq!(by_name("easylist"), Some(false), "EasyList — без доверия");
     }
 
     /// Запрещённые в тестах гонки с другими тестами env-мутации: Rust-тесты

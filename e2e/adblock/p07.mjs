@@ -164,7 +164,7 @@ const evalIn = async (ws, expression) => {
   return r.result?.value;
 };
 
-async function targets() {
+async function targets(errRetry = null) {
   let lastJson = null; // диагностика (карточка 061): что реально отдавал /json
   for (let i = 0; i < 90; i++) {
     try {
@@ -174,10 +174,24 @@ async function targets() {
       const yt = t.find((x) => x.type === "page" && /youtube\.com/.test(x.url));
       if (ui && yt) return { ui, yt };
       // Карточка 061: YT-навигация упала с ERR_* → вкладка стала страницей
-      // ошибки (карточка 048, в dev-режиме это localhost:5173). Дальше ждать
-      // бессмысленно — прогон ретраится целиком.
-      if (i > 10 && t.some((x) => x.type === "page" && /Не удалось открыть сайт|ERR_/.test(x.title))) {
-        throw new Error(`страница ошибки вместо видео: ${t.map((x) => `${x.title} @ ${x.url}`).join(" | ")}`);
+      // ошибки (карточка 048, в dev-режиме это localhost:5173).
+      const errPage = t.find((x) => x.type === "page" && /Не удалось открыть сайт|ERR_/.test(x.title));
+      if (errPage) {
+        // Карточка 061 (30.10): серия транзитных сетевых сбоев (резолв 11001
+        // в роутере и пр.) роняла прогон целиком — теперь штатная кнопка
+        // «Повторить» на нашей странице ошибки перезапускает навигацию,
+        // прогон продолжается на том же профиле.
+        if (errRetry && errRetry.left > 0 && (await clickRetryOn(errPage.webSocketDebuggerUrl))) {
+          errRetry.left--;
+          console.log(`    страница ошибки: нажат «Повторить» (в бюджете ещё ${errRetry.left})`);
+          i = -1;
+          await sleep(2000);
+          continue;
+        }
+        if (i > 10) {
+          // Дальше ждать бессмысленно — прогон ретраится целиком.
+          throw new Error(`страница ошибки вместо видео: ${t.map((x) => `${x.title} @ ${x.url}`).join(" | ")}`);
+        }
       }
     } catch (e) {
       if (String(e.message).startsWith("страница ошибки")) throw e;
@@ -187,6 +201,27 @@ async function targets() {
   throw new Error(
     `CDP-цели не поднялись (последний /json: ${JSON.stringify(lastJson)?.slice(0, 1500)})`,
   );
+}
+
+/** Клик «Повторить» на странице ошибки (карточка 048): после транзитного
+ * сетевого сбоя навигации кнопка перезапускает загрузку сайта с полным
+ * стеком контент-скриптов. false — кнопки нет/клик не прошёл. */
+async function clickRetryOn(wsUrl) {
+  try {
+    const ws = connect(wsUrl);
+    try {
+      const r = await ws.send("Runtime.evaluate", {
+        expression:
+          "(() => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Повторить'); if (b) { b.click(); return true; } return false; })()",
+        returnByValue: true,
+      });
+      return r?.result?.value === true;
+    } finally {
+      ws.close();
+    }
+  } catch {
+    return false;
+  }
 }
 
 /** Первый кадр КОНТЕНТА (мимо рекламной паузы, см. шапку). */
@@ -265,8 +300,11 @@ async function measureRun(mode, seedFilters) {
   }
   const app = launchApp(tmp);
   let ui, yt;
+  // бюджет «Повторить» на прогон: серия транзитных сбоев не должна ронять
+  // прогон (30.10 дважды падали 3 попытки подряд на резолве 11001)
+  const errRetry = { left: 3 };
   try {
-    const t = await targets();
+    const t = await targets(errRetry);
     ui = connect(t.ui.webSocketDebuggerUrl);
     yt = connect(t.yt.webSocketDebuggerUrl);
     for (let i = 0; i < 30; i++) {
@@ -303,7 +341,7 @@ async function measureRun(mode, seedFilters) {
           break;
         }
       } catch {
-        const tt = await targets();
+        const tt = await targets(errRetry);
         yt.close();
         yt = connect(tt.yt.webSocketDebuggerUrl);
       }
