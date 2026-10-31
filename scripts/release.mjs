@@ -30,7 +30,11 @@
 //
 // После публикации каналов релиз всегда обновляет и локальную портативную
 // копию C:\DuoPulse\duopulse.exe (правило карточки duopulse-062: каждый
-// выход новой версии обязан обновлять эту копию; папки нет — шаг пропущен).
+// выход новой версии обязан обновлять эту копию; папки нет — шаг пропущен),
+// и корневую копию установщика для хаба «Скачать» Aila (правило карточки
+// duopulse-063: хаб сканирует только корень builds/, и устаревший там
+// установщик — единственный канал для чужих машин — навсегда отрезает их
+// от обновлений).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -133,6 +137,36 @@ function deployLocal() {
         "Закройте DuoPulse и повторите: npm run release -- --deploy-local",
     );
     process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Хаб «Скачать» Aila (карточка duopulse-063): сервер сканирует только корень
+// builds/ проектов (подпапки релизов duopulse_<верс>_<тип>/ он не видит),
+// поэтому каждый релиз обязан класть туда свежий установщик —
+// DuoPulse-<верс>-setup-release.exe (имя по конвенции хаба, карточка 045).
+// Установщики/портативные zip прошлых версий из корня убираем: устаревший
+// установщик с нерабочим апдейтером — ловушка (другой компьютер поставит его
+// раз и никогда не узнает о новых версиях). Портативные zip в хабе больше
+// не раздаём вовсе: портативная копия не умеет самообновляться (NSIS-апдейтер
+// её не трогает — та же причина жалобы 063); канал дистрибуции — только
+// самообновляющийся установщик. Только release: debug-сборки в хаб не идут.
+// ---------------------------------------------------------------------------
+
+function deployHub() {
+  if (TYPE !== "release") return;
+  const root = path.join(ROOT, "builds");
+  const setupCopy = path.join(root, `DuoPulse-${VERSION}-setup-release.exe`);
+  fs.copyFileSync(path.join(outDir, setupName), setupCopy);
+  console.log(`хаб «Скачать» Aila: ${path.basename(setupCopy)} — обновлён (корень builds/)`);
+  for (const name of fs.readdirSync(root)) {
+    const stale =
+      (/^DuoPulse-[\d.]+-setup-release\.exe$/i.test(name) || /^DuoPulse-[\d.]+-portable-release\.zip$/i.test(name)) &&
+      name !== path.basename(setupCopy);
+    if (stale) {
+      fs.rmSync(path.join(root, name));
+      console.log(`хаб «Скачать» Aila: ${name} — убран (устарел/не самообновляется)`);
+    }
   }
 }
 
@@ -283,4 +317,6 @@ if (!fs.existsSync(path.join(GH_FEED_DIR, ".git"))) {
 
 // Локальная копия C:\DuoPulse — последний шаг каждого релиза (карточка
 // duopulse-062): новая версия обязана обновлять и папину портативную копию.
+// Перед ней — корень builds/ для хаба «Скачать» (карточка duopulse-063).
+deployHub();
 deployLocal();
