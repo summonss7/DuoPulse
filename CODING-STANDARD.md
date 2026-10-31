@@ -1,7 +1,7 @@
 # Общий стандарт программирования (CODING-STANDARD.md)
 
-Единый стандарт для 14 проектов: **Ai-Business, Ai-Purse, Aila, Al-Navi, Barter, Diary,
-DuoPulse, LeCards, LingoHub, LingoTune, NovaGrid, R-Admin, Scheduler, Synchro**.
+Единый стандарт для 15 проектов: **Ai-Business, Ai-Purse, Aila, Al-Navi, Barter, Diary,
+DuoPulse, LeCards, LingoHub, LingoTune, NovaGrid, R-Admin, Scheduler, Sontse, Synchro**.
 
 Канонический источник — `D:\Scheduler\CODING-STANDARD.md` (репозиторий диспетчера задач).
 Копия лежит в корне каждого проекта; при расхождении верен канонический файл. Изменения
@@ -157,7 +157,8 @@ DuoPulse, LeCards, LingoHub, LingoTune, NovaGrid, R-Admin, Scheduler, Synchro**.
 - [ ] Выводы и грабли зафиксированы; предложения новшеств — в чат Aila
 
 ---
-*Версия 1.2 — 11.10.2026, карточка scheduler-035: вся отчётность проектов диспетчера —
+*Версия 1.3 — 31.10.2026, карточка scheduler-062: в семью принят Sontse
+(спин-офф «Солнца» Aila) — 15 проектов. Версия 1.2 — 11.10.2026, карточка scheduler-035: вся отчётность проектов диспетчера —
 только в `CHANGELOG.md`, запись обязана нести дату-время начала и окончания работы;
 `promt.txt` заморожен как архив; в стандарт вошёл Synchro (14 проектов). Версия 1.1 —
 11.10.2026, карточка scheduler-033: `CHANGELOG.md` обязателен в каждом проекте.
