@@ -4264,3 +4264,29 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
 - Что сделано: Sontse (спин-офф «Солнца» Aila, D:\Sontse) подключён к диспетчеру задач как 15-й проект семьи — реестр D:\Scheduler\projects.json (карточка scheduler-062, желание Артёма: «проект стал известный и дай задание на выполнение»). В этом проекте: CODING-STANDARD.md — побайтовая копия канона v1.3: шапка перечисляет 15 проектов (+ Sontse), история версий дополнена строкой v1.3; сами правила стандарта не менялись.
 - Как проверено: копия CODING-STANDARD.md сверена с каноном D:\Scheduler\CODING-STANDARD.md (идентичны).
 - Коммит: bbe9482 «Семья приняла Sontse — стандарт v1.3 на 15 проектов: копия канона (карточка scheduler-062)» (+ пуш)
+
+## 31.10.2026, 22:11 — Релиз 0.1.2: фичи 058/060/061 вышли в оба канала (карточка duopulse-064)
+- Начало работы: 31.10.2026, 22:04
+- Окончание работы: 31.10.2026, 22:11
+- Что сделано: по решению Артёма из «Хаба ИИ» («Собрать 0.1.2 сейчас», 31.10 04:32)
+  выпущен релиз 0.1.2 с накопленными после 0.1.1 фичами: группы избранного
+  (duopulse-058), субтитры из речи ASR (duopulse-060), trusted-скриптлеты
+  блокировщика (duopulse-061). Версия поднята в package.json,
+  src-tauri/Cargo.toml (Cargo.lock — автоматически при сборке),
+  src-tauri/tauri.conf.json. `npm run release -- --notes "…"`: NSIS-установщик
+  DuoPulse_0.1.2_x64-setup.exe (5.07 МиБ) + подпись, публикация в оба канала
+  (Aila stable+canary, GitHub Pages stable+canary — коммиты b322d9c и 37c9b86
+  в duopulse-updates), deployHub() положил в корень builds/
+  DuoPulse-0.1.2-setup-release.exe (устаревший 0.1.1 убран), deployLocal()
+  обновил C:\DuoPulse (duopulse.exe + WebView2Loader.dll). Попутно исправлен
+  баг release.mjs: spawnSync издателя Aila с shell:true резал --notes по «;»
+  (cmd.exe-делители) — заметки в манифесте v2 обрезались до «0.1.2:»; shell:true
+  убран (как у git-вызовов ниже по коду), релиз перепубликован (--publish-only) —
+  заметки полные во всех фидах и манифесте.
+- Как проверено: до сборки vitest 208/208; сборка release — код 0; живые
+  запросы curl после публикации: Aila latest.json / latest-canary.json /
+  manifest.json — версия 0.1.2, заметки полные; GitHub-фиды stable и canary
+  для клиентов 0.1.0/0.1.1/0.1.2 — 0.1.2, url пакета корректный; корень
+  builds/ — DuoPulse-0.1.2-setup-release.exe; C:\DuoPulse\duopulse.exe от
+  22:08 этого дня. Перед работой копия проекта
+  backups/backup_2026-10-31_22-04-01.

@@ -261,7 +261,9 @@ if (NO_AILA) {
     "--extra",
     extra,
   ];
-  const pub = spawnSync("node", cliArgs, { stdio: "inherit", shell: true });
+  // без shell:true: cmd.exe режет аргументы по «;» и «,» — заметки релиза
+  // обрезались до первой точки с запятой (0.1.2); как у git() ниже
+  const pub = spawnSync("node", cliArgs, { stdio: "inherit" });
   if (pub.status !== 0) {
     console.error(`публикация на Aila не удалась (код ${pub.status}) — Aila включена?`);
     process.exit(pub.status ?? 1);
