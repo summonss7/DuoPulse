@@ -173,6 +173,18 @@ pub struct UpdaterStatusResult {
     pub pending: Option<UpdateInfo>,
 }
 
+/// Marker-тип события updater:check_done (duopulse-067): итог каждой проверки
+/// фида — автопроверки старта и ручных; бейдж найденного обновления на кнопке
+/// «⋮» зажигается/гаснет по нему (available=false — «последняя версия» или
+/// отказ сети — гасит: pending в книге проверок очищается тем же переходом).
+#[derive(Debug, Clone)]
+pub struct UpdaterCheckDoneEvent;
+
+impl crate::bridge::BridgeEvent for UpdaterCheckDoneEvent {
+    const NAME: &'static str = "updater:check_done";
+    type Payload = UpdaterCheckResult;
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -326,10 +338,14 @@ pub async fn run_check(
     service: &UpdaterService,
     cfg: &UpdaterConfig,
 ) -> UpdaterCheckResult {
-    match try_check(app, cfg).await {
+    let res = match try_check(app, cfg).await {
         Ok((update, source)) => service.found(update.map(Arc::new), source),
         Err(e) => service.failed(e),
-    }
+    };
+    // Итог — событием в UI (duopulse-067): любая проверка (автопроверка
+    // старта и ручная из настроек) обновляет бейдж «⋮» о pending-обновлении.
+    let _ = crate::bridge::emit::<UpdaterCheckDoneEvent>(app, &res);
+    res
 }
 
 async fn try_check(

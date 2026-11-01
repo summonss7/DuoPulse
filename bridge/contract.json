@@ -5522,6 +5522,77 @@
         "type": "object"
       }
     },
+    "updater:check_done": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "UpdateSource": {
+            "description": "Источник фида обновлений (duopulse-049): GitHub Pages (по умолчанию) или зеркало на семейном сервере Aila (updates/duopulse/, aila-163). При недоступности выбранного проверка уходит ко второму (порядок попыток и «кто ответил» — src/updater.rs); установка в любом случае идёт с minisign-подписью, источник меняет только адрес фида и пакета.",
+            "enum": [
+              "github",
+              "aila"
+            ],
+            "type": "string"
+          }
+        },
+        "description": "Итог проверки фида: что нашли (или почему не смогли посмотреть).",
+        "properties": {
+          "available": {
+            "description": "Есть пакет новее текущей версии.",
+            "type": "boolean"
+          },
+          "checkedAtUnix": {
+            "description": "Время проверки, unix-мс.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "dateUnix": {
+            "description": "Дата публикации пакета, unix-секунды (available=true).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "description": "Отказ проверки (сеть/фид/подпись манифеста): available=false.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "description": "Заметки о релизу (available=true, фид указал).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/UpdateSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Источник, ответивший проверкой (github/aila, duopulse-049): выбранной базой или зеркалом-фолбэком; None — ответа не было (error)."
+          },
+          "version": {
+            "description": "Версия найденного пакета (available=true).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "checkedAtUnix",
+          "dateUnix"
+        ],
+        "title": "UpdaterCheckResult",
+        "type": "object"
+      }
+    },
     "vpn:route_changed": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",

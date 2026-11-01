@@ -6,13 +6,17 @@
 // (white-list активной вкладки) и «Обновить списки» (adblock.update_lists).
 // Стиль — единый с контекст-меню вкладки (панель 12px, elevated, гайд 06 §5);
 // открытие закрывает прочие панели хрома (меню вкладки/прокси).
+// Карточка duopulse-067: точка на «⋮» о найденном обновлении (событие
+// updater:check_done; логика — update-badge.ts).
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
-import type { AdblockBlockedCount, AdblockStatusResult } from "../bridge/gen/types";
+import type { AdblockBlockedCount, AdblockStatusResult, UpdaterCheckResult } from "../bridge/gen/types";
+import { updateBadgeState, updateBadgeTitle } from "./update-badge";
 
 const err = (e: unknown): void => console.error("mainmenu:", e);
 const btn = document.getElementById("mainBtn") as HTMLButtonElement;
 const menu = document.getElementById("mainMenu") as HTMLDivElement;
+const updateDot = document.getElementById("updateDot") as HTMLElement | null;
 const adblockToggle = document.getElementById("adblockEnabled") as HTMLInputElement;
 const adblockMeta = document.getElementById("adblockMeta") as HTMLDivElement;
 const adblockSiteBtn = document.getElementById("adblockSite") as HTMLButtonElement;
@@ -168,4 +172,15 @@ void listen<AdblockBlockedCount>(bridge.events.adblockBlockedCount, (ev) => {
   const head = `Заблокировано: ${ev.payload.total}`;
   adblockMeta.textContent = idx && idx > 0 ? head + adblockMeta.textContent!.slice(idx) : head;
   if (lastStatus) lastStatus.blockedTotal = ev.payload.total;
+});
+
+// --- Бейдж найденного обновления (duopulse-067) ------------------------------
+
+void listen<UpdaterCheckResult>(bridge.events.updaterCheckDone, (ev) => {
+  // точка на «⋮» о pending-обновлении: итог любой проверки (автопроверка
+  // старта и ручная из настроек); ошибки/«последняя версия» гасят, установка
+  // перезапускает приложение — индикатора в новом сеансе просто нет.
+  const st = updateBadgeState(ev.payload);
+  if (updateDot) updateDot.hidden = !st.on;
+  btn.title = updateBadgeTitle(st);
 });

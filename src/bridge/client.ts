@@ -347,5 +347,9 @@ export const bridge = {
     /** subtitles.asr_progress (карточка duopulse-060): конвейер
      *  распознавания речи — фазы model/audio/decode/transcribe/done/error. */
     subtitlesAsrProgress: "subtitles:asr_progress",
+    /** updater.check_done (duopulse-067): итог проверки фида (автопроверка
+     *  старта и ручные) — бейдж найденного обновления на «⋮» зажигается/
+     *  гаснет по нему (available=false — «последняя версия» или отказ). */
+    updaterCheckDone: "updater:check_done",
   } as const,
 };

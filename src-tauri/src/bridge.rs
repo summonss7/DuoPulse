@@ -59,6 +59,9 @@ use crate::proxy;
 /// group_rename, group_remove, group_set_sort, group_toggle_bookmark,
 /// bookmark_move}; HistoryBookmark.groups, HistoryBookmarkAddParams.groupId,
 /// HistoryBookmarkListParams.groupId, HistoryHit.group (все с serde-default).
+/// v11 (duopulse-067, без bump — совместимое расширение): событие
+/// updater:check_done (итог проверки фида — автопроверки старта и ручных;
+/// бейдж найденного обновления на кнопке «⋮» главного меню).
 pub const CONTRACT_VERSION: u32 = 11;
 
 // ---------------------------------------------------------------------------
@@ -1419,6 +1422,7 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles:translate_progress": { "payload": schema!(SubtitlesTranslateProgress) },
             "subtitles:translate_unavailable": { "payload": schema!(SubtitlesTranslateUnavailable) },
             "subtitles:asr_progress": { "payload": schema!(crate::asr::pipeline::SubtitlesAsrProgress) },
+            "updater:check_done": { "payload": schema!(crate::updater::UpdaterCheckResult) },
         },
     })
 }
@@ -1512,6 +1516,10 @@ fn event_names_match_registry() {
             (
                 <crate::asr::pipeline::SubtitlesAsrProgressEvent as BridgeEvent>::NAME,
                 schema!(crate::asr::pipeline::SubtitlesAsrProgress),
+            ),
+            (
+                <crate::updater::UpdaterCheckDoneEvent as BridgeEvent>::NAME,
+                schema!(crate::updater::UpdaterCheckResult),
             ),
         ]
         .into_iter()

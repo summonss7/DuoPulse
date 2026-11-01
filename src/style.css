@@ -631,6 +631,27 @@ body {
   }
 }
 
+/* --- Бейдж найденного обновления на «⋮» (duopulse-067; точка как у
+     vpn-щита, «свечение = включено» — гайд 06 §3): pending-обновление
+     зажигает неон, «последняя версия»/ошибка/установка гасят --- */
+#mainBtn {
+  position: relative; /* точка-индикатор — в углу кнопки меню */
+}
+.update-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-neon);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent-neon) 60%, transparent);
+  pointer-events: none;
+}
+.update-dot[hidden] {
+  display: none;
+}
+
 /* --- Панель VPN (задача 6.5, docs/02 §6.2; панель 12px, контролы 8px) --- */
 .vpn-panel {
   position: absolute;
