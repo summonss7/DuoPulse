@@ -4340,6 +4340,6 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
   curl; vitest 208/208 PASS; cargo 281 passed / 0 failed / 3 ignored (windres
   требует MinGW в PATH — D:\tools\mingw64\bin). Временный стенд %TEMP%\
   duopulse-065 удалён.
-- Коммит: <hash> — check: duopulse-065 — комплексная проверка: апдейтер
+- Коммит: 68a0f0b — check: duopulse-065 — комплексная проверка: апдейтер
   подтверждён end-to-end, преролл YouTube = SSAI (блокировщик работает),
   дефект Alt+D на пустом наборе; план — карточки 066–069 (speed 9).
