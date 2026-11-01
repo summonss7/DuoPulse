@@ -4382,4 +4382,4 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
   набор + дорожки готовы» и др.); tsc чисто; cargo 281 passed / 0 failed /
   3 ignored (MinGW D:\tools\mingw64\bin в PATH). Рантайм-артефакт стенда
   altd-timeline.log — в .gitignore.
-- Коммит: <хеш будет указан следующим коммитом>
+- Коммит: 9720e9e — fix: duopulse-066 — Alt+D на пустом наборе собирает дуо-дефолт; инвариант «нет состояния вкл — 0 дорожек»; стенды altd-default/recreate-video; карточка 067
