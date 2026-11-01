@@ -34,6 +34,28 @@ export function defaultSetIds(
   return ids;
 }
 
+/** Решение Alt+D (docs/03 §8 п.2; дефект duopulse-066): «выключить» — только
+ * когда показ реально активен: флаг поднят И набор непуст. Состояние «флаг
+ * поднят, набор пуст» для пользователя — «субтитров нет» (оверлея нет):
+ * решаем «включить», собирая дефолт из списка адаптера, а не снимаем флаг.
+ * ids пуст — включить как есть: восстановить прошлый набор либо (дорожек
+ * нет) просто поднять флаг — включать нечего. */
+export type ToggleDecision = { on: false } | { on: true; ids: string[] };
+
+export function decideToggle(
+  enabled: boolean,
+  hasSetTracks: boolean,
+  list: AdapterTrackList | null,
+  preferred: readonly string[] = PREFERRED_TRANSLATION_LANGS,
+): ToggleDecision {
+  if (enabled && hasSetTracks) return { on: false };
+  if (!hasSetTracks) {
+    const ids = defaultSetIds(list, preferred);
+    if (ids.length > 0) return { on: true, ids };
+  }
+  return { on: true, ids: [] };
+}
+
 /** Те же участники в другом порядке? (multiset-сравнение) — fast-path
  * перестановки набора панелью (задача 3.7): без повторной загрузки дорожек. */
 export function sameMembers(a: readonly string[], b: readonly string[]): boolean {

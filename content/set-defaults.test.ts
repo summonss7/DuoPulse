@@ -1,8 +1,9 @@
 // Тесты дефолтного набора Alt+D (задача 3.7): defaultSetIds — «оригинал +
 // предпочитаемый перевод» из списка адаптера; sameMembers — fast-path
-// перестановки набора панелью.
+// перестановки набора панелью; decideToggle — решение Alt+D (duopulse-066:
+// «флаг поднят, набор пуст» — собрать дефолт, а не снять флаг).
 import { describe, expect, it } from "vitest";
-import { defaultSetIds, sameMembers } from "./set-defaults";
+import { decideToggle, defaultSetIds, sameMembers } from "./set-defaults";
 import type { AdapterTrackList } from "./adapters/types";
 
 const list = (base: Partial<AdapterTrackList["base"][number]>[], translations: string[]): AdapterTrackList => ({
@@ -55,6 +56,40 @@ describe("defaultSetIds (Alt+D на пустом наборе)", () => {
   it("пустой список адаптера — включать нечего", () => {
     expect(defaultSetIds(null)).toEqual([]);
     expect(defaultSetIds(list([], ["ru"]))).toEqual([]);
+  });
+});
+
+describe("decideToggle (Alt+D: дефект duopulse-066)", () => {
+  it("флаг поднят + пустой набор + дорожки готовы — собрать дефолт, а не снять флаг", () => {
+    // Прежний код в этом состоянии выключал показ («вкл — 0 дорожек» → выкл);
+    // для пользователя субтитров нет — первое нажатие должно включать дуо.
+    expect(decideToggle(true, false, list([{ lang: "en", original: true }], ["ru"]))).toEqual({
+      on: true,
+      ids: ["yt:en", "ru"],
+    });
+  });
+
+  it("показ активен (флаг + непустой набор) — выключить, помня состав", () => {
+    expect(decideToggle(true, true, list([{ lang: "en", original: true }], ["ru"]))).toEqual({ on: false });
+  });
+
+  it("флаг снят + непустой набор — включить, восстановив прошлый набор (без дефолта)", () => {
+    expect(decideToggle(false, true, list([{ lang: "en", original: true }], ["ru"]))).toEqual({
+      on: true,
+      ids: [],
+    });
+  });
+
+  it("пустой набор, список дорожек не готов/пуст — включить как есть (включать нечего)", () => {
+    expect(decideToggle(true, false, null)).toEqual({ on: true, ids: [] });
+    expect(decideToggle(false, false, list([], []))).toEqual({ on: true, ids: [] });
+  });
+
+  it("переводов нет — дефолт из одного оригинала", () => {
+    expect(decideToggle(true, false, list([{ lang: "en", original: true }], []))).toEqual({
+      on: true,
+      ids: ["yt:en"],
+    });
   });
 });
 

@@ -32,3 +32,6 @@ e2e/adblock/p07-last-run.txt
 
 # Рантайм-артефакт трассировки P-08 (e2e/perf/p08-trace.mjs)
 e2e/perf/p08-trace-last.json
+
+# Рантайм-артефакт стенда duopulse-066 (e2e/subtitles/altd-default.mjs)
+e2e/subtitles/altd-timeline.log

@@ -81,7 +81,7 @@ import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from ".
 import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import { preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
-import { defaultSetIds, sameMembers } from "./set-defaults";
+import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
 
 (function (): void {
   "use strict";
@@ -153,14 +153,41 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
   let fileTracks: Track[] = [];
   const setMemory = new Map<
     string,
-    { platform: Track[]; asr: Track[]; translate: Track[]; files: Track[] }
+    { platform: Track[]; asr: Track[]; translate: Track[]; files: Track[]; enabled: boolean }
   >();
   const SET_MEMORY_LIMIT = 8;
 
+  /** Запомнить текущее разбиение набора и состояние показа за текущим
+   * видео (LRU): возврат к видео восстановит и состав, и «вкл/выкл» —
+   * docs/03 §8 п.2 «последний набор». */
+  const rememberSetState = (): void => {
+    if (!currentVideo) return;
+    const key = currentVideo.videoKey;
+    setMemory.delete(key); // LRU: освежить порядок
+    setMemory.set(key, {
+      platform: platformTracks,
+      asr: asrTracks,
+      translate: translateTracks,
+      files: fileTracks,
+      enabled,
+    });
+    while (setMemory.size > SET_MEMORY_LIMIT) {
+      setMemory.delete(setMemory.keys().next().value as string);
+    }
+  };
+
   /** Показ включён (задача 3.7, docs/03 §8 п.2: Alt+D — «выключить, помня
    * последний набор»): при false движок получает пустой набор, состав и
-   * набор-память живут — включение восстанавливает показ без перезагрузки. */
+   * набор-память живут — включение восстанавливает показ без перезагрузки.
+   * Инвариант duopulse-066: в покое true только при непустом наборе —
+   * «вкл — 0 дорожек» не возникает, кнопка duo не врёт. */
   let enabled = true;
+
+  /** В наборе есть хоть одна дорожка (любой части)? Видимое пользователю
+   * «показано» = enabled && hasSetTracks() — решение Alt+D по нему
+   * (duopulse-066), а не по флагу одному. */
+  const hasSetTracks = (): boolean =>
+    platformTracks.length > 0 || asrTracks.length > 0 || translateTracks.length > 0 || fileTracks.length > 0;
 
   /** Единая точка смены набора: движок + гашение нативного показа. */
   const applyTracks = (tracks: Track[]): void => {
@@ -227,51 +254,61 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
         dropped: droppedFiles,
       });
     }
+    // Честность флага (duopulse-066): явное изменение состава (панель, дефолт
+    // Alt+D, файлы, перевод, ASR) включает показ, опустошение набора (сняли
+    // последнюю дорожку) выключает — состояния «вкл — 0 дорожек» не возникает.
+    enabled = tracks.length > 0;
     applyTracks(enabled ? tracks : []);
-    if (currentVideo) {
-      const key = currentVideo.videoKey;
-      setMemory.delete(key); // LRU: освежить порядок
-      setMemory.set(key, {
-        platform: platformTracks,
-        asr: asrTracks,
-        translate: translateTracks,
-        files: fileTracks,
-      });
-      while (setMemory.size > SET_MEMORY_LIMIT) {
-        setMemory.delete(setMemory.keys().next().value as string);
-      }
-    }
+    rememberSetState();
     reportSetState(via);
   };
 
-  /** Переключение показа (docs/03 §8 п.2): выключить — погасить, состав
-   * помним; включить — восстановить, а на пустом наборе собрать дефолт
-   * «оригинал + предпочитаемый перевод» (сценарий §5.1: Alt+D на свежей
-   * лекции даёт дуо en+ru). Работает только при детектированном видео. */
-  const toggleSubs = (via: string): void => {
-    if (!currentVideo) return;
-    if (enabled) {
-      enabled = false;
-      applyTracks([]);
-      reportSetState(via);
-      return;
-    }
+  /** Выключить показ (docs/03 §8 п.2): погасить, состав набора помним —
+   * включение восстановит его без перезагрузки. Состояние «выкл» уходит в
+   * набор-память: возврат к видео не включит показ сам. */
+  const disableSubs = (via: string): void => {
+    enabled = false;
+    applyTracks([]);
+    rememberSetState();
+    reportSetState(via);
+  };
+
+  /** Включить показ: восстановить набор, на пустом собрать дефолт
+   * «оригинал + предпочитаемый перевод» (сценарий docs/01 §5.1: Alt+D на
+   * свежей лекции даёт дуо en+ru; предпочитаемый язык — из настроек профиля,
+   * задача 5.1, window.__DUOPULSE_DEFAULTS__ от Core). */
+  const enableSubs = (via: string): void => {
     enabled = true;
-    if (
-      platformTracks.length === 0 &&
-      asrTracks.length === 0 &&
-      translateTracks.length === 0 &&
-      fileTracks.length === 0
-    ) {
-      // Дефолт-набор Alt+D: предпочитаемый язык перевода — из настроек
-      // профиля (задача 5.1, window.__DUOPULSE_DEFAULTS__ от Core).
+    if (!hasSetTracks()) {
       const ids = defaultSetIds(trackList, preferredLangs());
       if (ids.length > 0) {
-        void selectTracks(ids, via); // применит и отчитает (set-state)
+        void selectTracks(ids, via); // применит и отчитет (set-state)
         return;
       }
     }
     applySet(via);
+  };
+
+  /** Переключение показа (Alt+D, docs/03 §8 п.2): решение decideToggle —
+   * «выключить» только при активном показе (флаг + непустой набор);
+   * «флаг поднят, набор пуст» — это «не показано» (duopulse-066): включаем,
+   * собирая дефолт, а не снимаем флаг. Работает только при детектированном
+   * видео. */
+  const toggleSubs = (via: string): void => {
+    if (!currentVideo) return;
+    if (decideToggle(enabled, hasSetTracks(), trackList, preferredLangs()).on) enableSubs(via);
+    else disableSubs(via);
+  };
+
+  /** Явное включение/выключение (панель subtitles.set_enabled, e2e): «выкл»
+   * гасит всегда; «вкл» на пустом наборе собирает дефолт даже при уже
+   * поднятом флаге (duopulse-066). */
+  const setSubsEnabled = (on: boolean, via: string): void => {
+    if (on) {
+      if (!enabled || !hasSetTracks()) enableSubs(via);
+    } else if (enabled) {
+      disableSubs(via);
+    }
   };
 
   const parser = createCoreParser();
@@ -371,6 +408,15 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
         // Список дорожек принадлежит прошлому видео — сброс до свежего
         // (придёт с onYouTubeVideo; дефолт-набор Alt+D не соберётся по чужому).
         trackList = null;
+        // Запомненное видео восстанавливает и набор, и состояние показа
+        // («последний набор», docs/03 §8 п.2). Новое видео без набора —
+        // показ честно выключен (duopulse-066): флаг не поднимаем «впустую»
+        // (иначе кнопка duo выглядит включённой без оверлея, а первый Alt+D
+        // приходилось тратить на «выключение»); Alt+D соберёт дефолт
+        // «оригинал + ru» с первого нажатия. Переходный детект (ключ ещё
+        // без длительности) в память промахивается — уточнённый детект
+        // следом восстановит показ запомненного видео.
+        enabled = mem ? mem.enabled : false;
         applyTracks(enabled ? lastSetTracks() : []);
         engine.attach(video.el);
         reportSetState("video");
@@ -469,10 +515,12 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
 
   // Переключение показа (панель 3.7: subtitles.set_enabled/toggle → Core eval;
   // без detail — «переключить», путь Alt+D из хрома — там свой keydown).
+  // Явный запрос идёт через setSubsEnabled: «вкл» на пустом наборе собирает
+  // дефолт даже при поднятом флаге (duopulse-066).
   document.addEventListener("duopulse-toggle", (e) => {
     const detail = (e as CustomEvent<{ enabled?: unknown; via?: unknown }>).detail;
     if (detail && typeof detail.enabled === "boolean") {
-      if (detail.enabled !== enabled) toggleSubs(typeof detail.via === "string" ? detail.via : "panel");
+      setSubsEnabled(detail.enabled, typeof detail.via === "string" ? detail.via : "panel");
     } else {
       toggleSubs("alt-d");
     }
@@ -637,6 +685,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
       asrTracks: { id: string; lang: string; cues: number }[];
       translateTracks: { id: string; lang: string; cues: number }[];
       fileTracks: { id: string; lang: string; cues: number }[];
+      setMemory: { key: string; enabled: boolean; tracks: number }[];
       cloud: ReturnType<typeof cloudTranslateStatus>;
       asr: ReturnType<typeof asrStatus>;
     } {
@@ -653,6 +702,11 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
         asrTracks: asrTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
         translateTracks: translateTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
         fileTracks: fileTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
+        setMemory: [...setMemory.entries()].map(([key, m]) => ({
+          key,
+          enabled: m.enabled,
+          tracks: m.platform.length + m.asr.length + m.translate.length + m.files.length,
+        })),
         cloud: cloudTranslateStatus(),
         asr: asrStatus(),
       };
@@ -683,7 +737,7 @@ import { defaultSetIds, sameMembers } from "./set-defaults";
     selectTracks,
     /** Переключить показ (диагностика/e2e пути панели). */
     setEnabled(on: boolean): void {
-      if (on !== enabled) toggleSubs("test");
+      setSubsEnabled(on, "test");
     },
     /** Убрать файловые дорожки набора (панель/e2e): платформенные остаются. */
     clearFiles(): void {

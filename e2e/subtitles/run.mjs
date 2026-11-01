@@ -56,7 +56,9 @@
 //      закрылась, кнопка погасла;
 //  36) Alt+D снова: последний набор восстановлен, панель открылась;
 //  37) Alt+D из хрома (subtitles.toggle) + subtitles.set_enabled(true);
-//  38) subtitles.remove_track: дорожка снята, кнопка скрылась;
+//  38) subtitles.remove_track: дорожка снята, кнопка остаётся видимой
+//      (duopulse-057); пустой набор после remove — показ честно выкл
+//      (duopulse-066: «вкл — 0 дорожек» больше не возникает);
 //  39) subtitles.set_tracks fast-path: перестановка без перезагрузки;
 //  40) панельные контроли: слайдер сдвига = offset, размер/позиция — стиль;
 //  41) журнал событий subtitles:set_applied (dev-хук __duopulseSubtitlesEvents).
@@ -285,7 +287,19 @@ const waitForPage = async (ws, expr, timeoutMs, what) => {
   for (;;) {
     const v = await evalIn(ws, expr);
     if (v) return v;
-    if (Date.now() - t0 > timeoutMs) throw new Error(`не дождались: ${what}`);
+    if (Date.now() - t0 > timeoutMs) {
+      // диагностика: последнее состояние страницы на момент таймаута
+      let last = "";
+      try {
+        const s = await evalIn(ws, `window.__duopulseContent?.state()`);
+        last = s
+          ? ` [key=${s.videoKey} enabled=${s.enabled} tracks=${s.engine.trackCount} mem=${JSON.stringify(s.setMemory)}]`
+          : " [__duopulseContent нет]";
+      } catch {
+        /* страница недоступна */
+      }
+      throw new Error(`не дождались: ${what}${last}`);
+    }
     await sleep(100);
   }
 };
@@ -2082,7 +2096,9 @@ try {
   );
   check(
     "журнал событий subtitles:set_applied: alt-d/panel/remove/select с составами",
-    evLog.includes("alt-d:off:1") && evLog.includes("alt-d:on:1") && evLog.includes("panel:on:1") && evLog.includes("remove:on:0") && evLog.includes("select:on:2"),
+    // duopulse-066: снятие последней дорожки (remove) честно выключает показ
+    // (enabled=false при пустом наборе) — раньше оставалось remove:on:0
+    evLog.includes("alt-d:off:1") && evLog.includes("alt-d:on:1") && evLog.includes("panel:on:1") && evLog.includes("remove:off:0") && evLog.includes("select:on:2"),
     JSON.stringify(evLog.slice(-8)),
   );
 
