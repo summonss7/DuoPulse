@@ -697,6 +697,36 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                     };
                     post_to_page(sender.as_ref(), &reply);
                 }
+            } else if parsed["duopulse"] == "font-request" {
+                // Гарнитура субтитров (карточка duopulse-068): контент-оверлей
+                // живёт в контексте страницы, где фирменные @font-face не
+                // загружены (CSP) — Core отдаёт woff2-сабсеты гарнитуры base64,
+                // контент регистрирует их FontFace'ами из ArrayBuffer (без
+                // сетевой загрузки — CSP не подчинён). Один запрос на гарнитуру
+                // на вкладку: контент кеширует по имени.
+                if let Some(family) = parsed["family"].as_str() {
+                    let faces = subtitles::fonts::family_faces(family);
+                    let reply = if faces.is_empty() {
+                        serde_json::json!({
+                            "duopulse": "font-data",
+                            "family": family,
+                            "ok": false,
+                            "error": "гарнитура не требует доставки",
+                        })
+                    } else {
+                        serde_json::json!({
+                            "duopulse": "font-data",
+                            "family": family,
+                            "ok": true,
+                            "faces": faces.iter().map(|f| serde_json::json!({
+                                "weight": f.weight,
+                                "unicodeRange": f.unicode_range,
+                                "data": subtitles::fonts::base64(f.data),
+                            })).collect::<Vec<_>>(),
+                        })
+                    };
+                    post_to_page(sender.as_ref(), &reply);
+                }
             } else if parsed["duopulse"] == "translate-track" {
                 // Перевод дорожки облаком (задача 4.2): cues — у content-слоя,
                 // конвейер (кэш → пачки → провайдер → кэш) — src/translate/.
@@ -852,6 +882,16 @@ fn parse_set_state(value: &serde_json::Value) -> subtitles::service::TabSubtitle
         let defaults = subtitles::service::SubtitlesStyleInfo::default();
         st.style = subtitles::service::SubtitlesStyleInfo {
             font_scale_pct: json_u32(&style, "fontScalePct"),
+            // Гарнитура (карточка 068): старые бандлы поле не шлют — дефолт
+            // Inter; неизвестное значение тоже молча дефолтится.
+            font_family: {
+                let f = json_str(&style, "fontFamily");
+                if subtitles::fonts::is_valid_family(&f) {
+                    f
+                } else {
+                    defaults.font_family
+                }
+            },
             position: {
                 let p = json_str(&style, "position");
                 if p.is_empty() {

@@ -900,12 +900,15 @@ pub struct SubtitlesTranslateTrackParams {
 
 /// Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля
 /// не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета
-/// строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool).
+/// строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool),
+/// гарнитура — duopulse-068 (Inter | JetBrains Mono | system).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtitlesStylePatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_scale_pct: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

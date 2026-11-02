@@ -50,6 +50,7 @@ describe("baseStyle (задача 5.1)", () => {
     );
     expect(style).toEqual({
       fontScalePct: 130,
+      fontFamily: "Inter",
       position: "top",
       marginPct: 4,
       plateOpacity: 0.9,

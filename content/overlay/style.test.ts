@@ -5,11 +5,13 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SUBTITLE_STYLE,
+  FONT_FAMILY_VALUES,
   MARGIN_MAX_PCT,
   PLATE_MAX_SHARE,
   SCALE_MAX_PCT,
   SCALE_MIN_PCT,
   clampColor,
+  cssFontFamily,
   fitStepPct,
   hexToRgba,
   mergeStyle,
@@ -20,9 +22,10 @@ import {
 } from "./style";
 
 describe("mergeStyle — настройки отображения с клампами", () => {
-  it("дефолт: низ, масштаб 100%, отступ 6%, подложка 0,78, фирменные цвета, обводка (гайд 06 §6)", () => {
+  it("дефолт: Inter, низ, масштаб 100%, отступ 6%, подложка 0,78, фирменные цвета, обводка (гайд 06 §6)", () => {
     expect(DEFAULT_SUBTITLE_STYLE).toEqual({
       fontScalePct: 100,
+      fontFamily: "Inter",
       position: "bottom",
       marginPct: 6,
       plateOpacity: 0.78,
@@ -43,6 +46,10 @@ describe("mergeStyle — настройки отображения с кламп
       ...DEFAULT_SUBTITLE_STYLE,
       fontScalePct: 160,
     });
+    expect(mergeStyle(DEFAULT_SUBTITLE_STYLE, { fontFamily: "JetBrains Mono" })).toEqual({
+      ...DEFAULT_SUBTITLE_STYLE,
+      fontFamily: "JetBrains Mono",
+    });
   });
 
   it("масштаб клампится 75–300, отступ 0–25, подложка 0,2–1 (docs/03 §5)", () => {
@@ -61,6 +68,28 @@ describe("mergeStyle — настройки отображения с кламп
     });
     expect(patched.position).toBe("bottom");
     expect(patched.fontScalePct).toBe(DEFAULT_SUBTITLE_STYLE.fontScalePct);
+  });
+});
+
+describe("fontFamily — гарнитура плашки (карточка duopulse-068)", () => {
+  it("список: только фирменные с кириллическими сабсетами + системная", () => {
+    expect(FONT_FAMILY_VALUES).toEqual(["Inter", "JetBrains Mono", "system"]);
+  });
+
+  it("mergeStyle принимает значения из списка, мусор игнорирует", () => {
+    expect(mergeStyle(DEFAULT_SUBTITLE_STYLE, { fontFamily: "system" }).fontFamily).toBe("system");
+    expect(mergeStyle(DEFAULT_SUBTITLE_STYLE, { fontFamily: "Comic Sans" }).fontFamily).toBe("Inter");
+    expect(
+      mergeStyle({ ...DEFAULT_SUBTITLE_STYLE, fontFamily: "system" }, { position: "top" }).fontFamily,
+    ).toBe("system");
+  });
+
+  it("cssFontFamily: именная гарнитура с фолбэком, system — системный стек", () => {
+    expect(cssFontFamily("Inter")).toBe("Inter, 'Segoe UI', system-ui, sans-serif");
+    expect(cssFontFamily("JetBrains Mono")).toBe("'JetBrains Mono', Consolas, 'Courier New', monospace");
+    expect(cssFontFamily("system")).toBe("system-ui, 'Segoe UI', sans-serif");
+    // неизвестное значение — стек дефолта Inter (снисходительно)
+    expect(cssFontFamily("Comic Sans")).toBe("Inter, 'Segoe UI', system-ui, sans-serif");
   });
 });
 

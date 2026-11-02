@@ -19,9 +19,11 @@
 
 import type { ActiveRow } from "../engine/subtitles-engine";
 import { baseStyle } from "../defaults";
+import { ensureFontFamilyLoaded } from "../fonts";
 import {
   MARGIN_MAX_PCT,
   PLATE_MAX_SHARE,
+  cssFontFamily,
   fitStepPct,
   plateBackground,
   plateFontSizeCss,
@@ -223,7 +225,11 @@ export class SubtitlesOverlay {
     if (!this.plate) return;
     const p = this.plate.style;
     p.fontSize = plateFontSizeCss(this.autoPct);
+    p.fontFamily = cssFontFamily(this.style.fontFamily);
     p.background = plateBackground(this.style.plateOpacity, this.style.plateColor);
+    // Гарнитура (карточка 068): именные сабсеты в контексте страницы не
+    // загружены — попросить Core (один запрос на гарнитуру, дальше Set).
+    ensureFontFamilyLoaded(this.style.fontFamily);
   }
 
   private ensureDom(): void {
@@ -246,7 +252,6 @@ export class SubtitlesOverlay {
     p.padding = "8px 16px";
     p.borderRadius = "6px"; // гайд 06 §6
     p.backdropFilter = "blur(2px)"; // гайд 06 §6
-    p.fontFamily = "Inter, 'Segoe UI', system-ui, sans-serif";
     p.textAlign = "center";
     p.whiteSpace = "pre-wrap"; // многострочные cue
     p.lineHeight = "1.3";

@@ -12,10 +12,13 @@
 // #rrggbb (канонизация в clampColor: #RGB и uppercase допустимы на входе).
 
 /** Настройки отображения субтитров (docs/03 §6: размер, позиция, прозрачность,
- * цвета строк и подложки, обводка — duopulse-059). */
+ * цвета строк и подложки, обводка — duopulse-059; гарнитура — duopulse-068). */
 export interface SubtitleStyle {
   /** Масштаб кегля, %: 75–300, шаг 10 (колесо мыши, docs/03 §5). */
   fontScalePct: number;
+  /** Гарнитура плашки: значение FONT_FAMILY_VALUES (карточка 068; сабсеты
+   * доставляет Core по запросу fonts.ts — font-request/font-data). */
+  fontFamily: string;
   /** Позиция плашки: низ (по умолчанию) или верх (docs/03 §5). */
   position: "bottom" | "top";
   /** Отступ от края видео, % его высоты (docs/03 §5 «отступ»). */
@@ -36,6 +39,7 @@ export interface SubtitleStyle {
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   fontScalePct: 100,
+  fontFamily: "Inter",
   position: "bottom",
   marginPct: 6,
   plateOpacity: 0.78,
@@ -50,6 +54,20 @@ export const SCALE_MIN_PCT = 75;
 export const SCALE_MAX_PCT = 300;
 export const SCALE_STEP_PCT = 10;
 export const MARGIN_MAX_PCT = 25;
+
+/** Гарнитуры плашки (карточка 068): только фирменные с кириллическими
+ * сабсетами (src/theme/fonts: Inter, JetBrains Mono — cyrillic+latin,
+ * Space Grotesk кириллицы не имеет) плюс системная без доставки. */
+export const FONT_FAMILY_VALUES = ["Inter", "JetBrains Mono", "system"] as const;
+
+/** CSS-строка font-family для значения стиля: именная гарнитура с системным
+ * фолбэком (пока сабсет не дошёл / глиф вне диапазонов), «system» — чисто
+ * системный стек. */
+export function cssFontFamily(family: string): string {
+  if (family === "JetBrains Mono") return `'JetBrains Mono', Consolas, 'Courier New', monospace`;
+  if (family === "system") return `system-ui, 'Segoe UI', sans-serif`;
+  return `Inter, 'Segoe UI', system-ui, sans-serif`; // Inter — дефолт
+}
 
 const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v));
 
@@ -82,6 +100,9 @@ export function hexToRgba(hex: string, alpha: number): string {
 export function mergeStyle(base: SubtitleStyle, patch: Partial<SubtitleStyle>): SubtitleStyle {
   return {
     fontScalePct: clamp(Math.round(numOf(patch.fontScalePct, base.fontScalePct)), SCALE_MIN_PCT, SCALE_MAX_PCT),
+    fontFamily: (FONT_FAMILY_VALUES as readonly string[]).includes(patch.fontFamily as string)
+      ? (patch.fontFamily as string)
+      : base.fontFamily,
     position: patch.position === "top" || patch.position === "bottom" ? patch.position : base.position,
     marginPct: clamp(Math.round(numOf(patch.marginPct, base.marginPct)), 0, MARGIN_MAX_PCT),
     plateOpacity: clamp(numOf(patch.plateOpacity, base.plateOpacity), 0.2, 1),

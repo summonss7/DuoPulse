@@ -207,6 +207,8 @@ pub fn save_search(dir: &Path, cfg: &SearchConfig) -> Result<(), String> {
 pub struct SubtitlesStyleDefaults {
     /// Масштаб кегля, % (75–300).
     pub font_scale_pct: u32,
+    /// Гарнитура плашки: Inter | JetBrains Mono | system (карточка 068).
+    pub font_family: String,
     /// Позиция плашки: bottom|top.
     pub position: String,
     /// Отступ от края видео, % высоты (0–25).
@@ -246,6 +248,7 @@ impl Default for SubtitlesStyleDefaults {
     fn default() -> Self {
         Self {
             font_scale_pct: 100,
+            font_family: "Inter".into(),
             position: "bottom".into(),
             margin_pct: 6,
             plate_opacity: 0.78,
@@ -290,6 +293,9 @@ impl SubtitlesConfig {
         if self.style.position != "top" {
             self.style.position = "bottom".into();
         }
+        if !crate::subtitles::fonts::is_valid_family(&self.style.font_family) {
+            self.style.font_family = "Inter".into();
+        }
         self.style.font_scale_pct = self.style.font_scale_pct.clamp(75, 300);
         self.style.margin_pct = self.style.margin_pct.min(25);
         self.style.plate_opacity = self.style.plate_opacity.clamp(0.2, 1.0);
@@ -325,6 +331,7 @@ pub fn content_defaults_script(dir: &Path) -> String {
             "defaultTranslationLang": subs.default_translation_lang,
             "style": {
                 "fontScalePct": subs.style.font_scale_pct,
+                "fontFamily": subs.style.font_family,
                 "position": subs.style.position,
                 "marginPct": subs.style.margin_pct,
                 "plateOpacity": subs.style.plate_opacity,
@@ -559,6 +566,7 @@ mod tests {
             default_translation_lang: "  ES ".into(),
             style: SubtitlesStyleDefaults {
                 font_scale_pct: 999,
+                font_family: "Comic Sans".into(), // не из списка — дефолт Inter
                 position: "top".into(),
                 margin_pct: 90,
                 plate_opacity: 5.0,
@@ -572,6 +580,7 @@ mod tests {
         .normalized();
         assert_eq!(cfg.default_translation_lang, "es");
         assert_eq!(cfg.style.font_scale_pct, 300, "кламп кегля");
+        assert_eq!(cfg.style.font_family, "Inter", "гарнитура не из списка — дефолт");
         assert_eq!(cfg.style.position, "top");
         assert_eq!(cfg.style.margin_pct, 25, "кламп отступа");
         assert_eq!(cfg.style.plate_opacity, 1.0, "кламп непрозрачности");
@@ -632,6 +641,7 @@ mod tests {
                 default_translation_lang: "uk".into(),
                 style: SubtitlesStyleDefaults {
                     font_scale_pct: 120,
+                    font_family: "JetBrains Mono".into(),
                     position: "top".into(),
                     margin_pct: 4,
                     plate_opacity: 0.9,
@@ -651,6 +661,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(json).expect("JSON-литерал валиден");
         assert_eq!(parsed["subtitles"]["defaultTranslationLang"], "uk");
         assert_eq!(parsed["subtitles"]["style"]["fontScalePct"], 120);
+        assert_eq!(parsed["subtitles"]["style"]["fontFamily"], "JetBrains Mono");
         assert_eq!(parsed["subtitles"]["style"]["originalColor"], "#ffdd33");
         assert_eq!(parsed["subtitles"]["style"]["plateColor"], "#000000");
         assert_eq!(parsed["subtitles"]["style"]["textStroke"], false);

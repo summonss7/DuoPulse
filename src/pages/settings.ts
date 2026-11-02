@@ -32,6 +32,7 @@ const err = (e: unknown): void => console.error("settings-page:", e);
 interface SubtitlesForm {
   lang: string;
   fontScalePct: number;
+  fontFamily: string;
   position: string;
   marginPct: number;
   plateOpacity: number;
@@ -150,6 +151,19 @@ export function initSettingsPage(): void {
   scale.step = "5";
   const scaleVal = el("span", "set-range-val");
   scale.addEventListener("input", () => (scaleVal.textContent = pct(Number(scale.value))));
+  // Гарнитура (карточка duopulse-068): только фирменные с кириллическими
+  // сабсетами (Inter, JetBrains Mono) плюс системная.
+  const fontSel = document.createElement("select");
+  for (const [value, text] of [
+    ["Inter", "Inter"],
+    ["JetBrains Mono", "JetBrains Mono"],
+    ["system", "Системная"],
+  ] as const) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = text;
+    fontSel.append(opt);
+  }
   const margin = document.createElement("input");
   margin.type = "range";
   margin.min = "0";
@@ -237,6 +251,7 @@ export function initSettingsPage(): void {
   subs.body.append(
     field("Язык перевода по умолчанию", langInput, "код из 2–3 букв (ru, es, pt-br)"),
     field("Размер плашки", scale),
+    field("Гарнитура плашки", fontSel, "фирменные с кириллицей или системная"),
     field("Позиция плашки", posSeg),
     field("Отступ от края видео", margin),
     field("Непрозрачность подложки", opacity),
@@ -257,6 +272,7 @@ export function initSettingsPage(): void {
   const subsForm = (): SubtitlesForm => ({
     lang: langInput.value.trim(),
     fontScalePct: Number(scale.value),
+    fontFamily: fontSel.value,
     position: posTop.classList.contains("on") ? "top" : "bottom",
     marginPct: Number(margin.value),
     ...lookForm(),
@@ -273,6 +289,7 @@ export function initSettingsPage(): void {
           defaultTranslationLang: form.lang,
           style: {
             fontScalePct: form.fontScalePct,
+            fontFamily: form.fontFamily,
             position: form.position,
             marginPct: form.marginPct,
             plateOpacity: form.plateOpacity,
@@ -1148,6 +1165,7 @@ export function initSettingsPage(): void {
       langInput.value = all.subtitles.defaultTranslationLang ?? "ru";
       scale.value = String(st.fontScalePct ?? 100);
       scaleVal.textContent = pct(st.fontScalePct ?? 100);
+      fontSel.value = st.fontFamily ?? "Inter";
       segSet(st.position ?? "bottom");
       margin.value = String(st.marginPct ?? 6);
       marginVal.textContent = pct(st.marginPct ?? 6);

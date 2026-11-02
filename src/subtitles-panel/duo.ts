@@ -76,6 +76,7 @@ const state: DuoState = {
   offsetMs: 0,
   style: {
     fontScalePct: 100,
+    fontFamily: "Inter",
     position: "bottom",
     marginPct: 6,
     plateOpacity: 0.78,
@@ -270,6 +271,8 @@ function renderStyle(): void {
   const val = document.getElementById("duoScaleVal") as HTMLElement;
   slider.value = String(state.style.fontScalePct);
   val.textContent = `${state.style.fontScalePct}%`;
+  const fontSel = document.getElementById("duoFontFamily") as HTMLSelectElement;
+  if (state.style.fontFamily) fontSel.value = state.style.fontFamily;
   for (const b of (document.getElementById("duoPosition") as HTMLElement).children) {
     (b as HTMLElement).dataset.on = String((b as HTMLElement).dataset.pos === state.style.position);
   }
@@ -566,6 +569,12 @@ export function initDuo(): void {
   });
   scaleSlider.addEventListener("change", () => {
     void bridge.subtitles.setStyle({ style: { fontScalePct: Number(scaleSlider.value) } }).catch(err);
+  });
+  // Гарнитура (карточка 068): живая смена — set-style патчит fontFamily,
+  // оверлей перекладывает font-family плашки на месте (строки наследуют).
+  (document.getElementById("duoFontFamily") as HTMLSelectElement).addEventListener("change", (e) => {
+    const family = (e.target as HTMLSelectElement).value;
+    void bridge.subtitles.setStyle({ style: { fontFamily: family } }).catch(err);
   });
   (document.getElementById("duoPosition") as HTMLElement).addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>("[data-pos]");

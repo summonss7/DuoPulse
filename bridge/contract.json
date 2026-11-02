@@ -1655,6 +1655,7 @@
                   }
                 ],
                 "default": {
+                  "fontFamily": "Inter",
                   "fontScalePct": 100,
                   "marginPct": 6,
                   "mutedColor": "#ffffff",
@@ -1672,6 +1673,11 @@
           "SubtitlesStyleDefaults": {
             "description": "Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle). Цвета строк/плашки и обводка — карточка duopulse-059; serde(default) на контейнере: старые settings.json без новых полей читаются с дефолтами.",
             "properties": {
+              "fontFamily": {
+                "default": "Inter",
+                "description": "Гарнитура плашки: Inter | JetBrains Mono | system (карточка 068).",
+                "type": "string"
+              },
               "fontScalePct": {
                 "default": 100,
                 "description": "Масштаб кегля, % (75–300).",
@@ -2214,6 +2220,7 @@
                   }
                 ],
                 "default": {
+                  "fontFamily": "Inter",
                   "fontScalePct": 100,
                   "marginPct": 6,
                   "mutedColor": "#ffffff",
@@ -2231,6 +2238,11 @@
           "SubtitlesStyleDefaults": {
             "description": "Стиль плашки для новых вкладок: значения — та же модель, что в content- оверлее (docs/03 §5); клампы при применении — в content-слое (mergeStyle). Цвета строк/плашки и обводка — карточка duopulse-059; serde(default) на контейнере: старые settings.json без новых полей читаются с дефолтами.",
             "properties": {
+              "fontFamily": {
+                "default": "Inter",
+                "description": "Гарнитура плашки: Inter | JetBrains Mono | system (карточка 068).",
+                "type": "string"
+              },
               "fontScalePct": {
                 "default": 100,
                 "description": "Масштаб кегля, % (75–300).",
@@ -2720,8 +2732,12 @@
             "type": "object"
           },
           "SubtitlesStyleInfo": {
-            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059.",
+            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059, гарнитура — duopulse-068.",
             "properties": {
+              "fontFamily": {
+                "description": "Гарнитура плашки: Inter | JetBrains Mono | system (карточка 068; список — subtitles::fonts::FONT_FAMILY_VALUES, дефолт Inter).",
+                "type": "string"
+              },
               "fontScalePct": {
                 "description": "Масштаб кегля, %: 75–300 (docs/03 §5).",
                 "format": "uint32",
@@ -2765,6 +2781,7 @@
               }
             },
             "required": [
+              "fontFamily",
               "fontScalePct",
               "marginPct",
               "mutedColor",
@@ -2968,8 +2985,14 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
           "SubtitlesStylePatch": {
-            "description": "Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool).",
+            "description": "Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool), гарнитура — duopulse-068 (Inter | JetBrains Mono | system).",
             "properties": {
+              "fontFamily": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "fontScalePct": {
                 "format": "uint32",
                 "minimum": 0.0,
@@ -5166,8 +5189,12 @@
             "type": "object"
           },
           "SubtitlesStyleInfo": {
-            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059.",
+            "description": "Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059, гарнитура — duopulse-068.",
             "properties": {
+              "fontFamily": {
+                "description": "Гарнитура плашки: Inter | JetBrains Mono | system (карточка 068; список — subtitles::fonts::FONT_FAMILY_VALUES, дефолт Inter).",
+                "type": "string"
+              },
               "fontScalePct": {
                 "description": "Масштаб кегля, %: 75–300 (docs/03 §5).",
                 "format": "uint32",
@@ -5211,6 +5238,7 @@
               }
             },
             "required": [
+              "fontFamily",
               "fontScalePct",
               "marginPct",
               "mutedColor",

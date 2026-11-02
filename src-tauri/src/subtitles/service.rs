@@ -60,12 +60,15 @@ pub struct AppliedTrackInfo {
 
 /// Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей
 /// применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и
-/// обводка — карточка duopulse-059.
+/// обводка — карточка duopulse-059, гарнитура — duopulse-068.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtitlesStyleInfo {
     /// Масштаб кегля, %: 75–300 (docs/03 §5).
     pub font_scale_pct: u32,
+    /// Гарнитура плашки: Inter | JetBrains Mono | system (карточка 068;
+    /// список — subtitles::fonts::FONT_FAMILY_VALUES, дефолт Inter).
+    pub font_family: String,
     /// bottom | top.
     pub position: String,
     /// Отступ от края видео, % высоты.
@@ -88,6 +91,7 @@ impl Default for SubtitlesStyleInfo {
     fn default() -> Self {
         Self {
             font_scale_pct: 100,
+            font_family: "Inter".to_string(),
             position: "bottom".to_string(),
             margin_pct: 6,
             plate_opacity: 0.78,

@@ -699,6 +699,10 @@ export interface SubtitlesConfig {
  */
 export interface SubtitlesStyleDefaults {
   /**
+   * Гарнитура плашки: Inter | JetBrains Mono | system (карточка 068).
+   */
+  fontFamily?: string;
+  /**
    * Масштаб кегля, % (75–300).
    */
   fontScalePct?: number;
@@ -966,9 +970,13 @@ export interface BaseTrackInfo {
   translatable: boolean;
 }
 /**
- * Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059.
+ * Стиль плашки (docs/03 §6 SubtitleStyle): панель редактирует, оверлей применяет; здесь — последнее сообщённое значение. Цвета строк/плашки и обводка — карточка duopulse-059, гарнитура — duopulse-068.
  */
 export interface SubtitlesStyleInfo {
+  /**
+   * Гарнитура плашки: Inter | JetBrains Mono | system (карточка 068; список — subtitles::fonts::FONT_FAMILY_VALUES, дефолт Inter).
+   */
+  fontFamily: string;
   /**
    * Масштаб кегля, %: 75–300 (docs/03 §5).
    */
@@ -1083,9 +1091,10 @@ export interface SubtitlesSetStyleParams {
   style: SubtitlesStylePatch;
 }
 /**
- * Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool).
+ * Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool), гарнитура — duopulse-068 (Inter | JetBrains Mono | system).
  */
 export interface SubtitlesStylePatch {
+  fontFamily?: string | null;
   fontScalePct?: number | null;
   marginPct?: number | null;
   mutedColor?: string | null;

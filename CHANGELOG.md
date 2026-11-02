@@ -4430,3 +4430,40 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
   (error → точки нет) покрыт витестом. Временный стенд удалён, процессов
   duopulse.exe не осталось.
 - Коммит: c42e770 — feat: duopulse-067 — бейдж найденного обновления на «⋮»
+
+## 02.11.2026, 04:30 — выбор гарнитуры (шрифта) субтитров: Inter / JetBrains Mono / системная (duopulse-068)
+- Начало работы: 02.11.2026, 04:05
+- Окончание работы: 02.11.2026, 04:30
+- Что сделано: гарнитура плашки субтитров теперь выбирается, а не зашита
+  (пожелание комплексной проверки 065 «можно ли поменять шрифт»).
+  Контракт: SubtitlesStyle.fontFamily (service.rs/bridge.rs/settings, дефолт
+  «Inter»; gen:bridge → контракт v11, поля в патче set_style, дефолтах
+  settings.json и __DUOPULSE_DEFAULTS__). Список — только гарнитуры с
+  кириллическими сабсетами + системная: Inter, JetBrains Mono, «Системная»
+  (Space Grotesk кириллицы не имеет — в список не входит). Контролы: селект
+  «Гарнитура плашки» на «Настройки → Субтитры» и «Гарнитура» в duo-панели
+  рядом с размером (src/pages/settings.ts, src/subtitles-panel/duo.ts,
+  index.html). Применение живое, как цвета (карточка 059): font-family
+  плашки (строки наследуют) перекладывается на месте, узлы не пересоздаются,
+  набор не пере-включается (content/overlay/style.ts cssFontFamily + кламп
+  mergeStyle; overlay.applyPlateStyle). Доставка шрифтов на страницу: контент
+  живёт в контексте сайта, где фирменные @font-face не загружены и CSP чужие
+  data:-шрифты не пускает — новый канал (content/fonts.ts + main.rs):
+  «font-request» WebMessage'ом → Core отвечает «font-data» с woff2-сабсетами
+  400/500 cyrillic+latin base64 (include_bytes! из src/theme/fonts, модуль
+  subtitles/fonts.rs) → контент регистрирует FontFace из ArrayBuffer (без
+  сетевой загрузки, CSP не подчинён), один запрос на гарнитуру на вкладку.
+  Пресеты вида (look-presets) не тронуты — поле вне пресетов.
+- Как проверено: vitest 226/226 PASS (новые: fontFamily-клампы/cssFontFamily
+  в style.test, base64ToBytes/decodeFaces/ensureFontFamilyLoaded в
+  fonts.test, дефолт в defaults.test), tsc чисто; cargo test 283 passed /
+  0 failed (+2: base64/список гарнитур, fontFamily в нормализации и
+  defaults-скрипте). Живой стенд e2e/subtitles/font-family.mjs (постоянный,
+  debug-exe + vite dev, CDP 9237): 7/7 PASS — дефолт Inter в computed
+  font-family; сабсеты Inter реально в document.fonts (font-data доставлен);
+  живая смена на JetBrains Mono меняет computed font-family строк, узлы те
+  же, текст на месте; document.fonts.check 400 и 500 JetBrains Mono = true;
+  «system» — системный стек; мусорное значение игнорируется. Скриншот
+  shot-overlay-font-jetbrains.png приложен. Временный профиль стенда в
+  %TEMP% удалён.
+- Коммит: <будет после коммита>
