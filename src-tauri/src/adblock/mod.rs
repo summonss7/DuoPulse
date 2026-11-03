@@ -105,6 +105,15 @@ const COMPAT_RULES: &str = include_str!("compat.txt");
 /// `COMPAT_RULES` (обновление — пересборкой бинарника).
 const COMPAT_SOURCE: &str = "builtin:";
 
+/// Встроенный список точечных правил uBO quick-fixes (карточка duopulse-069):
+/// снапшот правила serverContract (rpnt-перезапись текстового узла до старта
+/// плеера) — единственный рабочий фронт против SSAI-преролла YouTube
+/// (серверная склейка в SABR-манифесте не видна сетевому/JSON-слою, карточка
+/// 065). Обновление — пересборкой (замена снапшота в quickfix.txt).
+const QUICKFIX_RULES: &str = include_str!("quickfix.txt");
+/// Источник-маркер (как `COMPAT_SOURCE` у compat-списка).
+const QUICKFIX_SOURCE: &str = "builtin-quickfix:";
+
 /// Разобранный набор (один раз на процесс; ошибка формата — печатаем и
 /// работаем без скриптлетов, как до карточки 043).
 fn scriptlet_resources() -> &'static [Resource] {
@@ -140,7 +149,7 @@ struct ListDef {
 /// к P-08, замер 050); откат — убрать имя из списка ниже. До 29.10 доверие
 /// было выключено экспериментом 050 (решение А автора от 22.10).
 fn trusted_list(name: &str) -> bool {
-    matches!(name, "ublock-ads" | "duopulse-compat")
+    matches!(name, "ublock-ads" | "duopulse-compat" | "duopulse-quickfix")
 }
 
 /// Реестр источников: DUOPULSE_ADBLOCK_LISTS (e2e) или DEFAULT_LISTS +
@@ -160,6 +169,13 @@ fn list_defs() -> Vec<ListDef> {
             name: "duopulse-compat".into(),
             source: COMPAT_SOURCE.into(),
             trusted: trusted_list("duopulse-compat"),
+        });
+        // Карточка 069: встроенный снапшот serverContract-правила uBO
+        // quick-fixes (rpnt) — trusted-источник, как compat.
+        defs.push(ListDef {
+            name: "duopulse-quickfix".into(),
+            source: QUICKFIX_SOURCE.into(),
+            trusted: trusted_list("duopulse-quickfix"),
         });
         return defs;
     };
@@ -673,6 +689,10 @@ impl AdblockService {
                 // вкомпилирован; пишем его в кэш для единообразия меток.
                 atomic_write(&path, COMPAT_RULES.as_bytes());
                 (Some(COMPAT_RULES.to_string()), now, String::new())
+            } else if def.source == QUICKFIX_SOURCE {
+                // Встроенный quickfix-снапшот (карточка 069) — тот же паттерн.
+                atomic_write(&path, QUICKFIX_RULES.as_bytes());
+                (Some(QUICKFIX_RULES.to_string()), now, String::new())
             } else if need_fetch {
                 match fetch_list(&def.source) {
                     Ok(t) => {
@@ -1458,6 +1478,11 @@ mod tests {
             "uBO-кураторский список доверен"
         );
         assert_eq!(by_name("duopulse-compat"), Some(true), "compat доверен");
+        assert_eq!(
+            by_name("duopulse-quickfix"),
+            Some(true),
+            "quickfix доверен (карточка 069)"
+        );
         assert_eq!(by_name("easylist"), Some(false), "EasyList — без доверия");
     }
 
@@ -1892,6 +1917,100 @@ mod tests {
         );
     }
 
+    // --- карточка duopulse-069: rpnt-порт (trusted-replace-node-text) ---------
+
+    #[test]
+    fn quickfix_servercontract_rpnt_injected_on_youtube() {
+        // Встроенный quickfix-снапшот (QUICKFIX_RULES, тот же trusted-режим,
+        // что выдаётся списку duopulse-quickfix в refresh_lists): гигантское
+        // правило serverContract инъецируется в injected_script — ранний
+        // doc-start-канал (cosmetic.js) исполнит его до инлайн-скриптов
+        // страницы, до чтения ytInitialPlayerResponse.
+        let mut set = adblock::lists::FilterSet::new(false);
+        set.add_filters(
+            QUICKFIX_RULES.lines(),
+            ParseOptions {
+                permissions: adblock::resources::PermissionMask::from_bits(1),
+                ..ParseOptions::default()
+            },
+        );
+        let mut engine = Engine::from_filter_set(set, true);
+        engine.use_resources(scriptlet_resources().iter().cloned());
+        let s = service();
+        s.set_engine(engine);
+        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        let _ = std::fs::write(
+            std::env::temp_dir().join("duopulse-rpnt-injected.js"),
+            &res.injected_script,
+        );
+        assert!(
+            res.injected_script.contains("trustedReplaceNodeText("),
+            "rpnt-правило quickfix инъецируется на YouTube: {}",
+            &res.injected_script[..res.injected_script.len().min(300)]
+        );
+        // Replacement дошёл целиком (экранирование запятых `\,` из списка
+        // снято движком — normalize_arg): ключевые фрагменты замены на месте,
+        // включая $1-подстановку и НЕэкранированную запятую в хвосте.
+        for needle in [
+            "serverContract",
+            "sedCount",
+            "js_ld",
+            "})();$1",
+            "Promise.prototype.then,i)})();$1",
+        ] {
+            assert!(
+                res.injected_script.contains(needle),
+                "аргументы правила дошли до инъекции: нет {needle:?}"
+            );
+        }
+        let other = s.cosmetic_resources("https://example.com/");
+        assert!(
+            !other.injected_script.contains("trustedReplaceNodeText"),
+            "правило хост-специфично для www.youtube.com"
+        );
+    }
+
+    #[test]
+    fn rpnt_alias_requires_trusted_list() {
+        // uBO-алиас rpnt замаплен на trusted-replace-node-text (базового
+        // replace-node-text в пакете @adguard/scriptlets нет, карточка 069):
+        // из недоверенных списков (EasyList, env-списки e2e) замены с
+        // произвольным JS на страницу не попадают — PermissionMask.
+        let e = scriptlet_engine(&["a.test##+js(rpnt, script, foo, bar)"]);
+        let s = service();
+        s.set_engine(e);
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(
+            !res.injected_script.contains("trustedReplaceNodeText"),
+            "rpnt из untrusted-списка не инъецируется"
+        );
+    }
+
+    #[test]
+    fn trusted_rpfr_alias_resolves() {
+        // Находка ревизии 061: 2 живых правила trusted-rpfr в filters.txt были
+        // мертвы без алиаса — теперь резолвятся в trusted-replace-fetch-response
+        // (из доверенного списка).
+        let mut set = adblock::lists::FilterSet::new(false);
+        set.add_filters(
+            ["a.test##+js(trusted-rpfr, /x/, y)"],
+            ParseOptions {
+                permissions: adblock::resources::PermissionMask::from_bits(1),
+                ..ParseOptions::default()
+            },
+        );
+        let mut engine = Engine::from_filter_set(set, true);
+        engine.use_resources(scriptlet_resources().iter().cloned());
+        let s = service();
+        s.set_engine(engine);
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(
+            res.injected_script.contains("trustedReplaceFetchResponse"),
+            "алиас trusted-rpfr резолвится: {}",
+            &res.injected_script[..res.injected_script.len().min(200)]
+        );
+    }
+
     #[test]
     fn scriptlets_disabled_by_toggle_and_site_exception() {
         let s = service();
@@ -2095,8 +2214,11 @@ mod tests {
         std::env::remove_var("DUOPULSE_ADBLOCK_LISTS");
         let defs = list_defs();
         assert!(defs.iter().any(|d| d.source == COMPAT_SOURCE));
+        assert!(defs.iter().any(|d| d.source == QUICKFIX_SOURCE));
         assert_eq!(
-            defs.iter().filter(|d| d.source != COMPAT_SOURCE).count(),
+            defs.iter()
+                .filter(|d| d.source != COMPAT_SOURCE && d.source != QUICKFIX_SOURCE)
+                .count(),
             DEFAULT_LISTS.len(),
             "сетевые списки не задвоены"
         );

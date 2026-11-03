@@ -36,13 +36,25 @@ const OUT = path.join(ROOT, "src-tauri", "src", "adblock", "scriptlets-resources
 
 // uBO-короткие алиасы, которых нет в names пакета (проверено по живому
 // uBlock filters.txt 15.10.2026: без них непокрыты nobab:15, raf, nee, nofetchif,
-// prune; replace-node-text в пакете только trusted — остаётся непокрытым).
+// prune). trusted-rpfr — находка ревизии 061: 2 живых правила
+// trusted-replace-fetch-response в filters.txt были мертвы без алиаса.
 const UBO_SHORT_ALIASES = {
   nobab: "prevent-bab",
   raf: "prevent-requestAnimationFrame",
   nee: "prevent-eval-if",
   nofetchif: "prevent-fetch",
   prune: "json-prune",
+  "trusted-rpfr": "trusted-replace-fetch-response",
+};
+
+// Собственные uBO-совместимые реализации вместо пакетных (карточка
+// duopulse-069): ключ — каноническое имя пакета, значение — [путь исходника,
+// дополнительные алиасы]. rpnt: AdGuard-порция ждёт (selector, textMatch,
+// pattern, replacement) — лишний textMatch перед pattern — и не знает токены
+// sedCount/excludes/condition/stay, живые uBO-правила quick-fixes/filters.txt
+// через неё молча ломаются; наш порт — uBO-семантика 1:1 (см. rpnt-scriptlet.js).
+const OUR_SCRIPTLETS = {
+  "trusted-replace-node-text": ["scripts/rpnt-scriptlet.js", ["rpnt", "rnt", "trusted-rpnt", "trusted-rnt"]],
 };
 
 const data = JSON.parse(fs.readFileSync(SRC, "utf8"));
@@ -58,21 +70,30 @@ for (const entry of data.scriptlets) {
   if (!decl) throw new Error(`${canonical}: исходник не начинается с function NAME(`);
   const fn = decl[1];
 
-  // Шим: движок вызывает `fn("a1","a2")` — собираем (source, args[]) конвенции AdGuard.
-  const impl = entry.scriptlet.replace(
-    new RegExp(`^function\\s+${fn}\\s*\\(`),
-    `function ${fn}$dp(`,
-  );
-  const content = [
-    `function ${fn}(){`,
-    `return ${fn}$dp({name:${JSON.stringify(canonical)},engine:"duopulse",verbose:false},[].slice.call(arguments));`,
-    `}`,
-    impl,
-    "",
-  ].join("\n");
-
   if (jsNames.has(fn)) throw new Error(`коллизия JS-имён: ${fn} (${jsNames.get(fn)} и ${canonical})`);
   jsNames.set(fn, canonical);
+
+  const ours = OUR_SCRIPTLETS[canonical];
+  let content;
+  if (ours) {
+    // Наша uBO-совместимая реализация: файл уже function-style (шим внутри),
+    // ведущие комментарии срезаем — контент обязан начинаться с function NAME(
+    const src = fs.readFileSync(path.join(ROOT, ours[0]), "utf8");
+    content = src.slice(Math.max(0, src.indexOf(`function ${fn}(`))).trimEnd() + "\n";
+  } else {
+    // Шим: движок вызывает `fn("a1","a2")` — собираем (source, args[]) конвенции AdGuard.
+    const impl = entry.scriptlet.replace(
+      new RegExp(`^function\\s+${fn}\\s*\\(`),
+      `function ${fn}$dp(`,
+    );
+    content = [
+      `function ${fn}(){`,
+      `return ${fn}$dp({name:${JSON.stringify(canonical)},engine:"duopulse",verbose:false},[].slice.call(arguments));`,
+      `}`,
+      impl,
+      "",
+    ].join("\n");
+  }
 
   const aliases = new Set();
   const addAlias = (a, owner) => {
@@ -84,6 +105,7 @@ for (const entry of data.scriptlets) {
     }
   };
   for (const n of entry.names.slice(1)) addAlias(n, canonical);
+  if (ours) for (const a of ours[1]) addAlias(a, canonical);
   for (const [short, target] of Object.entries(UBO_SHORT_ALIASES)) {
     if (target === canonical || entry.names.includes(target)) addAlias(short, canonical);
   }

@@ -626,3 +626,24 @@
   FontFace из ArrayBuffer — CSP страниц не мешает): document.fonts.check
   подтверждает 400/500 в живом стенде e2e/subtitles/font-family.mjs (7/7).
   Тесты: vitest 226 (+5 fontFamily/fonts), cargo 283 (+2).
+
+- 2026-11-03 — **карточка duopulse-069 выполнена: порт rpnt (trusted-replace-
+  node-text) + serverContract-правило uBO quick-fixes** против SSAI-преролла
+  YouTube. Собственный uBO-совместимый порт 1:1 (scripts/rpnt-scriptlet.js —
+  пакетный @adguard/scriptlets имеет несовместимую сигнатуру с textMatch) с
+  алиасами rpnt/rnt/trusted-rpnt/trusted-rnt + закрыта находка 061 (алиас
+  trusted-rpfr); правило serverContract — встроенным trusted-списком
+  adblock/quickfix.txt (источник builtin-quickfix:, обновление пересборкой;
+  PermissionMask: из недоверенных списков не инъецируется). Живая верификация
+  CDP: инъекция doc-start ✓, перезапись ytcsi-узла ✓ ($1 восстановлен),
+  контрмера исполняется ✓ (ловушки Uint8Array(105)), правило байт-в-байт =
+  живому uBO. НО преролл одиночное правило не устраняет: SSAI вшита серверно
+  в медиапоток, реклама играет полностью (29 с), восстановление — перезагрузка
+  с патченным UA, которой не хватает правил аттестации (trusted-edit-inbound-
+  object — 8 правил живого quick-fixes, скриптлета нет нигде). p07: реклама
+  on=[1,1,1] (критерий ≥2/3 — ветка «зафиксировано, почему нельзя»); p08:
+  INCONCLUSIVE по лотерее SSAI (контроль 0/6 с рекламой), справочная медиана
+  DuoPulse 4201 мс — в диапазоне 050/061 (4,2–4,3 с), SABR-stall не вернулся
+  → по гейту «столл/деградация → откат» правило остаётся. Продолжение —
+  карточка duopulse-072 (полный ансамбль: порт trusted-edit-inbound-object +
+  replace/rpfr-правила adPlacements/adSlots). Тесты: vitest 230, cargo 286.
