@@ -4,7 +4,7 @@
 // Поднимает приложение (debug-exe + vite dev), для каждого видео-кандидата:
 //   1) открывает watch-страницу, ждёт player-ответ;
 //   2) снимает captions.playerCaptionsTracklistRenderer (captionTracks +
-//      translationLanguages) и videoDetails — путь «player-api»
+//      translationLanguages + audioTracks) и videoDetails — путь «player-api»
 //      (movie_player.getPlayerResponse), попутно проверяет путь
 //      «initial» (window.ytInitialPlayerResponse);
 //   3) пробует in-page fetch дорожки (базовая + tlang-перевод, fmt=json3) —
@@ -111,6 +111,9 @@ const SNIPPET = `(async () => {
     durationSec: Number(details?.lengthSeconds ?? 0) || null,
     captionTracks: list?.captionTracks ?? null,
     translationLanguages: list?.translationLanguages ?? null,
+    audioTracks: list?.audioTracks ?? null,
+    defaultCaptionTrackIndex: list?.defaultCaptionTrackIndex ?? null,
+    defaultAudioTrackIndex: list?.defaultAudioTrackIndex ?? null,
   };
 })()`;
 
@@ -216,6 +219,12 @@ try {
       paths: { playerApi: data.usedPath === "player-api", initialResponse: data.hasBothPaths || data.usedPath === "initial" },
       captionTracks: data.captionTracks,
       translationLanguages: data.translationLanguages ?? [],
+      // duopulse-070: audioTracks рендерера пишем в фикстуру (web-клиент:
+      // captionTrackIndices/defaultCaptionTrackIndex; defaultCaptionTrackIndex
+      // зависит от языка интерфейса записывавшей сессии — не язык оригинала).
+      ...(data.audioTracks ? { audioTracks: data.audioTracks } : {}),
+      ...(data.defaultCaptionTrackIndex != null ? { defaultCaptionTrackIndex: data.defaultCaptionTrackIndex } : {}),
+      ...(data.defaultAudioTrackIndex != null ? { defaultAudioTrackIndex: data.defaultAudioTrackIndex } : {}),
       netProbe: { base: probeBase, tlangRu: probeRu },
     };
     fs.writeFileSync(path.join(OUT_DIR, `${fixture.videoId}.json`), JSON.stringify(fixture));

@@ -244,7 +244,8 @@ try {
       row.baseLang = `${info.base.length} баз / ${info.translationsCount} перев. (путь ${info.path}; плеер ad=${playerBefore.ad} state=${playerBefore.state} paused=${playerBefore.paused} t=${playerBefore.t})`;
       if (info.base.length === 0) throw new Error("нет базовых дорожек");
 
-      // Набор: оригинал (audioTracks.original → ручная → первая) + ru + es;
+      // Набор: оригинал (originalLangsOf: audioTracks/originalLanguage/asr →
+      // ручная → первая) + ru + es;
       // недостающие переводы замещаем вторым базовым языком (свободное
       // комбинирование, docs/03 §1).
       const original = info.base.find((b) => b.original && b.kind === "manual") ??

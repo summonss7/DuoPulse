@@ -16,6 +16,7 @@ import {
   installTimedtextCapture,
   normalizeBaseTracks,
   normalizeTranslations,
+  originalLangsOf,
   paramsOf,
   videoIdFromHref,
   videoIdOfResponse,
@@ -24,6 +25,7 @@ import {
   type PlayerElement,
   type YouTubeTransport,
 } from "./youtube";
+import { defaultSetIds } from "../set-defaults";
 import type { SubtitlesParser } from "./types";
 import type { Cue } from "../types";
 
@@ -43,6 +45,9 @@ interface Fixture {
   title: string;
   captionTracks: Record<string, unknown>[];
   translationLanguages: Record<string, unknown>[];
+  /** audioTracks рендерера (web-клиент, живая запись — duopulse-070); у
+   *  старых фикстур нет: записаны рекордером до захвата этого поля. */
+  audioTracks?: Record<string, unknown>[];
 }
 
 /** Фикстура → player-ответ (обёртка captions-части в структуру ответа). */
@@ -53,6 +58,7 @@ function playerResponseOf(fx: Fixture): Record<string, unknown> {
       playerCaptionsTracklistRenderer: {
         captionTracks: fx.captionTracks,
         translationLanguages: fx.translationLanguages,
+        ...(fx.audioTracks ? { audioTracks: fx.audioTracks } : {}),
       },
     },
   };
@@ -116,7 +122,7 @@ describe("извлечение списка из player-ответа (фикст
     });
   }
 
-  it("язык оригинала (audioTracks.original) помечается и становится базой по умолчанию", async () => {
+  it("язык оригинала (верхнеуровневые audioTracks[].original, TV/ANDROID-клиент) помечается и становится базой по умолчанию", async () => {
     const fxOriginal = fixtures.find((f) => f.videoId === "iG9CE55wbtY")!; // TED: 65 дорожек, первая — af
     const response = playerResponseOf(fxOriginal);
     (response as { audioTracks?: unknown }).audioTracks = [
@@ -133,6 +139,50 @@ describe("извлечение списка из player-ответа (фикст
     // голый код перевода клеится к базе-оригиналу, не к первой дорожке
     const { refs } = adapter.resolveIds(["ru"]);
     expect(refs[0].baseId).toBe("yt:en");
+  });
+
+  it("duopulse-070: TED без audioTracks[].original — оригинал en по asr-дорожке, не af и не ro", async () => {
+    const fx = fixtures.find((f) => f.videoId === "iG9CE55wbtY")!;
+    // фикстура несёт живые renderer.audioTracks (web-клиент, 04.11.2026):
+    // без original/originalLanguage; defaultCaptionTrackIndex=51 → ro —
+    // рекомендация под язык интерфейса записывавшей сессии (hl=ro)
+    const response = playerResponseOf(fx);
+    const langs = originalLangsOf(response);
+    expect(langs).toEqual(new Set(["en"])); // en-asr (vssId a.en) — оригинал
+    const adapter = new YouTubeAdapter({
+      win: makeWindow({ href: `https://www.youtube.com/watch?v=${fx.videoId}`, playerResponse: response }),
+    });
+    const list = await adapter.listTracks();
+    expect(list!.base.find((b) => b.id === "yt:en")!.original).toBe(true);
+    expect(list!.base.find((b) => b.id === "yt:en:asr")!.original).toBe(true);
+    expect(list!.base[0].original).toBe(false); // af — первая по алфавиту
+    expect(list!.base.find((b) => b.id === "yt:ro")!.original).toBe(false); // defaultCaptionTrackIndex-ловушка
+    // дефолтный набор Alt+D: «оригинал + ru» = en+ru, не af+ru
+    const ids = defaultSetIds(list);
+    expect(ids).toEqual(["yt:en", "ru"]);
+    // голый код перевода — базой становится оригинал
+    const { refs } = adapter.resolveIds(["ru"]);
+    expect(refs[0].baseId).toBe("yt:en");
+  });
+
+  it("duopulse-070: только asr-дорожка (Gangnam ko) — она и оригинал", () => {
+    const fx = fixtures.find((f) => f.videoId === "9bZkp7q19f0")!;
+    expect(originalLangsOf(playerResponseOf(fx))).toEqual(new Set(["ko"]));
+  });
+
+  it("duopulse-070: renderer.audioTracks[].originalLanguage помечается (задел на web-клиент)", () => {
+    const response = playerResponseOf({
+      videoId: "x",
+      url: "",
+      title: "",
+      captionTracks: [
+        { languageCode: "ja", vssId: ".ja" },
+        { languageCode: "en", vssId: ".en" },
+      ],
+      translationLanguages: [],
+      audioTracks: [{ captionTrackIndices: [0, 1], originalLanguage: "ja", hasDefaultTrack: true }],
+    });
+    expect(originalLangsOf(response)).toEqual(new Set(["ja"]));
   });
 
   it("asr-дорожка и ручная одного языка получают разные id (yt:en / yt:en:asr)", () => {

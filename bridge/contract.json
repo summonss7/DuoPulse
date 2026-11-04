@@ -2713,7 +2713,7 @@
                 "type": "string"
               },
               "original": {
-                "description": "Дорожка языка оригинала (audioTracks.original).",
+                "description": "Дорожка языка оригинала (детект — originalLangsOf контента: audioTracks[].original / .originalLanguage / asr-фолбэк).",
                 "type": "boolean"
               },
               "translatable": {
@@ -5318,7 +5318,7 @@
                 "type": "string"
               },
               "original": {
-                "description": "Дорожка языка оригинала (audioTracks.original).",
+                "description": "Дорожка языка оригинала (детект — originalLangsOf контента: audioTracks[].original / .originalLanguage / asr-фолбэк).",
                 "type": "boolean"
               },
               "translatable": {

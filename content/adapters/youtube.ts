@@ -17,6 +17,10 @@
 //   переводы получаются параллельным fetch живого URL дорожки + &tlang=
 //   (работает и после unloadModule). Смена lang= чужим кодом → 404, поэтому
 //   базовые дорожки — только через программирование плеера (последовательно).
+// - Язык оригинала — originalLangsOf: audioTracks[].original (TV/ANDROID-
+//   клиенты) → renderer.audioTracks[].originalLanguage → asr-дорожка
+//   (web-клиент, duopulse-070). defaultCaptionTrackIndex — рекомендация под
+//   язык ИНТЕРФЕЙСА зрителя, не оригинал.
 
 import type {
   Adapter,
@@ -52,6 +56,10 @@ interface RawTranslationLang {
 export interface RawCaptionList {
   captionTracks: RawCaptionTrack[];
   translationLanguages: RawTranslationLang[];
+  /** audioTracks рендерера без интерпретации (web-клиент: captionTrackIndices/
+   *  defaultCaptionTrackIndex/hasDefaultTrack; язык оригинала — см.
+   *  originalLangsOf). */
+  audioTracks: unknown[];
 }
 
 /** Имя дорожки: {simpleText} | {runs:[{text}]} — иначе пусто. */
@@ -75,13 +83,14 @@ export function extractCaptionList(response: unknown): RawCaptionList | null {
   if (!captions || typeof captions !== "object") return null;
   const renderer = (captions as { playerCaptionsTracklistRenderer?: unknown }).playerCaptionsTracklistRenderer;
   if (!renderer || typeof renderer !== "object") return null;
-  const r = renderer as { captionTracks?: unknown; translationLanguages?: unknown };
+  const r = renderer as { captionTracks?: unknown; translationLanguages?: unknown; audioTracks?: unknown };
   const captionTracks = Array.isArray(r.captionTracks) ? (r.captionTracks as RawCaptionTrack[]) : [];
   const translationLanguages = Array.isArray(r.translationLanguages)
     ? (r.translationLanguages as RawTranslationLang[])
     : [];
+  const audioTracks = Array.isArray(r.audioTracks) ? (r.audioTracks as unknown[]) : [];
   if (captionTracks.length === 0 && translationLanguages.length === 0) return null;
-  return { captionTracks, translationLanguages };
+  return { captionTracks, translationLanguages, audioTracks };
 }
 
 /** videoDetails.videoId ответа — защита от устаревшего ответа при SPA. */
@@ -91,16 +100,38 @@ export function videoIdOfResponse(response: unknown): string | null {
   return typeof id === "string" && id ? id : null;
 }
 
-/** Языки оригинала видео (audioTracks[].original player-ответа): выбор базы
- * перевода по умолчанию и пометка в списке; отсутствуют — пусто. */
+/** Языки оригинала видео: выбор базы перевода по умолчанию и пометка в
+ * списке; определить не удалось — пусто. Источники по приоритету (живые
+ * пробы web-клиента, карточка duopulse-070, 04.11.2026):
+ * 1. верхнеуровневые audioTracks[].original — формы ANDROID/TV-клиентов
+ *    (web-клиент их не отдаёт);
+ * 2. captions.playerCaptionsTracklistRenderer.audioTracks[].originalLanguage —
+ *    web-клиент пробы 04.11.2026 поля ещё не отдаёт, задел на будущее;
+ * 3. фолбэк — asr-дорожка: авто-субтитры генерятся из оригинального звука
+ *    (TED iG9CE55wbtY: en-asr → en; Gangnam 9bZkp7q19f0: ko-asr → ko).
+ * defaultCaptionTrackIndex НЕ использовать — это рекомендация под язык
+ * ИНТЕРФЕЙСА зрителя (проба: UI ro → индекс дорожки ro), не оригинал. */
 export function originalLangsOf(response: unknown): Set<string> {
   const out = new Set<string>();
-  const tracks = (response as { audioTracks?: unknown } | null)?.audioTracks;
-  if (!Array.isArray(tracks)) return out;
-  for (const t of tracks) {
-    if (!t || typeof t !== "object") continue;
-    const track = t as { languageCode?: unknown; original?: unknown };
-    if (track.original === true && typeof track.languageCode === "string") out.add(track.languageCode);
+  if (!response || typeof response !== "object") return out;
+  const add = (lang: unknown): void => {
+    if (typeof lang === "string" && lang) out.add(lang);
+  };
+  const top = (response as { audioTracks?: unknown }).audioTracks;
+  if (Array.isArray(top)) {
+    for (const t of top) {
+      if (!t || typeof t !== "object") continue;
+      const track = t as { languageCode?: unknown; original?: unknown };
+      if (track.original === true) add(track.languageCode);
+    }
+  }
+  const raw = extractCaptionList(response);
+  if (!raw) return out;
+  for (const t of raw.audioTracks) {
+    if (t && typeof t === "object") add((t as { originalLanguage?: unknown }).originalLanguage);
+  }
+  for (const t of raw.captionTracks) {
+    if (t.kind === "asr") add(t.languageCode);
   }
   return out;
 }
@@ -533,7 +564,7 @@ export class YouTubeAdapter implements Adapter {
    *  (декодер Core — symphonia, opus не умеет), из них — максимальный битрейт
    *  с прямым url; URL зашифрованы (signatureCipher) или отсутствуют — null
    *  (Core их не добудет, панель предложит ручной путь). Язык — оригинал
-   *  аудио (audioTracks.original), иначе пусто (whisper определит сам). */
+   *  аудио (originalLangsOf), иначе пусто (whisper определит сам). */
   audioSource(): { url: string; lang: string } | null {
     const found = this.playerResponse();
     if (!found) return null;

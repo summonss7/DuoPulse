@@ -580,7 +580,10 @@ mod tests {
         .normalized();
         assert_eq!(cfg.default_translation_lang, "es");
         assert_eq!(cfg.style.font_scale_pct, 300, "кламп кегля");
-        assert_eq!(cfg.style.font_family, "Inter", "гарнитура не из списка — дефолт");
+        assert_eq!(
+            cfg.style.font_family, "Inter",
+            "гарнитура не из списка — дефолт"
+        );
         assert_eq!(cfg.style.position, "top");
         assert_eq!(cfg.style.margin_pct, 25, "кламп отступа");
         assert_eq!(cfg.style.plate_opacity, 1.0, "кламп непрозрачности");

@@ -35,6 +35,23 @@ describe("presetSets", () => {
     expect(sets[0].ids).toEqual(["yt:fr"]);
   });
 
+  it("duopulse-070: TED-форма (первая af, оригинал en/en-asr) — «Дуо en+ru», не af+ru", () => {
+    // Реальная форма с iG9CE55wbtY: 65 дорожек по алфавиту, первая af;
+    // originalLangsOf детектит en по asr-дорожке → помечены yt:en и yt:en:asr
+    const sets = presetSets(
+      [
+        base({ id: "yt:af", lang: "af", name: "afrikaans" }),
+        base({ id: "yt:en", lang: "en", name: "english", original: true }),
+        base({ id: "yt:en:asr", lang: "en", kind: "asr", name: "english (auto)", original: true }),
+        base({ id: "yt:ro", lang: "ro", name: "română" }),
+      ],
+      [tlang("ru"), tlang("es")],
+    );
+    expect(sets.find((s) => s.key === "duo")!.label).toBe("Дуо en+ru");
+    expect(sets.find((s) => s.key === "duo")!.ids).toEqual(["yt:en", "ru"]);
+    expect(sets[0].ids).toEqual(["yt:en"]); // «Оригинал» — ручная en, не af
+  });
+
   it("оригинал непереводимый — Duo/Трио не строятся", () => {
     const sets = presetSets([base({ original: true, translatable: false })], [tlang("ru")]);
     expect(sets.map((s) => s.key)).toEqual(["solo"]);

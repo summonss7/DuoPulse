@@ -164,7 +164,7 @@
 - 2026-10-17 — **M3 «Многоязычные субтитры v1» закрыт по задачам (3.1–3.8,
   карточки 022–029); gate проверен (карточка duopulse-029)**. Живой прогон
   «10 случайных видео» (e2e/youtube, 52/52): на каждом видео набор
-  2–3 дорожки «оригинал + переводы tlang» с cue в движке (TED af 417 cue,
+  2–3 дорожки «оригинал + переводы tlang» с cue в движке (TED af 417 cue (af — баг детекта оригинала, устранён duopulse-070),
   Gangnam ko-asr, Bohemian ar, Despacito/Shape of You en…) + оверлей плашкой
   + гашение нативных + offset Alt+[/] с HUD; на первом — дроп .srt поверх
   дорожки платформы и сценарий docs/01 §5.1 из UI-хрома (кнопка «duo»,
@@ -647,3 +647,15 @@
   → по гейту «столл/деградация → откат» правило остаётся. Продолжение —
   карточка duopulse-072 (полный ансамбль: порт trusted-edit-inbound-object +
   replace/rpfr-правила adPlacements/adSlots). Тесты: vitest 230, cargo 286.
+
+- 2026-11-04 — **карточка duopulse-070 выполнена: язык оригинала детектируется
+  без audioTracks[].original** (дефект 066): живая проба web-клиента показала —
+  верхнеуровневых audioTracks нет, renderer.audioTracks без original-полей, а
+  defaultCaptionTrackIndex — рекомендация под язык ИНТЕРФЕЙСА (проба UI ro →
+  дорожка ro), не оригинал. originalLangsOf теперь: audioTracks[].original
+  (TV/ANDROID) → renderer.audioTracks[].originalLanguage (задел) → asr-дорожка
+  (авто-субтитры генерятся из оригинального звука: TED en-asr → en, Gangnam
+  ko-asr → ko); фикстуры TED/dQw дополнены живыми renderer.audioTracks, рекордер
+  их пишет (до этого выжимка поля теряла — первопричина бага). Дефолт Alt+D и
+  пресет «Дуо» на TED собирают en+ru, не af+ru. Тесты: vitest 234 (+4), cargo 286
+  (+3 ignored; попутно cargo fmt для коммитов 059/068).

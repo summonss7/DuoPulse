@@ -4506,3 +4506,44 @@ tauri-формата рядом с manifest.json v2, явное «✓ У вас 
   зомби-процессов не было (порты 5173/9226/9228 чисты; 8899 — системный
   туннель, не трогал); временные диагностические скрипты в %TEMP% удалены.
 - Коммит: 389789c — feat: duopulse-069 — rpnt + quickfix (порт trusted-replace-node-text, встроенный quickfix-список, живая верификация, карточка 072).
+
+## 04.11.2026, 03:23–03:55 — Язык оригинала без audioTracks: asr-детект, живые renderer.audioTracks в фикстурах, рекордер не теряет поля (duopulse-070)
+Начало: 04.11.2026 03:23, окончание: 04.11.2026 03:55 (сессия диспетчера ZCode).
+Дефект из живого прогона 066: originalLangsOf читал верхнеуровневые
+audioTracks[].original, которых в web-клиенте YouTube нет → НИ одна дорожка
+не помечалась original, дефолт Alt+D и пресет «Дуо» брали первую дорожку по
+алфавиту (TED iG9CE55wbtY: af+ru вместо en+ru). Что сделано:
+- Живая CDP-проба (TED + dQw4w9WgXcQ, web-клиент): renderer.keys =
+  captionTracks/audioTracks/translationLanguages/defaultAudioTrackIndex;
+  renderer.audioTracks БЕЗ original/originalLanguage (только captionTrackIndices,
+  defaultCaptionTrackIndex, hasDefaultTrack); верхнеуровневых audioTracks нет;
+  microformat/videoDetails без языка. Кандидат карточки
+  defaultCaptionTrackIndex ОТВЕРГНУТ: 51 → дорожка ro = рекомендация под язык
+  ИНТЕРФЕЙСА записывавшей сессии (hl=ro), не оригинал.
+- Первопричина фикстурной слепоты: рекордер e2e/youtube/record.mjs при выжимке
+  копировал только captionTracks/translationLanguages — audioTracks терялись
+  всегда. Рекордер теперь пишет audioTracks/defaultCaptionTrackIndex/
+  defaultAudioTrackIndex рендерера.
+- originalLangsOf (content/adapters/youtube.ts): три источника —
+  audioTracks[].original (TV/ANDROID-клиенты) → renderer.audioTracks[].
+  originalLanguage (задел; web-клиент пока не отдаёт) → asr-дорожка (авто-
+  субтитры генерятся из оригинального звука: TED en-asr→en, Gangnam ko-asr→ko,
+  dQw en-asr→en). extractCaptionList прокидывает renderer.audioTracks;
+  defaultCaptionTrackIndex задокументирован как ловушка. Комментарии
+  контракта (content/adapters/types.ts, src-tauri subtitles/service.rs,
+  bridge-генерация) обновлены.
+- Фикстуры TED и dQw дополнены живыми renderer.audioTracks (запись 04.11.2026,
+  компактный JSON как раньше) — тесты теперь на реальной форме ответа.
+- Тесты (+4): TED — originalLangsOf={en}, yt:en/yt:en:asr original, af/ro нет,
+  defaultSetIds=[yt:en, ru], resolveIds("ru")→база yt:en; Gangnam ko-asr —
+  оригинал; renderer.audioTracks[].originalLanguage; пресет «Дуо en+ru» на
+  TED-форме (не af+ru).
+- Документация: ROADMAP — запись 2026-11-04 по 070 + пометка у «TED af 417 cue»
+  (баг до 070); docs/05 §3.3 — источник оригинала originalLangsOf и уточнение
+  у «TED af+ru+es».
+- Прочее: копия backup.bat (backups/backup_2026-11-04_03-23-55); зомби нет;
+  временный скрипт пробы в %TEMP% удалён; попутно cargo fmt для реликтов
+  коммитов 059/068 (settings/mod.rs, subtitles/fonts.rs — fmt --check чисто).
+- Проверено: vitest 234/234 (23 файла; +4), cargo 286 passed +3 ignored,
+  typecheck чисто, content-бандл 24,3 КБ gzip ≤ 80, cargo fmt --check чисто.
+- Коммит: см. следующий коммит «CHANGELOG: хеш коммита duopulse-070».

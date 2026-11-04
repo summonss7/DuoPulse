@@ -961,7 +961,7 @@ export interface BaseTrackInfo {
    */
   name: string;
   /**
-   * Дорожка языка оригинала (audioTracks.original).
+   * Дорожка языка оригинала (детект — originalLangsOf контента: audioTracks[].original / .originalLanguage / asr-фолбэк).
    */
   original: boolean;
   /**

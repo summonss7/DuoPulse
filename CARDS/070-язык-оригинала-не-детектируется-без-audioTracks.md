@@ -1,10 +1,10 @@
 ---
 id: duopulse-070
 title: 'Язык оригинала не детектируется: в реальных player-ответах нет audioTracks — дефолт Alt+D и пресеты берут первую дорожку по алфавиту'
-status: todo
+status: done
 priority: 4
 created: 2026-11-01
-updated: 2026-11-02
+updated: 2026-11-04
 session: ""
 speed: 9
 src: CARD
@@ -36,14 +36,14 @@ parent: duopulse-066
 на оригинал) и на подпись чипа «Дуо <lang>+<lang>».
 
 ## Критерии готовности
-- [ ] На видео без `audioTracks[].original` в ответе (фикстура/живой прогон
+- [x] На видео без `audioTracks[].original` в ответе (фикстура/живой прогон
       TED iG9CE55wbtY) язык оригинала детектируется корректно (en), дорожка
       помечена `original` в tracksInfo()
-- [ ] defaultSetIds/пресет «Дуо» на таком видео собирают «оригинал + ru»
+- [x] defaultSetIds/пресет «Дуо» на таком видео собирают «оригинал + ru»
       (en+ru), не af+ru
-- [ ] Юнит-тесты на реальную форму player-ответа (фикстуры) — пометка
+- [x] Юнит-тесты на реальную форму player-ответа (фикстуры) — пометка
       original и фолбэки
-- [ ] vitest и cargo зелёные; CHANGELOG дополнен
+- [x] vitest и cargo зелёные; CHANGELOG дополнен
 
 ## Журнал
 - 01.11.2026: карточка создана из разбора живого прогона duopulse-066
@@ -51,3 +51,31 @@ parent: duopulse-066
   отсутствие audioTracks во всех 10 записанных ответах).
 - 01.11.2026: id исправлен duopulse-067 → duopulse-070 и файл переименован 067→070: id дублировал карточку 067-Бейдж (создана раньше, 10:19) и ронял закладку «Все задания» в Aila (aila-273).
 - 02.11.2026, 04:33:43: приоритет изменён Артёмом через Aila: 2 → 4 (0 — самый быстрый).
+
+
+- 04.11.2026, 03:22:13: диспетчер взял задачу в работу (новый запуск).
+- 04.11.2026, 03:24–03:32: копия проекта (backup_2026-11-04_03-23-55). Живая
+  CDP-проба web-клиента (TED iG9CE55wbtY + dQw4w9WgXcQ, %TEMP%-скрипт, удалён):
+  верхнеуровневых audioTracks нет; renderer = captionTracks/audioTracks/
+  translationLanguages/defaultAudioTrackIndex; renderer.audioTracks БЕЗ
+  original/originalLanguage; microformat/videoDetails без языка. Кандидат
+  карточки defaultCaptionTrackIndex ОТВЕРГНУТ: на TED = 51 → дорожка ro —
+  рекомендация под язык интерфейса сессии (hl=ro), не оригинал. Надёжный
+  источник — asr-дорожка (генерится из оригинального звука): en-asr→en (TED,
+  dQw), ko-asr→ko (Gangnam). Выяснена первопричина «в фикстурах нет
+  audioTracks»: рекордер record.mjs при выжимке копировал только
+  captionTracks/translationLanguages — поля терялись всегда.
+- 04.11.2026, 03:33–03:50: реализация — originalLangsOf: три источника
+  (audioTracks[].original TV/ANDROID → renderer.audioTracks[].originalLanguage
+  (задел) → asr-дорожка); extractCaptionList прокидывает renderer.audioTracks;
+  рекордер пишет audioTracks/defaultCaptionTrackIndex/defaultAudioTrackIndex;
+  фикстуры TED/dQw дополнены живыми renderer.audioTracks (запись 04.11.2026);
+  комментарии контракта обновлены (types.ts, service.rs + gen:bridge). Тесты
+  +4 (TED: {en}, yt:en/yt:en:asr original, af/ro нет, defaultSetIds=[yt:en,
+  ru], resolveIds("ru")→yt:en; Gangnam ko; originalLanguage; пресет «Дуо
+  en+ru»). tracksInfo() отдаёт base[].original из того же списка адаптера.
+  Доки: ROADMAP (запись 070 + пометка у «TED af 417 cue»), docs/05 §3.3.
+- 04.11.2026, 03:50–03:55: прогоны — vitest 234/234 (+4), cargo 286 passed
+  +3 ignored, typecheck чисто, бандл 24,3 КБ gzip ≤ 80; попутно cargo fmt
+  реликтов 059/068 (fmt --check чисто). CHANGELOG дополнен; критерии
+  проверены по факту — все [x].

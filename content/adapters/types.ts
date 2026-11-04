@@ -31,7 +31,8 @@ export interface BaseTrackInfo {
   /** vssId дорожки (".en" ручная / "a.en" asr) — для диагностики. */
   vssId: string;
   translatable: boolean;
-  /** Дорожка языка оригинала (audioTracks.original player-ответа). */
+  /** Дорожка языка оригинала (детект — originalLangsOf адаптера youtube:
+   *  audioTracks[].original / .originalLanguage / asr-фолбэк, duopulse-070). */
   original: boolean;
 }
 

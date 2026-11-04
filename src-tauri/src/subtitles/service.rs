@@ -29,7 +29,8 @@ pub struct BaseTrackInfo {
     pub kind: String,
     /// Отображаемое имя (локализовано платформой).
     pub name: String,
-    /// Дорожка языка оригинала (audioTracks.original).
+    /// Дорожка языка оригинала (детект — originalLangsOf контента:
+    /// audioTracks[].original / .originalLanguage / asr-фолбэк).
     pub original: bool,
     /// Платформа разрешает машинный перевод (tlang) этой дорожки.
     pub translatable: bool,
