@@ -74,7 +74,8 @@ const AILA_FEED_BASE = "https://aila.skillcoin.pp.ua/updates/duopulse";
 // {{arch}} — архитектра; пример в доках плагина — darwin/aarch64/1.0.0).
 const GH_FEED_BASE = "https://summonss7.github.io/duopulse-updates";
 // Локальный клон репозитория duopulse-updates для публикации GitHub-канала.
-const GH_FEED_DIR = process.env.DUOPULSE_GH_FEED_DIR || "D:\\duopulse-updates";
+// Живёт внутри проекта (duopulse-071: вне корня D:\ держать не будем).
+const GH_FEED_DIR = process.env.DUOPULSE_GH_FEED_DIR || path.join(ROOT, "duopulse-updates");
 // Общий издатель Aila (aila-163): копирует файлы, считает sha256, пишет
 // manifest.json v2 + history.jsonl и объявляет релиз в «Хабе ИИ».
 const AILA_CLI = "D:\\Scheduler\\tools\\publish-update.cjs";

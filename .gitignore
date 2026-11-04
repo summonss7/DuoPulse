@@ -1,6 +1,10 @@
 # Резервные копии проекта (backup.bat)
 backups/
 
+# Локальный клон репозитория фида обновлений duopulse-updates (отдельный git,
+# публикация GitHub Pages; duopulse-071)
+duopulse-updates/
+
 # Временные файлы анализа
 _tmp*
 brand_tmp.jpg

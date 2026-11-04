@@ -86,7 +86,7 @@ DuoPulse — настольный браузер (Windows-first) для повс
 
 Публикация релиза — одной командой `npm run release [-- --notes "что нового"]`:
 сборка → фиды → оба канала (зеркало Aila через `D:\Scheduler\tools\publish-update.cjs`,
-GitHub Pages — коммит в локальный клон `D:\duopulse-updates`) → **корень `builds/`
+GitHub Pages — коммит в локальный клон `D:\DuoPulse\duopulse-updates`) → **корень `builds/`
 для хаба «Скачать» Aila** (правило карточки duopulse-063: хаб сканирует только
 корень `builds/`, поэтому каждый релиз кладёт туда свежий
 `DuoPulse-<верс>-setup-release.exe` и убирает устаревшие установщики/портативные

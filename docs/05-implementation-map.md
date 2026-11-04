@@ -389,8 +389,9 @@ duopulse-updates), Aila — `<база>/latest.json` / `latest-canary.json`
 latest-canary.json (подпись из фактического .sig) → канал Aila через
 `node D:\Scheduler\tools\publish-update.cjs duopulse --extra …` (флаг
 --extra — точный список файлов публикации, общий для проектов) → канал
-GitHub коммитом в локальный клон D:\duopulse-updates (env
-DUOPULSE_GH_FEED_DIR; файлы фида прошлых версий перезаписываются текущим
+GitHub коммитом в локальный клон duopulse-updates внутри проекта (env
+DUOPULSE_GH_FEED_DIR, дефолт D:\DuoPulse\duopulse-updates — duopulse-071;
+файлы фида прошлых версий перезаписываются текущим
 фидом — старые клиенты узнают о релизе). Стенд e2e/update: ассерты контракта
 v11, `source` в проверках, фаза B+ «источник aila» (адресация
 latest-canary.json → «у вас последняя версия», source=aila).
