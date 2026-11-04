@@ -4610,3 +4610,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   themeRefresh-пометок нет; формально INCONCLUSIVE (exit 3 — лотерея SSAI
   055, пары равных состояний нет) — не FAIL, откат по гейту не требуется.
   Временные профили/логи стендов — в %TEMP%, удалены самими стендами.
+- Коммит: 5e7b9b4 — feat: duopulse-072 — полный ансамбль uBO quick-fixes против SSAI-преролла (порт trusted-edit-inbound-object + rpfr/replace-правила adPlacements/adSlots), p07/p08 замеры, вопрос Артёму.
