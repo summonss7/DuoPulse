@@ -4654,4 +4654,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   версия 0.1.3, endpoint 0.1.2 перезаписан фидом 0.1.3 (клиенты старых
   версий увидят обновление); артефакты builds/ и время обновления
   C:\DuoPulse\duopulse.exe (22:30 04.11.2026) проверены.
-- Коммит: (см. ниже)
+- Коммит: b0fb03e — release: duopulse-073 — версия 0.1.3 собрана и опубликована (ансамбль uBO quick-fixes 072 в релизе): stable+canary Aila+GitHub, хаб «Скачать», локальная копия C:DuoPulse; vitest 244, cargo 289
