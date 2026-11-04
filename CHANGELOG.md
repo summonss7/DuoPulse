@@ -4547,3 +4547,23 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Проверено: vitest 234/234 (23 файла; +4), cargo 286 passed +3 ignored,
   typecheck чисто, content-бандл 24,3 КБ gzip ≤ 80, cargo fmt --check чисто.
 - Коммит: 8c64463 — feat: duopulse-070 — asr-детект языка оригинала, живые renderer.audioTracks в фикстурах, рекордер не теряет поля.
+
+## 2026-11-04, 04:29 — duopulse-071: папка D:\duopulse-updates перенесена в проект
+- Начало работы: 2026-11-04, 04:21
+- Окончание работы: 2026-11-04, 04:29
+- Что сделано: D:\duopulse-updates — не мусор, а локальный клон репозитория фида
+  обновлений summonss7/duopulse-updates (GitHub Pages; stable/canary/engine),
+  чистый и синхронный с origin — потери исключены. Папка нужна (в неё публикует
+  GitHub-канал scripts/release.mjs), поэтому перенесена внутрь проекта:
+  D:\DuoPulse\duopulse-updates (git-репозиторий клона цел, 37c9b86). Дефолт
+  GH_FEED_DIR в release.mjs теперь path.join(ROOT, "duopulse-updates") — путь
+  жёстко не зашит, всегда внутри проекта; env DUOPULSE_GH_FEED_DIR по-прежнему
+  переопределяет. duopulse-updates/ в .gitignore (отдельный git, не часть кода
+  проекта). Обновлены README.md (раздел публикации релиза) и
+  docs/05-implementation-map.md (§ каналов обновлений). ROADMAP не менялся:
+  исторические записи о хостинге фида остаются верны, планы не затронуты.
+- Как проверено: копия backup.bat (backups/backup_2026-11-04_04-22-31);
+  node --check release.mjs; дефолт разрешается в D:\DuoPulse\duopulse-updates,
+  .git существует; упоминаний старого пути в активных файлах нет; git status
+  клон не видит (ignore работает); typecheck чисто; vitest 234/234 (23 файла).
+- Коммит: f7e6e1d — chore: duopulse-071 — клон фида duopulse-updates перенесён в проект (D:\DuoPulse\duopulse-updates): дефолт GH_FEED_DIR от ROOT, gitignore, README/docs.
