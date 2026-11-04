@@ -4546,4 +4546,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   коммитов 059/068 (settings/mod.rs, subtitles/fonts.rs — fmt --check чисто).
 - Проверено: vitest 234/234 (23 файла; +4), cargo 286 passed +3 ignored,
   typecheck чисто, content-бандл 24,3 КБ gzip ≤ 80, cargo fmt --check чисто.
-- Коммит: см. следующий коммит «CHANGELOG: хеш коммита duopulse-070».
+- Коммит: 8c64463 — feat: duopulse-070 — asr-детект языка оригинала, живые renderer.audioTracks в фикстурах, рекордер не теряет поля.
