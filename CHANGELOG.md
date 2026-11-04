@@ -4626,3 +4626,32 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   (vitest 244/244 и cargo 289 зафиксированы в реализации, коммит 5e7b9b4);
   проверены git status (после коммита — чисто) и push на github (main).
 - Коммит: 7c92b1f — chore: duopulse-072 — закрытие по ответу Артёма: ансамбль quick-fixes остаётся, карточка done.
+
+## 2026-11-04, 22:24–22:35 — duopulse-073: проверка и выпуск релиза 0.1.3 (ансамбль uBO quick-fixes 072 в релизных каналах)
+
+- Начало работы: 2026-11-04 22:24
+- Окончание работы: 2026-11-04 22:35
+- Что сделано: проверка показала — новая версия собрана/обновлена НЕ была:
+  оба канала фида обновлений (Aila latest.json + GitHub Pages), установщик
+  в корне builds/ для хаба «Скачать» и локальная портативная копия C:\DuoPulse
+  стояли на 0.1.2 от 31.10; одобренный Артёмом 04.11 ансамбль uBO quick-fixes
+  (duopulse-072, коммит 5e7b9b4) в релиз не входил. Версия поднята
+  0.1.2 → 0.1.3 (package.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml
+  + Cargo.lock) и выпущена `node scripts/release.mjs --notes "0.1.3: ансамбль
+  uBO quick-fixes против SSAI-преролла YouTube (trusted-edit-inbound-object,
+  trusted-rpfr, replace adPlacements/adSlots): реклама реже, мгновенное
+  восстановление после детекта, быстрый старт видео."`:
+  builds/duopulse_0.1.3_release/ (setup.exe 5,1 МБ + .sig + latest.json +
+  latest-canary.json); публикация stable+canary на Aila (манифест v2) и на
+  GitHub Pages (duopulse-updates, коммит 6fcd03c, пуш); хаб «Скачать»:
+  DuoPulse-0.1.3-setup-release.exe в корне builds/, устаревший 0.1.2 убран;
+  локальная копия C:\DuoPulse обновлена (duopulse.exe + WebView2Loader.dll).
+  ROADMAP.md дополнен записью о релизе 0.1.3. Карточка CARDS/073 — done.
+- Как проверено: копия backup.bat (backups/backup_2026-11-04_22-24-33);
+  vitest 244/244 (24 файла); cargo test 289 passed +3 ignored (MinGW
+  gnu-тулчейн в PATH); typecheck чисто; фиды по факту — Aila latest.json
+  версия 0.1.3, GitHub endpoint stable/windows/x86_64/0.1.3 — HTTP 200
+  версия 0.1.3, endpoint 0.1.2 перезаписан фидом 0.1.3 (клиенты старых
+  версий увидят обновление); артефакты builds/ и время обновления
+  C:\DuoPulse\duopulse.exe (22:30 04.11.2026) проверены.
+- Коммит: (см. ниже)
