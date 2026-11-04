@@ -4567,3 +4567,46 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   .git существует; упоминаний старого пути в активных файлах нет; git status
   клон не видит (ignore работает); typecheck чисто; vitest 234/234 (23 файла).
 - Коммит: f7e6e1d — chore: duopulse-071 — клон фида duopulse-updates перенесён в проект (D:\DuoPulse\duopulse-updates): дефолт GH_FEED_DIR от ROOT, gitignore, README/docs.
+
+## 2026-11-04, 08:55 — duopulse-072: SSAI-преролл YouTube, шаг 2 — полный ансамбль uBO quick-fixes: порт trusted-edit-inbound-object + replace/rpfr-правила adPlacements/adSlots
+- Начало работы: 2026-11-04, 04:56
+- Окончание работы: 2026-11-04, 08:55
+- Что сделано (карточка CARDS/072, продолжение 069):
+  - Порт trusted-edit-inbound-object — scripts/edit-inbound-scriptlet.js:
+    скриптлета нет ни в adblock-rs, ни в @adguard/scriptlets 2.5.1 (только
+    prune-вариант) — дословный порт uBO 1.75.4 (jsonpath.js + proxy-apply.js +
+    json-edit.js, trusted-ветка), сигнатура (propChain, argPos, jsonq) — ровно
+    форма живых правил quick-fixes. Конвертер build-adblock-resources.mjs
+    подключает его ДОПОЛНИТЕЛЬНЫМ ресурсом вне пакета (102 ресурса, 21
+    trusted; permission:1, контроль коллизий имён/алиасов как у пакетных).
+  - src-tauri/src/adblock/quickfix.txt (встроенный trusted-источник
+    builtin-quickfix, обновление пересборкой): +7 правил аттестации eio
+    (clientScreen CHANNEL / params 8AUB, YAHI / isInlinePlaybackNoAd /
+    lactMilliseconds ${now} / referer→#reloadxhr / вырезка патч-токенов UA),
+    +4 trusted-rpfr и +8 сетевых $xhr,1p,replace= adPlacements/adSlots→
+    no_ads (/player, /watch, /get_watch, /playlist — сетевой слой replace.rs,
+    карточка 050). Снапшот uBO quick-fixes 04.11.2026.
+  - Тесты: scripts/edit-inbound-scriptlet.test.ts (+10 vitest: редактирование
+    входящего объекта по jsonPath, +=/=/repl/${now}, фильтры [?.…], argPos -1,
+    битый jsonq не ломает цель, дословность живых правил incl. инертность \b-
+    формы правила 32); cargo (+3: инъекция полного ансамбля на YouTube,
+    отказ untrusted-списку, парсинг/матчинг 8 replace-правил).
+  - Документация: ROADMAP (запись 2026-11-04 по 072), docs/04 §SSAI —
+    обновление «полный ансамбль портирован, преролл 2/3».
+  - Вопрос Артёму в «Хаб ИИ» Aila (id duopulse_072_ensemble_20261104):
+    оставить ансамбль или откатить до чистого 044-состояния — карточка 072
+    в wait/blocked, ответ диспетчер подшьёт в журнал.
+- Как проверено: копия backup.bat (backups/backup_2026-11-04_08-47-53);
+  vitest 244/244 (24 файла; +10); cargo 289 passed +3 ignored; cargo fmt
+  --check чисто; typecheck чисто; живые прогоны — p07 (debug-exe, свежие
+  профили, off/on×3): duopulse-quickfix=20 правил живой загрузкой, off=
+  [249,327,298] реклама 3/3, on=[261,111,233] (заблокировано 10–16), реклама
+  on=[1,0,1] — 2/3 с ad-showing, 1/3 без: ансамбль не устраняет SSAI (матрица:
+  061 — 3/3; 069 — 3/3 + полный преролл 29,4 с + восстановление 0×0 ~45 с;
+  072 — 2/3), но снижает частоту и чинит восстановление после детекта;
+  p08 (tauri build --no-bundle, прод-exe): все 14 запусков стартовали,
+  DuoPulse ad-ячейка [2324..2611] мс, смешанные медианы 2529 vs 2584 мс —
+  лучше диапазона 050/061 (4,2–4,3 с), SABR-stall/0×0 не вернулся,
+  themeRefresh-пометок нет; формально INCONCLUSIVE (exit 3 — лотерея SSAI
+  055, пары равных состояний нет) — не FAIL, откат по гейту не требуется.
+  Временные профили/логи стендов — в %TEMP%, удалены самими стендами.

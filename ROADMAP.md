@@ -659,3 +659,22 @@
   их пишет (до этого выжимка поля теряла — первопричина бага). Дефолт Alt+D и
   пресет «Дуо» на TED собирают en+ru, не af+ru. Тесты: vitest 234 (+4), cargo 286
   (+3 ignored; попутно cargo fmt для коммитов 059/068).
+
+- 2026-11-04 — **карточка duopulse-072 выполнена: полный ансамбль uBO
+  quick-fixes против SSAI-преролла** — порт trusted-edit-inbound-object
+  (скриптлета нет ни в adblock-rs, ни в @adguard/scriptlets 2.5.1):
+  scripts/edit-inbound-scriptlet.js, дословный порт uBO 1.75.4 (jsonpath.js +
+  proxy-apply.js + json-edit.js, trusted-ветка), сигнатура (propChain, argPos,
+  jsonq); конвертер build-adblock-resources.mjs подключает его доп. ресурсом
+  вне пакета (permission:1). quickfix.txt: +7 правил аттестации eio + 4
+  trusted-rpfr + 8 сетевых $xhr,1p,replace= adPlacements/adSlots→no_ads
+  (/player, /watch, /get_watch, /playlist — сетевой слой replace.rs 050);
+  снапшот 04.11.2026, живой загрузкой подтверждено duopulse-quickfix=20.
+  p07: реклама on=[1,0,1] (2/3 с ad-showing; матрица: 061 — 3/3, 069 — 3/3 +
+  полный преролл 29,4 с + восстановление 0×0 ~45 с, 072 — 2/3, 1/3 без
+  рекламы) — ансамбль не устраняет SSAI серверно, но снижает частоту и чинит
+  восстановление; вопрос Артёму «оставить/откатить до 044» (wait в карточке).
+  p08: смешанные медианы 2529 vs 2584 мс (лучше диапазона 050/061 4,2–4,3 с),
+  все запуски стартовали, SABR-stall не вернулся, формально INCONCLUSIVE по
+  лотерее SSAI (055) — откат по гейту не требуется. Тесты: vitest 244 (+10),
+  cargo 289 (+3).

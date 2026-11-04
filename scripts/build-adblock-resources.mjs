@@ -57,6 +57,14 @@ const OUR_SCRIPTLETS = {
   "trusted-replace-node-text": ["scripts/rpnt-scriptlet.js", ["rpnt", "rnt", "trusted-rpnt", "trusted-rnt"]],
 };
 
+// Собственные uBO-скриптлеты, которых в пакете НЕТ вовсе (карточка
+// duopulse-072): trusted-edit-inbound-object — аттестация player-запросов
+// YouTube при патченном UA, ансамбль uBO quick-fixes против SSAI-преролла.
+// Ключ — каноническое имя ресурса (uBO-имя без .js), значение — как выше.
+const OUR_EXTRA_SCRIPTLETS = {
+  "trusted-edit-inbound-object": ["scripts/edit-inbound-scriptlet.js", []],
+};
+
 const data = JSON.parse(fs.readFileSync(SRC, "utf8"));
 if (!data?.scriptlets?.length) throw new Error("пустой scriptlets.corelibs.json");
 
@@ -120,6 +128,40 @@ for (const entry of data.scriptlets) {
   if (canonical.startsWith("trusted-") || entry.names.some((n) => n.startsWith("trusted-"))) {
     resource.permission = 1;
   }
+  resources.push(resource);
+}
+
+// Дополнительные ресурсы вне пакета (карточка 072): тот же контроль имён/
+// алиасов/коллизий и function-style, контент — целиком наш исходник.
+for (const [canonical, [file, extraAliases]] of Object.entries(OUR_EXTRA_SCRIPTLETS)) {
+  if (jsNames.size && aliasOwner.has(canonical) && aliasOwner.get(canonical) !== canonical) {
+    throw new Error(`доп. скриптлет ${canonical}: имя занято (${aliasOwner.get(canonical)})`);
+  }
+  const src = fs.readFileSync(path.join(ROOT, file), "utf8");
+  const decl = src.match(/^function\s+([A-Za-z_$][\w$]*)\s*\(/m);
+  if (!decl) throw new Error(`${canonical}: исходник не содержит function NAME(`);
+  const fn = decl[1];
+  if (jsNames.has(fn)) throw new Error(`коллизия JS-имён: ${fn} (${jsNames.get(fn)} и ${canonical})`);
+  jsNames.set(fn, canonical);
+  const content = src.slice(Math.max(0, src.indexOf(`function ${fn}(`))).trimEnd() + "\n";
+  const aliases = new Set();
+  const addAlias = (a) => {
+    for (const form of new Set([a, a.endsWith(".js") ? a.slice(0, -3) : a + ".js"])) {
+      const prev = aliasOwner.get(form);
+      if (prev && prev !== canonical) throw new Error(`алиас ${form} у ${prev} и ${canonical}`);
+      aliasOwner.set(form, canonical);
+      if (form !== canonical && form !== canonical + ".js") aliases.add(form);
+    }
+  };
+  for (const a of extraAliases) addAlias(a);
+  const resource = {
+    name: canonical + ".js",
+    aliases: [...aliases].sort(),
+    kind: { mime: "application/javascript" },
+    content: Buffer.from(content, "utf8").toString("base64"),
+  };
+  // trusted-* — только доверенным спискам (как пакетным, PermissionMask)
+  if (canonical.startsWith("trusted-")) resource.permission = 1;
   resources.push(resource);
 }
 

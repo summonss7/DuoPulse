@@ -1986,6 +1986,125 @@ mod tests {
         );
     }
 
+    // --- карточка duopulse-072: ансамбль quick-fixes (edit-inbound+rpfr+replace)
+
+    #[test]
+    fn quickfix_ensemble_injected_on_youtube() {
+        // Полный ансамбль из quickfix-снапшота: 7 правил аттестации
+        // trusted-edit-inbound-object (порт uBO 1.75.4) + 4 trusted-rpfr —
+        // всё инъецируется в doc-start-канал на YouTube; аргументы доходят
+        // целиком (экранирование `\,` движок снимает при парсинге скриптлетов).
+        let mut set = adblock::lists::FilterSet::new(false);
+        set.add_filters(
+            QUICKFIX_RULES.lines(),
+            ParseOptions {
+                permissions: adblock::resources::PermissionMask::from_bits(1),
+                ..ParseOptions::default()
+            },
+        );
+        let mut engine = Engine::from_filter_set(set, true);
+        engine.use_resources(scriptlet_resources().iter().cloned());
+        let s = service();
+        s.set_engine(engine);
+        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        let eio_calls = res
+            .injected_script
+            .matches("trustedEditInboundObject(\"")
+            .count();
+        assert_eq!(eio_calls, 7, "7 правил edit-inbound инъецируются");
+        // ключевые фрагменты живых правил (jsonPath-редакторы, repl, ${now})
+        for needle in [
+            "attestationRequest",
+            "clientScreen",
+            "8AUB",
+            "YAHI",
+            "${now}",
+            "#reloadxhr",
+            "createCommentParams",
+        ] {
+            assert!(
+                res.injected_script.contains(needle),
+                "аргументы edit-inbound дошли: нет {needle:?}"
+            );
+        }
+        // rpfr-варианты adPlacements/adSlots → no_ads. Считаем ВЫЗОВЫ —
+        // needle с `("` не задевает определение `…Response(){` в инъекции.
+        let rpfr_calls = res
+            .injected_script
+            .matches("trustedReplaceFetchResponse(\"")
+            .count();
+        assert_eq!(rpfr_calls, 4, "4 trusted-rpfr-правила инъецируются");
+        // host-специфичность: чужой домен — ничего из ансамбля
+        let other = s.cosmetic_resources("https://example.com/");
+        assert!(!other.injected_script.contains("trustedEditInboundObject"));
+        assert!(!other
+            .injected_script
+            .contains("trustedReplaceFetchResponse"));
+    }
+
+    #[test]
+    fn edit_inbound_requires_trusted_list() {
+        // Скриптлет правит ПРОИЗВОЛЬНЫЕ объекты в вызовах любых методов —
+        // из недоверенных списков (env-списки e2e, EasyList) не инъецируется,
+        // только trusted-источники (duopulse-quickfix/compat, ublock-ads).
+        let e = scriptlet_engine(&[
+            "a.test##+js(trusted-edit-inbound-object, JSON.stringify, 0, .a=1)",
+        ]);
+        let s = service();
+        s.set_engine(e);
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(
+            !res.injected_script.contains("trustedEditInboundObject"),
+            "edit-inbound из untrusted-списка не инъецируется"
+        );
+    }
+
+    #[test]
+    fn quickfix_network_replace_rules_parsed() {
+        // 8 живых $xhr,1p,replace= правил из quickfix-снапшота разбираются
+        // сетевым слоем (replace.rs, карточка 050): adPlacements/adSlots →
+        // no_ads на /playlist, /watch, /player, /get_watch. Проверяем сам
+        // парсер+матчер (сервис подхватывает те же тексты в refresh_lists).
+        let rules = replace::parse_replace_rules(QUICKFIX_RULES);
+        assert_eq!(rules.len(), 8, "правил $replace в quickfix-снапшоте");
+        assert!(
+            rules.iter().all(|r| !r.exception),
+            "все правила — рабочие (не @@-исключения)"
+        );
+        // матч: XHR /player с 1p-источника youtube.com — оба правила
+        let player = rules
+            .iter()
+            .filter(|r| {
+                r.matches(
+                    "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+                    "xhr",
+                    Some("www.youtube.com"),
+                )
+            })
+            .count();
+        assert_eq!(player, 2, "adPlacements+adSlots на /player");
+        // get_watch (||youtube.com/… — поддомен www матчится)
+        let gw = rules
+            .iter()
+            .filter(|r| {
+                r.matches(
+                    "https://www.youtube.com/youtubei/v1/get_watch?videoId=x",
+                    "xhr",
+                    Some("www.youtube.com"),
+                )
+            })
+            .count();
+        assert_eq!(gw, 2, "adPlacements+adSlots на /get_watch");
+        // не-xhr тип — правила $xhr не действуют
+        assert!(!rules.iter().any(|r| {
+            r.matches(
+                "https://www.youtube.com/youtubei/v1/player?x=1",
+                "document",
+                Some("www.youtube.com"),
+            )
+        }));
+    }
+
     #[test]
     fn trusted_rpfr_alias_resolves() {
         // Находка ревизии 061: 2 живых правила trusted-rpfr в filters.txt были
