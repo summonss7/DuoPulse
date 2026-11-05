@@ -513,6 +513,17 @@ impl TabManager {
                     }
                 });
             }
+            // Новая вкладка (карточка duopulse-075): как и прочие действия с
+            // созданием webview — вне потока цикла событий.
+            "ctrl+t" => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let manager = app.state::<TabManager>();
+                    if let Err(e) = manager.open(&app, None, None) {
+                        eprintln!("tabs: new tab (ctrl+t): {e}");
+                    }
+                });
+            }
             _ => {}
         }
     }

@@ -3,8 +3,8 @@
    (после content/m0-spike.js), срабатывает до скриптов страницы.
 
    Фокус обычно в контентной части, а не в UI-полосе — поэтому переключения
-   вкладок (Ctrl+Tab / Ctrl+Shift+Tab) и восстановление закрытой (Ctrl+Shift+T)
-   ловятся здесь и уходят в Core сообщением WebView2
+   вкладок (Ctrl+Tab / Ctrl+Shift+Tab), новая вкладка (Ctrl+T) и восстановление
+   закрытой (Ctrl+Shift+T) ловятся здесь и уходят в Core сообщением WebView2
    (window.chrome.webview.postMessage → WebMessageReceived в main.rs →
    tabs::handle_hotkey). Ctrl+D — закладка текущей страницы (карточка 057):
    ту же команду дублирует звёздочка в навбаре (фокус в UI). Команды
@@ -37,6 +37,8 @@
         post("ctrl+shift+t");
       } else if (!e.shiftKey && !e.repeat && (e.key === "d" || e.key === "D")) {
         post("ctrl+d");
+      } else if (!e.shiftKey && !e.repeat && (e.key === "t" || e.key === "T")) {
+        post("ctrl+t");
       } else {
         return;
       }

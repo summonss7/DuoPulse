@@ -21,6 +21,7 @@ export function onTabsChanged(cb: TabsListener): void {
 /** Последний известный список вкладок (для хоткеев и контекст-меню). */
 let tabs: TabInfo[] = [];
 
+const tabbarEl = document.getElementById("tabbar") as HTMLDivElement;
 const tabsEl = document.getElementById("tabs") as HTMLDivElement;
 const newtabBtn = document.getElementById("newtab") as HTMLButtonElement;
 const menuEl = document.getElementById("tabMenu") as HTMLDivElement;
@@ -121,11 +122,14 @@ tabsEl.addEventListener("auxclick", (e) => {
   if (tab) closeTab(tab.dataset.id as string);
 });
 
-tabsEl.addEventListener("contextmenu", (e) => {
+// правый клик по вкладке — её меню; по пустому месту таб-бара (карточка
+// duopulse-075: «возле вкладок нет "создать новую вкладку"») — то же меню
+// без вкладочного контекста: доступно «Новая вкладка», вкладочные действия
+// отключены
+tabbarEl.addEventListener("contextmenu", (e) => {
   const tab = tabElement(e.target);
-  if (!tab) return;
   e.preventDefault();
-  openMenu(tab.dataset.id as string, e.clientX, e.clientY);
+  openMenu((tab?.dataset.id as string) ?? null, e.clientX, e.clientY);
 });
 
 // колесо — горизонтальная прокрутка полосы вкладок
@@ -140,7 +144,10 @@ newtabBtn.addEventListener("click", () => {
 });
 
 // --- контекстное меню вкладки -------------------------------------------------
-function openMenu(id: string, x: number, y: number): void {
+/** Меню таб-бара: на вкладке — её действия, на пустом месте (id === null,
+ *  карточка duopulse-075) — доступны только «Новая вкладка» и
+ *  «Переоткрыть закрытую», вкладочные действия отключены. */
+function openMenu(id: string | null, x: number, y: number): void {
   menuTabId = id;
   // прочие панели хрома закрываются (единое «одно меню на экран», mainmenu.ts)
   for (const other of ["mainMenu", "proxyMenu", "duoPanel"]) {
@@ -150,8 +157,14 @@ function openMenu(id: string, x: number, y: number): void {
   for (const btn of menuEl.querySelectorAll("button[data-act]")) {
     (btn as HTMLButtonElement).disabled = false;
   }
-  const tab = tabs.find((t) => t.id === id);
-  if (tab && tabs.length <= 1) {
+  const tab = id ? tabs.find((t) => t.id === id) : null;
+  if (!tab) {
+    // нет вкладочного контекста — вкладочные действия недоступны
+    for (const act of ["duplicate", "sleep", "close", "closeOthers"]) {
+      const b = menuEl.querySelector(`[data-act="${act}"]`) as HTMLButtonElement | null;
+      if (b) b.disabled = true;
+    }
+  } else if (tabs.length <= 1) {
     // «Закрыть другие» безсмысленна для единственной вкладки
     (menuEl.querySelector('[data-act="closeOthers"]') as HTMLButtonElement).disabled = true;
   }
@@ -177,18 +190,25 @@ function closeMenu(): void {
 
 menuEl.addEventListener("click", (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-act]");
-  if (!btn || !menuTabId) return;
+  if (!btn) return;
+  // без вкладочного контекста (пустое место бара) доступны только новые
+  // вкладки: newtab/reopen — глобальные действия
   const id = menuTabId;
-  const tab = tabs.find((t) => t.id === id);
+  if (!id && !["newtab", "reopen"].includes(btn.dataset.act ?? "")) return;
+  const tab = id ? tabs.find((t) => t.id === id) : null;
   closeMenu();
   switch (btn.dataset.act) {
+    case "newtab":
+      void bridge.tabs.open({}).then(apply, err);
+      break;
     case "duplicate":
       if (tab) void bridge.tabs.open({ url: tab.url }).then(apply, err);
       break;
     case "close":
-      closeTab(id);
+      if (id) closeTab(id);
       break;
     case "closeOthers":
+      if (!id) break;
       void (async () => {
         for (const other of tabs.filter((t) => t.id !== id)) {
           await bridge.tabs.close({ id: other.id });
@@ -199,8 +219,8 @@ menuEl.addEventListener("click", (e) => {
       void bridge.tabs.reopen().then(apply, err);
       break;
     case "sleep":
-      // ручное усыпление (задача 2.3); фон сна подтверждает tabs:updated
-      void bridge.tabs.sleep({ id }).then(apply, err);
+      // ручное усыпление (задача 2.3); фон сна подтверждает tabs.updated
+      if (id) void bridge.tabs.sleep({ id }).then(apply, err);
       break;
   }
 });
@@ -226,6 +246,10 @@ window.addEventListener(
       cycle(e.shiftKey ? -1 : 1);
     } else if (e.shiftKey && !e.repeat && (e.key === "t" || e.key === "T")) {
       void bridge.tabs.reopen().then(apply, err);
+    } else if (!e.shiftKey && !e.repeat && (e.key === "t" || e.key === "T")) {
+      // новая вкладка (карточка duopulse-075): в контенте то же ловит
+      // content/chrome-hotkeys.js через Core
+      void bridge.tabs.open({}).then(apply, err);
     } else {
       return;
     }

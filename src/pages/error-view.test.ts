@@ -1,7 +1,7 @@
 // DuoPulse — тесты модели страницы ошибки (карточка duopulse-048): хост
 // правила и решение кнопки «этот сайт — через туннель».
 import { describe, expect, it } from "vitest";
-import { errorHost, tunnelAction } from "./error-view";
+import { directAction, directActionAvailable, errorHost, tunnelAction } from "./error-view";
 
 describe("errorHost — хост для split-правила", () => {
   it("внешний адрес даёт домен без www", () => {
@@ -37,5 +37,34 @@ describe("tunnelAction — решение после vpn.add_rule", () => {
   });
   it("статуса нет — честная подсказка без автоповтора", () => {
     expect(tunnelAction(null).retry).toBe(false);
+  });
+});
+
+describe("directAction — кнопка «напрямую» при поднятом туннеле (duopulse-075)", () => {
+  it("глобальный режим сменился на split — автоповтор с пояснением", () => {
+    const a = directAction({ mode: "wg", routing: "global" });
+    expect(a.retry).toBe(true);
+    expect(a.note).toContain("split");
+    expect(a.note).toContain("напрямую");
+  });
+  it("split — правило добавлено, автоповтор", () => {
+    const a = directAction({ mode: "wg", routing: "split" });
+    expect(a.retry).toBe(true);
+    expect(a.note).toContain("напрямую");
+  });
+  it("статуса нет — честная подсказка без автоповтора", () => {
+    expect(directAction(null).retry).toBe(false);
+  });
+});
+
+describe("directActionAvailable — когда показывать кнопку «напрямую»", () => {
+  it("туннель поднят — кнопка нужна (сайт уже пытались через туннель)", () => {
+    expect(directActionAvailable({ mode: "wg", routing: "global" })).toBe(true);
+    expect(directActionAvailable({ mode: "wg", routing: "split" })).toBe(true);
+  });
+  it("туннель выключен/прокси/статуса нет — сайт и так напрямую, кнопка не нужна", () => {
+    expect(directActionAvailable({ mode: "off", routing: "off" })).toBe(false);
+    expect(directActionAvailable({ mode: "proxy", routing: "global" })).toBe(false);
+    expect(directActionAvailable(null)).toBe(false);
   });
 });

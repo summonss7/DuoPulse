@@ -57,12 +57,15 @@ const OUR_SCRIPTLETS = {
   "trusted-replace-node-text": ["scripts/rpnt-scriptlet.js", ["rpnt", "rnt", "trusted-rpnt", "trusted-rnt"]],
 };
 
-// Собственные uBO-скриптлеты, которых в пакете НЕТ вовсе (карточка
-// duopulse-072): trusted-edit-inbound-object — аттестация player-запросов
-// YouTube при патченном UA, ансамбль uBO quick-fixes против SSAI-преролла.
+// Собственные uBO-скриптлеты, которых в пакете НЕТ вовсе (карточки
+// duopulse-072/075): trusted-edit-inbound-object — аттестация player-запросов
+// YouTube при патченном UA; trusted-prevent-dom-bypass — анти-байпас
+// анонимных about:blank iframe (живые правила quick-fixes были мертвы без
+// ресурса). Ансамбль uBO quick-fixes против SSAI-преролла.
 // Ключ — каноническое имя ресурса (uBO-имя без .js), значение — как выше.
 const OUR_EXTRA_SCRIPTLETS = {
   "trusted-edit-inbound-object": ["scripts/edit-inbound-scriptlet.js", []],
+  "trusted-prevent-dom-bypass": ["scripts/prevent-dom-bypass-scriptlet.js", []],
 };
 
 const data = JSON.parse(fs.readFileSync(SRC, "utf8"));

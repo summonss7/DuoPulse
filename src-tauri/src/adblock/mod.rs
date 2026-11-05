@@ -1933,6 +1933,37 @@ mod tests {
     // --- карточка duopulse-069: rpnt-порт (trusted-replace-node-text) ---------
 
     #[test]
+    fn quickfix_prevent_dom_bypass_injected_on_youtube() {
+        // Карточка duopulse-075: живые правила quick-fixes
+        // `##+js(trusted-prevent-dom-bypass, Node.prototype.appendChild, fetch|Request)`
+        // были мертвы — ресурса не было ни в пакете, ни у нас. Порт
+        // (scripts/prevent-dom-bypass-scriptlet.js) подключён конвертером:
+        // правила инъецируются на YouTube (анти-байпас about:blank iframe).
+        let mut set = adblock::lists::FilterSet::new(false);
+        set.add_filters(
+            QUICKFIX_RULES.lines(),
+            ParseOptions {
+                permissions: adblock::resources::PermissionMask::from_bits(1),
+                ..ParseOptions::default()
+            },
+        );
+        let mut engine = Engine::from_filter_set(set, true);
+        engine.use_resources(scriptlet_resources().iter().cloned());
+        let s = service();
+        s.set_engine(engine);
+        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        assert!(
+            res.injected_script.matches("trustedPreventDOMBypass(").count() >= 2,
+            "оба trusted-prevent-dom-bypass правила quickfix инъецируются (fetch и Request): {}",
+            &res.injected_script[..res.injected_script.len().min(300)]
+        );
+        // Внутри порта — семантика uBO: делегирование пропатченного метода
+        // родителя встроенному контексту и замена контекста целиком.
+        assert!(res.injected_script.contains("contentWindow"));
+        assert!(res.injected_script.contains("[object Window]"));
+    }
+
+    #[test]
     fn quickfix_servercontract_rpnt_injected_on_youtube() {
         // Встроенный quickfix-снапшот (QUICKFIX_RULES, тот же trusted-режим,
         // что выдаётся списку duopulse-quickfix в refresh_lists): гигантское

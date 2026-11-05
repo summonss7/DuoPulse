@@ -255,9 +255,13 @@ const errorActions = async (ws) =>
         `(() => {
            const bs = [...document.querySelectorAll('.err-actions button')];
            if (!bs.length) return null;
+           const split = bs.filter((b) => !b.className.includes('primary'));
            return {
              retry: bs.some((b) => b.className.includes('primary')),
-             tunnel: bs.find((b) => !b.className.includes('primary'))?.textContent ?? null,
+             tunnel: split.find((b) => b.textContent.includes('туннель'))?.textContent ?? null,
+             // карточка duopulse-075: при поднятом туннеле первой — «напрямую»
+             direct: split.find((b) => b.textContent.includes('напрямую'))?.textContent ?? null,
+             first: split[0]?.textContent ?? null,
            };
          })()`,
       ).catch(() => null);
@@ -754,10 +758,17 @@ try {
     errF.ctx?.url === `http://${F_HOST}/` && actF.tunnel != null && actF.tunnel.includes(F_HOST),
     `ctx=${JSON.stringify(errF.ctx)}, actions=${JSON.stringify(actF)}`,
   );
+  // duopulse-075: туннель поднят — первой кнопкой идёт «этот сайт — напрямую»
+  // (RU-сервисы режут зарубежные IP), «через туннель» — второй.
+  check(
+    `F1b (075) туннель поднят: «напрямую» — первая кнопка, «через туннель» — вторая`,
+    actF.direct != null && actF.direct.includes(F_HOST) && actF.first === actF.direct,
+    `actions=${JSON.stringify(actF)}`,
+  );
   await evalIn(
     errF.ws,
     `(() => {
-       const b = [...document.querySelectorAll('.err-actions button')].find((x) => !x.className.includes('primary'));
+       const b = [...document.querySelectorAll('.err-actions button')].find((x) => x.textContent.includes('туннель'));
        b.click();
        return true;
      })()`,
@@ -807,6 +818,65 @@ try {
     tabsAfterF?.tabs?.every((t) => !t.url.startsWith("duopulse://error")) &&
       tabsAfterF?.tabs?.some((t) => t.url.startsWith(`http://${F_HOST}/`)),
     JSON.stringify(tabsAfterF?.tabs?.map((t) => t.url)),
+  );
+
+  // --- G. страница ошибки → «этот сайт — напрямую» в глобальном режиме (075) -----
+  // Сценарий Артёма «включил VPN — mail.ru не открывается»: глобальный режим,
+  // зарубежный выход, RU-сайт режет зарубежные IP. Стенд: глобальный режим,
+  // свежий домен вне зоны .tun — DNS туннеля отдаёт необслуживаемый адрес,
+  // соединение не проходит → страница ошибки. Клик «напрямую»: direct-правило
+  // + глобальный режим переключается на split + автоповтор загрузки (домен
+  // вне .tun системным DNS — NXDOMAIN, снова страница ошибки: попытка и
+  // правило — проверяемы, резолва у домена нет намеренно).
+  const G_HOST = "fresh-075.example";
+  await openVpnPanel(uiWs);
+  await evalIn(uiWs, `document.getElementById('vpnMode').querySelector("button[data-mode='global']").click(), true`);
+  const stG0 = await pollUntil(
+    async () => (await vpnStatus(uiWs))?.routing === "global" ? await vpnStatus(uiWs) : null,
+    15000,
+    "режим global включён",
+  );
+  check(
+    "G0 (075) глобальный режим включён (туннель поднят)",
+    stG0?.routing === "global" && stG0?.mode === "wg",
+    `routing=${stG0?.routing}, mode=${stG0?.mode}`,
+  );
+
+  await contentWs.send("Page.navigate", { url: `http://${G_HOST}/` }).catch(() => {});
+  contentWs.close();
+  // DNS туннеля отвечает быстро, TCP на необслуживаемый адрес — таймаутом:
+  // дедлайн шире обычного (90 с).
+  const errG = await connectErrorPage(`http://${G_HOST}/`, 90000);
+  const actG = await errorActions(errG.ws);
+  check(
+    `G1 (075) сайт не открылся через глобальный туннель — страница ошибки, «напрямую» первой`,
+    errG.ctx?.url === `http://${G_HOST}/` && actG.direct != null && actG.direct.includes(G_HOST) && actG.first === actG.direct,
+    `ctx=${JSON.stringify(errG.ctx)?.slice(0, 120)}, actions=${JSON.stringify(actG)}`,
+  );
+
+  await evalIn(
+    errG.ws,
+    `(() => {
+       const b = [...document.querySelectorAll('.err-actions button')].find((x) => x.textContent.includes('напрямую'));
+       b.click();
+       return true;
+     })()`,
+  );
+  // Клик: direct-правило в общем сторе + режим global→split + автоповтор
+  // (системный DNS отдаёт NXDOMAIN — страница ошибки появляется снова).
+  const rulesG = await pollUntil(
+    async () => {
+      const r = await evalIn(uiWs, `window.__duopulse.vpn.getRules()`);
+      return r?.mode === "split" && r?.rules?.some((x) => x.domain === G_HOST && x.route === "direct") ? r : null;
+    },
+    20000,
+    "direct-правило создано, режим сменился на split",
+  );
+  const errG2 = await connectErrorPage(`http://${G_HOST}/`, 45000).catch(() => null);
+  check(
+    "G2 (075) клик «напрямую»: правило direct создано, глобальный режим сменился на split, загрузка повторена",
+    rulesG != null && errG2 != null && errG2.ctx?.url === `http://${G_HOST}/`,
+    `rules=${JSON.stringify(rulesG?.rules)}, retry-page=${errG2 != null}`,
   );
 
   // --- завершение сеанса 1 (профиль/режим остаются в профиле) --------------------

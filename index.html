@@ -229,10 +229,14 @@
           DuoPulse — только VPN-клиент: серверы принадлежат вам или вашему
           провайдеру VPN; собственных серверов и списков обхода нет. Законность
           использования VPN зависит от юрисдикции и остаётся вашей ответственностью.
+          В глобальном режиме российские сайты (mail.ru, Яндекс&hellip;) могут не
+          открываться — их серверы отклоняют зарубежные IP: добавьте такие домены
+          в split-правило «напрямую».
           <button type="button" id="vpnSettingsLink" class="link">Настройки VPN &rarr;</button>
         </div>
       </div>
       <div id="tabMenu" class="tab-menu" hidden>
+        <button type="button" data-act="newtab">Новая вкладка <span class="kbd">Ctrl+T</span></button>
         <button type="button" data-act="duplicate">Дублировать вкладку</button>
         <button type="button" data-act="sleep">Усыпить вкладку</button>
         <button type="button" data-act="close">Закрыть вкладку</button>

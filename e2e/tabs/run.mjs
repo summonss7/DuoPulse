@@ -11,7 +11,10 @@
 //      → WebMessage → Core): активная_switch по кольцу;
 //   6) Ctrl+Shift+T: закрытая вкладка возвращается (URL тот же, новая активна);
 //   7) UI-хоткеи (событие keydown в UI-webview) — то же переключение;
-//   8) скриншот таб-бара для сверки со стилем (гайд 06).
+//   8) контекст-меню вкладки (открытие/«Закрыть») + на ПУСТОМ месте бара
+//      (карточка duopulse-075: «Новая вкладка» доступна, вкладочные действия
+//      отключены) + Ctrl+T из контента и из UI;
+//   9) скриншот таб-бара для сверки со стилем (гайд 06).
 // Изоляция: APPDATA и WEBVIEW2_USER_DATA_FOLDER — во временном каталоге.
 //
 // Запуск:  node e2e/tabs/run.mjs [путь-к-duopulse.exe]
@@ -284,6 +287,69 @@ try {
     "контекст-меню: «Закрыть вкладку» закрывает её, меню закрывается",
     menuClosed === true && afterMenuClose.length === countBefore - 1,
     `вкладок ${countBefore} → ${afterMenuClose.length}`,
+  );
+
+  // (8b) контекст-меню на ПУСТОМ месте таб-бара (карточка duopulse-075:
+  // «правый клик возле вкладок — нет "создать новую вкладку"»): меню
+  // открывается, вкладочные действия отключены, «Новая вкладка» работает
+  const emptyMenu = await evalIn(
+    uiWs,
+    `(function () {
+       const bar = document.getElementById("tabbar");
+       const r = bar.getBoundingClientRect();
+       bar.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.right - 8, clientY: r.top + r.height / 2 }));
+       const menu = document.getElementById("tabMenu");
+       const disabled = ["duplicate", "sleep", "close", "closeOthers"].map(
+         (a) => menu.querySelector('button[data-act="' + a + '"]').disabled,
+       );
+       return JSON.stringify({ open: !menu.hidden, disabled, newtab: !menu.querySelector('button[data-act="newtab"]').disabled });
+     })()`,
+  );
+  let emptyState = { open: false, disabled: [], newtab: false };
+  try { emptyState = JSON.parse(emptyMenu); } catch {}
+  check(
+    "контекст-меню на пустом месте: открыто, вкладочные действия отключены, «Новая вкладка» доступна",
+    emptyState.open === true && emptyState.disabled.every(Boolean) && emptyState.newtab === true,
+    emptyMenu,
+  );
+  const emptyCountBefore = (await tabsList(uiWs)).tabs.length;
+  const emptyNewTab = await evalIn(
+    uiWs,
+    `(function () {
+       document.querySelector('#tabMenu button[data-act="newtab"]').click();
+       return document.getElementById("tabMenu").hidden;
+     })()`,
+  );
+  await sleep(600);
+  const emptyAfter = (await tabsList(uiWs)).tabs;
+  check(
+    "меню пустого места: «Новая вкладка» создаёт вкладку, меню закрывается",
+    emptyNewTab === true && emptyAfter.length === emptyCountBefore + 1,
+    `вкладок ${emptyCountBefore} → ${emptyAfter.length}`,
+  );
+
+  // (8c) Ctrl+T — новая вкладка: из контента (chrome-hotkeys.js → Core) и из UI
+  const ctrlTBefore = (await tabsList(uiWs)).tabs.length;
+  await keydown(contentWs, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", ctrlKey: true, cancelable: true })); 1`);
+  for (let i = 0; i < 15; i++) {
+    await sleep(400);
+    if ((await tabsList(uiWs)).tabs.length > ctrlTBefore) break;
+  }
+  check(
+    "Ctrl+T из контента: создана новая вкладка",
+    (await tabsList(uiWs)).tabs.length === ctrlTBefore + 1,
+    `${ctrlTBefore} → ${(await tabsList(uiWs)).tabs.length}`,
+  );
+  const ctrlTUiBefore = (await tabsList(uiWs)).tabs.length;
+  await keydown(uiWs, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "t", ctrlKey: true, cancelable: true })); 1`);
+  for (let i = 0; i < 15; i++) {
+    await sleep(300);
+    if ((await tabsList(uiWs)).tabs.length > ctrlTUiBefore) break;
+  }
+  check(
+    "Ctrl+T из UI: создана новая вкладка",
+    (await tabsList(uiWs)).tabs.length === ctrlTUiBefore + 1,
+    `${ctrlTUiBefore} → ${(await tabsList(uiWs)).tabs.length}`,
   );
 
   // (9) чистый скриншот таб-бара (сверка стиля с гайдом 06)

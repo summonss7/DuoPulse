@@ -8,7 +8,7 @@
 // duopulse://error) — заглушка без действий.
 import { bridge } from "../bridge";
 import type { VpnStatusResult } from "../bridge/gen/types";
-import { errorHost, tunnelAction } from "./error-view";
+import { directAction, directActionAvailable, errorHost, tunnelAction } from "./error-view";
 
 const err = (e: unknown): void => console.error("error-page:", e);
 
@@ -63,30 +63,70 @@ if (ctx) {
   });
 
   actions.append(retry);
-  // Кнопка «этот сайт — через туннель» — только для адреса с доменом:
-  // правило доменное, IP-адрес и внутренние страницы не считаются.
+  // Split-кнопки — только для адреса с доменом: правило доменное, IP-адрес
+  // и внутренние страницы не считаются. Туннель поднят — сайт уже пытались
+  // через туннель, первой идёт «напрямую» (карточка duopulse-075: RU-сервисы
+  // режут зарубежные IP и в глобальном режиме «не работают»); туннель выключен
+  // — сайт шёл напрямую, уместна «через туннель».
   if (host) {
-    const tunnel = document.createElement("button");
-    tunnel.type = "button";
-    tunnel.textContent = `«${host}» — через туннель`;
-    tunnel.title = "Добавить split-правило для домена и повторить загрузку";
-    tunnel.addEventListener("click", () => {
-      tunnel.disabled = true;
-      void bridge.vpn
-        .addRule({ domain: host, route: "tunnel" })
-        .then(() => bridge.vpn.status())
-        .then((st: VpnStatusResult) => {
-          const act = tunnelAction(st);
-          note.textContent = act.note;
-          if (act.retry) void bridge.nav.navigate({ url: ctx.url }).catch(err);
-        })
-        .catch((e) => {
-          tunnel.disabled = false;
-          note.textContent = String(e);
-          err(e);
-        });
-    });
-    actions.append(tunnel);
+    const mkSplit = (
+      route: "tunnel" | "direct",
+      title: string,
+      decide: typeof tunnelAction,
+    ): HTMLButtonElement => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = `«${host}» — ${route === "tunnel" ? "через туннель" : "напрямую"}`;
+      b.title = title;
+      b.addEventListener("click", () => {
+        b.disabled = true;
+        void bridge.vpn
+          .addRule({ domain: host, route })
+          .then(async () => {
+            // прямому правилу нужен split: глобальный режим переключаем,
+            // остальной трафик остаётся в туннеле
+            if (route === "direct") {
+              const cur = await bridge.vpn.status();
+              if (cur.routing === "global") await bridge.vpn.setMode({ mode: "split" });
+            }
+            return bridge.vpn.status();
+          })
+          .then((st: VpnStatusResult) => {
+            const act = decide(st);
+            note.textContent = act.note;
+            if (act.retry) void bridge.nav.navigate({ url: ctx.url }).catch(err);
+          })
+          .catch((e) => {
+            b.disabled = false;
+            note.textContent = String(e);
+            err(e);
+          });
+      });
+      return b;
+    };
+    actions.append(
+      // порядок — по вероятной причине: статус определяет порядок ниже
+      mkSplit(
+        "tunnel",
+        "Добавить split-правило для домена и повторить загрузку",
+        tunnelAction,
+      ),
+    );
+    void bridge
+      .vpn.status()
+      .then((st: VpnStatusResult): void => {
+        // туннель не поднят — сайт и так идёт напрямую, кнопка не нужна
+        if (!directActionAvailable(st)) return;
+        const first = actions.querySelector("button:not(.primary)");
+        const direct = mkSplit(
+          "direct",
+          "Маршрутировать домен мимо туннеля (split) и повторить загрузку",
+          directAction,
+        );
+        if (first) actions.insertBefore(direct, first);
+        else actions.append(direct);
+      })
+      .catch(err);
   }
 
   root.append(addr, reason, actions, note);
