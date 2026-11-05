@@ -1,7 +1,7 @@
-! DuoPulse quickfix — снапшот правила serverContract из uBO quick-fixes
-! (карточка duopulse-069, 02.11.2026). Источник:
-!   https://ublockorigin.github.io/uAssets/filters/quick-fixes.txt
-! Обновление — пересборкой: заменить правило ниже свежей версией из списка.
+! DuoPulse quickfix — оффлайн-снапшот YouTube-части uBO quick-fixes
+! (карточки 069/072; 074 — снапшот 05.11.2026 + живой источник). Список
+! качается живьём (QUICKFIX_URL в mod.rs, обновление как у EasyList); этот
+! текст — фолбэк первого запуска без сети. Обновление — пересборкой.
 ! Список подключён как trusted-источник (trusted_list, как duopulse-compat):
 ! replacement содержит произвольный JS — из недоверенных списков такие
 ! правила движок не инъецирует (PermissionMask).
@@ -24,10 +24,6 @@ www.youtube.com##+js(trusted-edit-inbound-object, JSON.stringify, 0, [?.attestat
 www.youtube.com##+js(trusted-edit-inbound-object, JSON.stringify, 0, [?.attestationRequest][?.context.client.userAgent=/channel|lactmilli|inline/].playbackContext.contentPlaybackContext.lactMilliseconds="${now}")
 www.youtube.com##+js(trusted-edit-inbound-object, JSON.stringify, 0, [?.attestationRequest][?.context.client.userAgent=/adunit|channel|lactmilli|inline|yahi|eafg|yaf4/].playbackContext.contentPlaybackContext.referer=repl({"regex":"(?:#reloadxhr)?$"\,"replacement":"#reloadxhr"}))
 www.youtube.com##+js(trusted-edit-inbound-object, JSON.stringify, 0, [?.createCommentParams].context.client.userAgent=repl({"regex":"/; (adunit|channel|lactmilli|inline|yahi|eafg|yaf4)\b/"\,"replacement":""}))
-www.youtube.com##+js(trusted-rpfr, '"adPlacements"', '"no_ads"', player?)
-www.youtube.com##+js(trusted-rpfr, '"adSlots"', '"no_ads"', player?)
-www.youtube.com##+js(trusted-rpfr, '"adSlots"', '"no_ads"', /^\W+$/)
-www.youtube.com##+js(trusted-rpfr, '"adSlots"', '"no_ads"', /get_watch?)
 ||www.youtube.com/playlist?list=$xhr,1p,replace=/"adPlacements"/"no_ads"/
 ||www.youtube.com/playlist?list=$xhr,1p,replace=/"adSlots"/"no_ads"/
 ||www.youtube.com/watch?$xhr,1p,replace=/"adPlacements"/"no_ads"/
@@ -36,3 +32,35 @@ www.youtube.com##+js(trusted-rpfr, '"adSlots"', '"no_ads"', /get_watch?)
 ||www.youtube.com/youtubei/v1/player?$xhr,1p,replace=/"adSlots"/"no_ads"/
 ||youtube.com/youtubei/v1/get_watch?$xhr,1p,replace=/"adPlacements"/"no_ads"/
 ||youtube.com/youtubei/v1/get_watch?$xhr,1p,replace=/"adSlots"/"no_ads"/
+
+! --- duopulse-074: полная YouTube-часть живого quick-fixes ---
+! (снапшот 05.11.2026; список теперь качается живьём — QUICKFIX_URL в mod.rs,
+! этот снапшот остаётся оффлайн-фолбэком первого запуска). Добавлен слой,
+! который uBO на Chromium использует против SSAI, а снапшот 072 не включал:
+! перезапись fetch/xhr-ответов (json-prune-fetch-response, json-prune-
+! xhr-response, trusted-replace-xhr-response), анти-байпас YouTube
+! (rmnt-алиас remove-node-text, trusted-prevent-dom-bypass — скриптлеты
+! nano-stb/prevent-dom-bypass в ресурсном наборе пока нет, правила инертны
+! до порта), маскировка Shorts-рекламы и скрытие anti-adblock-тостов.
+! НЕ включено: json-prune adSlots legacyImportant (env_firefox-ветка uBO;
+! клиентская adSlots-обрезка ломает SABR в DuoPulse — гасится исключением
+! в compat.txt) и ##^script:has-text (html-filtering, только Firefox).
+www.youtube.com##+js(nano-stb, [native code], 17000, 0.001)
+www.youtube.com##+js(json-prune-fetch-response, adPlacements adSlots playerResponse.adPlacements playerResponse.adSlots [].playerResponse.adPlacements [].playerResponse.adSlots, , propsToMatch, /\/player(\?|$)/)
+www.youtube.com##+js(json-prune-fetch-response, adPlacements adSlots playerResponse.adPlacements playerResponse.adSlots, , propsToMatch, /playlist?)
+m.youtube.com,www.youtube.com,www.youtube-nocookie.com##+js(json-prune-fetch-response, endpoint.watchEndpoint.unserializedPrefetchData.playerResponse.playerAds endpoint.watchEndpoint.unserializedPrefetchData.playerResponse.adPlacements endpoint.watchEndpoint.unserializedPrefetchData.playerResponse.adSlots, , propsToMatch, /resolve_url?)
+www.youtube.com##+js(json-prune-xhr-response, adPlacements adSlots playerResponse.adPlacements playerResponse.adSlots [].playerResponse.adPlacements [].playerResponse.adSlots, , propsToMatch, /\/player(?:\?.+)?$/)
+tv.youtube.com##+js(trusted-replace-xhr-response, '"adPlacements"', '"no_ads"', /playlist\?list=|\/player(?:\?.+)?$|watch\?[tv]=/)
+www.youtube.com##+js(trusted-replace-xhr-response, /"adPlacements.*?([A-Z]"\}|"\}{2\,4})\}\]\,/, , /playlist\?list=|\/player(?:\?.+)?$|watch\?[tv]=/)
+www.youtube.com##+js(trusted-replace-xhr-response, /"adPlacements.*?("adSlots"|"adBreakHeartbeatParams")/gms, $1, /\/player(?:\?.+)?$/)
+www.youtube.com##+js(trusted-rpfr, '"adPlacements"', '"no_ads"', player?)
+www.youtube.com##+js(trusted-rpfr, '"adSlots"', '"no_ads"', player?)
+www.youtube.com##+js(trusted-rpfr, '"adSlots"', '"no_ads"', /^\W+$/)
+www.youtube.com##+js(trusted-rpfr, '"adSlots"', '"no_ads"', /get_watch?)
+www.youtube.com##+js(rmnt, script, window\,"fetch")
+www.youtube.com##+js(trusted-prevent-dom-bypass, Node.prototype.appendChild, fetch)
+www.youtube.com##+js(trusted-prevent-dom-bypass, Node.prototype.appendChild, Request)
+youtube.com##+js(json-prune, entries.[-].command.reelWatchEndpoint.adClientParams.isAd)
+youtube.com#@##player-ads
+www.youtube.com###toast:has(> #text-container > yt-formatted-string#text.yt-notification-action-renderer)
+www.youtube.com##.ytSnackbarContainerOpened:has(> .snackbarViewModelSwipeable > .snackbarViewModelEngagementBarWrapper .ytAttributedStringWhiteSpacePreWrap[style])

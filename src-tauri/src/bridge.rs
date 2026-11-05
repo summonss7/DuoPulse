@@ -74,6 +74,17 @@ pub struct BridgeVersionResult {
     pub version: u32,
 }
 
+/// app.build_info: версия приложения и момент сборки (карточка duopulse-074:
+/// бейдж «vX.Y.Z · дата» в шапке браузера). `build_unix` — unix-секунды
+/// компиляции (DUOPULSE_BUILD_UNIX из build.rs; 0 — неизвестно), фронтенд
+/// форматирует их локальной датой пользователя.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AppBuildInfoResult {
+    pub version: String,
+    pub build_unix: u64,
+}
+
 /// tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct TabsListResult {
@@ -1229,6 +1240,8 @@ pub fn contract_json() -> serde_json::Value {
         "commands": {
             "bridge.version": { "handler": "bridge_version", "params": null,
                                 "result": schema!(BridgeVersionResult) },
+            "app.build_info": { "handler": "app_build_info", "params": null,
+                                "result": schema!(AppBuildInfoResult) },
             "tabs.list": { "handler": "tabs_list", "params": null,
                            "result": schema!(TabsListResult) },
             "tabs.open": { "handler": "tabs_open", "params": schema!(TabsOpenParams),
@@ -1545,6 +1558,17 @@ fn event_names_match_registry() {
 fn bridge_version() -> BridgeVersionResult {
     BridgeVersionResult {
         version: CONTRACT_VERSION,
+    }
+}
+
+/// app.build_info (карточка duopulse-074): версия + момент сборки.
+#[tauri::command]
+fn app_build_info() -> AppBuildInfoResult {
+    AppBuildInfoResult {
+        version: env!("CARGO_PKG_VERSION").into(),
+        build_unix: env!("DUOPULSE_BUILD_UNIX")
+            .parse::<u64>()
+            .unwrap_or(0),
     }
 }
 
@@ -3144,6 +3168,7 @@ fn save_proxy(
 pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.invoke_handler(tauri::generate_handler![
         bridge_version,
+        app_build_info,
         tabs_list,
         tabs_open,
         tabs_close,

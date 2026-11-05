@@ -21,7 +21,9 @@
 //! `serialize_raw` ресурсы НЕ сериализует — `use_resources` вызывается и
 //! после `Engine::from_rules`, и после `deserialize`.
 //!
-//! Списки: EasyList + uBO filters (ads) по умолчанию; загрузка по HTTPS,
+//! Списки: EasyList + uBO filters (ads) + живой uBO quick-fixes (SSAI-ансамбль,
+//! карточка 074; оффлайн-фолбэк — встроенный снапшот) + встроенный compat;
+//! загрузка по HTTPS,
 //! кэш текстов в `profile/filters/<имя>.txt` (docs/02 §8), скомпилированный
 //! движок в `engine.bin` (deserialize — сотни мс против секунд парсинга),
 //! метаданные (digest/дата/число правил) — `meta.json`. Фоновое обновление:
@@ -105,14 +107,18 @@ const COMPAT_RULES: &str = include_str!("compat.txt");
 /// `COMPAT_RULES` (обновление — пересборкой бинарника).
 const COMPAT_SOURCE: &str = "builtin:";
 
-/// Встроенный список точечных правил uBO quick-fixes (карточка duopulse-069):
-/// снапшот правила serverContract (rpnt-перезапись текстового узла до старта
-/// плеера) — единственный рабочий фронт против SSAI-преролла YouTube
-/// (серверная склейка в SABR-манифесте не видна сетевому/JSON-слою, карточка
-/// 065). Обновление — пересборкой (замена снапшота в quickfix.txt).
+/// Встроенный снапшот uBO quick-fixes (карточки 069/072/074): оффлайн-фолбэк
+/// живого источника `QUICKFIX_URL` — первый запуск без сети/кэша работает на
+/// нём, дальше список качается и обновляется как EasyList. Обновление
+/// снапшота — пересборкой (замена текста в quickfix.txt).
 const QUICKFIX_RULES: &str = include_str!("quickfix.txt");
-/// Источник-маркер (как `COMPAT_SOURCE` у compat-списка).
-const QUICKFIX_SOURCE: &str = "builtin-quickfix:";
+/// Живой список uBO quick-fixes (карточка 074): против SSAI-преролла YouTube
+/// работает только весь текущий ансамбль uBO (rpnt serverContract + правила
+/// аттестации + перезапись fetch/xhr-ответов), а список меняется почти
+/// ежедневно — замороженный снапшот 072 протухал за сутки. Качается и
+/// обновляется (сутки/час) тем же механизмом, что EasyList; trusted — тот же
+/// уровень доверия, который даёт списку сам uBO.
+const QUICKFIX_URL: &str = "https://ublockorigin.github.io/uAssets/filters/quick-fixes.txt";
 
 /// Разобранный набор (один раз на процесс; ошибка формата — печатаем и
 /// работаем без скриптлетов, как до карточки 043).
@@ -148,6 +154,8 @@ struct ListDef {
 /// P-07 19% ≤ 60%), плата — обёртки fetch/XHR на youtube-документах (~+8%
 /// к P-08, замер 050); откат — убрать имя из списка ниже. До 29.10 доверие
 /// было выключено экспериментом 050 (решение А автора от 22.10).
+/// duopulse-quickfix (карточка 074) — живой кураторский список uBO
+/// quick-fixes: тот же уровень доверия, который даёт ему сам uBO.
 fn trusted_list(name: &str) -> bool {
     matches!(name, "ublock-ads" | "duopulse-compat" | "duopulse-quickfix")
 }
@@ -170,11 +178,12 @@ fn list_defs() -> Vec<ListDef> {
             source: COMPAT_SOURCE.into(),
             trusted: trusted_list("duopulse-compat"),
         });
-        // Карточка 069: встроенный снапшот serverContract-правила uBO
-        // quick-fixes (rpnt) — trusted-источник, как compat.
+        // Карточка 074: живой список uBO quick-fixes (URL, качается как
+        // EasyList; оффлайн-фолбэк — встроенный снапшот) — trusted-источник,
+        // как compat.
         defs.push(ListDef {
             name: "duopulse-quickfix".into(),
-            source: QUICKFIX_SOURCE.into(),
+            source: QUICKFIX_URL.into(),
             trusted: trusted_list("duopulse-quickfix"),
         });
         return defs;
@@ -689,10 +698,6 @@ impl AdblockService {
                 // вкомпилирован; пишем его в кэш для единообразия меток.
                 atomic_write(&path, COMPAT_RULES.as_bytes());
                 (Some(COMPAT_RULES.to_string()), now, String::new())
-            } else if def.source == QUICKFIX_SOURCE {
-                // Встроенный quickfix-снапшот (карточка 069) — тот же паттерн.
-                atomic_write(&path, QUICKFIX_RULES.as_bytes());
-                (Some(QUICKFIX_RULES.to_string()), now, String::new())
             } else if need_fetch {
                 match fetch_list(&def.source) {
                     Ok(t) => {
@@ -700,8 +705,16 @@ impl AdblockService {
                         (Some(t), now, String::new())
                     }
                     Err(e) => {
-                        // кэш есть — работаем на нём, ошибку покажем в статусе
-                        (cached.clone(), cached_at, e.to_string())
+                        if cached.is_none() && def.name == "duopulse-quickfix" {
+                            // Оффлайн-запуск без кэша (карточка 074): лучше
+                            // протухший встроенный снапшот ансамбля, чем
+                            // пустой список; кэш пишем — до удачной загрузки.
+                            atomic_write(&path, QUICKFIX_RULES.as_bytes());
+                            (Some(QUICKFIX_RULES.to_string()), now, String::new())
+                        } else {
+                            // кэш есть — работаем на нём, ошибку покажем в статусе
+                            (cached.clone(), cached_at, e.to_string())
+                        }
                     }
                 }
             } else {
@@ -2105,6 +2118,154 @@ mod tests {
         }));
     }
 
+    // --- карточка duopulse-074: живой quick-fixes, слой fetch/xhr-ответов ---
+
+    /// Движок из текстов с trusted-правами (паттерн тестов 072).
+    fn trusted_engine(texts: &[&str]) -> Engine {
+        let mut set = adblock::lists::FilterSet::new(false);
+        for t in texts {
+            set.add_filters(
+                t.lines(),
+                ParseOptions {
+                    permissions: adblock::resources::PermissionMask::from_bits(1),
+                    ..ParseOptions::default()
+                },
+            );
+        }
+        let mut engine = Engine::from_filter_set(set, true);
+        engine.use_resources(scriptlet_resources().iter().cloned());
+        engine
+    }
+
+    #[test]
+    fn quickfix_full_snapshot_injects_response_layer() {
+        // Снапшот 074 добавил к ансамблю 072 слой перезаписи fetch/xhr-
+        // ответов uBO (json-prune-fetch-response, json-prune-xhr-response,
+        // trusted-replace-xhr-response) + анти-байпас (rmnt = remove-node-
+        // text, nano-stb = adjust-setTimeout; ресурсы есть в пакете).
+        // trusted-prevent-dom-bypass ресурса не имеет — правило инертно
+        // (движок пропускает неизвестный скриптлет молча) и остальные
+        // инъекции не ломает.
+        let s = service();
+        s.set_engine(trusted_engine(&[QUICKFIX_RULES]));
+        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+        // ансамбль 072 жив
+        let eio_calls = res.injected_script.matches("trustedEditInboundObject(\"").count();
+        assert_eq!(eio_calls, 7, "7 правил edit-inbound инъецируются");
+        let rpfr_calls = res.injected_script.matches("trustedReplaceFetchResponse(\"").count();
+        assert_eq!(rpfr_calls, 4, "4 trusted-rpfr-правила инъецируются");
+        // слой 074: перезапись ответов
+        let fetch_prune = res.injected_script.matches("jsonPruneFetchResponse(\"").count();
+        assert!(fetch_prune >= 3, "json-prune-fetch-response: {fetch_prune}");
+        let xhr_prune = res.injected_script.matches("jsonPruneXhrResponse(\"").count();
+        assert!(xhr_prune >= 1, "json-prune-xhr-response: {xhr_prune}");
+        let xhr_replace = res
+            .injected_script
+            .matches("trustedReplaceXhrResponse(\"")
+            .count();
+        // 2 правила www.youtube.com (третье — tv.youtube.com, ниже)
+        assert!(xhr_replace >= 2, "trusted-replace-xhr-response: {xhr_replace}");
+        let tv = s.cosmetic_resources("https://tv.youtube.com/");
+        assert!(
+            tv.injected_script.matches("trustedReplaceXhrResponse(\"").count() >= 1,
+            "tv.youtube-вариант инъецируется на tv"
+        );
+        // анти-байпас (алиасы пакета)
+        assert!(
+            res.injected_script.matches("removeNodeText(\"").count() >= 1,
+            "rmnt → remove-node-text"
+        );
+        assert!(
+            res.injected_script.matches("adjustSetTimeout(\"").count() >= 1,
+            "nano-stb → adjust-setTimeout"
+        );
+        // сайт-специфичность слоя
+        let other = s.cosmetic_resources("https://example.com/");
+        assert!(!other.injected_script.contains("trustedReplaceXhrResponse"));
+        assert!(!other.injected_script.contains("jsonPruneFetchResponse"));
+    }
+
+    #[test]
+    fn compat_exception_neutralizes_firefox_json_prune() {
+        // Живой quick-fixes несёт клиентскую adSlots-обрезку ТОЛЬКО в
+        // env_firefox-ветке (json-prune … legacyImportant); наш парсер
+        // директивы !#if не понимает (это комментарий) — правило
+        // активировалось бы. Точное исключение в compat гасит его (линия
+        // 044: клиентская adSlots-обрезка ломает SABR-хендшейк в DuoPulse).
+        let live_rule = "youtube.com##+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots legacyImportant)";
+        let s = service();
+        s.set_engine(trusted_engine(&[live_rule, COMPAT_RULES]));
+        let res = s.cosmetic_resources("https://www.youtube.com/watch?v=x");
+        assert!(
+            !res.injected_script.contains("legacyImportant"),
+            "правило погашено исключением compat"
+        );
+        // контроль механизма: без compat-исключения правило активно
+        let s2 = service();
+        s2.set_engine(trusted_engine(&[live_rule]));
+        let res2 = s2.cosmetic_resources("https://www.youtube.com/watch?v=x");
+        assert!(
+            res2.injected_script.contains("legacyImportant"),
+            "без исключения json-prune инъецируется"
+        );
+    }
+
+    #[test]
+    fn compat_expire_rule_blocks_ssai_media_requests() {
+        // Адаптация сетевого правила uBO quick-fixes #29059 (compat.txt):
+        // SSAI-медиа-сегменты идут с неправдоподобным expire (regex апстрима
+        // отсекает правдоподобный диапазон текущей эпохи); оригинал падает
+        // в adblock-rs на опции method= — адаптация без неё.
+        let s = service();
+        s.set_engine(trusted_engine(&[COMPAT_RULES]));
+        assert!(
+            s.should_block(
+                Some("https://www.youtube.com/watch?v=x"),
+                "https://rr5---sn-4g5lznle.googlevideo.com/videoplayback?expire=2094204800&mn=sn-x",
+                "xhr",
+                Some("https://www.youtube.com/"),
+            ),
+            "SSAI-подобный expire (2094…) блокируется"
+        );
+        assert!(
+            !s.should_block(
+                Some("https://www.youtube.com/watch?v=x"),
+                "https://rr5---sn-4g5lznle.googlevideo.com/videoplayback?expire=1793900000&mn=sn-x",
+                "xhr",
+                Some("https://www.youtube.com/"),
+            ),
+            "правдоподобный expire (эпоха+6ч) не тронут"
+        );
+    }
+
+    #[test]
+    fn quickfix_offline_fallback_to_builtin_snapshot() {
+        // Живой quick-fixes недоступен, кэша нет (первый запуск без сети,
+        // карточка 074): движок строится из встроенного снапшота, а не
+        // пустует. Адрес 127.0.0.1:1 — мгновенный отказ соединения.
+        let _env = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("duopulse-adblock-qf-fb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let _guard = EnvGuard::set(
+            "DUOPULSE_ADBLOCK_LISTS",
+            "duopulse-quickfix=http://127.0.0.1:1/qf.txt",
+        );
+        let profile = dir.join("profile");
+        std::fs::create_dir_all(&profile).unwrap();
+        let s = AdblockService::new(&profile);
+        s.refresh_lists(false);
+        let st = s.status();
+        assert!(st.ready, "движок построен из снапшот-фолбэка");
+        assert_eq!(st.lists.len(), 1);
+        assert!(st.lists[0].rules > 0, "в снапшоте есть правила");
+        assert!(st.lists[0].error.is_none(), "{:?}", st.lists[0].error);
+        // кэш записан текстом снапшота — следующий старт без сети пойдёт в
+        // ту же ветку (кэш есть → оффлайн-кэш, не фолбэк)
+        assert!(profile.join("filters").join("duopulse-quickfix.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn trusted_rpfr_alias_resolves() {
         // Находка ревизии 061: 2 живых правила trusted-rpfr в filters.txt были
@@ -2333,10 +2494,13 @@ mod tests {
         std::env::remove_var("DUOPULSE_ADBLOCK_LISTS");
         let defs = list_defs();
         assert!(defs.iter().any(|d| d.source == COMPAT_SOURCE));
-        assert!(defs.iter().any(|d| d.source == QUICKFIX_SOURCE));
+        assert!(
+            defs.iter().any(|d| d.source == QUICKFIX_URL),
+            "quick-fixes — живой URL (карточка 074)"
+        );
         assert_eq!(
             defs.iter()
-                .filter(|d| d.source != COMPAT_SOURCE && d.source != QUICKFIX_SOURCE)
+                .filter(|d| d.source != COMPAT_SOURCE && d.source != QUICKFIX_URL)
                 .count(),
             DEFAULT_LISTS.len(),
             "сетевые списки не задвоены"

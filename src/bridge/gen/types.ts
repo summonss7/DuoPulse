@@ -52,6 +52,7 @@ export interface DuoPulseBridgeContract {
   AdblockStatusResult: AdblockStatusResult;
   AdblockListInfo: AdblockListInfo;
   AdblockUpdateListsParams: AdblockUpdateListsParams;
+  AppBuildInfoResult: AppBuildInfoResult;
   AsrClearCacheResult: AsrClearCacheResult;
   AsrSettings: AsrSettings;
   AsrProviderId: AsrProviderId;
@@ -250,6 +251,13 @@ export interface AdblockUpdateListsParams {
    * true — качать даже непротухшие (кнопка «Обновить списки»).
    */
   force?: boolean;
+}
+/**
+ * app.build_info: версия приложения и момент сборки (карточка duopulse-074: бейдж «vX.Y.Z · дата» в шапке браузера). `build_unix` — unix-секунды компиляции (DUOPULSE_BUILD_UNIX из build.rs; 0 — неизвестно), фронтенд форматирует их локальной датой пользователя.
+ */
+export interface AppBuildInfoResult {
+  buildUnix: number;
+  version: string;
 }
 /**
  * asr.clear_cache (приватность): очистить кэш ASR-дорожек (asr_tracks).

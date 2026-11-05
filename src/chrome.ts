@@ -6,6 +6,7 @@ import { bridge } from "./bridge";
 import { initTabBar, onTabsChanged } from "./chrome/tabbar";
 import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
 import { initStar, setActivePage } from "./chrome/star";
+import { initAppVersion } from "./chrome/app-version";
 import "./chrome/mainmenu";
 import "./proxy-menu";
 import "./vpn-panel/vpn-panel";
@@ -14,6 +15,8 @@ import { initTranslateSettings } from "./subtitles-panel/translate-settings";
 
 // Таб-бар (задача 1.2): рендер вкладок, хоткеи, контекст-меню.
 initTabBar();
+// Бейдж «vX.Y.Z · дата сборки» в шапке (карточка duopulse-074).
+initAppVersion();
 // Omnibox (задача 1.3): подсказки, Enter/Esc/стрелки, кнопки навигации.
 initOmnibox();
 // Звёздочка избранного (карточка duopulse-057): закладка активной страницы.

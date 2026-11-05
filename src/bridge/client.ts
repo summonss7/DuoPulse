@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AdblockSetEnabledParams,
   AdblockStatusResult,
+  AppBuildInfoResult,
   AdblockUpdateListsParams,
   AsrClearCacheResult,
   AsrPrepareResult,
@@ -306,6 +307,9 @@ export const bridge = {
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */
     restart: () => invoke<void>("app_restart"),
+    /** app.build_info (duopulse-074): версия + unix-момент сборки — бейдж
+     *  «vX.Y.Z · дата» в шапке и строка версии в настройках. */
+    buildInfo: () => invoke<AppBuildInfoResult>("app_build_info"),
   },
   /** Имена событий контракта (Core → UI) для @tauri-apps/api/event.listen. */
   events: {

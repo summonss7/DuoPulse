@@ -689,3 +689,25 @@
   (DuoPulse-0.1.3-setup-release.exe, 0.1.2 убран), локальная копия
   C:\DuoPulse обновлена. Тесты: vitest 244/244, cargo 289+3 ignored,
   typecheck чисто; фиды проверены HTTP 200.
+- 2026-11-05 — **0.1.4, живой uBO quick-fixes + бейдж даты сборки**
+  (duopulse-074, пожелание Артёма «реклама в начале всё равно идёт +
+  дата сборки в шапке»): замороженный снапшот 072 протухал за сутки —
+  список uBO quick-fixes против SSAI-преролла меняется почти ежедневно.
+  duopulse-quickfix теперь живой источник (QUICKFIX_URL, качается и
+  обновляется как EasyList — сутки/час; trusted, как compat; оффлайн без
+  кэша — встроенный снапшот 05.11), снапшот расширен полной YouTube-частью:
+  слой перезаписи fetch/xhr-ответов (json-prune-fetch-response,
+  json-prune-xhr-response, trusted-replace-xhr-response), анти-байпас
+  YouTube (rmnt, nano-stb; trusted-prevent-dom-bypass — до порта ресурса,
+  инертно), маскировка Shorts-рекламы, скрытие anti-adblock-тостов.
+  compat.txt: точечное исключение env_firefox-ветки json-prune adSlots
+  (линия 044 — клиентская обрезка ломает SABR) + адаптация сетевого
+  правила expire (метод= выкинут — adblock-rs не разбирает). Бейдж
+  «vX.Y.Z · дата» в шапке у логотипа + дата сборки в Настройках:
+  build.rs кладёт DUOPULSE_BUILD_UNIX, мост app.build_info (контракт v11).
+  Релиз 0.1.4: stable+canary Aila+GitHub, хаб «Скачать», локальная копия
+  C:\DuoPulse. Тесты: vitest 248/248 (+4), cargo 293+3 ignored (+4),
+  typecheck чисто; p07 (e2e, живой список 446 правил): off реклама 3/3,
+  on 2/3 (SSAI-лотерея — уровень ансамбля 072, кардинально SSAI не убирается
+  и у uBO), сеть 348→259 (74%%); откат по гейту не требуется (072: лотерея
+  055, формально INCONCLUSIVE).

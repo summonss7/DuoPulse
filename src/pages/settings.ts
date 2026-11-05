@@ -17,6 +17,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
+import { buildDateRu } from "../chrome/app-version";
 import type {
   SettingsAll,
   UpdaterCheckResult,
@@ -979,14 +980,21 @@ export function initSettingsPage(): void {
       : ` · источник: ${label} (выбранный недоступен — ответило зеркало)`;
   };
 
+  /** Дата сборки бинарника (app.build_info, duopulse-074) для строки версии. */
+  let buildDate = "";
+  /** Последний статус апдейтера — перерисовка строки версии с датой сборки. */
+  let lastUpdaterStatus: UpdaterStatusResult | null = null;
+
   /** Итог проверки/статуса → кнопки и тексты. */
   const renderUpdateState = (st: UpdaterStatusResult | null, res: UpdaterCheckResult | null): void => {
+    if (st) lastUpdaterStatus = st;
     const pending = res?.available
       ? { version: res.version ?? "?", notes: res.notes ?? null, dateUnix: res.dateUnix }
       : st?.pending ?? null;
     if (st) {
       updVersionLine.textContent =
-        `Текущая версия: ${st.currentVersion} · канал: ${st.channel === "canary" ? "канарейка" : "стабильный"}` +
+        `Текущая версия: ${st.currentVersion}${buildDate ? ` (сборка ${buildDate})` : ""}` +
+        ` · канал: ${st.channel === "canary" ? "канарейка" : "стабильный"}` +
         ` · источник: ${st.source === "aila" ? "Aila" : "GitHub"}`;
       if (!res) {
         if (pending) updStatus.textContent = `Доступна версия ${pending.version} (найдена ранее).`;
@@ -1208,11 +1216,23 @@ export function initSettingsPage(): void {
         }
       })
       .catch(err);
-    // Обновления (задача 5.2): версия/канал/последняя проверка из Core
+    // Обновления (задача 5.2): версия/канал/последняя проверка из Core;
+    // затем дата сборки (app.build_info, duopulse-074) — перерисовка строки
     await bridge.updater
       .status()
       .then((st) => renderUpdateState(st, null))
       .catch(err);
+    await bridge.app
+      .buildInfo()
+      .then((info) => {
+        const date = buildDateRu(info.buildUnix);
+        if (!date || date === buildDate) return;
+        buildDate = date;
+        if (lastUpdaterStatus) renderUpdateState(lastUpdaterStatus, null);
+      })
+      .catch(() => {
+        /* без Core строка версии остаётся без даты сборки */
+      });
   };
 
   void reload();

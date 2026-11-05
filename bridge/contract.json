@@ -346,6 +346,30 @@
         "type": "object"
       }
     },
+    "app.build_info": {
+      "handler": "app_build_info",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "app.build_info: версия приложения и момент сборки (карточка duopulse-074: бейдж «vX.Y.Z · дата» в шапке браузера). `build_unix` — unix-секунды компиляции (DUOPULSE_BUILD_UNIX из build.rs; 0 — неизвестно), фронтенд форматирует их локальной датой пользователя.",
+        "properties": {
+          "buildUnix": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "buildUnix",
+          "version"
+        ],
+        "title": "AppBuildInfoResult",
+        "type": "object"
+      }
+    },
     "app.restart": {
       "handler": "app_restart",
       "params": null,

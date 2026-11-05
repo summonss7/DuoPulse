@@ -22,3 +22,18 @@ m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,y
 m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)
 m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots important)
 m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com##+js(json-prune, playerResponse.adPlacements playerResponse.playerAds adPlacements playerAds)
+
+! --- duopulse-074: живой quick-fixes — точечная совместимость ---
+! 1) uBO держит клиентскую adSlots-обрезку ТОЛЬКО в env_firefox-ветке
+!    (quick-fixes json-prune … legacyImportant); наш парсер директивы !#if
+!    не разбирает (это комментарий) — правило активировалось бы на любом
+!    движке. Продолжаем линию 044: клиентская adSlots-обрезка ломает
+!    SABR/SSAI-хендшейк в DuoPulse — гасим точным исключением.
+m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots legacyImportant)
+! 2) Адаптация сетевого правила uBO quick-fixes (#29059, SSAI-медиа-запросы
+!    с неправдоподобным expire): апстрим несёт опцию method=get, которую
+!    adblock-rs не разбирает (UnrecognisedOption — правило падает целиком);
+!    здесь то же правило без method= (videoplayback — всегда GET).
+!    ДИАПАЗОНЫ ЦИФР апстрим правит по календарю (179x → 18xx с января 2027):
+!    при релизе сверять с живым quick-fixes.txt.
+/\.googlevideo\.com\/videoplayback\?expire=(?:[02-9]\d+|1[1-68-9]\d+|17[1-7]\d+)&/$xhr,3p,domain=www.youtube.com

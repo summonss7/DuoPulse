@@ -188,6 +188,7 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "updater.check": { path: ["updater", "check"] },
   "updater.install": { path: ["updater", "install"] },
   "app.restart": { path: ["app", "restart"] },
+  "app.build_info": { path: ["app", "buildInfo"] },
 };
 
 describe("bridge-клиент соответствует contract.json", () => {
