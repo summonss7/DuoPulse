@@ -40,9 +40,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** Синхронизация версии в файле релиза с tauri.conf.json (duopulse-078):
+ *  заменяет строку по регексу, только если она отличается; файла нет — тишина
+ *  (структура проекта может измениться, релиз не должен падать из-за него). */
+function syncVersionFile(file, re, replacement) {
+  if (!fs.existsSync(file)) return;
+  const text = fs.readFileSync(file, "utf8");
+  if (re.test(text) && !text.includes(replacement)) {
+    fs.writeFileSync(file, text.replace(re, replacement));
+    console.log(`версия синхронизирована: ${path.relative(ROOT, file)} -> ${VERSION}`);
+  }
+}
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const conf = JSON.parse(fs.readFileSync(path.join(ROOT, "src-tauri", "tauri.conf.json"), "utf8"));
 const VERSION = conf.version;
+
+// tauri.conf.json — единственный источник версии; Cargo.toml и package.json
+// синхронизируем перед сборкой (карточка duopulse-078: релиз 0.1.6 поднял
+// конфиг, но забыл Cargo.toml — бейдж в навбаре показывал 0.1.5, отставая
+// на релиз). Правим только при расхождении, чтобы не трогать mtime зря.
+syncVersionFile(path.join(ROOT, "src-tauri", "Cargo.toml"), /^version = ".*"$/m, `version = "${VERSION}"`);
+syncVersionFile(path.join(ROOT, "package.json"), /^  "version": ".*",$/m, `  "version": "${VERSION}",`);
+
 const TYPE = process.argv.includes("--debug") ? "debug" : "release";
 const PUBLISH_ONLY = process.argv.includes("--publish-only");
 const NO_AILA = process.argv.includes("--no-aila");

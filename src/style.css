@@ -287,16 +287,6 @@ body {
 .logo span {
   color: var(--accent-neon); /* «Pulse» — неон, §4; без свечения — §8 */
 }
-/* Бейдж «vX.Y.Z · дата сборки» рядом с логотипом (карточка duopulse-074):
-   тихий, моно, muted — информация, не акцент. */
-.app-ver {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-right: 2px;
-  white-space: nowrap;
-  user-select: none;
-}
 /* Иконки-кнопки (§3/§5): линейные 16px, покой muted, hover нейтральный тёплый,
    свечение — только фокус. */
 .icon-btn {

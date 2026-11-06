@@ -1292,15 +1292,19 @@ fn main() {
             // Окно создаётся кодом (не из tauri.conf.json), чтобы подставить
             // аргументы: UI-webview и дочерние webview вкладок делят одно
             // окружение WebView2 — прокси действует на все (localhost обходит).
-            // Заголовок с версией (карточка duopulse-062): версия — из
-            // tauri.conf.json (package_info), единственный источник для
-            // release.mjs и фидов обновлений.
+            // Заголовок с версией и датой/временем сборки (карточки
+            // duopulse-062, duopulse-078): версия — из tauri.conf.json
+            // (package_info), единственный источник для release.mjs и фидов
+            // обновлений; момент сборки — build.rs (DUOPULSE_BUILD_UNIX).
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::App("index.html".into()),
             )
-            .title(format!("DuoPulse {}", app.package_info().version))
+            .title(window_title(
+                &app.package_info().version.to_string(),
+                build_unix_stamp(),
+            ))
             .inner_size(1360.0, 860.0)
             .min_inner_size(800.0, 600.0)
             .resizable(true)
@@ -1380,4 +1384,53 @@ fn main() {
                     .spawn_restore_materialize(app);
             }
         });
+}
+
+/// Момент сборки из build.rs (DUOPULSE_BUILD_UNIX); 0 — момент неизвестен
+/// (ранний кэш без скрипта). Отдельно от window_title для лёгких тестов.
+fn build_unix_stamp() -> u64 {
+    env!("DUOPULSE_BUILD_UNIX").parse::<u64>().unwrap_or(0)
+}
+
+/// Заголовок главного окна: «DuoPulse 0.1.6 · 07.11.2026 14:32» — версия
+/// + локальные дата/время сборки (карточка duopulse-078; до этого версия
+/// дублировалась бейджем в навбаре от CARGO_PKG_VERSION и отставала на
+/// релиз, если Cargo.toml забыли поднять). Без момента сборки — только
+/// версия.
+fn window_title(version: &str, build_unix: u64) -> String {
+    // 0 — момент неизвестен (build.rs не сработал/раный кэш): без штампа
+    let stamp = (build_unix > 0)
+        .then(|| chrono::DateTime::from_timestamp(build_unix as i64, 0))
+        .flatten()
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%d.%m.%Y %H:%M").to_string());
+    match stamp {
+        Some(s) => format!("DuoPulse {version} · {s}"),
+        None => format!("DuoPulse {version}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_unix_stamp, window_title};
+    use chrono::TimeZone;
+
+    #[test]
+    fn title_with_build_stamp() {
+        // Дата/время зависят от зоны — проверяем форму, а не точные цифры.
+        assert_eq!(
+            window_title("0.1.6", 1_762_300_000),
+            format!("DuoPulse 0.1.6 · {}", chrono::Local.timestamp_opt(1_762_300_000, 0).unwrap().format("%d.%m.%Y %H:%M"))
+        );
+    }
+
+    #[test]
+    fn title_without_build_stamp() {
+        assert_eq!(window_title("0.1.6", 0), "DuoPulse 0.1.6");
+    }
+
+    #[test]
+    fn build_stamp_parses_env() {
+        // build.rs всегда кладёт число — парсинг не должен молча давать 0
+        assert!(build_unix_stamp() > 0);
+    }
 }

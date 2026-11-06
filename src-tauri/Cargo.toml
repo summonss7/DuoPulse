@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.5"
+version = "0.1.6"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
@@ -75,6 +75,10 @@ regex = "1"
 # Разбор адресов фида обновлений (задача 5.2): url::Url требуется плагину
 # апдейтера при подстановке канала в endpoints.
 url = "2"
+# Дата/время сборки в заголовке окна (карточка duopulse-078): форматирование
+# unix-момента из build.rs в локальной зоне. Уже в дереве (транзитивно),
+# без новых загрузок.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # Потоковое чтение XML (задача 3.1): YouTube timedtext <transcript>/<timedtext>
 # в src/subtitles/timedtext.rs; на битых документах возвращает ошибку события,
 # а не паникует — парсер продолжает с диагностику (карточка duopulse-022).
