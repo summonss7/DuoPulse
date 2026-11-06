@@ -1119,6 +1119,9 @@ fn build_tab_webview(app: &AppHandle, id: &str, start: WebviewUrl) -> WebviewBui
         // + оверлей; обнаруженное видео уходит в Core сообщением «video»
         // (main.rs → событие контракта page:video_detected, docs/05 §2).
         .initialization_script(crate::CONTENT_INIT_SCRIPT_SUBTITLES)
+        // Кнопка «Пропустить рекламу» (карточка duopulse-076): активна только
+        // на watch-страницах YouTube (host-проверка внутри скрипта).
+        .initialization_script(crate::CONTENT_INIT_SCRIPT_AD_SKIP)
         // Аргументы те же, что у UI-webview: окружение WebView2 создаётся
         // первым webview, но дублируем для устойчивости к порядку создания.
         .additional_browser_args(crate::startup_proxy_args())

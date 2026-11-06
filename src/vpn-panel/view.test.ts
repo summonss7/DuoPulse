@@ -9,10 +9,12 @@ import {
   formatPing,
   hostOf,
   noteRoute,
+  offDetail,
   routeLabel,
   routeRows,
   routingLabel,
   shieldLabel,
+  shieldOffTitle,
   shieldState,
 } from "./view";
 
@@ -36,6 +38,24 @@ describe("shieldState (индикатор-щит, гайд 06 §2)", () => {
     expect(shieldLabel("connecting")).toBe("Подключается");
     expect(shieldLabel("connected")).toBe("Подключён");
     expect(shieldLabel("error")).toBe("Ошибка");
+  });
+});
+
+describe("offDetail / shieldOffTitle (duopulse-076: почему «никогда не включается»)", () => {
+  it("без профиля — явная причина: импортировать .conf, своих серверов нет", () => {
+    expect(offDetail("off", false)).toContain("импортируйте профиль WireGuard");
+    expect(offDetail("off", false)).toContain("собственных серверов не имеет");
+    expect(shieldOffTitle("off", false)).toContain("нужен профиль WireGuard");
+  });
+
+  it("профиль есть, туннель выключен — просто «напрямую», тултип короткий", () => {
+    expect(offDetail("off", true)).toBe("трафик браузера — напрямую");
+    expect(shieldOffTitle("off", true)).toBe("VPN — выключен");
+  });
+
+  it("действует внешний прокси — про прокси и в детали, и в титуле", () => {
+    expect(offDetail("proxy", true)).toContain("внешний прокси");
+    expect(shieldOffTitle("proxy", true)).toBe("VPN — выключен");
   });
 });
 

@@ -38,6 +38,16 @@
   if (window.__DUOPULSE_COSMETIC__) return;
   window.__DUOPULSE_COSMETIC__ = true;
 
+  /* Внутренние страницы (app-origin) — селекторов скрытия для них нет,
+  запросы/ответы только шумят (карточка duopulse-076); внешний документ
+  в этом же webview получит всё как раньше. */
+  if (
+    location.hostname === "tauri.localhost" ||
+    location.protocol === "duopulse:" ||
+    (location.hostname === "localhost" && location.port === "5173")
+  )
+    return;
+
   var host = null;
   try {
     host = window.chrome && window.chrome.webview ? window.chrome.webview : null;

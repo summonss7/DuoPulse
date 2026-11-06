@@ -22,10 +22,12 @@ import {
   formatPing,
   hostOf,
   noteRoute,
+  offDetail,
   routeLabel,
   routeRows,
   routingLabel,
   shieldLabel,
+  shieldOffTitle,
   shieldState,
 } from "./view";
 
@@ -76,11 +78,13 @@ const tunnelOn = (): boolean => status?.mode === "wg";
 
 function renderShield(): void {
   const st = status ? shieldState(status) : "off";
+  const routing = rulesRes?.mode ?? status?.routing ?? "off";
   btn.dataset.vpn = st;
+  // duopulse-076: без профиля тултип объясняет, почему тумблер не включится
   btn.title =
     st === "off"
-      ? `VPN — ${routingLabel(rulesRes?.mode ?? status?.routing ?? "off")}`
-      : `VPN — ${shieldLabel(st)} (${routingLabel(rulesRes?.mode ?? status?.routing ?? "off")})`;
+      ? shieldOffTitle(routing, profiles.length > 0)
+      : `VPN — ${shieldLabel(st)} (${routingLabel(routing)})`;
 }
 
 function renderStatus(): void {
@@ -90,10 +94,11 @@ function renderStatus(): void {
   if (st === "connected" && status?.wg) {
     statusDetailEl.textContent = `«${status.wg.profileName}» · ${status.wg.endpoint}`;
   } else if (st === "off") {
-    statusDetailEl.textContent =
-      status?.mode === "proxy"
-        ? "туннель выключен — действует внешний прокси"
-        : "трафик браузера — напрямую";
+    // duopulse-076: без профиля — явная причина и что делать (не «просто напрямую»)
+    statusDetailEl.textContent = offDetail(
+      status?.mode ?? "off",
+      profiles.length > 0
+    );
   } else {
     statusDetailEl.textContent = status?.detail ?? "";
   }
@@ -260,7 +265,9 @@ enabledEl.addEventListener("change", async () => {
   const on = enabledEl.checked;
   if (on && !selectedId) {
     enabledEl.checked = false;
-    flashDetail("Сначала импортируйте профиль WireGuard (.conf).");
+    flashDetail(
+      "Сначала импортируйте профиль WireGuard (.conf) — файл выдаёт ваш VPN-провайдер; собственных серверов у DuoPulse нет."
+    );
     return;
   }
   try {

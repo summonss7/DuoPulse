@@ -35,6 +35,27 @@ export function shieldLabel(st: ShieldState): string {
   }
 }
 
+/** Деталь строки статуса при выключенном туннеле. Тон зависит от причины:
+ *  без профиля это не «просто выключено» — тумблер включить НЕЛЬЗЯ, пока не
+ *  импортирован WireGuard-конфиг (DuoPulse — только VPN-клиент, своих
+ *  серверов нет, docs/01 F-12; карточка duopulse-076: «всё время пишет
+ *  выключен и никогда не включается»). */
+export function offDetail(mode: string, hasProfiles: boolean): string {
+  if (mode === "proxy") return "туннель выключен — действует внешний прокси";
+  if (!hasProfiles)
+    return "нет сервера: импортируйте профиль WireGuard (.conf) от вашего VPN-провайдера — DuoPulse собственных серверов не имеет";
+  return "трафик браузера — напрямую";
+}
+
+/** Титул кнопки-щита при выключенном туннеле: без профиля подсказывает
+ *  причину прямо в тултипе (карточка duopulse-076). */
+export function shieldOffTitle(mode: string, hasProfiles: boolean): string {
+  const routing = routingLabel(mode);
+  return hasProfiles
+    ? `VPN — ${routing}`
+    : `VPN — ${routing} · нужен профиль WireGuard (.conf): импортируйте файл от вашего провайдера`;
+}
+
 /** Байты туннеля: «864 Б», «1,2 КиБ», «34 МиБ», «1,1 ГиБ» (одна десятичная,
  *  запятая — по-русски, без хвостовых нулей). */
 export function formatBytes(n: number): string {

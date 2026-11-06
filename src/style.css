@@ -34,6 +34,11 @@ body {
 #app {
   position: relative;
   display: grid;
+  /* minmax(0,1fr): авто-трек не сжимался ниже max-content строк — в узком
+     окне (<~880px) навбар вылезал за край и уносил щит VPN и меню «⋮»
+     (карточка duopulse-076); теперь строки режутся по ширине окна:
+     omnibox сжимается, #tabs скроллится. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--tabbar-h) var(--navbar-h);
   height: var(--chrome-h);
   background: var(--bg-base);

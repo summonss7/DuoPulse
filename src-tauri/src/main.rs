@@ -80,6 +80,10 @@ pub(crate) const CONTENT_INIT_SCRIPT_COSMETIC: &str = include_str!("../../conten
 /// как dist/: cargo требует его до сборки — fresh clone собирает npm-шагом.
 pub(crate) const CONTENT_INIT_SCRIPT_SUBTITLES: &str =
     include_str!("../../content/gen/duopulse-content.js");
+/// Кнопка «Пропустить рекламу» на YouTube (карточка duopulse-076): SSAI-преролл
+/// вшит в медиапоток — фильтры его не снимают; кнопка — ручная эскалация
+/// (seek в конец секции → перезагрузка с &t=, «лотерея SSAI» из карточки 072).
+pub(crate) const CONTENT_INIT_SCRIPT_AD_SKIP: &str = include_str!("../../content/ad-skip.js");
 
 /// Аргументы окружения WebView2, зафиксированные на старте приложения:
 /// каждая новая вкладка наследует их (сменить можно только перезапуском).

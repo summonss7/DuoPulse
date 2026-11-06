@@ -90,6 +90,16 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   w.__DUOPULSE_SUBTITLES__ = true;
 
   const pageWindow = window as unknown as PageWindow;
+  // Внутренние страницы (app-origin: прод tauri.localhost, dev localhost:5173)
+  // — не контент: видео там нет, а запросы шрифтов/состояния шумят в консоль
+  // (карточка duopulse-076). Webview живёт с бандлом всю жизнь — внешний
+  // документ в нём получит всё как раньше.
+  if (
+    location.hostname === "tauri.localhost" ||
+    location.protocol === "duopulse:" ||
+    (location.hostname === "localhost" && location.port === "5173")
+  )
+    return;
   let currentVideo: DetectedVideo | null = null;
   // Перехват тел timedtext: только на YouTube (initialization script до
   // скриптов страницы; кросс-доменная навигация = новый документ = новый бандл).

@@ -15,6 +15,15 @@
   if (window.__DUOPULSE_MEDIA_WATCH__) return;
   window.__DUOPULSE_MEDIA_WATCH__ = true;
 
+  /* Внутренние страницы (app-origin) медиа не играют — монитор не нужен
+     (карточка duopulse-076); внешний документ в этом же webview — как раньше. */
+  if (
+    location.hostname === "tauri.localhost" ||
+    location.protocol === "duopulse:" ||
+    (location.hostname === "localhost" && location.port === "5173")
+  )
+    return;
+
   var last = null;
 
   var post = function (playing) {

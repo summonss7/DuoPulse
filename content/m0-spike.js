@@ -17,6 +17,17 @@
   if (window.__DUOPULSE_M0__) return;
   window.__DUOPULSE_M0__ = true;
 
+  /* Внутренние страницы (app-origin: прод tauri.localhost, dev localhost:5173)
+     — не контент: бейдж и проба перехвата там — шум и лишние запросы
+     (карточка duopulse-076). Webview живёт со скриптом всю жизнь: после ухода
+     по внешнему адресу документ создаётся заново — guard не мешает. */
+  if (
+    location.hostname === "tauri.localhost" ||
+    location.protocol === "duopulse:" ||
+    (location.hostname === "localhost" && location.port === "5173")
+  )
+    return;
+
   var TAG = "[DuoPulse M0]";
   console.log(TAG, "content script injected:", location.href);
 
