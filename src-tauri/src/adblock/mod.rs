@@ -292,7 +292,19 @@ struct ListState {
 struct Inner {
     enabled: bool,
     site_exceptions: BTreeSet<String>,
+    /// Нетрастед-списки (EasyList и env-источники e2e): живёт в скомпилированном
+    /// кэше `engine.bin` (deserialize — сотни мс против секунд парсинга).
     engine: Option<Arc<Engine>>,
+    /// Trusted-списки (uBO-кураторские + compat): ВСЕГДА пересобирается из
+    /// текстов, никогда не сериализуется. Причина — баг adblock-rs 0.9.8
+    /// (карточка duopulse-080): `serialize_raw` выбрасывает PermissionMask
+    /// скриптлет-правил (data_format/v0.rs: `for (f, _mask) in bin`), а
+    /// `deserialize` восстанавливает её пустой — любой движок из engine.bin
+    /// теряет ВСЕ trusted-скриптлеты (rpnt serverContract, аттестация
+    /// trusted-edit-inbound-object, trusted-rpfr — ансамбль против SSAI
+    /// YouTube), оставались только нетрастед (json-prune…) и сетевые правила,
+    /// и серверный преролл (USDAI) проигрывался в каждой сессии после первой.
+    trusted_engine: Option<Arc<Engine>>,
     lists: Vec<ListState>,
     blocked_total: u64,
     /// Все http(s)-запросы через перехватчик (диагностика P-07: «до/после»).
@@ -340,6 +352,7 @@ impl AdblockService {
                 enabled: persisted.enabled,
                 site_exceptions: persisted.site_exceptions.into_iter().collect(),
                 engine: None,
+                trusted_engine: None,
                 lists,
                 blocked_total: 0,
                 seen_total: 0,
@@ -383,9 +396,11 @@ impl AdblockService {
         if !guard.enabled {
             return false;
         }
-        let Some(engine) = guard.engine.clone() else {
+        let engine = guard.engine.clone();
+        let trusted_engine = guard.trusted_engine.clone();
+        if engine.is_none() && trusted_engine.is_none() {
             return false;
-        };
+        }
         // Источник запроса: для навигации — сама цель (семантика $document),
         // для подресурсов — Referer, при его отсутствии — URL вкладки.
         let source = if request_type == "document" {
@@ -404,7 +419,15 @@ impl AdblockService {
         let Ok(request) = Request::new(uri, source, request_type) else {
             return false; // неразбираемый запрос — не блокируем
         };
-        let blocked = engine.check_network_request(&request).matched;
+        // Двухдвижковая схема (карточка 080): основной кэш + trusted-движок из
+        // текстов; сетевые правила trusted-списков (uBO quick-fixes: SSAI-медиа
+        // googlevideo с неправдоподобным expire и пр.) живут здесь.
+        let blocked = engine
+            .as_ref()
+            .is_some_and(|e| e.check_network_request(&request).matched)
+            || trusted_engine
+                .as_ref()
+                .is_some_and(|e| e.check_network_request(&request).matched);
         if blocked {
             let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
             guard.blocked_total += 1;
@@ -474,7 +497,7 @@ impl AdblockService {
         let guard = self.inner.lock().expect("adblock: лок не отравлен");
         AdblockStatusResult {
             enabled: guard.enabled,
-            ready: guard.engine.is_some(),
+            ready: guard.engine.is_some() || guard.trusted_engine.is_some(),
             blocked_total: guard.blocked_total,
             seen_total: guard.seen_total,
             replace_rules: guard.replace_rules.iter().filter(|r| !r.exception).count() as u32,
@@ -575,13 +598,15 @@ impl AdblockService {
         if !guard.enabled {
             return CosmeticResources {
                 active: false,
-                ready: guard.engine.is_some(),
+                ready: guard.engine.is_some() || guard.trusted_engine.is_some(),
                 hide: vec![],
                 generichide: false,
                 injected_script: String::new(),
             };
         }
-        let Some(engine) = guard.engine.clone() else {
+        let engine = guard.engine.clone();
+        let trusted_engine = guard.trusted_engine.clone();
+        if engine.is_none() && trusted_engine.is_none() {
             // списки ещё грузятся — скрипту стоит повторить запрос (ready=false)
             return CosmeticResources {
                 active: true,
@@ -590,7 +615,7 @@ impl AdblockService {
                 generichide: false,
                 injected_script: String::new(),
             };
-        };
+        }
         if source_host_exempted(&guard.site_exceptions, url) {
             return CosmeticResources {
                 active: false,
@@ -601,15 +626,32 @@ impl AdblockService {
             };
         }
         drop(guard);
-        let res = engine.url_cosmetic_resources(url);
-        let mut hide: Vec<String> = res.hide_selectors.into_iter().collect();
+        // Слияние двух движков (карточка 080): скрытия — объединением и
+        // дедупликацией, generichide — ИЛИ, скриптлеты — конкатенацией
+        // (trusted-скриптлеты даёт только свежий trusted-движок — кэш
+        // engine.bin их теряет вместе с PermissionMask).
+        let mut hide: Vec<String> = Vec::new();
+        let mut generichide = false;
+        let mut injected_script = String::new();
+        for engine in engine.iter().chain(trusted_engine.iter()) {
+            let res = engine.url_cosmetic_resources(url);
+            hide.extend(res.hide_selectors.into_iter());
+            generichide = generichide || res.generichide;
+            if !res.injected_script.is_empty() {
+                if !injected_script.is_empty() {
+                    injected_script.push('\n');
+                }
+                injected_script.push_str(&res.injected_script);
+            }
+        }
         hide.sort_unstable();
+        hide.dedup();
         CosmeticResources {
             active: true,
             ready: true,
             hide,
-            generichide: res.generichide,
-            injected_script: res.injected_script,
+            generichide,
+            injected_script,
         }
     }
 
@@ -631,15 +673,20 @@ impl AdblockService {
         if !guard.enabled || source_host_exempted(&guard.site_exceptions, url) {
             return vec![];
         }
-        let Some(engine) = guard.engine.clone() else {
+        let engine = guard.engine.clone();
+        let trusted_engine = guard.trusted_engine.clone();
+        if engine.is_none() && trusted_engine.is_none() {
             return vec![];
-        };
+        }
         drop(guard);
         let classes = &classes[..classes.len().min(MAX_TOKENS)];
         let ids = &ids[..ids.len().min(MAX_TOKENS)];
-        let exceptions = engine.url_cosmetic_resources(url).exceptions;
-        let mut selectors =
-            engine.hidden_class_id_selectors(classes.iter(), ids.iter(), &exceptions);
+        // Оба движка (карточка 080), каждый со своими исключениями хоста.
+        let mut selectors: Vec<String> = Vec::new();
+        for engine in engine.iter().chain(trusted_engine.iter()) {
+            let exceptions = engine.url_cosmetic_resources(url).exceptions;
+            selectors.extend(engine.hidden_class_id_selectors(classes.iter(), ids.iter(), &exceptions));
+        }
         selectors.sort_unstable();
         selectors.dedup();
         selectors
@@ -734,14 +781,20 @@ impl AdblockService {
                 e
             })
         };
-        let Some(engine) = engine else {
+        let trusted = trusted_engine_from_texts(&texts).map(Arc::new);
+        if engine.is_none() && trusted.is_none() {
             return;
-        };
-        let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
-        if guard.engine.is_some() {
-            return; // refresh уже успел — не откатываем его движок
         }
-        guard.engine = Some(Arc::new(engine));
+        let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
+        if guard.engine.is_some() || guard.trusted_engine.is_some() {
+            return; // refresh уже успел — не откатываем его движки
+        }
+        if engine.is_some() {
+            guard.engine = engine.map(Arc::new);
+        }
+        if trusted.is_some() {
+            guard.trusted_engine = trusted;
+        }
         // $replace-правила — из тех же кэш-текстов
         guard.replace_rules = texts
             .iter()
@@ -838,6 +891,7 @@ impl AdblockService {
             // Явно выключено окружением (e2e): движка не будет.
             let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
             guard.engine = None;
+            guard.trusted_engine = None;
             guard.lists = new_states;
             guard.replace_rules = Vec::new();
             guard.early_cache.clear();
@@ -850,12 +904,14 @@ impl AdblockService {
 
         let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
         guard.lists = new_states;
-        // Полный набор текстов → движок из них. Частичный — только если
+        // Полный набор текстов → движки из них. Частичный — только если
         // движка ещё нет: один недоступный источник не должен оставлять
         // блокировщик совсем без списков (EasyList один уже полезен);
         // при живом движке частичное обновление его не трогает.
+        // Trusted-движок — всегда из текстов (карточка 080), дёшево.
         if texts.len() == defs.len() || (!texts.is_empty() && guard.engine.is_none()) {
             guard.engine = engine.map(Arc::new);
+            guard.trusted_engine = trusted_engine_from_texts(&texts).map(Arc::new);
             // $replace-правила — из тех же текстов, что построили движок
             guard.replace_rules = texts
                 .iter()
@@ -1022,6 +1078,14 @@ impl AdblockService {
     fn set_engine(&self, engine: Engine) {
         let mut guard = self.inner.lock().unwrap();
         guard.engine = Some(Arc::new(engine));
+        guard.early_cache.clear();
+    }
+
+    /// Тестам: подставить trusted-движок (карточка 080, двухдвижковая схема).
+    #[cfg(test)]
+    fn set_trusted_engine(&self, engine: Engine) {
+        let mut guard = self.inner.lock().unwrap();
+        guard.trusted_engine = Some(Arc::new(engine));
         guard.early_cache.clear();
     }
 }
@@ -1268,32 +1332,60 @@ fn write_compiled(filters_dir: &std::path::Path, bytes: &[u8], digests: &[u64]) 
 }
 
 /// Атомарная запись (tmp + rename) — паттерн session.rs.
-/// Набор digest'ов валидности engine.bin (общий для refresh и restore):
-/// digest каждого списка по meta, ресурсный набор скриптлетов — в том же
-/// наборе (смена набора при обновлении бинарника перестраивает engine.bin);
-/// набор trusted-флагов — тоже (карточка 050: смена доверия меняет инъекции).
+/// Набор digest'ов валидности engine.bin (общий для refresh и restore).
+/// Карточка 080: engine.bin — только НЕТРАСТЕД-списки (trusted-движок не
+/// сериализуется вовсе — см. [`AdblockService`] / `Inner::trusted_engine`);
+/// маркер формата `enginesplit` гонит одну внеплановую пересборку при смене
+/// схемы (старый bin содержал все списки). Ресурсный набор скриптлетов —
+/// в том же наборе (смена набора при обновлении бинарника перестраивает
+/// engine.bin).
 fn compiled_digests(defs: &[ListDef], meta: &ListsMeta) -> Vec<u64> {
     let mut digests: Vec<u64> = defs
         .iter()
+        .filter(|d| !d.trusted)
         .map(|d| meta.lists.get(&d.name).map(|m| m.digest).unwrap_or(0))
         .collect();
     digests.push(digest(SCRIPTLETS_JSON));
-    let trusted_marks = defs
-        .iter()
-        .filter(|d| d.trusted)
-        .map(|d| d.name.as_str())
-        .collect::<Vec<_>>()
-        .join(",");
-    digests.push(digest(&format!("trusted:{trusted_marks}")));
+    digests.push(digest("enginesplit:trusted-v2"));
     digests
+}
+
+/// Trusted-движок из текстов доверенных списков (карточка 080): собирается
+/// при каждом старте/обновлении и НИКОГДА не проходит serialize→deserialize —
+/// roundtrip adblock-rs стирает PermissionMask скриптлет-правил, без маски
+/// trusted-скриптлеты (rpnt/trusted-*) не инъецируются. Парсинг сотен/тысяч
+/// правил — десятки мс против секунд EasyList. Сетевые правила trusted-списков
+/// тоже здесь (uBO quick-fixes: блокировка SSAI-медиа googlevideo).
+fn trusted_engine_from_texts(texts: &[(String, String, bool)]) -> Option<Engine> {
+    let mut set = adblock::lists::FilterSet::new(false);
+    let mut any = false;
+    for (_, text, trusted) in texts {
+        if !trusted {
+            continue;
+        }
+        any = true;
+        set.add_filters(
+            text.lines(),
+            ParseOptions {
+                permissions: adblock::resources::PermissionMask::from_bits(1),
+                ..ParseOptions::default()
+            },
+        );
+    }
+    if !any {
+        return None;
+    }
+    let mut engine = Engine::from_filter_set(set, true);
+    engine.use_resources(scriptlet_resources().iter().cloned());
+    Some(engine)
 }
 
 /// Движок по digest'ам: скомпилированный кэш, иначе сборка из текстов.
 /// serialize_raw ресурсы не хранит — подключаем после deserialize.
-/// FilterSet: права выдаются ПО СПИСКУ (карточка 050) — trusted-скриптлеты
-/// uBO (trusted-replace-xhr-response и пр.) инъецируются только из доверенных
-/// источников (uBO-кураторский список, наш compat), EasyList/env — нет.
-/// Собранный движок пишется в engine.bin по тем же digest'ам.
+/// Собирается ТОЛЬКО из нетрастед-текстов (карточка 080): trusted-списки
+/// живёт в отдельном несериализуемом движке (`trusted_engine_from_texts`) —
+/// права у кэша всё равно теряются. Собранный движок пишется в engine.bin
+/// по тем же digest'ам.
 fn compiled_or_from_texts(
     filters_dir: &std::path::Path,
     digests: &[u64],
@@ -1305,15 +1397,10 @@ fn compiled_or_from_texts(
     }
     let mut set = adblock::lists::FilterSet::new(false);
     for (_, text, trusted) in texts {
-        let opts = if *trusted {
-            ParseOptions {
-                permissions: adblock::resources::PermissionMask::from_bits(1),
-                ..ParseOptions::default()
-            }
-        } else {
-            ParseOptions::default()
-        };
-        set.add_filters(text.lines(), opts);
+        if *trusted {
+            continue;
+        }
+        set.add_filters(text.lines(), ParseOptions::default());
     }
     let mut engine = Engine::from_filter_set(set, true);
     engine.use_resources(scriptlet_resources().iter().cloned());
@@ -2163,6 +2250,83 @@ mod tests {
         assert!(
             !res.injected_script.contains("trustedReplaceNodeText"),
             "rpnt из untrusted-списка не инъецируется"
+        );
+    }
+
+    // --- карточка duopulse-080: двухдвижковая схема (кэш + trusted) --------
+
+    #[test]
+    fn serialize_roundtrip_drops_trusted_scriptlets() {
+        // Корень 080: serialize_raw adblock-rs 0.9.8 выбрасывает PermissionMask
+        // скриптлет-правил (data_format/v0.rs: `for (f, _mask) in bin`),
+        // deserialize восстанавливает её пустой — движок из engine.bin терял
+        // ВСЕ trusted-скриптлеты uBO (rpnt serverContract, аттестация
+        // trusted-edit-inbound-object, trusted-rpfr — ансамбль против SSAI
+        // YouTube), и серверный преролл играл в каждой сессии после первой.
+        // Тест фиксирует баг библиотеки как факт — почва для split-схемы.
+        let texts = vec![(
+            "q".to_string(),
+            "a.test##+js(rpnt, script, foo, bar)".to_string(),
+            true,
+        )];
+        let mut engine = trusted_engine_from_texts(&texts).unwrap();
+        let s = service();
+        s.set_engine(trusted_engine_from_texts(&texts).unwrap());
+        let live = s.cosmetic_resources("https://a.test/");
+        assert!(
+            live.injected_script.contains("trustedReplaceNodeText("),
+            "живой движок (из текстов) инъецирует rpnt"
+        );
+        // тот же движок после serialize→deserialize (путь engine.bin)
+        let bytes = engine.serialize_raw().unwrap();
+        let mut restored = Engine::default();
+        restored.deserialize(&bytes).unwrap();
+        restored.use_resources(scriptlet_resources().iter().cloned());
+        let s2 = service();
+        s2.set_engine(restored);
+        let dead = s2.cosmetic_resources("https://a.test/");
+        assert!(
+            !dead.injected_script.contains("trustedReplaceNodeText("),
+            "баг adblock-rs: roundtrip кэша стирает trusted-скриптлеты"
+        );
+    }
+
+    #[test]
+    fn two_engine_scheme_keeps_trusted_rules_over_cache() {
+        // Фикс 080: engine.bin — только нетрастед-списки, trusted-движок
+        // всегда пересобирается из текстов. После «перезапуска» (кэш +
+        // trusted-тексты) trusted-скриптлеты инъецируются, сетевые правила
+        // работают из ОБОИХ движков (uBO quick-fixes блокирует SSAI-медиа).
+        // Нетрастед-текст trusted-движка не строит (изоляция прав, 050).
+        assert!(
+            trusted_engine_from_texts(&[("e".into(), "b.test##+js(rpnt, x, y)".into(), false)])
+                .is_none(),
+            "нетрастед-тексты не дают trusted-движка"
+        );
+        let s = service();
+        // нетрастед-кэш: сетевое правило блокируется основным движком
+        let mut cache = Engine::from_rules(["/untrustednet/*"], ParseOptions::default());
+        cache.use_resources(scriptlet_resources().iter().cloned());
+        s.set_engine(cache);
+        // trusted-движок из текстов: rpnt-скриптлет + своё сетевое правило
+        let texts = vec![(
+            "q".to_string(),
+            "a.test##+js(rpnt, script, foo, bar)\n/trustednet/*".to_string(),
+            true,
+        )];
+        s.set_trusted_engine(trusted_engine_from_texts(&texts).unwrap());
+        let res = s.cosmetic_resources("https://a.test/");
+        assert!(
+            res.injected_script.contains("trustedReplaceNodeText("),
+            "trusted-скриптлет доезжает через отдельный движок"
+        );
+        assert!(
+            s.should_block(None, "https://a.test/untrustednet/x.js", "script", None),
+            "сетевое правило нетрастед-движка работает"
+        );
+        assert!(
+            s.should_block(None, "https://a.test/trustednet/x.js", "script", None),
+            "сетевое правило trusted-движка (SSAI-медиа uBO) работает"
         );
     }
 

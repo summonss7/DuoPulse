@@ -62,6 +62,11 @@ todo | in_progress | review | done | blocked.
   диагностика аудио-конфигурации Windows: wasapi-check.ps1, audio-enum.ps1; voices.ps1 —
   список SAPI-голосов для генератора. Понадобятся для повторного прогона
   e2e/m0-results/AUDIO-PROTOCOL.md §6 (карточка duopulse-006).
+- `e2e/adblock/ssai-probe.mjs` — стенд SSAI/USDAI-преролла YouTube (карточки 074/080):
+  свежий профиль на прогон, seed-списки из прогретого профиля; зонд — инъекция
+  скриптлетов, rpnt-пейлоад в DOM, UA-токены, `.ad-showing`, SSAP/USDAI-маркер в
+  stats for nerds; `--deep` — плотный дамп во время рекламы (playerResponse, патчи
+  нативов). Результат — e2e/adblock/ssai-last-run.json (gitignore, рантайм-артефакт).
 
 Новые временные файлы в корне не накапливать: одноразовое — `%TEMP%`, постоянное — `e2e/`.
 <!-- /E2E-ИНСТРУМЕНТЫ -->

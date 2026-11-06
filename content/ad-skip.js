@@ -1,17 +1,19 @@
-/* DuoPulse — кнопка «Пропустить рекламу» (карточка duopulse-076).
+/* DuoPulse — авто-пропуск + кнопка «Пропустить рекламу» (карточки 076, 080).
    Initialization_script контентной вкладки (как m0-spike/cosmetic, docs/02 §4),
    активен только на watch-страницах YouTube.
 
-   Почему кнопка: SSAI-реклама YouTube вшивается сервером в сам медиапоток —
-   сетевые фильтры её не видят, ансамбль quick-fixes (072/074) снижает частоту,
-   но преролл иногда проигрывается полностью. Ручная эскалация (карточка 072:
-   seek не срабатывает, помогает перезагрузка — «лотерея SSAI»):
-   1-й клик — seekTo(конец текущей рекламной секции): снимает клиентские
-   (не SSAI) рекламы и часть mid-roll;
-   если реклама через ~800 мс всё ещё идёт — кнопка становится
-   «Перезагрузить без рекламы»: перезагрузка страницы сохраняет позицию
-   (&t=) — свежий player-запрос часто приходит уже без преролла (1/3 по
-   матрице 072; повторный клик — ещё один бросок).
+   Почему так: SSAI/USDAI-реклама YouTube вшивается сервером в сам медиапоток —
+   сетевые фильтры её не видят, ансамбль quick-fixes (072/074/080) снижает
+   частоту, но преролл всё ещё приходит. Эскейп самого uBO (serverContract-
+   пейлоад quick-fixes) — seekTo(конец рекламной секции) при маркере «SSAP, AD»
+   в stats for nerds; YouTube уже шлёт маркер «USDAI, SABR» — пейлоад молчит.
+   Потому карточка 080 повторяет эскейп у себя, без зависимости от маркера:
+
+   АВТО (080): ad-showing → через 400 мс seekTo(duration секции); реклама
+   через ~1.6 с всё ещё идёт → перезагрузка с &t= (новой бросок SSAI-лотереи),
+   не более 2 авто-перезагрузок на видео (sessionStorage; дальше — кнопка).
+   КНОПКА (076, без изменений): 1-й клик — seek, затем «Перезагрузить без
+   рекламы» — ещё броски лотереи вручную.
 
    Без зависимостей, один IIFE. */
 (function () {
@@ -33,6 +35,84 @@
   // позиция контента до рекламы (для &t= при перезагрузке): во время SSAI-преролла
   // currentTime отсчитывает рекламу — сохраняем последнее «не рекламное» значение
   var contentSec = 0;
+
+  // ── авто-эскалация (карточка 080) ──────────────────────────────────────────
+  var AUTO_SEEK_MS = 400; // после ad-showing: плеерному API дать осесть
+  var AUTO_RELOAD_MS = 1600; // seek не снял рекламу — бросок лотереи
+  var AUTO_RELOAD_MAX = 2; // на видео (защита от цикла, дальше — кнопка)
+  var autoTimers = [];
+  var reloadsKey = null;
+
+  var videoId = function () {
+    try {
+      return new URLSearchParams(location.search).get("v") || "";
+    } catch (e) {
+      return "";
+    }
+  };
+  var reloadsDone = function () {
+    if (!reloadsKey) reloadsKey = "duopulse-ad-reloads:" + videoId();
+    try {
+      return Number(sessionStorage.getItem(reloadsKey)) || 0;
+    } catch (e) {
+      return AUTO_RELOAD_MAX; // sessionStorage нет — авто-перезагрузки выключены
+    }
+  };
+  var reloadsInc = function () {
+    try {
+      if (!reloadsKey) reloadsDone(); // инициализирует ключ текущим videoId
+      sessionStorage.setItem(reloadsKey, String(reloadsDone() + 1));
+    } catch (e) {}
+  };
+  var clearAuto = function () {
+    for (var i = 0; i < autoTimers.length; i++) clearTimeout(autoTimers[i]);
+    autoTimers = [];
+  };
+  // конец ТЕКУЩЕЙ секции прогресса: во время рекламы duration = длина секции
+  var adSectionEnd = function () {
+    try {
+      var p = player.getProgressState && player.getProgressState();
+      // живые потоки (duration Infinity) и аномально длинные «секции» —
+      // не реклама, авто-seek не трогаем (остаётся кнопка)
+      if (p && isFinite(p.duration) && p.duration > 0 && p.duration <= 600)
+        return p.duration;
+    } catch (e) {}
+    return null;
+  };
+  var reloadWithT = function () {
+    var url;
+    try {
+      url = new URL(location.href);
+      if (contentSec > 3) url.searchParams.set("t", String(contentSec));
+      else url.searchParams.delete("t");
+    } catch (e) {
+      location.reload();
+      return;
+    }
+    location.href = url.href;
+  };
+  // запуск при появлении ad-showing; снятие рекламы чистит таймеры (render)
+  var startAuto = function () {
+    clearAuto();
+    autoTimers.push(
+      setTimeout(function () {
+        var end = adSectionEnd();
+        if (end != null && player.seekTo) {
+          try {
+            player.seekTo(end);
+          } catch (e) {}
+        }
+      }, AUTO_SEEK_MS),
+    );
+    autoTimers.push(
+      setTimeout(function () {
+        if (!adShowing()) return;
+        if (reloadsDone() >= AUTO_RELOAD_MAX) return; // кап исчерпан — кнопка
+        reloadsInc();
+        reloadWithT();
+      }, AUTO_RELOAD_MS),
+    );
+  };
 
   var adShowing = function () {
     return !!(player && player.classList && player.classList.contains("ad-showing"));
@@ -76,6 +156,7 @@
       if (btn) btn.remove();
       btn = null;
       stage = 0;
+      clearAuto(); // реклама кончилась (снята/прошла) — авто-фазы не нужны
       return;
     }
     if (btn) return; // уже показана
@@ -88,6 +169,7 @@
     } catch (e) {
       /* API может не быть — &t= не критичен */
     }
+    startAuto(); // карточка 080: seek → (если не помогло) перезагрузка
     btn = document.createElement("div");
     btn.className = "duopulse-ad-skip";
     btn.title =
@@ -132,16 +214,8 @@
       return;
     }
     // перезагрузка с сохранением позиции контента — новый бросок SSAI-лотереи
-    var url;
-    try {
-      url = new URL(location.href);
-      if (contentSec > 3) url.searchParams.set("t", String(contentSec));
-      else url.searchParams.delete("t");
-    } catch (e) {
-      location.reload();
-      return;
-    }
-    location.href = url.href;
+    reloadsInc();
+    reloadWithT();
   };
 
   // плеер появляется после загрузки страницы; класс ad-showing приходит и уходит
@@ -161,6 +235,12 @@
         player = cur;
         mo.disconnect();
         mo.observe(player, { attributes: true, attributeFilter: ["class"] });
+        // кнопка жила в старом плеере (узел уничтожен со страницей плеера):
+        // сброс, иначе render выйдет по «уже показана» и не создаст её (и
+        // авто-фазы 080) на новом плеере
+        if (btn) btn.remove();
+        btn = null;
+        stage = 0;
         render();
       }
     });
