@@ -648,6 +648,9 @@ impl AdblockService {
     // --- нить обновления ----------------------------------------------------
 
     fn updater_loop(self: Arc<Self>) {
+        // Карточка 077: движок из кэша прошлой сессии публикуем ДО сетевого
+        // прохода — refresh_lists при протухших списках сначала качает их.
+        self.restore_from_cache();
         loop {
             let forced = {
                 let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
@@ -669,6 +672,82 @@ impl AdblockService {
                 .wait_timeout(guard, timeout)
                 .expect("adblock: лок не отравлен");
         }
+    }
+
+    /// Карточка 077: восстановить движок из дискового кэша прошлой сессии
+    /// БЕЗ сети — до первого refresh_lists. Раньше движок публиковался только
+    /// после refresh_lists, а тот при протухших (>суток) списках сначала их
+    /// СКАЧИВАЕТ (секунды до тайм-аута на каждый сетевой список) — всё это
+    /// время should_block fail-open, и первое после запуска браузера видео
+    /// получало SSAI/клиентскую рекламу, а после F5 («рекламы нет и не будет»)
+    /// движок уже готов. Кэш есть почти всегда: публикуем движок мгновенно,
+    /// сеть досмотрит обновления следом и подменит движок при изменениях.
+    fn restore_from_cache(&self) {
+        let defs = list_defs();
+        if defs.is_empty() {
+            return; // списки выключены окружением (e2e)
+        }
+        let filters_dir = self.profile_dir.join("filters");
+        let meta = read_meta(&filters_dir);
+        // Тексты только с диска: compat — встроенный, quickfix без кэша —
+        // встроенный снапшот (как в refresh_lists, карточка 074), прочие —
+        // файлы кэша; источники (URL) не трогаем — сети здесь нет.
+        let mut texts: Vec<(String, String, bool)> = Vec::new();
+        let mut states: Vec<ListState> = Vec::new();
+        for def in &defs {
+            let path = list_path(&filters_dir, &def.name);
+            let text = if def.source == COMPAT_SOURCE {
+                Some(COMPAT_RULES.to_string())
+            } else {
+                std::fs::read_to_string(&path).ok().or_else(|| {
+                    (def.name == "duopulse-quickfix").then(|| QUICKFIX_RULES.to_string())
+                })
+            };
+            let Some(text) = text else {
+                continue; // кэша нет — первый запуск, дождёмся сети
+            };
+            states.push(ListState {
+                name: def.name.clone(),
+                source: def.source.clone(),
+                rules: count_rules(&text),
+                updated_at: meta
+                    .lists
+                    .get(&def.name)
+                    .map(|m| m.updated_at)
+                    .unwrap_or(0),
+                error: String::new(),
+            });
+            texts.push((def.name.clone(), text, def.trusted));
+        }
+        if texts.is_empty() {
+            return;
+        }
+        // Полный набор текстов: годится и без engine.bin (смена бинарника —
+        // digest'ы не совпали) — соберём и закэшируем. Частичный: только
+        // скомпилированный кэш с совпавшими digest'ами прошлой сессии.
+        let digests = compiled_digests(&defs, &meta);
+        let engine = if texts.len() == defs.len() {
+            compiled_or_from_texts(&filters_dir, &digests, &texts)
+        } else {
+            load_compiled(&filters_dir, &digests).map(|mut e| {
+                e.use_resources(scriptlet_resources().iter().cloned());
+                e
+            })
+        };
+        let Some(engine) = engine else {
+            return;
+        };
+        let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
+        if guard.engine.is_some() {
+            return; // refresh уже успел — не откатываем его движок
+        }
+        guard.engine = Some(Arc::new(engine));
+        // $replace-правила — из тех же кэш-текстов
+        guard.replace_rules = texts
+            .iter()
+            .flat_map(|(_, t, _)| replace::parse_replace_rules(t))
+            .collect();
+        guard.lists = states;
     }
 
     /// Один проход обновления: отсутствующие/протухшие списки → скачать;
@@ -765,53 +844,8 @@ impl AdblockService {
             return;
         }
 
-        // Скомпилированный кэш валиден, если набор digest'ов совпал; digest
-        // ресурсного набора скриптлетов — в том же наборе (смена набора при
-        // обновлении бинарника перестраивает engine.bin); набор trusted-флагов
-        // списков — тоже (карточка 050: смена доверия меняет инъекции).
-        let mut digests: Vec<u64> = defs
-            .iter()
-            .map(|d| meta.lists.get(&d.name).map(|m| m.digest).unwrap_or(0))
-            .collect();
-        digests.push(digest(SCRIPTLETS_JSON));
-        let trusted_marks = defs
-            .iter()
-            .filter(|d| d.trusted)
-            .map(|d| d.name.as_str())
-            .collect::<Vec<_>>()
-            .join(",");
-        digests.push(digest(&format!("trusted:{trusted_marks}")));
-        let engine = match load_compiled(&filters_dir, &digests) {
-            // serialize_raw ресурсы не хранит — подключаем после deserialize
-            Some(mut e) => {
-                e.use_resources(scriptlet_resources().iter().cloned());
-                Some(e)
-            }
-            None => {
-                // FilterSet: права выдаются ПО СПИСКУ (карточка 050) —
-                // trusted-скриптлеты uBO (trusted-replace-xhr-response и пр.)
-                // инъенцируются только из доверенных источников (uBO-кураторский
-                // список, наш compat), EasyList/env-списки — по-прежнему нет
-                let mut set = adblock::lists::FilterSet::new(false);
-                for (_, text, trusted) in &texts {
-                    let opts = if *trusted {
-                        ParseOptions {
-                            permissions: adblock::resources::PermissionMask::from_bits(1),
-                            ..ParseOptions::default()
-                        }
-                    } else {
-                        ParseOptions::default()
-                    };
-                    set.add_filters(text.lines(), opts);
-                }
-                let mut engine = Engine::from_filter_set(set, true);
-                engine.use_resources(scriptlet_resources().iter().cloned());
-                if let Ok(bin) = engine.serialize_raw() {
-                    write_compiled(&filters_dir, &bin, &digests);
-                }
-                Some(engine)
-            }
-        };
+        let digests = compiled_digests(&defs, &meta);
+        let engine = compiled_or_from_texts(&filters_dir, &digests, &texts);
         write_meta(&filters_dir, &meta);
 
         let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
@@ -1234,6 +1268,61 @@ fn write_compiled(filters_dir: &std::path::Path, bytes: &[u8], digests: &[u64]) 
 }
 
 /// Атомарная запись (tmp + rename) — паттерн session.rs.
+/// Набор digest'ов валидности engine.bin (общий для refresh и restore):
+/// digest каждого списка по meta, ресурсный набор скриптлетов — в том же
+/// наборе (смена набора при обновлении бинарника перестраивает engine.bin);
+/// набор trusted-флагов — тоже (карточка 050: смена доверия меняет инъекции).
+fn compiled_digests(defs: &[ListDef], meta: &ListsMeta) -> Vec<u64> {
+    let mut digests: Vec<u64> = defs
+        .iter()
+        .map(|d| meta.lists.get(&d.name).map(|m| m.digest).unwrap_or(0))
+        .collect();
+    digests.push(digest(SCRIPTLETS_JSON));
+    let trusted_marks = defs
+        .iter()
+        .filter(|d| d.trusted)
+        .map(|d| d.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    digests.push(digest(&format!("trusted:{trusted_marks}")));
+    digests
+}
+
+/// Движок по digest'ам: скомпилированный кэш, иначе сборка из текстов.
+/// serialize_raw ресурсы не хранит — подключаем после deserialize.
+/// FilterSet: права выдаются ПО СПИСКУ (карточка 050) — trusted-скриптлеты
+/// uBO (trusted-replace-xhr-response и пр.) инъецируются только из доверенных
+/// источников (uBO-кураторский список, наш compat), EasyList/env — нет.
+/// Собранный движок пишется в engine.bin по тем же digest'ам.
+fn compiled_or_from_texts(
+    filters_dir: &std::path::Path,
+    digests: &[u64],
+    texts: &[(String, String, bool)],
+) -> Option<Engine> {
+    if let Some(mut e) = load_compiled(filters_dir, digests) {
+        e.use_resources(scriptlet_resources().iter().cloned());
+        return Some(e);
+    }
+    let mut set = adblock::lists::FilterSet::new(false);
+    for (_, text, trusted) in texts {
+        let opts = if *trusted {
+            ParseOptions {
+                permissions: adblock::resources::PermissionMask::from_bits(1),
+                ..ParseOptions::default()
+            }
+        } else {
+            ParseOptions::default()
+        };
+        set.add_filters(text.lines(), opts);
+    }
+    let mut engine = Engine::from_filter_set(set, true);
+    engine.use_resources(scriptlet_resources().iter().cloned());
+    if let Ok(bin) = engine.serialize_raw() {
+        write_compiled(filters_dir, &bin, digests);
+    }
+    Some(engine)
+}
+
 fn atomic_write(path: &std::path::Path, bytes: &[u8]) {
     let tmp = path.with_extension("tmp");
     if std::fs::write(&tmp, bytes)
@@ -1557,6 +1646,53 @@ mod tests {
         let st3 = s3.status();
         assert_eq!(st3.lists[0].rules, 2);
         assert!(s3.should_block(None, "https://any.test/second/x.js", "script", None));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_from_cache_publishes_engine_before_network() {
+        // Карточка 077: после перезапуска движок поднимается из кэша ДО
+        // сетевого прохода refresh_lists (раньше на время скачивания
+        // протухших списков should_block был fail-open — «первая реклама
+        // после запуска, после F5 — нет»).
+        let _env = ENV_LOCK.lock().unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("duopulse-adblock-restore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // первый запуск: файловый источник строит и кэширует движок
+        let list = dir.join("list.txt");
+        std::fs::write(&list, "/alwaysblocked/*\n").unwrap();
+        let _guard = EnvGuard::set("DUOPULSE_ADBLOCK_LISTS", &format!("t={}", list.display()));
+        let profile = dir.join("profile");
+        std::fs::create_dir_all(&profile).unwrap();
+        let s = AdblockService::new(&profile);
+        s.refresh_lists(false);
+        assert!(s.status().ready, "предусловие: кэш создан");
+
+        // перезапуск: источник — «мертвый» URL, refresh_lists его не скачал бы;
+        // restore_from_cache поднимает движок без сети
+        let _guard2 =
+            EnvGuard::set("DUOPULSE_ADBLOCK_LISTS", "t=https://nonexistent.invalid/list.txt");
+        let s2 = AdblockService::new(&profile);
+        assert!(!s2.status().ready, "до restore движка ещё нет");
+        s2.restore_from_cache();
+        assert!(s2.status().ready, "карточка 077: движок из кэша без сети");
+        assert!(s2.should_block(None, "https://any.test/alwaysblocked/ad.js", "script", None));
+        assert!(!s2.should_block(None, "https://any.test/ok.js", "script", None));
+        // статусы списков заполнены из кэша, а не «список ещё не загружен»
+        let st = s2.status();
+        assert_eq!(st.lists.len(), 1);
+        assert_eq!(st.lists[0].rules, 1);
+        assert!(st.lists[0].error.is_none(), "{:?}", st.lists[0].error);
+
+        // пустой кэш (первый запуск): restore честно оставляет движок None
+        let fresh = dir.join("fresh-profile");
+        std::fs::create_dir_all(&fresh).unwrap();
+        let s3 = AdblockService::new(&fresh);
+        s3.restore_from_cache();
+        assert!(!s3.status().ready, "без кэша движок ждёт сеть, как раньше");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

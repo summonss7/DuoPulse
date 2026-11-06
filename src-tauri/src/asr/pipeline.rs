@@ -516,7 +516,6 @@ fn run_job(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asr::engine::AsrSegment;
 
     /// Тихий PCM (5 секунд нуля).
     fn silence(secs: u32) -> Vec<i16> {
