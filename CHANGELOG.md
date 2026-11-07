@@ -4918,3 +4918,57 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   один оригинал, (E) повторный клик — только панель, показ живёт, (F) «настройки субтитров»
   открывают duopulse://settings.
 - Коммит: e6e66cd (feat: duopulse-079)
+
+## 07.11.2026 23:55 — duopulse-081: мобильная версия, этап 1/3 — Android-каркас на Tauri 2 (aila-370)
+
+- Начало работы: 07.11.2026, 22:53
+- Окончание работы: 07.11.2026, 23:55
+- Что сделано (первый этап мобильного MVP по варианту Б из duopulse-053, пожелание
+  aila-370; образец — рабочая обёртка NovaGrid novagrid-058):
+  - Крейт src-tauri перестроен в lib-паттерн Tauri 2: [lib] duopulse_lib
+    (staticlib/cdylib/rlib — мобильные таргеты) + [[bin]] duopulse (вся логика десктопа
+    в main.rs не тронута — на Android бин не собирается, cdylib винде не нужен).
+    Мобильная ветка src/lib.rs — тонкий билдер (окно из конфига + плагин dialog);
+    десктоп-зависимости (webview2-com/windows/updater/rusqlite/adblock/ureq/
+    boringtun/smoltcp/symphonia/…) — в [target.'cfg(not(any(android, ios)))'.dependencies],
+    фича unstable — только десктоп-секции.
+  - gen/android (tauri android init, коммитится; BuildTask.kt запатчен — узел из PATH,
+    относительный путь CLI: генератор печёт абсолютный путь машины). Оверлей
+    tauri.android.conf.json: identifier dev.duopulse.mobile (десктоп dev.duopulse.spike),
+    withGlobalTauri true — признак мобильной ветки для фронтенда (window.__TAURI__),
+    окно «main» конфигом (мобильная ветка не создаёт окна кодом десктопа).
+  - Иконки: scripts/make-android-icons.mjs (ffmpeg: знак из icon.ico → 1024) +
+    `tauri icon` → mipmap gen/android; npm run android:icons.
+  - Мобильная ветка фронтенда src/mobile/ (+ветвление в main.ts до хрома; десктоп-хром
+    прячет display:none): стартовый экран «мобильная ветка · этап 1 из 3» с версией,
+    omnibox + GO + HOME, ОДНА вкладка-iframe (мульти-webview Tauri 2 — десктоп-only).
+    resolveMobileInput — мобильная пара omnibox.rs; YouTube /watch и youtu.be
+    переписываются во встраиваемый /embed/ID (обычные страницы YouTube под
+    X-Frame-Options в iframe не открываются, поиск — честная строка-статус).
+    13 юнит-тестов platform.test.ts.
+  - Скрипты scripts/android-dev.sh / android-build.sh (npm run android:dev | android:build):
+    сверка версий трёх конфигов, фронтенд, `tauri android build --apk`, артефакты
+    builds/duopulse_<верс>_android_<тип>/DuoPulse-<верс>-android-<тип>.apk. Release
+    подписан duopulse-release.keystore (пароль — gitignored keystore.properties,
+    схема novagrid-059) и копируется в корень builds/ — хаб «Скачать» Aila
+    (как setup-файлы в release.mjs; устаревшие android-APK из корня убираются).
+  - Баги живого смоука (исправлены в этом же коммите): (1) author display:flex
+    перебивал UA [hidden] + .m-content без flex-direction — старт и вкладка
+    двумя колонками; (2) EDGE_TO_EDGE_ENFORCED (targetSdk 35+): шапка под системным
+    статус-баром, он перехватывал тапы по omnibox/GO/HOME — viewport-fit=cover +
+    padding env(safe-area-inset-top) у #mobile (env пробрасывается, реальный инсет
+    50 px).
+- Как проверено: cargo build --bin и cargo test 300/300; vitest 282/282 (+13), tsc
+  чисто; e2e-стенд e2e/bridge/run.mjs — ALL PASS 29/29 (первый прогон 1 флак-тайминг,
+  повторные чистые). Живой смоук на эмуляторе (AVD lecards_test, android-36 x86_64,
+  universal debug APK): стартовый экран мобильной ветки → тап omnibox → IME-ввод
+  «example.com» → GO → вкладка загрузила страницу на всю ширину (CDP tabSrc
+  https://example.com/, пиксельный контроль YAVG 32→210) → m.youtube.com/watch?v=…
+  переписался в плеер /embed (скриншот) → HOME вернул старт. CDP WebView — через
+  adb forward webview_devtools_remote (порт 9223, e2e/tools/cdp.mjs). Скриншоты —
+  builds/duopulse_0.1.6_android_debug/ (gitignore).
+- Артефакты: debug universal (aarch64+x86_64, эмуляторы+телефоны отладка) и release
+  aarch64 подписанный — builds/duopulse_0.1.6_android_{debug,release}/; копия release —
+  корень builds/ для хаба «Скачать» Aila (Android-чип 🤖 после aila-370).
+- Коммит: cc61c63 (feat: duopulse-081)
+
