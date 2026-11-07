@@ -18,7 +18,7 @@
         <button id="reload" class="icon-btn" title="Обновить"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.7-3.75"/><path d="M13 2.8v2.7h-2.7"/></svg></button>
         <input id="omnibox" type="text" placeholder="Введите адрес или поисковый запрос" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest" />
         <div id="suggest" class="suggest" hidden role="listbox" aria-label="Подсказки адресной строки"></div>
-        <button id="duoBtn" class="duo-btn" title="Субтитры DuoPulse — клик: панель набора, Alt+D: вкл/выкл" hidden>duo<span class="duo-dots" aria-hidden="true"><i></i><i></i><i></i></span></button>
+        <button id="duoBtn" class="duo-btn" title="Субтитры DuoPulse — клик: включить и настроить языки, Alt+D: вкл/выкл" hidden>duo<span class="duo-dots" aria-hidden="true"><i></i><i></i><i></i></span></button>
         <button id="go" class="go">Перейти</button>
         <button id="starBtn" class="icon-btn star-btn" title="Добавить в избранное (Ctrl+D)" hidden aria-pressed="false"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l2 4.1 4.5.7-3.3 3.1.8 4.5L8 12.1l-4 2.1.8-4.5L1.5 6.6 6 5.9z"/></svg></button>
         <button id="libBtn" class="icon-btn" title="История и закладки"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></button>
@@ -86,6 +86,22 @@
           </label>
         </div>
         <div class="duo-meta" id="duoMeta">Видео не найдено</div>
+        <div class="duo-section-title">Языки <span class="duo-hint">с какого на какой</span></div>
+        <div class="duo-langs" id="duoLangs">
+          <label class="duo-field">
+            <span>Язык видео</span>
+            <select id="duoLangFrom" class="duo-select"></select>
+          </label>
+          <span class="duo-langs-arrow" aria-hidden="true">&rarr;</span>
+          <label class="duo-field">
+            <span>Перевод</span>
+            <select id="duoLangTo" class="duo-select"></select>
+          </label>
+        </div>
+        <div class="duo-langs-note">
+          Перевод по умолчанию для новых видео —
+          <button type="button" id="duoLangSettings" class="link">настройки субтитров</button>
+        </div>
         <div class="duo-presets" id="duoPresets"></div>
         <div class="duo-section-title">Набор <span class="duo-hint">до 3 строк</span></div>
         <div class="duo-set" id="duoSet"></div>

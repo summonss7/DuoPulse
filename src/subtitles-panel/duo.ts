@@ -2,7 +2,8 @@
 // docs/03 §8; docs/05 §1 src/subtitles-panel/). Кнопка в навбаре рядом с
 // адресной строкой: состояние показа активной вкладки — выкл / одна дорожка /
 // дуо / три (docs/03 §8 п.1), видна только когда на странице есть видео с
-// дорожками (платформенными или файловыми). Клик — панель; Alt+D — вкл/выкл
+// дорожками (платформенными или файловыми). Клик — включить показ, если выключен (карточка duopulse-079: как у Alt+D —
+// дефолт «оригинал + перевод» или прошлый набор), и открыть панель; Alt+D — вкл/выкл
 // показа (docs/03 §8 п.2, сценарий docs/01 §5.1) и вместе с ним показать/
 // скрыть панель (карточка duopulse-028): источник Alt+D приходит полем via
 // события subtitles:set_applied — из страницы его ловит content-слой, из
@@ -36,6 +37,14 @@ import type {
   TranslationLangInfo,
 } from "../bridge/gen/types";
 import { presetSets, normalizeTrackId } from "./presets";
+import {
+  fromChange,
+  fromOptions,
+  langRowState,
+  toChange,
+  toOptions,
+  type LangAction,
+} from "./langs-row";
 import { cloudLangOptions, translateProgressText, translateUnavailableText } from "./cloud-langs";
 import { asrProgressText } from "./asr-status";
 import { LOOK_PRESETS, matchLookPreset } from "./look-presets";
@@ -129,11 +138,72 @@ function renderButton(): void {
 function renderPanel(): void {
   (document.getElementById("duoEnabled") as HTMLInputElement).checked = state.enabled;
   (document.getElementById("duoMeta") as HTMLElement).textContent = setSummary();
+  renderLangs();
   renderPresets();
   renderSet();
   renderAdd();
   renderOffset();
   renderStyle();
+}
+
+/** Строка «Языки: с какого → на какой» (карточка duopulse-079): селект
+ * оригинала (базовые дорожки) и селект перевода (нет / tlang платформы /
+ * облако) — выбор применяется сразу, рендер восстанавливается по набору. */
+function renderLangs(): void {
+  const fromSel = document.getElementById("duoLangFrom") as HTMLSelectElement;
+  const toSel = document.getElementById("duoLangTo") as HTMLSelectElement;
+  const row = langRowState(state.tracks);
+  fromSel.replaceChildren();
+  const fos = fromOptions(state.base);
+  for (const o of fos) {
+    const opt = document.createElement("option");
+    opt.value = o.id;
+    opt.textContent = o.name;
+    fromSel.append(opt);
+  }
+  fromSel.disabled = fos.length === 0;
+  if (row.fromId) fromSel.value = row.fromId;
+
+  const fromTrack = state.base.find((b) => b.id === row.fromId) ?? null;
+  toSel.replaceChildren();
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = state.base.length ? "Нет (только оригинал)" : "—";
+  toSel.append(none);
+  const opts = toOptions(
+    state.translations,
+    fromTrack ? { lang: fromTrack.lang, translatable: fromTrack.translatable } : null,
+  );
+  const groups: [("platform" | "cloud"), string][] = [
+    ["platform", "Перевод платформы"],
+    ["cloud", "Облачный перевод"],
+  ];
+  for (const [key, label] of groups) {
+    const items = opts.filter((o) => o.group === key);
+    if (!items.length) continue;
+    const og = document.createElement("optgroup");
+    og.label = label;
+    for (const o of items) {
+      const opt = document.createElement("option");
+      opt.value = o.value;
+      opt.textContent = o.name;
+      og.append(opt);
+    }
+    toSel.append(og);
+  }
+  const want = row.to.kind === "none" ? "" : row.to.kind === "platform" ? row.to.lang : `cloud:${row.to.lang}`;
+  toSel.value = want;
+  if (want && toSel.value !== want) {
+    // применённый перевод вне списка вариантов (например, tlang с подтегом) —
+    // добавляем его, чтобы селект показывал фактическое состояние
+    const opt = document.createElement("option");
+    opt.value = want;
+    opt.textContent =
+      row.to.kind === "cloud" ? `${row.to.lang} — облако` : row.to.kind === "platform" ? row.to.lang : want;
+    toSel.append(opt);
+    toSel.value = want;
+  }
+  toSel.disabled = opts.length === 0 && !want;
 }
 
 function renderPresets(): void {
@@ -360,9 +430,32 @@ function closeOtherPanels(): void {
 
 // --- инициализация ----------------------------------------------------------
 
+/** Действие строки «Языки» (langs-row): set/remove/translate — в порядке. */
+const runLangAction = (a: LangAction): void => {
+  if (a.type === "set") {
+    void bridge.subtitles.setTracks({ ids: a.ids }).catch(err);
+  } else if (a.type === "remove") {
+    void bridge.subtitles.removeTrack({ id: a.id }).catch(err);
+  } else {
+    const meta = document.getElementById("duoTranslateMeta") as HTMLElement;
+    meta.hidden = false;
+    meta.dataset.phase = "translating";
+    meta.textContent = `Перевод запрошен (${a.lang})…`;
+    void bridge.subtitles.translateTrack({ targetLang: a.lang }).catch((ex) => err(ex));
+  }
+};
+
 export function initDuo(): void {
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
+    // Клик = «включить субтитры» (карточка duopulse-079): показ выключен или
+    // набор пуст — включаем (content-слой соберёт дефолт «оригинал + перевод»
+    // или восстановит прошлый набор, как у Alt+D), панель открываем всегда.
+    if (!state.enabled || state.tracks.length === 0) {
+      void bridge.subtitles.setEnabled({ on: true }).catch(err);
+      if (panel.hidden) openPanel();
+      return;
+    }
     togglePanel();
   });
 
@@ -397,6 +490,21 @@ export function initDuo(): void {
     void bridge.subtitles
       .setEnabled({ on: (e.target as HTMLInputElement).checked })
       .catch(err);
+  });
+
+  // Строка «Языки: с какого → на какой» (карточка duopulse-079): выбор
+  // применяется сразу (набор/облако), ссылка — страница настроек субтитров.
+  (document.getElementById("duoLangFrom") as HTMLSelectElement).addEventListener("change", (e) => {
+    const sel = e.target as HTMLSelectElement;
+    for (const a of fromChange(state.tracks, state.base, sel.value)) runLangAction(a);
+  });
+  (document.getElementById("duoLangTo") as HTMLSelectElement).addEventListener("change", (e) => {
+    const sel = e.target as HTMLSelectElement;
+    for (const a of toChange(state.tracks, state.base, sel.value)) runLangAction(a);
+  });
+  document.getElementById("duoLangSettings")?.addEventListener("click", () => {
+    void bridge.tabs.open({ url: "duopulse://settings" }).catch(err);
+    closePanel();
   });
 
   // Пресеты и операции набора — делегирование (data-act/data-idx/data-ids).

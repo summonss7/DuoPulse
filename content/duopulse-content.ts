@@ -193,6 +193,10 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
    * «вкл — 0 дорожек» не возникает, кнопка duo не врёт. */
   let enabled = true;
 
+  /** Ждущее включение (duopulse-079): via включения, пришедшего до списка
+   * дорожек; потребит onYouTubeVideo, снимает disableSubs/смена видео. */
+  let pendingEnable: string | null = null;
+
   /** В наборе есть хоть одна дорожка (любой части)? Видимое пользователю
    * «показано» = enabled && hasSetTracks() — решение Alt+D по нему
    * (duopulse-066), а не по флагу одному. */
@@ -268,6 +272,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     // Alt+D, файлы, перевод, ASR) включает показ, опустошение набора (сняли
     // последнюю дорожку) выключает — состояния «вкл — 0 дорожек» не возникает.
     enabled = tracks.length > 0;
+    if (tracks.length > 0) pendingEnable = null; // набор применился — ждущее включение сыграло (duopulse-079)
     applyTracks(enabled ? tracks : []);
     rememberSetState();
     reportSetState(via);
@@ -278,6 +283,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
    * набор-память: возврат к видео не включит показ сам. */
   const disableSubs = (via: string): void => {
     enabled = false;
+    pendingEnable = null; // ждущее включение отменили (duopulse-079)
     applyTracks([]);
     rememberSetState();
     reportSetState(via);
@@ -286,15 +292,35 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   /** Включить показ: восстановить набор, на пустом собрать дефолт
    * «оригинал + предпочитаемый перевод» (сценарий docs/01 §5.1: Alt+D на
    * свежей лекции даёт дуо en+ru; предпочитаемый язык — из настроек профиля,
-   * задача 5.1, window.__DUOPULSE_DEFAULTS__ от Core). */
+   * задача 5.1, window.__DUOPULSE_DEFAULTS__ от Core).
+   * Гонка duopulse-079: включение в окне «видео детектировано, списка
+   * дорожек ещё нет» (пере-детект/SPA) раньше терялось — флаг честно гасил
+   * applySet по пустому набору. Теперь такое включение подвешиваем (via
+   * помним) и собираем дефолт по приходу списка (onYouTubeVideo). */
   const enableSubs = (via: string): void => {
     enabled = true;
     if (!hasSetTracks()) {
       const ids = defaultSetIds(trackList, preferredLangs());
       if (ids.length > 0) {
-        void selectTracks(ids, via); // применит и отчитет (set-state)
+        // Транзиентный отказ загрузки (timedtext при троттлинге) не должен
+        // молча раздевать дефолт до оригинала: один повтор через 1.5 с
+        // (duopulse-079), если показ ещё включён и видео то же.
+        const keyAtEnable = currentVideo?.videoKey ?? null;
+        void selectTracks(ids, via).then((r) => {
+          if (r.failures.length === 0) return;
+          console.error(
+            "[duopulse] дефолт-набор: не загрузились " +
+              r.failures.map((f) => `${f.id} (${f.reason})`).join(", ") +
+              " — повтор через 1.5 с",
+          );
+          window.setTimeout(() => {
+            if (!enabled || currentVideo?.videoKey !== keyAtEnable || pendingEnable !== null) return;
+            void selectTracks(ids, via);
+          }, 1500);
+        });
         return;
       }
+      if (trackList === null) pendingEnable = via;
     }
     applySet(via);
   };
@@ -340,6 +366,13 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       trackList = list;
       const canTracks = (list?.base.length ?? 0) > 0;
       reportDetected(video, canTracks);
+      // Ждущее включение (duopulse-079): список пришёл — собираем дефолт;
+      // список без дорожек (base пуст) гасит ожидание честным applySet.
+      if (pendingEnable !== null && !hasSetTracks()) {
+        const via = pendingEnable;
+        pendingEnable = null;
+        enableSubs(via); // trackList уже на месте — повторного подвешивания нет
+      }
       if (list) {
         // Полный список — в Core (сервис состояния + событие subtitles:
         // tracks_ready для панели, задача 3.7); журнал — путь добычи.
@@ -418,6 +451,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
         // Список дорожек принадлежит прошлому видео — сброс до свежего
         // (придёт с onYouTubeVideo; дефолт-набор Alt+D не соберётся по чужому).
         trackList = null;
+        pendingEnable = null; // ждущее включение — тоже прошлого видео
         // Запомненное видео восстанавливает и набор, и состояние показа
         // («последний набор», docs/03 §8 п.2). Новое видео без набора —
         // показ честно выключен (duopulse-066): флаг не поднимаем «впустую»
@@ -725,7 +759,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     tracksInfo(): {
       path: string;
       version: string;
-      base: { id: string; lang: string; kind: string; name: string; original: boolean }[];
+      base: { id: string; lang: string; kind: string; name: string; original: boolean; translatable: boolean }[];
       translationsCount: number;
       warnings: string[];
     } | null {
@@ -739,6 +773,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
           kind: b.kind,
           name: b.name,
           original: b.original,
+          translatable: b.translatable,
         })),
         translationsCount: trackList.translations.length,
         warnings: trackList.warnings.slice(),

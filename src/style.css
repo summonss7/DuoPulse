@@ -2087,6 +2087,34 @@ body.internal-page {
   border-color: var(--accent-neon);
   box-shadow: var(--focus-ring-soft);
 }
+/* Строка «Языки: с какого → на какой» (карточка duopulse-079): два селекта
+   со стрелкой; подпись-ссылка ведёт на страницу настроек субтитров. */
+.duo-langs {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.duo-langs-arrow {
+  padding-bottom: 7px;
+  color: var(--text-muted);
+}
+.duo-langs-note {
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.duo-langs-note .link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-neon);
+  font-size: 11px;
+  cursor: pointer;
+}
+.duo-langs-note .link:hover {
+  text-decoration: underline;
+}
 .duo-files {
   display: flex;
   align-items: center;
