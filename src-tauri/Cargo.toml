@@ -5,28 +5,58 @@ description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
 
+# Развилка бин/lib (duopulse-081, образец novagrid-058): десктоп собирается
+# бином duopulse (main.rs со всей логикой браузера) и от lib НЕ зависит —
+# cdylib/staticlib нужны только мобильным таргетам (Android .so через JNI
+# для активити из gen/android), MinGW-линкер винды их не строит. Десктоп —
+# `cargo build --bin duopulse`, `tauri android build` — только --lib
+# (мобильная ветка src/lib.rs).
+[lib]
+name = "duopulse_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "duopulse"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# unstable: API нескольких webview в одном окне (WebviewBuilder/Window::add_child,
-# AppHandle::get_webview/get_window) — нужен для схемы «UI-полоса + контентный webview».
-tauri = { version = "2", features = ["unstable"] }
+# База без фич: нужна обеим веткам (бин десктопа и мобильная lib). Фича
+# unstable (несколько webview в одном окне — таб-бар + контентные webview)
+# включается только десктоп-секцией ниже: на Android API не работает, а
+# фичи tauri компилируются и для мобильного таргета.
+tauri = { version = "2", features = [] }
 # Нативный выбор файла (панель субтитров «Свои субтитры…», задача 3.7:
 # subtitles.load_file нужен абсолютный путь — HTML input в WebView2 даёт
 # fakepath). Вызов — напрямую invoke("plugin:dialog|open"), без npm-пакета.
+# Кросс-платформенный: регистрируется и мобильной веткой lib.rs (этап 2 —
+# выбор файла своих субтитров на телефоне), capability default.json общая.
 tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Десктоп-только (duopulse-081): вся логика бина main.rs — Windows/десктоп.
+# На Android/iOS бин не собирается вовсе (tauri android build → --lib), а
+# тянуть COM WebView2, DPAPI, движок блокировщика, WireGuard-стек и декодеры
+# в мобильную lib незачем — этап 2 вынесет сюда переносимое ядро (парсеры
+# субтитров, перевод, SQLite) по мере надобности.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# unstable: API нескольких webview в одном окне (WebviewBuilder/Window::add_child,
+# AppHandle::get_webview/get_window) — нужен для схемы «UI-полоса + контентный webview».
+tauri = { version = "2", features = ["unstable"] }
 # Автообновление (задача 5.2): подписанные артефакты (minisign), каналы
 # stable/canary, установка NSIS-пакета. Драйвится из Rust (src/updater.rs)
 # по командам контракта updater.* — JS-API плагина не используется.
+# Мобильная ветка обновляется своим путём (этап 3, duopulse-083: APK-манифест
+# центра Aila + системная установка).
 tauri-plugin-updater = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 # JSON Schema из Rust-типов: единый источник IPC-контракта bridge (задача 1.1,
 # docs/05 §2) — из схем генерируются TS-типы (src/bridge/gen/types.ts).
 schemars = "0.8"
 # Прямой доступ к COM-API WebView2 (WebResourceRequested) для сетевого перехвата M0
-# и BasicAuthentication (креденшалы прокси, задача 1.8).
+# и BasicAuthentication (креды прокси, задача 1.8).
 webview2-com = "0.39"
 windows-core = "0.62"
 # DPAPI для пароля прокси (CryptProtectData; задача 1.8, docs/02 §9).

@@ -13,7 +13,10 @@
     "gen:bridge": "node scripts/gen-bridge.mjs",
     "release": "node scripts/release.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "android:dev": "bash scripts/android-dev.sh",
+    "android:build": "bash scripts/android-build.sh",
+    "android:icons": "node scripts/make-android-icons.mjs && node node_modules/@tauri-apps/cli/tauri.js icon src-tauri/icons/source-1024.png"
   },
   "dependencies": {
     "@tauri-apps/api": "^2"

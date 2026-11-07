@@ -10,18 +10,26 @@ import "./style.css";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 // dev-хук window.__duopulse нужен и хрому, и внутренним страницам (e2e).
 import "./bridge/dev-probe";
+// Мобильная ветка (duopulse-081): обёртка Android включает withGlobalTauri,
+// признак — window.__TAURI__ (см. src/mobile/platform.ts); хром и внутренние
+// страницы десктопа на телефоне не живут — своя ветка UI.
+import { isTauriMobile } from "./mobile/platform";
 
-const page = getCurrentWebview().label.match(/^page-([a-z]+)-\d+$/)?.[1];
-if (page === "history") {
-  void import("./pages/history");
-} else if (page === "newtab") {
-  void import("./pages/newtab");
-} else if (page === "diagnostics") {
-  void import("./pages/diagnostics");
-} else if (page === "settings") {
-  void import("./pages/settings"); // задача 5.1: полные настройки + профиль
-} else if (page === "error") {
-  void import("./pages/error"); // страница ошибки загрузки, карточка 048
+if (isTauriMobile()) {
+  void import("./mobile/mobile");
 } else {
-  void import("./chrome");
+  const page = getCurrentWebview().label.match(/^page-([a-z]+)-\d+$/)?.[1];
+  if (page === "history") {
+    void import("./pages/history");
+  } else if (page === "newtab") {
+    void import("./pages/newtab");
+  } else if (page === "diagnostics") {
+    void import("./pages/diagnostics");
+  } else if (page === "settings") {
+    void import("./pages/settings"); // задача 5.1: полные настройки + профиль
+  } else if (page === "error") {
+    void import("./pages/error"); // страница ошибки загрузки, карточка 048
+  } else {
+    void import("./chrome");
+  }
 }

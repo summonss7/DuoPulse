@@ -1,0 +1,181 @@
+/* DuoPulse — мобильная ветка (этап 1, duopulse-081): тёмный кибер-минимализм
+   гайда 06 на токенах темы (tokens.css уже загружен в main.ts). Мобильная
+   вёрстка: шапка-omnibox, контент-вкладка, строка статуса. */
+
+#mobile {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-ui, system-ui, sans-serif);
+  /* EDGE_TO_EDGE_ENFORCED (targetSdk 35+): окно рисует под системными
+     полосами, статус-бар перехватывал тапы по шапке (смоук duopulse-081).
+     viewport-fit=cover даёт env(safe-area-inset-*); fallback max() — если
+     WebView не пробрасывает инсеты (env=0), шапка всё равно ниже полосы. */
+  padding-top: max(env(safe-area-inset-top, 0px), 28px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 10px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* ── Шапка: ⌂ + логотип + omnibox-пилюля + → ─────────────────────────── */
+.m-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid rgba(189, 254, 79, 0.14);
+}
+
+.m-logo {
+  font-family: var(--font-logo, inherit);
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.m-logo b,
+.m-mark b {
+  color: var(--accent-neon);
+  font-weight: 600;
+}
+
+.m-bar input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(189, 254, 79, 0.18);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 15px;
+  outline: none;
+}
+.m-bar input:focus {
+  border-color: var(--accent-neon);
+  box-shadow: var(--glow-neon); /* «пульс» — гайд 06 §3 */
+}
+.m-bar input::placeholder {
+  color: var(--text-muted);
+}
+
+.m-icon,
+.m-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+}
+.m-go {
+  background: var(--accent-neon);
+  color: var(--bg-base);
+}
+.m-icon:active,
+.m-go:active {
+  opacity: 0.8;
+}
+
+/* ── Контент: стартовый экран или вкладка-iframe ─────────────────────── */
+.m-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column; /* без этого start и вкладка встают в ряд (баг
+                             первого прогона на эмуляторе — две колонки) */
+}
+
+/* display у .m-start/.m-tab перебивает UA-правило [hidden]{display:none}
+   (специфичность author > UA) — прячем явно, иначе стартовый экран остаётся
+   рядом с вкладкой после перехода */
+.m-start[hidden],
+.m-tab[hidden] {
+  display: none;
+}
+
+.m-start {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+}
+
+.m-mark {
+  font-family: var(--font-logo, inherit);
+  font-size: 34px;
+  /* ambient-пульс логотипа — гайд 06 §3 (свечение рамкой, 3 с) */
+  animation: m-pulse 3s ease-in-out infinite;
+  border-radius: 12px;
+  padding: 6px 14px;
+}
+@keyframes m-pulse {
+  0%,
+  100% {
+    text-shadow: 0 0 0 rgba(189, 254, 79, 0);
+  }
+  50% {
+    text-shadow: 0 0 24px rgba(189, 254, 79, 0.45);
+  }
+}
+
+.m-branch {
+  margin: 0;
+  color: var(--accent-neon);
+  font-size: 14px;
+}
+.m-version {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.m-hint {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.m-quick {
+  margin-top: 10px;
+  padding: 10px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(189, 254, 79, 0.3);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.m-quick:active {
+  border-color: var(--accent-neon);
+}
+
+.m-tab {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: var(--bg-base);
+}
+
+/* ── Строка статуса ───────────────────────────────────────────────────── */
+.m-status {
+  padding: 6px 12px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-top: 1px solid rgba(189, 254, 79, 0.1);
+}
