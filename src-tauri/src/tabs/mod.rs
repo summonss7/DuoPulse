@@ -368,7 +368,15 @@ impl TabManager {
         url: Option<String>,
         position: Option<usize>,
     ) -> Result<TabsListResult, String> {
-        self.spawn_tab(app, url.unwrap_or_else(default_tab_url), position)
+        self.spawn_tab(app, url.unwrap_or_else(default_tab_url), position, true)
+    }
+
+    /// «Открыть ссылку в новом окне» без перехода (карточка duopulse-088):
+    /// NewWindowRequested (target=_blank, средняя кнопка, пункт контекстного
+    /// меню) открывает вкладку в фоне — активной остаётся текущая, фокус не
+    /// крадётся; пользователь переключается сам, когда захочет.
+    pub fn open_background(&self, app: &AppHandle, url: String) -> Result<TabsListResult, String> {
+        self.spawn_tab(app, url, None, false)
     }
 
     /// tabs.reopen (Ctrl+Shift+T): последняя закрытая возвращается на прежнюю
@@ -381,7 +389,7 @@ impl TabManager {
                 .pop_back()
                 .ok_or_else(|| "закрытых вкладок нет".to_string())?
         };
-        self.spawn_tab(app, url, Some(index))
+        self.spawn_tab(app, url, Some(index), true)
     }
 
     /// tabs.close: закрыть вкладку по id; активной становится соседняя
@@ -657,13 +665,16 @@ impl TabManager {
         exited
     }
 
-    /// Создание webview вкладки; position — индекс вставки в бар (None — конец).
+    /// Создание webview вкладки; position — индекс вставки в бар (None — конец);
+    /// activate — стать активной (tabs.open/Ctrl+T — как в браузерах) или
+    /// открыться в фоне (карточка duopulse-088: «новое окно» не крадёт фокус).
     /// `duopulse://<имя>` — внутренняя страница (webview с UI-бандлом).
     fn spawn_tab(
         &self,
         app: &AppHandle,
         url: String,
         position: Option<usize>,
+        activate: bool,
     ) -> Result<TabsListResult, String> {
         let parsed =
             Url::parse(&url).map_err(|e| format!("некорректный URL вкладки «{url}»: {e}"))?;
@@ -692,12 +703,24 @@ impl TabManager {
                     last_active_ms: now_ms(),
                 },
             );
-            st.active = Some(index);
+            // Фоновое открытие (карточка duopulse-088): активной остаётся
+            // текущая вкладка — перехода на новую нет; активных нет (пустой
+            // бар) — держать фон неоткуда, новая становится активной.
+            if activate || st.active.is_none() {
+                st.active = Some(index);
+            }
             id
         };
 
         self.spawn_webview(app, &id, &parsed, internal.is_some())?;
         self.apply_visibility(app);
+        if !activate {
+            // Создание webview может перехватить фокус — возвращаем его
+            // активной (прежней) вкладке: пользователь продолжает её читать.
+            if let Some(wv) = self.active_webview(app) {
+                wv.set_focus().ok();
+            }
+        }
         Ok(self.finish(app))
     }
 

@@ -1016,6 +1016,9 @@ unsafe fn install_nav_failure_watcher(core: &ICoreWebView2, app: &AppHandle, tab
 /// блокируются. Попап-фильтра по IsUserInitiated нет: в живом рантайме
 /// (пробы карточки 057) WebView2 сообщает true даже скриптовому window.open
 /// при загрузке страницы — фильтр бы только дал ложные блокировки.
+/// Вкладка открывается в ФОНЕ, без перехода на неё (карточка duopulse-088:
+/// «открыть ссылку в новом окне» не должно переключать на новое окно —
+/// активной остаётся текущая, см. tabs::open_background).
 #[cfg(windows)]
 unsafe fn install_new_window_handler(core: &ICoreWebView2, app: &AppHandle) {
     use webview2_com::NewWindowRequestedEventHandler;
@@ -1038,7 +1041,7 @@ unsafe fn install_new_window_handler(core: &ICoreWebView2, app: &AppHandle) {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 let manager = app.state::<tabs::TabManager>();
-                if let Err(e) = manager.open(&app, Some(uri.clone()), None) {
+                if let Err(e) = manager.open_background(&app, uri.clone()) {
                     eprintln!("tabs: new-window не открыл {uri}: {e}");
                 }
             });

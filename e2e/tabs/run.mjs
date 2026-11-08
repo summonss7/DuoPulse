@@ -14,6 +14,9 @@
 //   8) контекст-меню вкладки (открытие/«Закрыть») + на ПУСТОМ месте бара
 //      (карточка duopulse-075: «Новая вкладка» доступна, вкладочные действия
 //      отключены) + Ctrl+T из контента и из UI;
+//   6b) window.open из контента (NewWindowRequested): вкладка открывается
+//      в ФОНЕ — активной остаётся текущая (карточка duopulse-088), ручное
+//      переключение tabs.activate работает;
 //   9) скриншот таб-бара для сверки со стилем (гайд 06).
 // Изоляция: APPDATA и WEBVIEW2_USER_DATA_FOLDER — во временном каталоге.
 //
@@ -249,6 +252,28 @@ try {
     reopened.url.endsWith("/p3-moved") && (await tabsList(uiWs)).tabs.length === 5,
     JSON.stringify(reopened),
   );
+
+  // (6b) «открыть ссылку в новом окне» в фоне (карточка duopulse-088):
+  // window.open из контента поднимает NewWindowRequested — вкладка создаётся,
+  // но НЕ активируется (активной остаётся текущая, перехода/фокуса нет);
+  // переключение на неё — явным tabs.activate, как «я сам перейду потом»
+  const bgBefore = await activeTab(uiWs);
+  const bgCount = (await tabsList(uiWs)).tabs.length;
+  await evalIn(contentWs, `window.open("${url("p-bg")}"); "ok"`);
+  let bgTab;
+  for (let i = 0; i < 20; i++) {
+    await sleep(400);
+    bgTab = (await tabsList(uiWs)).tabs.find((t) => t.url.endsWith("/p-bg"));
+    if (bgTab) break;
+  }
+  const bgState = await tabsList(uiWs);
+  check(
+    "window.open из контента: вкладка открылась в фоне, активная не сменилась",
+    !!bgTab && !bgState.tabs.find((t) => t.url.endsWith("/p-bg")).active && (await activeTab(uiWs)).id === bgBefore.id && bgState.tabs.length === bgCount + 1,
+    JSON.stringify({ was: bgBefore.id, now: (await activeTab(uiWs)).id, count: `${bgCount} → ${bgState.tabs.length}` }),
+  );
+  await evalIn(uiWs, `window.__duopulse.tabs.activate({ id: "${bgTab.id}" })`);
+  check("фоновая вкладка активируется вручную (tabs.activate)", (await activeTab(uiWs)).id === bgTab.id);
 
   // (7) хоткеи в UI-webview (фокус в хроме)
   const uiBefore = (await activeTab(uiWs)).id;
