@@ -18,8 +18,14 @@
 // нативно через ureq); парсеры cue — общий модуль subtitles (parse_auto,
 // единый источник разбора с десктопом). Команды bridge десктопа
 // (tabs.*/nav.*/subtitles.*...) на мобильных по-прежнему не регистрируются.
+//
+// Этап 3 (duopulse-083): OTA мобильной — команды mobile_updater (манифест
+// центра Aila /updates/duopulse, APK-ассет, системная установка; десктоп
+// обновляется своим tauri-plugin-updater по latest.json и манифест v2 не
+// читает).
 
 pub mod duo_mobile;
+pub mod mobile_updater;
 // Парсеры cue — мобильным таргетам (duopulse-082): parse_auto для duo_fetch_
 // cues. На десктопе либа их не компилирует: оставалась бы тонкой (cdylib
 // Windows/MinGW не тянет экспорт тяжёлых деревьев — quick-xml, ср. рецепт
@@ -41,7 +47,14 @@ fn mobile_run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(duo_mobile::DuoManaged::default())
-        .invoke_handler(duo_mobile::invoke_handler())
+        .invoke_handler(tauri::generate_handler![
+            duo_mobile::net::duo_yt_player,
+            duo_mobile::net::duo_fetch_cues,
+            duo_mobile::net::duo_translate_texts,
+            mobile_updater::updater_check,
+            mobile_updater::updater_download,
+            mobile_updater::updater_install,
+        ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить DuoPulse (мобильная ветка)");
 }

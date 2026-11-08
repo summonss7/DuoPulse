@@ -890,12 +890,14 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "duopulse"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "adblock",
  "boringtun",
  "chrono",
  "duopulse-wg-stand",
+ "jni 0.21.1",
+ "ndk-context",
  "quick-xml 0.36.2",
  "regex",
  "rmp",
@@ -903,6 +905,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sha2",
  "smoltcp",
  "socket2",
  "symphonia",

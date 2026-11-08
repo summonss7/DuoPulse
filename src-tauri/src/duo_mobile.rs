@@ -196,7 +196,7 @@ fn gtx_parse_maps_lines() {
 // --- мобильная сетевая часть (cfg(mobile)) -------------------------------------
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-mod net {
+pub(crate) mod net {
     use super::*;
     use std::collections::HashMap;
     use std::io::Read;
@@ -461,13 +461,9 @@ mod net {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub use net::DuoManaged;
 
-/// Хендлер мобильных команд: макрос generate_handler! резолвит скрытые
-/// элементы команд (__cmd__*/__tauri_command_name_*) по ПУТИ — собирать его
-/// надо там же, где команды живут (в net), отсюда отдаём готовый замыканием.
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke) -> bool {
-    tauri::generate_handler![net::duo_yt_player, net::duo_fetch_cues, net::duo_translate_texts]
-}
+// Хендлер команд собирает lib.rs (generate_handler! резолвит скрытые
+// элементы команд по ПУТИ — net открыт как pub(crate), рядом же регистрируется
+// и mobile_updater этапа 3).
 
 #[cfg(test)]
 mod tests {

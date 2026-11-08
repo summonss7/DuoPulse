@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- duopulse-083: OTA-обновления — системная установка скачанного APK
+         (FileProvider + ACTION_VIEW из Kotlin-хелпера MobileUpdateHelper;
+         без этого Android 8+ блокирует установку неизвестных источников) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

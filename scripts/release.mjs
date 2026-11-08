@@ -271,7 +271,18 @@ if (NO_AILA) {
   process.exit(1);
 } else {
   console.log(`\nпубликация на Aila (${CHANNELS.join("+")})…`);
-  const extra = [setupName, `${setupName}.sig`, ...feedFiles].map((f) => path.join(outDir, f)).join(",");
+  const extraFiles = [setupName, `${setupName}.sig`, ...feedFiles].map((f) => path.join(outDir, f));
+  // Android-APK той же версии из корня builds/ (кладёт его туда
+  // scripts/android-build.sh): мобильная ветка обновляется манифестом v2
+  // (duopulse-083) — APK едет в канале рядом с windows-сетапами. --extra
+  // отключает автоскан builds/ у издателя, поэтому список собираем сами.
+  const hubApk = path.join(ROOT, "builds", `DuoPulse-${VERSION}-android-release.apk`);
+  if (TYPE === "release" && fs.existsSync(hubApk)) {
+    extraFiles.push(hubApk);
+    console.log(`в публикацию включён APK: ${path.basename(hubApk)}`);
+  } else if (TYPE === "release") {
+    console.log(`мобильный APK не найден (${hubApk}) — канал публикуется без android-ассета`);
+  }
   const cliArgs = [
     AILA_CLI,
     "duopulse",
@@ -280,7 +291,7 @@ if (NO_AILA) {
     "--notes",
     NOTES || `DuoPulse ${VERSION} (${TYPE})`,
     "--extra",
-    extra,
+    extraFiles.join(","),
   ];
   // без shell:true: cmd.exe режет аргументы по «;» и «,» — заметки релиза
   // обрезались до первой точки с запятой (0.1.2); как у git() ниже

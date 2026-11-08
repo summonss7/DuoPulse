@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# duopulse-083: Kotlin-хелпер OTA-установки (MobileUpdateHelper.install)
+# зовётся из Rust по имени через JNI — ссылок в Java/Kotlin-коде нет, без
+# keep R8 переименует/удалит класс (грабля novagrid-063)
+-keep class dev.duopulse.mobile.MobileUpdateHelper { *; }

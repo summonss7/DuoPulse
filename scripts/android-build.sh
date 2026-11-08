@@ -98,7 +98,9 @@ if [ "$TYPE" = "release" ]; then
   HUB_APK="DuoPulse-$VER-android-release$SUFFIX.apk"
   cp -f "$APK_SRC" "$ROOT/builds/$HUB_APK"
   echo "хаб «Скачать» Aila: $HUB_APK — обновлён (корень builds/)"
-  for name in "$(ls "$ROOT/builds")"; do
+  # без кавычек вокруг $(ls): иначе весь список — одно слово и цикл не
+  # видит устаревшие APK (duopulse-083: 0.1.6 переживал чистку 0.1.8)
+  for name in $(ls "$ROOT/builds"); do
     if [ "$name" != "$HUB_APK" ] && [[ "$name" =~ ^DuoPulse-[0-9.]+-android-release(-unsigned)?\.apk$ ]]; then
       rm -f "$ROOT/builds/$name"
       echo "хаб «Скачать» Aila: $name — убран (устарел)"

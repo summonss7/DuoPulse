@@ -13,6 +13,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import "./mobile.css";
 import { resolveMobileInput, videoIdOfEmbed } from "./platform";
 import { MobileDuo, type DuoStatus } from "./duo";
+import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
 
 const chromeRoot = document.getElementById("app");
 // DOM десктоп-хрома не трогаем, просто прячем: не [hidden] — стили десктопа
@@ -35,6 +36,7 @@ root.innerHTML = `
       <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9M9 4.5 12.5 8 9 11.5"/></svg>
     </button>
   </header>
+  <div id="mUpdate" class="m-update" hidden></div>
   <main class="m-content">
     <section id="mStart" class="m-start">
       <div class="m-mark" aria-hidden="true">duo<b>Pulse</b></div>
@@ -44,6 +46,7 @@ root.innerHTML = `
         открываются встроенным плеером — кнопка «duo» включает субтитры и
         перевод (готовые дорожки видео или Google).</p>
       <button class="m-quick" data-url="https://www.youtube.com/watch?v=iG9CE55wbtY">Открыть пример — TED с субтитрами</button>
+      <button id="mCheckUpdate" class="m-check-update">Проверить обновления</button>
     </section>
     <iframe id="mTab" class="m-tab" title="Страница" hidden
       allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer-when-downgrade"></iframe>
@@ -65,6 +68,64 @@ function note(text: string): void {
   status.textContent = text;
   status.hidden = !text;
 }
+
+// ── OTA-обновления из центра Aila (этап 3, duopulse-083) ───────────────
+const updateBanner = root.querySelector<HTMLElement>("#mUpdate")!;
+
+/** Перерисовка баннера обновления по состоянию контроллера (updater.ts). */
+function renderUpdate(ui: UpdaterUi): void {
+  updateBanner.innerHTML = "";
+  updateBanner.hidden = ui.kind === "idle";
+  if (ui.kind === "idle") return;
+  if (ui.kind === "checking") {
+    updateBanner.textContent = "Проверяю обновления…";
+    return;
+  }
+  if (ui.kind === "available") {
+    const head = document.createElement("b");
+    head.textContent = `⬆ Доступна версия ${ui.version}`;
+    updateBanner.appendChild(head);
+    if (ui.notes) {
+      const notes = document.createElement("span");
+      notes.className = "m-update-notes";
+      notes.textContent = ui.notes;
+      updateBanner.appendChild(notes);
+    }
+    const btn = document.createElement("button");
+    btn.className = "m-update-btn";
+    btn.textContent = "Обновить";
+    btn.addEventListener("click", () => void updater.install());
+    updateBanner.appendChild(btn);
+    return;
+  }
+  if (ui.kind === "downloading") {
+    const pct = ui.total ? Math.min(100, Math.round((ui.downloaded / ui.total) * 100)) : 0;
+    updateBanner.textContent = `Скачиваю ${ui.version}: ${pct}%` + (ui.total ? ` (${mb(ui.downloaded)} из ${mb(ui.total)})` : "");
+    return;
+  }
+  if (ui.kind === "installing") {
+    updateBanner.textContent = "Открыт системный установщик — подтвердите установку, приложение обновится само.";
+    return;
+  }
+  if (ui.kind === "needs-permission") {
+    updateBanner.textContent = "Разрешите установку из этого источника в открывшихся настройках.";
+    const btn = document.createElement("button");
+    btn.className = "m-update-btn";
+    btn.textContent = "Обновить";
+    btn.addEventListener("click", () => void updater.install());
+    updateBanner.appendChild(btn);
+    return;
+  }
+  if (ui.kind === "latest") {
+    updateBanner.textContent = `✓ У вас последняя версия (${ui.version})`;
+    return;
+  }
+  updateBanner.textContent = `Обновления: ${ui.message}`;
+}
+
+const updater = createMobileUpdater(renderUpdate);
+void updater.init();
+root.querySelector<HTMLButtonElement>("#mCheckUpdate")!.addEventListener("click", () => void updater.check(true));
 
 // ── duo: субтитры и перевод (этап 2) ───────────────────────────────────
 let duoPanel: import("./duo/panel").DuoPanel | null = null;

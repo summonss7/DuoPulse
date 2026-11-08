@@ -5031,3 +5031,57 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   подписан duopulse-release.keystore, копия — корень builds/ для хаба
   «Скачать» Aila).
 - Коммит: dceb76a (feat: duopulse-082)
+
+## 08.11.2026 06:37 — duopulse-083: мобильная версия, этап 3/3 — автообновление (OTA) и выпуск 0.1.8 (aila-370)
+
+- Начало работы: 08.11.2026, 05:10
+- Окончание работы: 08.11.2026, 06:37
+- Что сделано (финальный этап мобильного MVP, каркас — duopulse-081, фичи — duopulse-082):
+  - OTA из центра семьи (концепция D:\Scheduler\UPDATES-SYSTEM.md §§3–5, эталон —
+    novagrid-063): Rust-модуль src-tauri/src/mobile_updater.rs — команды updater_check
+    (GET /updates/duopulse/manifest.json; env DUOPULSE_UPDATE_BASE для стендов),
+    updater_download (стрим в cacheDir/updates, sha256 из манифеста, события
+    «duopulse:mobile-updater-progress» ~256 КиБ), updater_install (системная
+    установка через Kotlin-хелпер). Сеть — ureq мобильной ветки (rustls +
+    webpki-roots; грабля NovaGrid с rustls-platform-verifier не переносится),
+    агента без общего timeout — иначе длинное скачивание рвётся. Чистые функции
+    (version_lt, pick_apk: только .apk, без x86, приоритет arm64/universal) —
+    хостовые тесты (4). deps android-секции: sha2, jni, ndk-context.
+  - Kotlin-хелпер gen/android MobileUpdateHelper.kt (dev.duopulse.mobile):
+    appop REQUEST_INSTALL_PACKAGES → настройки MANAGE_UNKNOWN_APP_SOURCES,
+    FileProvider (dev.duopulse.mobile.fileprovider, cache-path) + ACTION_VIEW;
+    proguard-keep (R8 выкидывает класс без Java-ссылок — грабля novagrid-063);
+    permission в AndroidManifest.xml.
+  - Фронтенд src/mobile/updater.ts (контроллер: калитка тихой проверки 10 мин
+    по localStorage, «duopulse.mobile.update.lastCheck»; подписка прогресса;
+    install: скачать → системный установщик, needs-permission — баннер с кнопкой
+    повтора) + UI в mobile.ts (баннер #mUpdate под шапкой: «⬆ Доступна версия
+    X» + notes + «Обновить», «Скачиваю… %», подсказки установщика, «✓ У вас
+    последняя версия», ошибки; кнопка «Проверить обновления» на старт-экране;
+    стили mobile.css). Чистая разметка исхода uiFromCheck — юнит-тесты (8).
+  - Поезд релиза 0.1.8: бамп версии; release.mjs теперь постоянно включает в
+    публикацию Aila Android-APK той же версии из корня builds/ (раньше --extra
+    неclал APK — издатель с --extra не сканирует builds/); фикс чистки хаба в
+    android-build.sh (for name in "$(ls)" — кавычки превращали список в одно
+    слово, устаревшие APK не убирались); published: десктоп NSIS 0.1.8
+    (stable+canary, GitHub Pages + зеркало Aila, локальная копия C:\DuoPulse,
+    корень builds/) + universal release APK (aarch64+x86_64, подписан) —
+    манифест канала: 5 ассетов с android-asset (15,8 МБ, sha256).
+  - Живая проверка OTA на эмуляторе (AVD lecards_test, universal release
+    0.1.7→0.1.8): тихая проверка при старте подняла баннер «⬆ Доступна версия
+    0.1.8» → «Обновить» → needs-permission открыл настройки источника →
+    разрешение → «Обновить» в баннере (кнопка повтора) → скачивание с
+    прогрессом («Скачиваю 14% (2 МБ из 16 МБ)») → sha256 сверен → системный
+    установщик «Do you want to update this app?» → Update → финал заблокировал
+    Play Protect ОБРАЗА эмулятора (как у novagrid-063, на телефонах семьи
+    сайдлоад работает) — установку довёл adb → «версия 0.1.8» → «✓ У вас
+    последняя версия (0.1.8)». Финальный APK (с фиксами) перепроверен запуском.
+    Скриншоты: test-results/duopulse-083/ (01–08).
+  - По ходу исправлены два дефекта, вскрытых живой проверкой: (1) баннер
+    needs-permission просил нажать «Обновить» снова, но кнопки не имел —
+    кнопка повтора добавлена; (2) на пути повтора текст «Скачиваю …» терял
+    номер версии — pendingVersion в контроллере. Оба вошли в опубликованный APK.
+- Как проверено: vitest 309/309 (+8 OTA), typecheck чисто, cargo test 300
+  (+4 mobile_updater), bridge e2e 29/29 (десктоп-регресс), живой OTA-цикл на
+  эмуляторе (8 скриншотов), манифест канала проверен (5 ассетов с APK).
+- Коммит: <будет добавлен после коммита>

@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.7"
+version = "0.1.8"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
@@ -170,9 +170,15 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 # системное хранилище/JNI не нужны (грабля NovaGrid с rustls-platform-
 # verifier на Android сюда не переносится). quick-xml — парсер timedtext
 # общего модуля subtitles, который мобильная lib компилирует для parse_auto.
+# Этап 3 (duopulse-083): sha2 — сверка APK OTA-обновления; jni + ndk-context —
+# системная установка APK через Kotlin-хелпер gen/android (контекст
+# приложения кладёт tao, эталон novagrid-063).
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 ureq = { version = "2", features = ["tls"], default-features = false }
 quick-xml = "0.36"
+sha2 = "0.10"
+jni = "0.21"
+ndk-context = "0.1"
 
 [dev-dependencies]
 # Loopback-стенд WireGuard для маршрутных тестов (задача 6.6, карточка
