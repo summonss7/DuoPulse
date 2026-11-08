@@ -3,20 +3,28 @@
 // адресной строкой: состояние показа активной вкладки — выкл / одна дорожка /
 // дуо / три (docs/03 §8 п.1), видна только когда на странице есть видео с
 // дорожками (платформенными или файловыми). Клик — включить показ, если выключен (карточка duopulse-079: как у Alt+D —
-// дефолт «оригинал + перевод» или прошлый набор), и открыть панель; Alt+D — вкл/выкл
-// показа (docs/03 §8 п.2, сценарий docs/01 §5.1) и вместе с ним показать/
-// скрыть панель (карточка duopulse-028): источник Alt+D приходит полем via
-// события subtitles:set_applied — из страницы его ловит content-слой, из
-// хрома этот модуль (IPC subtitles.toggle).
+// дефолт «оригинал + перевод» или прошлый набор), и открыть нативное меню
+// (карточка duopulse-087: «в кнопочки duo не могу найти, где настроить языки
+// и формат плашки» — HTML-панель на контентных вкладках уходит под страницу,
+// спайк duopulse-086; меню — popup muda поверх webview: показ набора, языки
+// видео, перевод по умолчанию, позиция/размер/вид плашки, синхронизация,
+// свои субтитры, ASR, вход на страницу настроек; payload — duo-menu.ts,
+// сборка — chrome_menu.rs build_duo_menu, транспорт overlay-menu.ts).
+// Alt+D — вкл/выкл показа (docs/03 §8 п.2, сценарий docs/01 §5.1); источник
+// Alt+D приходит полем via события subtitles:set_applied — из страницы его
+// ловит content-слой, из хрома этот модуль (IPC subtitles.toggle).
 //
-// Панель (гайд 06): состав набора 1–3 дорожек — языки, источники (платформа/
-// файл/перевод), порядок строк (↑/↓, fast-path без перезагрузки); пресеты
-// быстрого переключения; «Свои субтитры…» (нативный выбор файла →
-// subtitles.load_file, плагин dialog); слайдер синхронизации ±10 с (тот же
-// offset, что HUD); размер/позиция плашки (subtitles.set_style). Данные —
-// снапшот subtitles.list_tracks + события subtitles:{tracks_ready,
-// set_applied} и page:video_detected сервис состояния Core (только активная
-// вкладка: события фильтруются по tabId).
+// HTML-панель (гайд 06) — полный редактор набора: состав 1–3 дорожек — языки,
+// источники (платформа/файл/перевод), порядок строк (↑/↓, fast-path без
+// перезагрузки); пресеты быстрого переключения; «Свои субтитры…» (нативный
+// выбор файла → subtitles.load_file, плагин dialog); слайдер синхронизации
+// ±10 с (тот же offset, что HUD); размер/позиция/цвета плашки
+// (subtitles.set_style). После 087 пользовательского входа в неё нет (видна
+// только нативным меню) — открытие событием «duo:open-panel» (e2e-стенды;
+// вернуть панель над webview — карточка duopulse-090). Данные — снапшот
+// subtitles.list_tracks + события subtitles:{tracks_ready, set_applied} и
+// page:video_detected сервис состояния Core (только активная вкладка:
+// события фильтруются по tabId).
 //
 // Задача 4.2: «+ перевод в… (облако)» — запуск subtitles.translate_track
 // (конвейер Core: кэш SQLite → пачки ≤ 2 КБ → провайдер), статус — событие
@@ -36,6 +44,7 @@ import type {
   SubtitlesTranslateUnavailable,
   TranslationLangInfo,
 } from "../bridge/gen/types";
+import { onOverlayMenuAction, openOverlayMenu } from "../chrome/overlay-menu";
 import { presetSets, normalizeTrackId } from "./presets";
 import {
   fromChange,
@@ -45,6 +54,7 @@ import {
   toOptions,
   type LangAction,
 } from "./langs-row";
+import { buildDuoMenuPayload, menuFromId, menuToValue, type DuoMenuPayload } from "./duo-menu";
 import { cloudLangOptions, translateProgressText, translateUnavailableText } from "./cloud-langs";
 import { asrProgressText } from "./asr-status";
 import { LOOK_PRESETS, matchLookPreset } from "./look-presets";
@@ -404,6 +414,25 @@ async function refresh(): Promise<void> {
 
 // --- панель -----------------------------------------------------------------
 
+/** Payload последнего открытого меню (индексы пунктов «Язык видео»/«Перевод»
+ * валидны только для него — храним, пока меню не открыто заново). */
+let menuPayload: DuoMenuPayload | null = null;
+
+/** Нативное меню кнопки (карточка 087): над webview на любой вкладке.
+ * Свежий снапшот вкладки + дефолтный язык настроек → payload → popup. */
+async function openMenu(): Promise<void> {
+  await refresh();
+  let defLang = "ru";
+  try {
+    defLang = (await bridge.settings.getAll()).subtitles?.defaultTranslationLang ?? "ru";
+  } catch {
+    /* настройки недоступны — дефолт списка */
+  }
+  menuPayload = buildDuoMenuPayload(state, defLang);
+  const r = btn.getBoundingClientRect();
+  openOverlayMenu("duo", r.left, r.bottom + 6, menuPayload);
+}
+
 function openPanel(): void {
   closeOtherPanels();
   panel.style.left = `${btn.offsetLeft}px`;
@@ -413,11 +442,6 @@ function openPanel(): void {
 
 function closePanel(): void {
   panel.hidden = true;
-}
-
-function togglePanel(): void {
-  if (panel.hidden) openPanel();
-  else closePanel();
 }
 
 /** Прочие всплывающие панели хрома — открытие одного закрывает остальные. */
@@ -445,19 +469,121 @@ const runLangAction = (a: LangAction): void => {
   }
 };
 
+/** «Свои субтитры…» — нативный выбор файла → subtitles.load_file (панель и
+ * пункт нативного меню 087). */
+const pickSubtitlesFile = (): void => {
+  void (async () => {
+    try {
+      const path = await invoke<string | null>("plugin:dialog|open", {
+        options: {
+          title: "Свои субтитры (.srt / .vtt)",
+          multiple: false,
+          filters: [{ name: "Субтитры", extensions: ["srt", "vtt"] }],
+        },
+      });
+      if (!path) return;
+      const res = await bridge.subtitles.loadFile({ path });
+      const meta = document.getElementById("duoFileMeta") as HTMLElement;
+      meta.hidden = false;
+      meta.textContent =
+        `${res.name} — ${res.cueCount} реплик` +
+        (res.warnings.length ? ` (предупреждений: ${res.warnings.length})` : "");
+    } catch (e) {
+      err(e);
+    }
+  })();
+};
+
+/** «Распознать речь» (карточка duopulse-060): кнопка панели/пункт меню →
+ * subtitles.asr_start → Core eval → content добудет URL аудио → конвейер
+ * Core; прогресс/итог — событием subtitles:asr_progress. */
+const requestAsr = (): void => {
+  const meta = document.getElementById("duoAsrMeta") as HTMLElement;
+  meta.hidden = false;
+  meta.dataset.phase = "transcribing";
+  meta.textContent = "Распознавание запущено…";
+  void bridge.subtitles.asrStart().catch((ex) => err(ex));
+};
+
+/** Выбор пункта нативного меню (карточка 087): тот же набор IPC, что у
+ * контролов панели, — языки через langs-row, стиль/сдвиг — патчи set_style/
+ * set_offset, дефолт — settings.apply, файл/ASR — те же функции. */
+const runMenuAction = (a: Record<string, unknown>): void => {
+  const act = String(a.act ?? "");
+  if (act === "toggle") {
+    void bridge.subtitles.setEnabled({ on: !state.enabled }).catch(err);
+    return;
+  }
+  if (act === "from" && menuPayload) {
+    const id = menuFromId(menuPayload, Number(a.index));
+    if (id) for (const x of fromChange(state.tracks, state.base, id)) runLangAction(x);
+    return;
+  }
+  if (act === "to" && menuPayload) {
+    const value = menuToValue(menuPayload, Number(a.index));
+    if (value !== null) for (const x of toChange(state.tracks, state.base, value)) runLangAction(x);
+    return;
+  }
+  if (act === "deflang") {
+    void bridge.settings
+      .apply({ subtitles: { defaultTranslationLang: String(a.lang ?? "") } })
+      .catch(err);
+    return;
+  }
+  if (act === "pos") {
+    void bridge.subtitles.setStyle({ style: { position: String(a.pos) } }).catch(err);
+    return;
+  }
+  if (act === "scale") {
+    void bridge.subtitles.setStyle({ style: { fontScalePct: Number(a.pct) } }).catch(err);
+    return;
+  }
+  if (act === "look") {
+    const preset = LOOK_PRESETS.find((p) => p.id === a.look);
+    if (preset) void bridge.subtitles.setStyle({ style: { ...preset.patch } }).catch(err);
+    return;
+  }
+  if (act === "offset") {
+    // delta 0 — пункт «Сброс»: обнуляем сдвиг, а не переустанавливаем текущий
+    const delta = Number(a.deltaMs);
+    const next = delta === 0 ? 0 : Math.max(-10000, Math.min(10000, state.offsetMs + delta));
+    void bridge.subtitles.setOffset({ offsetMs: next }).catch(err);
+    return;
+  }
+  if (act === "file") {
+    pickSubtitlesFile();
+    return;
+  }
+  if (act === "asr") {
+    requestAsr();
+    return;
+  }
+  if (act === "settings") {
+    void bridge.tabs.open({ url: "duopulse://settings" }).catch(err);
+  }
+};
+
 export function initDuo(): void {
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
-    // Клик = «включить субтитры» (карточка duopulse-079): показ выключен или
-    // набор пуст — включаем (content-слой соберёт дефолт «оригинал + перевод»
-    // или восстановит прошлый набор, как у Alt+D), панель открываем всегда.
+    // Клик = «включить субтитры» (карточка duopulse-079) + нативное меню
+    // (карточка 087): показ выключен или набор пуст — включаем (content-слой
+    // соберёт дефолт «оригинал + перевод» или восстановит прошлый набор),
+    // меню открываем всегда — над webview на любой вкладке.
     if (!state.enabled || state.tracks.length === 0) {
       void bridge.subtitles.setEnabled({ on: true }).catch(err);
-      if (panel.hidden) openPanel();
-      return;
     }
-    togglePanel();
+    void openMenu();
   });
+
+  // Действия нативного меню (popup muda — выбор приходит «menu-action»).
+  onOverlayMenuAction((a) => {
+    if (a.menu === "duo") runMenuAction(a);
+  });
+
+  // HTML-панель (087): пользовательского входа нет — над webview её не видно
+  // (спайк 086); открытие событием для e2e-стендов, вернуть панель — 090.
+  window.addEventListener("duo:open-panel", () => openPanel());
 
   // закрытие кликом мимо / Escape — как у прочих панелей хрома
   window.addEventListener(
@@ -566,17 +692,12 @@ export function initDuo(): void {
     select.value = ""; // обратно к подсказке; панель перерисует set_applied
   });
 
-  // Распознать речь (карточка duopulse-060): кнопка панели → subtitles.asr_start
-  // → Core eval duopulse-asr-request → content добудет URL аудио → конвейер
-  // Core (самофетч → декод → чанки → движок → кэш). Прогресс/итог/ошибки —
-  // событием subtitles:asr_progress (duoAsrMeta, автоскрытие как у перевода).
-  document.getElementById("duoAsrBtn")?.addEventListener("click", () => {
-    const meta = document.getElementById("duoAsrMeta") as HTMLElement;
-    meta.hidden = false;
-    meta.dataset.phase = "transcribing";
-    meta.textContent = "Распознавание запрошено…";
-    void bridge.subtitles.asrStart().catch((ex) => err(ex));
-  });
+  // Распознать речь (карточка duopulse-060): кнопка панели и пункт
+  // нативного меню (087) → requestAsr → subtitles.asr_start → Core eval
+  // duopulse-asr-request → content добудет URL аудио → конвейер Core.
+  // Прогресс/итог/ошибки — событием subtitles:asr_progress (duoAsrMeta,
+  // автоскрытие как у перевода).
+  document.getElementById("duoAsrBtn")?.addEventListener("click", requestAsr);
   let asrStatusTimer = 0;
   void listen<SubtitlesAsrProgress>(bridge.events.subtitlesAsrProgress, (ev) => {
     if (ev.payload.tabId !== state.tabId) return;
@@ -632,29 +753,9 @@ export function initDuo(): void {
     }
   });
 
-  // «Свои субтитры…»: нативный выбор файла → subtitles.load_file (3.6).
-  document.getElementById("duoFileBtn")?.addEventListener("click", () => {
-    void (async () => {
-      try {
-        const path = await invoke<string | null>("plugin:dialog|open", {
-          options: {
-            title: "Свои субтитры (.srt / .vtt)",
-            multiple: false,
-            filters: [{ name: "Субтитры", extensions: ["srt", "vtt"] }],
-          },
-        });
-        if (!path) return;
-        const res = await bridge.subtitles.loadFile({ path });
-        const meta = document.getElementById("duoFileMeta") as HTMLElement;
-        meta.hidden = false;
-        meta.textContent =
-          `${res.name} — ${res.cueCount} реплик` +
-          (res.warnings.length ? ` (предупреждений: ${res.warnings.length})` : "");
-      } catch (e) {
-        err(e);
-      }
-    })();
-  });
+  // «Свои субтитры…»: нативный выбор файла → subtitles.load_file (3.6);
+  // тот же диалог — пункт «Свои субтитры…» нативного меню (087).
+  document.getElementById("duoFileBtn")?.addEventListener("click", pickSubtitlesFile);
 
   // Синхронизация: слайдер панели задаёт тот же offset, что HUD (docs/03 §8 п.5).
   const offsetSlider = document.getElementById("duoOffset") as HTMLInputElement;
@@ -750,12 +851,9 @@ export function initDuo(): void {
       state.offsetMs = ev.payload.offsetMs;
       state.style = ev.payload.style;
       render();
-      // Alt+D «показать/скрыть панель» (карточка duopulse-028): вслед за
-      // переключением показа — панель открывается/закрывается.
-      if (ev.payload.via === "alt-d") {
-        if (ev.payload.enabled) openPanel();
-        else closePanel();
-      }
+      // Alt+D раньше открывал/закрывал HTML-панель (карточка duopulse-028) —
+      // с 087 показ переключается без панели (над webview её не видно, вход
+      // в настройки — нативное меню кнопки duo).
     },
   );
 

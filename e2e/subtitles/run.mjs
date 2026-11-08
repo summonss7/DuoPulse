@@ -1185,8 +1185,9 @@ try {
     JSON.stringify(duoBtnState),
   );
 
-  // (34) клик по кнопке открывает панель настроек; Esc закрывает.
-  await evalIn(ui3, `document.getElementById("duoBtn").click()`);
+  // (34) панель настроек открывается тест-событием (карточка 087: клик кнопки
+  // открывает нативное меню, HTML-панель — e2e/future-090); Esc закрывает.
+  await evalIn(ui3, `window.dispatchEvent(new CustomEvent("duo:open-panel"))`);
   await sleep(500); // refresh() панели (tabs.list + list_tracks)
   const panelOpen = await evalIn(
     ui3,
@@ -1677,7 +1678,7 @@ try {
 
   // (35) Alt+D в контентной вкладке (docs/03 §8 п.2): выключить показ —
   // состав помнят обе стороны, событие subtitles:set_applied via=alt-d
-  // доходит до UI, кнопка гаснет, панель закрывается за ним (карточка 028).
+  // доходит до UI, кнопка гаснет (панель больше не тогглится — 087).
   const altOff = await evalIn(
     tab,
     `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "KeyD", cancelable: true }))`,
@@ -1705,8 +1706,8 @@ try {
     JSON.stringify(offUi),
   );
 
-  // (36) Alt+D снова: включение восстанавливает последний набор (тот же id),
-  // панель открывается (via=alt-d), показ в такт.
+  // (36) Alt+D снова: включение восстанавливает последний набор (тот же id);
+  // панель не открывается (087: показ переключается без панели).
   await evalIn(tab, `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "KeyD", cancelable: true }))`);
   await waitForPage(tab, `window.__duopulseContent?.state().enabled === true && window.__duopulseContent?.state().engine.trackCount === 1`, 5000, "набор восстановлен");
   const onUi = await evalIn(
@@ -1714,13 +1715,12 @@ try {
     `(function () { return { count: document.getElementById("duoBtn").dataset.count, panelHidden: document.getElementById("duoPanel").hidden }; })()`,
   );
   check(
-    "Alt+D включил: последний набор восстановлен (test:ru), кнопка «дуо-режим», панель открылась",
-    onUi.count === "1" && onUi.panelHidden === false,
+    "Alt+D включил: последний набор восстановлен (test:ru), кнопка «дуо-режим», панель не открывается",
+    onUi.count === "1" && onUi.panelHidden === true,
     JSON.stringify(onUi),
   );
 
   // (37) Alt+D из хрома (IPC subtitles.toggle — фокус в UI): тот же эффект.
-  await evalIn(ui3, `document.getElementById("duoBtn").click()`); // закрыть панель
   await sleep(150);
   const toggleViaChrome = await evalIn(
     ui3,
@@ -1777,8 +1777,9 @@ try {
   );
 
   // (40) панельные контроли: слайдер синхронизации — тот же offset (docs/03
-  // §8 п.5); размер и позиция — subtitles.set_style в оверлей.
-  await evalIn(ui3, `document.getElementById("duoBtn").click()`);
+  // §8 п.5); размер и позиция — subtitles.set_style в оверлей. Панель —
+  // тест-событием (087).
+  await evalIn(ui3, `window.dispatchEvent(new CustomEvent("duo:open-panel"))`);
   await sleep(400);
   await evalIn(
     ui3,

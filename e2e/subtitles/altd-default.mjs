@@ -404,9 +404,10 @@ try {
     `набор: ${langs.join(" + ")}, via=${ev1?.via}`,
   );
 
-  // (C) чип «Дуо en+ru» подсвечен сразу после включения. via=alt-d сам
-  // открывает панель (карточка duopulse-028) — не закрываем её кликом.
-  await evalIn(ui, `document.getElementById("duoBtn").hidden === false && document.getElementById("duoPanel").hidden === false ? true : document.getElementById("duoBtn").click()`);
+  // (C) чип «Дуо en+ru» подсвечен сразу после включения. Панель открывается
+  // тест-событием (карточка 087: клик кнопки — нативное меню, Alt+D панель
+  // больше не открывает).
+  await evalIn(ui, `window.dispatchEvent(new CustomEvent("duo:open-panel"))`);
   await waitForPage(ui, `document.getElementById("duoPanel").hidden === false`, 5000, "панель открыта");
   const chip = await evalIn(
     ui,

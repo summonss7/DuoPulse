@@ -1,17 +1,22 @@
-// Живой стенд карточки duopulse-079: клик по кнопке «duo» должен ВКЛЮЧАТЬ
-// субтитры (как Alt+D — дефолт «оригинал + предпочитаемый перевод»), а не
-// только открывать панель; в панели — строка «Языки: с какого → на какой»
-// (селекты оригинала и перевода) со ссылкой на настройки субтитров.
+// Живой стенд карточек duopulse-079/087: вход в субтитры — кнопка «duo».
+// С 087 клик открывает НАТИВНОЕ меню (popup muda над webview: HTML-панель на
+// контентной вкладке не видна — спайк 086), клик на выключенном показе
+// включает субтитры (079, как Alt+D — дефолт «оригинал + предпочитаемый
+// перевод»). Нативный popup не автоматизируется из CDP: поведение кнопки
+// проверяем проводкой действия «menu-action» (тот же вид, что шлёт Core из
+// on_menu_event), HTML-панель (оставшийся редактор набора) открываем
+// тест-событием «duo:open-panel».
 //
-// Проверки (критерии карточки):
-//   A) свежее видео (enabled=false): клик duoBtn → панель открыта И показ
-//      включён дуо-дефолтом (en-оригинал + ru-перевод, via=panel);
-//   B) строка «Языки»: селект «Язык видео» = en-оригинал, «Перевод» = ru;
+// Проверки (критерии карточек):
+//   A) свежее видео (enabled=false): меню duo act=toggle → показ включён
+//      дуо-дефолтом (en-оригинал + ru-перевод);
+//   A2) меню duo (087): дефолт-язык перевода, позиция и размер плашки;
+//   B) строка «Языки» панели: селект «Язык видео» = en-оригинал, «Перевод» = ru;
 //   C) смена перевода в селекте → дуо-набор en+<новый> без перезагрузки;
 //   D) «Нет (только оригинал)» → набор из 1 дорожки;
-//   E) повторный клик по duoBtn при включённом показе — только панель
-//      (панель закрылась, показ остался);
-//   F) «настройки субтитров» открывает вкладку duopulse://settings.
+//   E) Escape закрывает панель, показ остаётся включён;
+//   F) меню duo act=settings открывает вкладку duopulse://settings;
+//   F2) ссылка «настройки субтитров» панели открывает ту же вкладку.
 //
 // Запуск:  node e2e/subtitles/duo-button.mjs [путь-к-duopulse.exe] [videoId]
 // Требует собранный debug-exe (cargo build); vite dev поднимает сам. Видео
@@ -134,6 +139,15 @@ const findTarget = async (pred) => {
   return targets.find((t) => t.type === "page" && pred(t.url));
 };
 
+// Действие нативного меню (как шлёт Core из on_menu_event — паттерн карточки
+// 086: нативный popup из CDP не автоматизируется, проверяем проводку).
+const menuAction = (ws, payload) =>
+  evalIn(ws, `window.__TAURI_INTERNALS__.invoke('plugin:event|emit', ${JSON.stringify({ event: "menu-action", payload })})`);
+
+// HTML-панель duo открывается тест-событием (пользовательский вход — меню).
+const openDuoPanel = (ws) =>
+  evalIn(ws, `window.dispatchEvent(new CustomEvent("duo:open-panel")); document.getElementById("duoPanel").hidden === false`);
+
 try {
   await killOurExes();
   vite = spawn("npm", ["run", "dev"], { cwd: ROOT, shell: true, stdio: "ignore" });
@@ -236,9 +250,11 @@ try {
   if (before?.enabled !== false || (before?.tracks ?? []).length !== 0)
     console.log(`внимание: стартовое состояние не «свежее» (enabled=${before?.enabled}, tracks=${(before?.tracks ?? []).length}) — проверка A по-прежнему про клик`);
 
-  // (A) клик по кнопке «duo» на выключенном показе: панель + дуо-дефолт.
-  // en-оригинал непереводим (isTranslatable=false) — tlang платформы нельзя
-  // и по специции дефолт = один оригинал; иначе ждём дуо en+ru.
+  // (A) кнопка «duo» на выключенном показе: включение показа. Клик кнопки не
+  // жмём — нативный popup модален; действию toggle меню соответствует то же
+  // setEnabled(true), что клику (карточка 079). en-оригинал непереводим
+  // (isTranslatable=false) — tlang платформы нельзя и дефолт = один оригинал;
+  // иначе ждём дуо en+ru.
   const preClick = await evalIn(
     tab,
     `window.__duopulseContent?.tracksInfo()`,
@@ -249,15 +265,14 @@ try {
     "ПЕРЕД КЛИКОМ: " +
       JSON.stringify(preClick && { path: preClick.path, base: preClick.base.map((b) => b.id + (b.translatable === false ? " !tr" : "")), translationsCount: preClick.translationsCount, warnings: preClick.warnings }),
   );
-  await evalIn(ui, `document.getElementById("duoBtn").click()`);
-  const panelOpen = await waitFor(ui, `document.getElementById("duoPanel").hidden === false`, 5000, "панель открыта");
+  await menuAction(ui, { menu: "duo", act: "toggle" });
   let applied;
   try {
     applied = await waitFor(
       tab,
       `window.__duopulseContent?.state().enabled === true && window.__duopulseContent?.state().engine.trackCount >= 1`,
       150000,
-      "клик duoBtn: показ включён (дефолт-набор загрузился)",
+      "кнопка duo: показ включён (дефолт-набор загрузился)",
     );
   } catch (e) {
     const s = await evalIn(tab, `window.__duopulseContent?.state()`).catch(() => null);
@@ -299,12 +314,36 @@ try {
     throw e;
   }
   check(
-    `(A) клик duoBtn включил показ с дефолт-набором (${enTranslatable ? "en-оригинал + ru" : "en-оригинал, tlang недоступен"}), панель открыта`,
-    panelOpen === true && applied === true && !!snap,
+    `(A) кнопка duo включила показ с дефолт-набором (${enTranslatable ? "en-оригинал + ru" : "en-оригинал, tlang недоступен"})`,
+    applied === true && !!snap,
     `набор: ${(snap.tracks ?? []).map((t) => t.id).join(" + ")}`,
   );
 
-  // (B) строка «Языки»: селекты оригинала/перевода отражают набор
+  // (A2) меню duo (087): дефолт-язык перевода и формат плашки — те же IPC,
+  // что у контролов панели; проверяем проводку действий меню.
+  await menuAction(ui, { menu: "duo", act: "deflang", lang: "es" });
+  const defSaved = await waitFor(
+    ui,
+    `(async () => (await window.__duopulse.settings.getAll()).subtitles?.defaultTranslationLang === "es")()`,
+    10000,
+    "дефолт-язык es сохранён",
+  ).catch(() => null);
+  check("(A2) меню duo: «Перевод по умолчанию» → настройки (es)", !!defSaved, "settings.subtitles.defaultTranslationLang=es");
+  await menuAction(ui, { menu: "duo", act: "deflang", lang: "ru" });
+  await menuAction(ui, { menu: "duo", act: "pos", pos: "top" });
+  await menuAction(ui, { menu: "duo", act: "scale", pct: 150 });
+  const styled = await waitFor(
+    ui,
+    `(async () => { const s = await window.__duopulse.subtitles.listTracks(); return s.style?.position === "top" && s.style?.fontScalePct === 150; })()`,
+    15000,
+    "позиция/размер плашки применены",
+  ).catch(() => null);
+  check("(A2) меню duo: позиция (верх) и размер (150%) плашки применены", !!styled, "subtitles.set_style по menu-action");
+  await menuAction(ui, { menu: "duo", act: "pos", pos: "bottom" });
+  await menuAction(ui, { menu: "duo", act: "scale", pct: 100 });
+
+  // (B) строка «Языки» панели: селекты оригинала/перевода отражают набор
+  await openDuoPanel(ui);
   const langs = await evalIn(
     ui,
     `(function () {
@@ -369,27 +408,39 @@ try {
   );
   check("(D) «Нет» — набор из одного оригинала", !!snapD, `набор: ${snapD}`);
 
-  // (E) повторный клик при включённом показе: только панель, показ живёт
-  await evalIn(ui, `document.getElementById("duoBtn").click()`); // панель открыта → закроется
-  await waitFor(ui, `document.getElementById("duoPanel").hidden === true`, 5000, "панель закрылась");
+  // (E) Escape закрывает панель, показ остаётся включён (клик кнопки с 087
+  // открывает нативное меню — панель закрывается как прежде, мимо/Escape).
+  // Диспатч на window: слушатель duo.ts — bubble на window, событие с
+  // bubbles:false от document до него не доходит (как в run.mjs п.35).
+  await evalIn(ui, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
+  await waitFor(ui, `document.getElementById("duoPanel").hidden === true`, 5000, "панель закрылась (Escape)");
   const snapE = await evalIn(ui, `window.__duopulse.subtitles.listTracks()`);
   check(
-    "(E) второй клик duoBtn закрыл панель, показ остался включён",
+    "(E) Escape закрыл панель, показ остался включён",
     snapE.enabled === true && (snapE.tracks ?? []).length === 1,
     `enabled=${snapE.enabled}, tracks=${(snapE.tracks ?? []).length}`,
   );
 
-  // (F) «настройки субтитров»: вкладка duopulse://settings
-  await evalIn(ui, `document.getElementById("duoBtn").click()`); // снова открыть панель
-  await waitFor(ui, `document.getElementById("duoPanel").hidden === false`, 5000, "панель открыта");
-  await evalIn(ui, `document.getElementById("duoLangSettings").click()`);
+  // (F) пункт меню «Все настройки субтитров…» (087): вкладка duopulse://settings
+  await menuAction(ui, { menu: "duo", act: "settings" });
   const settingsUrl = await waitFor(
     ui,
     `(async () => { const t = await window.__duopulse.tabs.list(); const active = t.tabs.find((x) => x.active); return active && active.url.includes("settings") ? active.url : null; })()`,
     15000,
     "активная вкладка — настройки",
   );
-  check("(F) «настройки субтитров» открыли duopulse://settings", !!settingsUrl, `url=${settingsUrl}`);
+  check("(F) меню duo: «Все настройки субтитров…» открыли duopulse://settings", !!settingsUrl, `url=${settingsUrl}`);
+
+  // (F2) ссылка «настройки субтитров» панели — та же вкладка
+  await openDuoPanel(ui);
+  await evalIn(ui, `document.getElementById("duoLangSettings").click()`);
+  const settingsUrl2 = await waitFor(
+    ui,
+    `(async () => { const t = await window.__duopulse.tabs.list(); const active = t.tabs.find((x) => x.active); return active && active.url.includes("settings") ? active.url : null; })()`,
+    15000,
+    "активная вкладка — настройки (по ссылке панели)",
+  );
+  check("(F2) ссылка панели «настройки субтитров» открывает duopulse://settings", !!settingsUrl2, `url=${settingsUrl2}`);
 } finally {
   try {
     app?.kill();

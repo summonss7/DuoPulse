@@ -257,7 +257,8 @@ try {
   const ui = connect(uiTarget.webSocketDebuggerUrl);
   await waitForPage(ui, `typeof window.__duopulse === "object"`, 10000, "bridge-хук window.__duopulse");
   await waitForPage(ui, `!document.getElementById("duoBtn").hidden`, 10000, "кнопка duo видна");
-  await evalIn(ui, `document.getElementById("duoBtn").click()`);
+  // панель — тест-событием (карточка 087: клик кнопки открывает нативное меню)
+  await evalIn(ui, `window.dispatchEvent(new CustomEvent("duo:open-panel"))`);
   await waitForPage(ui, `!document.getElementById("duoPanel").hidden`, 5000, "панель duo открыта");
   const btnState = await evalIn(
     ui,
