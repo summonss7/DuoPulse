@@ -1,16 +1,18 @@
 // DuoPulse — мобильная ветка UI (этап 1 карточки duopulse-081, вариант Б из
-// duopulse-053): стартовый экран «мобильная ветка», ОДНА вкладка — WebView
-// страницы в iframe под omnibox. Мульти-webview с десктопа (таб-бар +
-// дочерние webview вкладок) на Android не работает — child-webview API
-// Tauri 2 десктоп-only; iframe — минимальный скелет этапа 1, Duo-субтитры
-// и перевод приезжают в этап 2 (duopulse-082).
+// duopulse-053; этап 2 — duopulse-082): стартовый экран «мобильная ветка»,
+// ОДНА вкладка — WebView страницы в iframe под omnibox. Мульти-webview с
+// десктопа (таб-бар + дочерние webview вкладок) на Android не работает —
+// child-webview API Tauri 2 десктоп-only; iframe — минимальный скелет,
+// Duo-субтитры и перевод — этап 2 (duopulse-082): кнопка «duo» + панель
+// настроек + плашка над плеером (src/mobile/duo/).
 //
 // Команды bridge десктопа (tabs.*/nav.*/history.*) на мобильной обёртке не
-// зарегистрированы (lib.rs — тонкий билдер) — ветка их не зовёт; разбор
-// ввода — локальный resolveMobileInput (src/mobile/platform.ts).
+// зарегистрированы (lib.rs — тонкий билдер + Duo-движок), ветка их не зовёт;
+// разбор ввода — локальный resolveMobileInput (src/mobile/platform.ts).
 import { getVersion } from "@tauri-apps/api/app";
 import "./mobile.css";
-import { resolveMobileInput } from "./platform";
+import { resolveMobileInput, videoIdOfEmbed } from "./platform";
+import { MobileDuo, type DuoStatus } from "./duo";
 
 const chromeRoot = document.getElementById("app");
 // DOM десктоп-хрома не трогаем, просто прячем: не [hidden] — стили десктопа
@@ -26,6 +28,7 @@ root.innerHTML = `
       <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7 8 2.5 13.5 7v6a.5.5 0 0 1-.5.5h-3.5v-4h-3v4H3a.5.5 0 0 1-.5-.5z"/></svg>
     </button>
     <span class="m-logo" aria-hidden="true">duo<b>Pulse</b></span>
+    <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo">duo</button>
     <input id="mOmnibox" type="text" placeholder="Адрес или поиск" spellcheck="false"
       autocomplete="off" enterkeyhint="go" />
     <button id="mGo" class="m-go" title="Перейти" aria-label="Перейти">
@@ -35,11 +38,12 @@ root.innerHTML = `
   <main class="m-content">
     <section id="mStart" class="m-start">
       <div class="m-mark" aria-hidden="true">duo<b>Pulse</b></div>
-      <p class="m-branch">мобильная ветка · этап 1 из 3</p>
+      <p class="m-branch">мобильная ветка · субтитры и перевод</p>
       <p class="m-version" id="mVersion"></p>
       <p class="m-hint">Введите адрес или поисковый запрос. Ссылки YouTube с видео
-        открываются встроенным плеером; субтитры и перевод — этап 2.</p>
-      <button class="m-quick" data-url="https://example.com/">Открыть пример — example.com</button>
+        открываются встроенным плеером — кнопка «duo» включает субтитры и
+        перевод (готовые дорожки видео или Google).</p>
+      <button class="m-quick" data-url="https://www.youtube.com/watch?v=iG9CE55wbtY">Открыть пример — TED с субтитрами</button>
     </section>
     <iframe id="mTab" class="m-tab" title="Страница" hidden
       allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer-when-downgrade"></iframe>
@@ -50,15 +54,54 @@ root.innerHTML = `
 const omnibox = root.querySelector<HTMLInputElement>("#mOmnibox")!;
 const go = root.querySelector<HTMLButtonElement>("#mGo")!;
 const home = root.querySelector<HTMLButtonElement>("#mHome")!;
+const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
 const start = root.querySelector<HTMLElement>("#mStart")!;
 const tab = root.querySelector<HTMLIFrameElement>("#mTab")!;
 const status = root.querySelector<HTMLElement>("#mStatus")!;
+const content = root.querySelector<HTMLElement>(".m-content")!;
 
 /** Показ строки статуса: что открыто / почему могло не открыться. */
 function note(text: string): void {
   status.textContent = text;
   status.hidden = !text;
 }
+
+// ── duo: субтитры и перевод (этап 2) ───────────────────────────────────
+let duoPanel: import("./duo/panel").DuoPanel | null = null;
+let videoOpen = false;
+const duo = new MobileDuo(content, tab, (s: DuoStatus) => {
+  duoPanel?.setStatus(s);
+  // Панель закрыта — статус duo виден в общей строке (панель открыта — только в ней).
+  if (!duoPanel) {
+    note(s.text ?? (videoOpen ? "Плеер YouTube. Нажмите «duo» для субтитров и перевода." : ""));
+  }
+});
+duoBtn.addEventListener("click", () => {
+  if (duoPanel) {
+    duoPanel.remove();
+    duoPanel = null;
+    return;
+  }
+  void (async () => {
+    const { DuoPanel } = await import("./duo/panel");
+    duoPanel = new DuoPanel(
+      {
+        onUpdate: (patch) => {
+          duo.update(patch);
+          duoPanel?.sync();
+        },
+        onClose: () => {
+          duoPanel?.remove();
+          duoPanel = null;
+        },
+      },
+      () => duo.currentSettings,
+      () => duo.trackList,
+    );
+    content.appendChild(duoPanel.root);
+    duoPanel.refreshList(duo.trackList);
+  })();
+});
 
 /** Загрузить адрес в единственную вкладку (iframe). */
 function navigate(input: string): void {
@@ -67,12 +110,22 @@ function navigate(input: string): void {
   tab.src = res.url;
   tab.hidden = false;
   start.hidden = true;
-  if (res.kind === "search") {
-    note("Поиск YouTube. Страницы результатов YouTube не встраиваются в iframe — откройте видео, ссылку с /watch можно ввести здесь.");
-  } else if (res.url.includes("youtube.com/embed/")) {
-    note("Плеер YouTube (embed). Субтитры и перевод — этап 2.");
+  duoPanel?.remove();
+  duoPanel = null;
+  const videoId = videoIdOfEmbed(res.url);
+  videoOpen = !!videoId;
+  if (videoId) {
+    duoBtn.hidden = false;
+    void duo.open(videoId);
+    note("Плеер YouTube. Нажмите «duo» для субтитров и перевода.");
   } else {
-    note(res.url);
+    duoBtn.hidden = true;
+    duo.close();
+    if (res.kind === "search") {
+      note("Поиск YouTube. Страницы результатов не встраиваются в iframe — откройте видео, ссылку с /watch можно ввести здесь.");
+    } else {
+      note(res.url);
+    }
   }
 }
 
@@ -90,6 +143,10 @@ home.addEventListener("click", () => {
   tab.hidden = true;
   tab.src = "about:blank";
   start.hidden = false;
+  duoBtn.hidden = true;
+  duo.close();
+  duoPanel?.remove();
+  duoPanel = null;
   note("");
   omnibox.value = "";
   omnibox.focus();

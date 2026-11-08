@@ -86,6 +86,7 @@
 
 /* ── Контент: стартовый экран или вкладка-iframe ─────────────────────── */
 .m-content {
+  position: relative; /* якорь абсолютной плашки duo и панели (этап 2) */
   flex: 1;
   min-height: 0;
   display: flex;
@@ -178,4 +179,176 @@
   overflow: hidden;
   text-overflow: ellipsis;
   border-top: 1px solid rgba(189, 254, 79, 0.1);
+}
+
+/* ── duo: кнопка, плашка субтитров, панель настроек (этап 2, duopulse-082) ── */
+.m-duo-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  border: 1px solid rgba(189, 254, 79, 0.35);
+  background: var(--bg-elevated);
+  color: var(--accent-neon);
+  font-family: var(--font-logo, inherit);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.m-duo-btn:active {
+  border-color: var(--accent-neon);
+  box-shadow: var(--glow-neon);
+}
+
+/* Плашка поверх iframe: контейнер прижат к нижнему (или верхнему) краю
+   «видео» = .m-content; отступ — % высоты контейнера (marginPct, гайд 06).
+   container-type — cqw-кегль plateFontSizeCss масштабируется с шириной. */
+.m-duo-overlay {
+  position: absolute;
+  inset-inline: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none; /* тапы уходят плееру (пуск/пауза/fullscreen) */
+  container-type: inline-size;
+}
+.m-duo-overlay[data-position="bottom"] {
+  bottom: 6%;
+}
+.m-duo-overlay[data-position="top"] {
+  top: 6%;
+}
+.m-duo-plate {
+  max-width: 92%;
+  padding: 0.5em 1em;
+  border-radius: 0.5em;
+  text-align: center;
+  line-height: 1.35;
+}
+.m-duo-row {
+  text-shadow: 0 0 2px rgba(10, 14, 23, 0.9), 0 1px 2px rgba(10, 14, 23, 0.9);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.m-duo-row-trans {
+  margin-top: 0.15em;
+}
+
+/* Панель настроек — нижний лист поверх контента. */
+.m-duo-panel {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg-surface);
+  border-top: 1px solid rgba(189, 254, 79, 0.25);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+}
+.m-duo-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.m-duo-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+.m-duo-toggle,
+.m-duo-close {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(189, 254, 79, 0.25);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.m-duo-toggle.m-on {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+}
+.m-duo-close {
+  padding: 0 10px;
+}
+.m-duo-set {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.m-duo-set > span:first-child {
+  width: 76px;
+  flex: none;
+}
+.m-duo-field select {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(189, 254, 79, 0.2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.m-duo-stepper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.m-duo-stepper button {
+  height: 34px;
+  min-width: 44px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(189, 254, 79, 0.2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.m-duo-stepper b {
+  min-width: 56px;
+  text-align: center;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.m-duo-seg {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+}
+.m-duo-seg button {
+  flex: 1;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(189, 254, 79, 0.2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.m-duo-seg button.m-on {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+}
+.m-duo-status {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--bg-base);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.m-duo-status.m-err {
+  color: #ff9d9d;
+}
+.m-duo-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
 }

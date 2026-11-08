@@ -16,8 +16,15 @@
 //! результат стабильно отсортирован по `start_ms`.
 #![allow(dead_code)] // парсеры — фикстурные тесты (duopulse-022); сервис — задача 3.7
 
+// SQLite-кэш дорожек — десктоп-только (duopulse-082): rusqlite живёт за
+// cfg-забором общих зависимостей (база duopulse.db — профиль десктопа);
+// парсеры (parse_auto) мобильная lib переиспользует, кэш ей не нужен.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod cache;
 pub mod fonts;
+// Зеркало состояния content-слоя для панели десктопа (schemars) — мобильная
+// lib его не тянет (duopulse-082); парсеры ниже — общие.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod service;
 pub mod srt;
 pub mod timedtext;

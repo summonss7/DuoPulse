@@ -2,7 +2,7 @@
 // (window.__TAURI__ есть только у мобильной обёртки) и разбор ввода omnibox
 // (пара omnibox.rs + перезапись YouTube-ссылок во встраиваемый плеер).
 import { describe, expect, it } from "vitest";
-import { isTauriMobile, resolveMobileInput, youtubeEmbedUrl } from "./platform";
+import { isTauriMobile, resolveMobileInput, videoIdOfEmbed, youtubeEmbedUrl } from "./platform";
 
 describe("isTauriMobile", () => {
   it("есть __TAURI__ — мобильная обёртка", () => {
@@ -14,25 +14,31 @@ describe("isTauriMobile", () => {
 });
 
 describe("youtubeEmbedUrl", () => {
-  it("watch?v= → embed", () => {
+  // duopulse-082: ко всем embed добавляется enablejsapi=1 — IFrame Player API
+  // для duo-часов (опрос getCurrentTime постсообщениями).
+  it("watch?v= → embed с enablejsapi", () => {
     expect(youtubeEmbedUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(
-      "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1",
     );
   });
-  it("youtu.be/ID → embed", () => {
+  it("youtu.be/ID → embed с enablejsapi", () => {
     expect(youtubeEmbedUrl("https://youtu.be/dQw4w9WgXcQ?t=30")).toBe(
-      "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1",
     );
   });
   it("m.youtube.com тоже плеер", () => {
     expect(youtubeEmbedUrl("https://m.youtube.com/watch?v=abc123_-X")).toBe(
-      "https://www.youtube.com/embed/abc123_-X",
+      "https://www.youtube.com/embed/abc123_-X?enablejsapi=1",
     );
   });
-  it("уже embed — канонизируется без дубля", () => {
+  it("уже embed — канонизируется без дубля параметров", () => {
     expect(youtubeEmbedUrl("https://www.youtube.com/embed/abc?rel=0")).toBe(
-      "https://www.youtube.com/embed/abc",
+      "https://www.youtube.com/embed/abc?enablejsapi=1",
     );
+  });
+  it("videoIdOfEmbed — id из embed-URL для duo-сессии", () => {
+    expect(videoIdOfEmbed("https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1")).toBe("dQw4w9WgXcQ");
+    expect(videoIdOfEmbed("https://example.com/embed/short")).toBeNull();
   });
   it("не-YouTube и мусор — не плеер", () => {
     expect(youtubeEmbedUrl("https://example.com/watch?v=1")).toBeNull();
@@ -63,11 +69,11 @@ describe("resolveMobileInput", () => {
   it("ссылка YouTube с видео — встраиваемый плеер", () => {
     expect(resolveMobileInput("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toEqual({
       kind: "url",
-      url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      url: "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1",
     });
     expect(resolveMobileInput("youtu.be/dQw4w9WgXcQ")).toEqual({
       kind: "url",
-      url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      url: "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1",
     });
   });
   it("текст со пробелами — поиск YouTube (кодируется)", () => {

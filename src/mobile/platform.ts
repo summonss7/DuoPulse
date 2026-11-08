@@ -24,25 +24,34 @@ const BARE_DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+([/?#:].*)?$/i;
 
 /** YouTube-плеер, который можно встроить в iframe: обычные /watch и youtu.be
  *  страница YouTube отдает с X-Frame-Options и в iframe не открывается,
- *  /embed/ID — можно (единственный официальный встраиваемый путь). */
+ *  /embed/ID — можно (единственный официальный встраиваемый путь).
+ *  enablejsapi=1 — IFrame Player API для duo-часов (duopulse-082: опрос
+ *  getCurrentTime кросс-доменного плеера постсообщениями). */
 export function youtubeEmbedUrl(url: string): string | null {
   try {
     const u = new URL(url);
     const host = u.hostname.replace(/^www\./, "");
+    let id: string | null = null;
     if (host === "youtube.com" || host === "m.youtube.com") {
       const v = u.searchParams.get("v");
-      if (u.pathname === "/watch" && v) return `https://www.youtube.com/embed/${v}`;
+      if (u.pathname === "/watch" && v) id = v;
       const m = u.pathname.match(/^\/embed\/([\w-]+)/);
-      if (m) return `https://www.youtube.com/embed/${m[1]}`;
+      if (m) id = m[1];
     }
     if (host === "youtu.be") {
-      const id = u.pathname.slice(1).split("/")[0];
-      if (id) return `https://www.youtube.com/embed/${id}`;
+      id = u.pathname.slice(1).split("/")[0] || null;
     }
+    if (id) return `https://www.youtube.com/embed/${id}?enablejsapi=1`;
   } catch {
     // не URL — не плеер
   }
   return null;
+}
+
+/** videoId из URL embed-плеера (после youtubeEmbedUrl) — для duo-сессии. */
+export function videoIdOfEmbed(url: string): string | null {
+  const m = url.match(/\/embed\/([\w-]{6,20})/);
+  return m ? m[1] : null;
 }
 
 /** Разбор ввода «URL (догадка схемы) или поиск» — мобильная пара

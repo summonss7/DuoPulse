@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.6"
+version = "0.1.7"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
@@ -36,6 +36,11 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Разбор/проверка URL Duo-запросов (duo_mobile.rs: allowlist хостов fetch);
+# маленький чистый крейт, обеим веткам. HTTP-клиент НЕ общий: ureq объявлен
+# отдельно для десктопа и мобильных таргетов (рецепт NovaGrid — огромный
+# cdylib-экспорт rustls/ring на Windows MinGW не тянет, либа десктопа тонкая).
+url = "2"
 
 # Десктоп-только (duopulse-081): вся логика бина main.rs — Windows/десктоп.
 # На Android/iOS бин не собирается вовсе (tauri android build → --lib), а
@@ -103,8 +108,8 @@ ureq = { version = "2", features = ["tls", "socks-proxy", "gzip"], default-featu
 # уже в дереве транзитивно (adblock full-regex-handling).
 regex = "1"
 # Разбор адресов фида обновлений (задача 5.2): url::Url требуется плагину
-# апдейтера при подстановке канала в endpoints.
-url = "2"
+# апдейтера при подстановке канала в endpoints. (Крейт объявлен в общих
+# зависимостях — с duopulse-082 его использует и мобильный Duo-движок.)
 # Дата/время сборки в заголовке окна (карточка duopulse-078): форматирование
 # unix-момента из build.rs в локальной зоне. Уже в дереве (транзитивно),
 # без новых загрузок.
@@ -158,6 +163,16 @@ symphonia = { version = "0.5", default-features = false, features = [
 # engine-whisper-1 пакует их одним архивом. Уже в дереве (транзитивно),
 # без новых загрузок; deflate-only — больше zip'у в Core ничего не надо.
 zip = { version = "4", default-features = false, features = ["deflate"] }
+
+# Мобильная ветка lib (duopulse-082; рецепт NovaGrid: сетевые зависимости
+# мобильного пути живут ТОЛЬКО здесь — cdylib десктопа остаётся тонким,
+# MinGW не тянет экспорт rustls/ring). ureq с rustls + вшитыми webpki-roots:
+# системное хранилище/JNI не нужны (грабля NovaGrid с rustls-platform-
+# verifier на Android сюда не переносится). quick-xml — парсер timedtext
+# общего модуля subtitles, который мобильная lib компилирует для parse_auto.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+ureq = { version = "2", features = ["tls"], default-features = false }
+quick-xml = "0.36"
 
 [dev-dependencies]
 # Loopback-стенд WireGuard для маршрутных тестов (задача 6.6, карточка

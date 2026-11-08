@@ -12,10 +12,20 @@
 // на мобильных; десктопный конфиг держит false. Фронтенд различает ветки так
 // (isTauriMobile в src/mobile/platform.ts) — один веб-бандл на все платформы.
 //
-// Этап 1 — каркас: тонкий WebView с окном из tauri.android.conf.json и плагин
-// dialog (нативные пикеры; этап 2 — выбор файла своих субтитров). Команды
-// bridge десктопа (tabs.*/nav.*/subtitles.*...) на мобильных не
-// регистрируются — мобильная ветка UI их не зовёт.
+// Этап 2 (duopulse-082): Duo-движок — команды duo_yt_player/duo_fetch_cues/
+// duo_translate_texts (src/duo_mobile.rs) для субтитров и перевода в
+// мобильной ветке (кросс-доменный iframe не может fetch сам, сеть ходит
+// нативно через ureq); парсеры cue — общий модуль subtitles (parse_auto,
+// единый источник разбора с десктопом). Команды bridge десктопа
+// (tabs.*/nav.*/subtitles.*...) на мобильных по-прежнему не регистрируются.
+
+pub mod duo_mobile;
+// Парсеры cue — мобильным таргетам (duopulse-082): parse_auto для duo_fetch_
+// cues. На десктопе либа их не компилирует: оставалась бы тонкой (cdylib
+// Windows/MinGW не тянет экспорт тяжёлых деревьев — quick-xml, ср. рецепт
+// NovaGrid), десктоп-бин собирает модуль сам (main.rs).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod subtitles;
 
 /// Точка входа мобильной обёртки; mobile_entry_point генерирует JNI-связку
 /// для Kotlin-активити из gen/android. На десктоп-таргетах не вызывается
@@ -30,6 +40,8 @@ pub fn run() {
 fn mobile_run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(duo_mobile::DuoManaged::default())
+        .invoke_handler(duo_mobile::invoke_handler())
         .run(tauri::generate_context!())
         .expect("не удалось запустить DuoPulse (мобильная ветка)");
 }
