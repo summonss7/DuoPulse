@@ -377,24 +377,21 @@ try {
   const activated = await waitFor(uiWs, (t) => t.id === busyId && !t.sleeping, 10000, "пробуждение активацией");
   check("активация спящей вкладки пробуждает её", activated.active === true && activated.sleeping === false);
 
-  // (10) контекстное меню «Усыпить вкладку» — UI-путь (p0 сейчас фоновая)
-  const menuOk = await evalIn(
+  // (10) контекстное меню «Усыпить вкладку» — UI-путь (p0 сейчас фоновая).
+  // Карточка duopulse-086: меню нативное (popup muda), из CDP не кликается —
+  // проверяем проводку действием «menu-action» (как шлёт Core из on_menu_event);
+  // блокировку «Усыпить» для активной/спящей покрывает vitest (tab-menu.test.ts).
+  await evalIn(
     uiWs,
-    `(function () {
-       const t = [...document.querySelectorAll("#tabs .tab")].find((el) => el.dataset.id === "${p0Id}");
-       t.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 220, clientY: 24 }));
-       const btn = document.querySelector('#tabMenu button[data-act="sleep"]');
-       const disabled = btn.disabled;
-       const opened = !document.getElementById("tabMenu").hidden;
-       btn.click();
-       return { opened, disabled };
-     })()`,
+    `window.__TAURI_INTERNALS__.invoke('plugin:event|emit', ${JSON.stringify({
+      event: "menu-action",
+      payload: { menu: "tab", act: "sleep", id: p0Id },
+    })})`,
   );
   const p0Slept = await waitFor(uiWs, (t) => t.id === p0Id && t.sleeping, 10000, "сон p0 из меню");
   check(
-    "контекстное меню: «Усыпить вкладку» усыпляет фоновую (активной — заблокировано)",
-    menuOk.opened === true && menuOk.disabled === false && p0Slept.sleeping === true,
-    `menu=${JSON.stringify(menuOk)}`,
+    "контекстное меню: «Усыпить вкладку» усыпляет фоновую (menu-action)",
+    p0Slept.sleeping === true,
   );
 
   // (11) скриншот таб-бара со спящей вкладкой (луна + приглушение, гайд 06)

@@ -387,7 +387,6 @@ try {
   // не закрыть дропдаун — снимки хрома должны быть без случайных панелей)
   const closePanels = `(() => {
      document.getElementById('proxyMenu').hidden = true;
-     document.getElementById('tabMenu').hidden = true;
      document.getElementById('mainMenu').hidden = true;
      document.getElementById('suggest').hidden = true;
      document.getElementById('omnibox').blur();
@@ -408,13 +407,8 @@ try {
 
   await evalIn(ui, closePanels);
   await evalIn(ui, `document.getElementById('suggest').hidden`);
-  await evalIn(
-    ui,
-    `document.querySelector('.tab').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 20 }))`,
-  );
-  await waitFor(() => evalIn(ui, `!document.getElementById('tabMenu').hidden`));
-  await shot(ui, "tab-menu.png");
-
+  // контекст-меню вкладки (карточка duopulse-086) — нативный popup muda
+  // поверх webview: DOM-меню больше нет, CDP-снимок не делаем
   await evalIn(ui, closePanels);
   await shot(ui, "chrome.png");
 

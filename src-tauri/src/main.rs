@@ -36,6 +36,7 @@
 mod adblock;
 mod asr;
 mod bridge;
+mod chrome_menu;
 mod history;
 mod omnibox;
 mod perf;
@@ -1208,6 +1209,9 @@ fn main() {
     startup_mark("stores-open");
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
     bridge::register(tauri::Builder::default())
+        .on_menu_event(|app, event| {
+            chrome_menu::emit_action(app, &event.id.0);
+        })
         .plugin(tauri_plugin_dialog::init())
         // Автообновление (задача 5.2): конфиг plugins.updater (pubkey/фид) и
         // состояние UpdaterExt::updater_builder — драйвится из src/updater.rs.
@@ -1402,7 +1406,11 @@ fn window_title(version: &str, build_unix: u64) -> String {
     let stamp = (build_unix > 0)
         .then(|| chrono::DateTime::from_timestamp(build_unix as i64, 0))
         .flatten()
-        .map(|dt| dt.with_timezone(&chrono::Local).format("%d.%m.%Y %H:%M").to_string());
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%d.%m.%Y %H:%M")
+                .to_string()
+        });
     match stamp {
         Some(s) => format!("DuoPulse {version} · {s}"),
         None => format!("DuoPulse {version}"),
@@ -1419,7 +1427,13 @@ mod tests {
         // Дата/время зависят от зоны — проверяем форму, а не точные цифры.
         assert_eq!(
             window_title("0.1.6", 1_762_300_000),
-            format!("DuoPulse 0.1.6 · {}", chrono::Local.timestamp_opt(1_762_300_000, 0).unwrap().format("%d.%m.%Y %H:%M"))
+            format!(
+                "DuoPulse 0.1.6 · {}",
+                chrono::Local
+                    .timestamp_opt(1_762_300_000, 0)
+                    .unwrap()
+                    .format("%d.%m.%Y %H:%M")
+            )
         );
     }
 

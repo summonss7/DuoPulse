@@ -1566,9 +1566,7 @@ fn bridge_version() -> BridgeVersionResult {
 fn app_build_info() -> AppBuildInfoResult {
     AppBuildInfoResult {
         version: env!("CARGO_PKG_VERSION").into(),
-        build_unix: env!("DUOPULSE_BUILD_UNIX")
-            .parse::<u64>()
-            .unwrap_or(0),
+        build_unix: env!("DUOPULSE_BUILD_UNIX").parse::<u64>().unwrap_or(0),
     }
 }
 
@@ -3244,6 +3242,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         updater_status,
         updater_check,
         updater_install,
-        app_restart
+        app_restart,
+        crate::chrome_menu::ui_menu_open
     ])
 }

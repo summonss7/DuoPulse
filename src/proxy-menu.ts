@@ -102,11 +102,9 @@ btn.addEventListener("click", async (e) => {
   if (open) {
     // прочие панели хрома закрываются (единое «одно меню на экран», mainmenu.ts)
     const mainMenu = document.getElementById("mainMenu") as HTMLElement | null;
-    const tabMenu = document.getElementById("tabMenu") as HTMLElement | null;
     const duoPanel = document.getElementById("duoPanel") as HTMLElement | null;
     const vpnPanel = document.getElementById("vpnPanel") as HTMLElement | null;
     if (mainMenu) mainMenu.hidden = true;
-    if (tabMenu) tabMenu.hidden = true;
     if (duoPanel) duoPanel.hidden = true;
     if (vpnPanel) vpnPanel.hidden = true;
   }

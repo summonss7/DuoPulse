@@ -10,8 +10,13 @@
 // вкладке ту же команду ловит content/chrome-hotkeys.js и Core делает тот
 // же toggle (tabs.updated после него обновит кнопку: chrome.ts подписывает
 // setActivePage на смену вкладок).
+// Карточка duopulse-086: мини-меню групп рендерится в оверлей-окне
+// menu-overlay — контентные webview рисуются поверх HTML UI, и панель под
+// навбаром уходила под страницу («звёздочка ничего не делает»). Разметку
+// запрашивает openOverlayMenu("star", …), клики возвращаются «menu-action».
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, TabInfo } from "../bridge";
+import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
 
 const err = (e: unknown): void => console.error("star:", e);
 const btn = document.getElementById("starBtn") as HTMLButtonElement;
@@ -21,8 +26,6 @@ let url = "";
 /** Заголовок для новой закладки (document.title вкладки из снапшота). */
 let title = "";
 let starred = false;
-/** Живое мини-меню выбора группы (одно). */
-let menu: HTMLDivElement | null = null;
 
 function render(): void {
   btn.dataset.on = String(starred);
@@ -48,9 +51,8 @@ async function refreshState(): Promise<void> {
   }
 }
 
-/** Добавить закладку в группу и закрыть меню. */
+/** Добавить закладку в группу (действие из оверлей-меню). */
 async function addTo(groupId: number | null): Promise<void> {
-  closeMenu();
   if (!url) return;
   try {
     await bridge.history.bookmarkAdd({ url, title, groupId });
@@ -61,68 +63,16 @@ async function addTo(groupId: number | null): Promise<void> {
 }
 
 /** Мини-меню групп под звёздочкой (карточка duopulse-058): список групп
- *  (по умолчанию — первой, с пометкой) и «Новая группа…» с инлайн-инпутом. */
+ *  (по умолчанию — первой, с пометкой) и «Новая группа…» с инлайн-вводом —
+ *  рендер и клики в оверлей-окне (duopulse-086), здесь только запрос. */
 async function openMenu(): Promise<void> {
-  closeMenu();
-  let groups: BookmarkGroupInfo[];
   try {
-    ({ groups } = await bridge.history.groupList());
+    const { groups } = await bridge.history.groupList();
+    const r = btn.getBoundingClientRect();
+    openOverlayMenu("star", r.right, r.bottom + 6, { groups });
   } catch (e) {
     err(e);
-    return;
   }
-  menu = document.createElement("div");
-  menu.className = "star-menu";
-  menu.setAttribute("role", "menu");
-  for (const g of groups) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.setAttribute("role", "menuitem");
-    item.textContent = g.isDefault ? `${g.name} · по умолчанию` : g.name;
-    item.title = g.isDefault ? "Группа по умолчанию (Ctrl+D)" : `Добавить в «${g.name}»`;
-    item.addEventListener("click", () => void addTo(g.id));
-    menu.append(item);
-  }
-  const newBtn = document.createElement("button");
-  newBtn.type = "button";
-  newBtn.className = "star-menu-new";
-  newBtn.setAttribute("role", "menuitem");
-  newBtn.textContent = "+ Новая группа…";
-  newBtn.addEventListener("click", () => {
-    if (menu?.querySelector(".star-menu-input")) return;
-    const input = document.createElement("input");
-    input.className = "star-menu-input";
-    input.type = "text";
-    input.placeholder = "Имя группы";
-    input.spellcheck = false;
-    input.maxLength = 60;
-    newBtn.replaceWith(input);
-    input.focus();
-    input.addEventListener("keydown", (ev) => {
-      ev.stopPropagation();
-      const name = input.value.trim();
-      if (ev.key === "Enter" && name) {
-        void bridge.history
-          .groupAdd({ name })
-          .then((g) => addTo(g.id))
-          .catch(err);
-      }
-      if (ev.key === "Escape") closeMenu();
-    });
-    input.addEventListener("blur", () => closeMenu());
-  });
-  menu.append(newBtn);
-  document.body.append(menu);
-  // под кнопкой, не выходя за правый край окна
-  const r = btn.getBoundingClientRect();
-  menu.style.top = `${r.bottom + 6}px`;
-  const mw = menu.getBoundingClientRect().width;
-  menu.style.left = `${Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8))}px`;
-}
-
-function closeMenu(): void {
-  menu?.remove();
-  menu = null;
 }
 
 async function toggle(): Promise<void> {
@@ -139,21 +89,35 @@ async function toggle(): Promise<void> {
   }
 }
 
+// действия из меню (нативный popup): группа — добавить закладку;
+// «Новая группа…» — нативное меню без ввода текста, ведёт в управление
+onOverlayMenuAction((a) => {
+  if (a.menu !== "star" || !url) return;
+  if (a.newGroup === true) {
+    void bridge.tabs.open({ url: "duopulse://history" }).catch(err);
+  } else if (typeof a.groupId === "number") {
+    void addTo(a.groupId);
+  }
+});
+
 /** Смена активной вкладки/её URL (подписка chrome.ts на tabs.updated; событие
  *  приходит и после SPA-навигации — карточка 057, и после Ctrl+D из контента:
  *  Core эмитит tabs.updated по toggle_bookmark_active). */
 export function setActivePage(tab: TabInfo | undefined): void {
   const external = !!tab && /^https?:/i.test(tab.url);
-  url = external ? (tab as TabInfo).url : "";
+  const next = external ? (tab as TabInfo).url : "";
+  // меню закрывается только при реальной смене страницы: tabs.updated
+  // приходит и по ходу загрузки той же вкладки (loading/title) —
+  // оверлей не должен мигнуть закрытием (карточка duopulse-086)
+  url = next;
   title = tab?.title ?? "";
   starred = false;
   btn.hidden = !external;
-  closeMenu();
   render();
   if (external) void refreshState();
 }
 
-/** Инициализация: клик, Ctrl+D (фокус в UI) и закрытие меню кликом мимо. */
+/** Инициализация: клик, Ctrl+D (фокус в UI); закрытие меню — в оверлее. */
 export function initStar(): void {
   btn.addEventListener("click", () => void toggle());
   window.addEventListener(
@@ -171,16 +135,4 @@ export function initStar(): void {
     },
     true
   );
-  window.addEventListener(
-    "mousedown",
-    (e) => {
-      if (menu && !(e.target as HTMLElement).closest(".star-menu") && e.target !== btn) {
-        closeMenu();
-      }
-    },
-    true
-  );
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeMenu();
-  });
 }

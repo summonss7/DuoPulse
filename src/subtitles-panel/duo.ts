@@ -422,7 +422,7 @@ function togglePanel(): void {
 
 /** Прочие всплывающие панели хрома — открытие одного закрывает остальные. */
 function closeOtherPanels(): void {
-  for (const id of ["tabMenu", "mainMenu", "proxyMenu", "vpnPanel"]) {
+  for (const id of ["mainMenu", "proxyMenu", "vpnPanel"]) {
     const node = document.getElementById(id);
     if (node) node.hidden = true;
   }

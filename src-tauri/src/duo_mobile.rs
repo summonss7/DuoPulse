@@ -83,7 +83,11 @@ pub struct DuoCuesResult {
 
 /// videoId YouTube ([\w-]{6,20}) — защита от инъекций в путь/запрос.
 pub fn valid_video_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    !id.is_empty()
+        && id.len() <= 20
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// Разрешённые хосты duo_fetch_cues/duo_yt_player: YouTube и его CDN контента
@@ -186,11 +190,17 @@ fn gtx_parse_maps_lines() {
     let body = r#"{"sentences":[{"trans":"Доброе утро.\n","orig":"Good morning.\n"},
                    {"trans":"Опять будильник.","orig":"Alarm again."}],"src":"en"}"#;
     let joined = parse_gtx_joined(body).expect("тело разбирается");
-    assert_eq!(split_joined(&joined, 2).expect("длины сошлись"), ["Доброе утро.", "Опять будильник."]);
+    assert_eq!(
+        split_joined(&joined, 2).expect("длины сошлись"),
+        ["Доброе утро.", "Опять будильник."]
+    );
     assert!(split_joined(&joined, 3).is_none(), "чужая длина — фолбэк");
     assert!(parse_gtx_joined("<html>Sorry</html>").is_none());
     assert!(split_joined(&"", 0).map(|v| v.is_empty()).unwrap_or(false));
-    assert_eq!(gtx_cache_key("en", "ru", &["a".into(), "b".into()]), "en\u{1}ru\u{1}a\u{1}b");
+    assert_eq!(
+        gtx_cache_key("en", "ru", &["a".into(), "b".into()]),
+        "en\u{1}ru\u{1}a\u{1}b"
+    );
 }
 
 // --- мобильная сетевая часть (cfg(mobile)) -------------------------------------
@@ -240,7 +250,10 @@ pub(crate) mod net {
             }
             Err(ureq::Error::Status(code, resp)) => {
                 let body = resp.into_string().unwrap_or_default();
-                Err(format!("HTTP {code}: {}", body.chars().take(160).collect::<String>()))
+                Err(format!(
+                    "HTTP {code}: {}",
+                    body.chars().take(160).collect::<String>()
+                ))
             }
             Err(e) => Err(format!("сеть: {e}")),
         }
@@ -255,7 +268,9 @@ pub(crate) mod net {
         // принимает сырой символ в query, но экранированный вид надёжнее.
         for b in joined.bytes() {
             match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => query.push(b as char),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    query.push(b as char)
+                }
                 b' ' => query.push_str("%20"),
                 b'\n' => query.push_str("%0A"),
                 _ => query.push_str(&format!("%{b:02X}")),
@@ -270,7 +285,8 @@ pub(crate) mod net {
                 }
                 match get_status(agent, &url) {
                     Ok((200, body)) => {
-                        return parse_gtx_joined(&body).ok_or_else(|| "gtx ответ не разобран".to_string());
+                        return parse_gtx_joined(&body)
+                            .ok_or_else(|| "gtx ответ не разобран".to_string());
                     }
                     Ok((status, _)) => {
                         last_err = format!("gtx HTTP {status} ({host})");
@@ -294,13 +310,18 @@ pub(crate) mod net {
         to: &str,
     ) -> Result<Vec<String>, String> {
         let cache_key = gtx_cache_key(from, to, texts);
-        if let Some(hit) = state.gtx_cache.lock().expect("duo: лок не отравлен").get(&cache_key) {
+        if let Some(hit) = state
+            .gtx_cache
+            .lock()
+            .expect("duo: лок не отравлен")
+            .get(&cache_key)
+        {
             return Ok(hit.clone());
         }
         let joined = texts.join("\n");
-        let out = match gtx_get(agent, from, to, &joined)
-            .and_then(|j| split_joined(&j, texts.len()).ok_or_else(|| "несовпадение строк".to_string()))
-        {
+        let out = match gtx_get(agent, from, to, &joined).and_then(|j| {
+            split_joined(&j, texts.len()).ok_or_else(|| "несовпадение строк".to_string())
+        }) {
             Ok(lines) => lines,
             Err(_) => {
                 // Фолбэк: построчно (пачка смёржилась или профильный сбой).
@@ -323,7 +344,10 @@ pub(crate) mod net {
     /// Player-ответ YouTube (innertube, ANDROID-клиент) по videoId — сырым
     /// JSON: разбор списка дорожек делает фронтенд (content-адаптер). Кэш 1 ч.
     #[tauri::command]
-    pub fn duo_yt_player(video_id: String, state: State<'_, DuoManaged>) -> Result<serde_json::Value, String> {
+    pub fn duo_yt_player(
+        video_id: String,
+        state: State<'_, DuoManaged>,
+    ) -> Result<serde_json::Value, String> {
         if !valid_video_id(&video_id) {
             return Err("некорректный videoId".into());
         }
@@ -359,7 +383,10 @@ pub(crate) mod net {
             .parse()
             .map_err(|e| format!("innertube JSON: {e}"))?;
         // Бот-блок/приватность — сразу честная ошибка (фронтенд покажет текст).
-        if let Some(status) = value.pointer("/playabilityStatus/status").and_then(|s| s.as_str()) {
+        if let Some(status) = value
+            .pointer("/playabilityStatus/status")
+            .and_then(|s| s.as_str())
+        {
             if status != "OK" {
                 let reason = value
                     .pointer("/playabilityStatus/reason")
@@ -370,7 +397,11 @@ pub(crate) mod net {
         }
         let mut cache = state.player_cache.lock().expect("duo: лок не отравлен");
         if cache.len() >= PLAYER_CACHE_MAX {
-            if let Some(oldest) = cache.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()) {
+            if let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, (at, _))| *at)
+                .map(|(k, _)| k.clone())
+            {
                 cache.remove(&oldest);
             }
         }
@@ -407,11 +438,21 @@ pub(crate) mod net {
         };
         let (status, text) = match fetch() {
             Ok(Ok(pair)) => pair,
-            Ok(Err(code)) => return Ok(DuoCuesResult { status: code, cues: Vec::new(), warnings: Vec::new() }),
+            Ok(Err(code)) => {
+                return Ok(DuoCuesResult {
+                    status: code,
+                    cues: Vec::new(),
+                    warnings: Vec::new(),
+                })
+            }
             Err(e) => return Err(e),
         };
         if status != 200 {
-            return Ok(DuoCuesResult { status, cues: Vec::new(), warnings: Vec::new() });
+            return Ok(DuoCuesResult {
+                status,
+                cues: Vec::new(),
+                warnings: Vec::new(),
+            });
         }
         if text.len() > BODY_MAX_BYTES {
             return Err("тело дорожки больше 4 МБ".into());
@@ -420,14 +461,22 @@ pub(crate) mod net {
         let cues = parsed
             .cues
             .into_iter()
-            .map(|c| DuoCue { start_ms: c.start_ms, end_ms: c.end_ms, text: c.text })
+            .map(|c| DuoCue {
+                start_ms: c.start_ms,
+                end_ms: c.end_ms,
+                text: c.text,
+            })
             .collect();
         let warnings = parsed
             .warnings
             .into_iter()
             .map(|w| format!("строка {}: {}", w.line, w.message))
             .collect();
-        Ok(DuoCuesResult { status, cues, warnings })
+        Ok(DuoCuesResult {
+            status,
+            cues,
+            warnings,
+        })
     }
 
     /// Перевод пачек cue-текстов Google gtx (без ключа; мобильная ветка — см.
@@ -475,10 +524,17 @@ mod tests {
         let mut cache: HashMap<String, (std::time::Instant, serde_json::Value)> = HashMap::new();
         for (i, key) in ["aaa", "bbb", "ccc"].iter().enumerate() {
             std::thread::sleep(Duration::from_millis(5));
-            cache.insert(key.to_string(), (std::time::Instant::now(), serde_json::json!({"n": i})));
+            cache.insert(
+                key.to_string(),
+                (std::time::Instant::now(), serde_json::json!({"n": i})),
+            );
         }
         // зеркало логики команды: при переполнении уходит самая старая запись
-        let oldest = cache.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()).unwrap();
+        let oldest = cache
+            .iter()
+            .min_by_key(|(_, (at, _))| *at)
+            .map(|(k, _)| k.clone())
+            .unwrap();
         assert_eq!(oldest, "aaa");
         cache.remove(&oldest);
         assert_eq!(cache.len(), 2);

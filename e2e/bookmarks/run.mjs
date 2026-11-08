@@ -252,26 +252,20 @@ try {
 
   await uiWs.evalIn(`${H}.groupRename(${JSON.stringify({ id: WORK_ID, name: "Проекты" })})`);
 
-  // --- 4. мини-меню звёздочки на внешней странице ----------------------------
+  // --- 4. меню звёздочки на внешней странице ---------------------------------
+  // Карточка duopulse-086: меню нативное (popup muda поверх контентных
+  // webview — DOM-меню под страницей не было видно), из CDP не кликается:
+  // выбор группы эмулируем событием «menu-action» (тот же вид, что шлёт
+  // Core из on_menu_event).
   await uiWs.evalIn(`document.getElementById('omnibox').blur()`);
   const starHidden = await uiWs.evalIn(`document.getElementById('starBtn').hidden`, false);
   check("звёздочка видна на внешней странице", starHidden === false, String(starHidden));
-  await uiWs.evalIn(`document.getElementById('starBtn').click()`);
-  const menuItems = await waitFor(
-    () =>
-      uiWs
-        .evalIn(`(() => { const a = [...document.querySelectorAll('.star-menu button')].map(b => b.textContent); return a.length ? a : null; })()`, false)
-        .then((v) => v ?? null),
-    6000,
-  );
-  check(
-    "мини-меню звёздочки: группы + «Новая группа…»",
-    !!menuItems && menuItems.some((t) => t.includes("Избранное")) && menuItems.some((t) => t.includes("Новая группа")),
-    JSON.stringify(menuItems),
-  );
   // добавление текущей страницы стенд в «Проекты»
   await uiWs.evalIn(
-    `[...document.querySelectorAll('.star-menu button')].find(b => b.textContent.includes('Проекты'))?.click()`,
+    `window.__TAURI_INTERNALS__.invoke('plugin:event|emit', ${JSON.stringify({
+      event: "menu-action",
+      payload: { menu: "star", groupId: WORK_ID },
+    })})`,
   );
   const starred = await waitFor(
     () =>

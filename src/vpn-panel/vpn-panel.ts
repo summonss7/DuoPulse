@@ -444,7 +444,7 @@ btn.addEventListener("click", (e) => {
   e.stopPropagation();
   const open = panel.hidden;
   if (open) {
-    for (const id of ["mainMenu", "tabMenu", "proxyMenu", "duoPanel"]) {
+    for (const id of ["mainMenu", "proxyMenu", "duoPanel"]) {
       const node = document.getElementById(id);
       if (node) node.hidden = true;
     }

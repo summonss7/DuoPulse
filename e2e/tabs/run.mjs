@@ -257,74 +257,43 @@ try {
   const uiAfter = (await activeTab(uiWs)).id;
   check("Ctrl+Tab из UI: активная сменилась", uiAfter !== uiBefore, `${uiBefore} → ${uiAfter}`);
 
-  // (8) контекст-меню вкладки: открытие, скриншот, действие «Закрыть вкладку»
-  const menuOpened = await evalIn(
+  // (8) контекст-меню вкладки (карточка duopulse-086: меню нативное,
+  // popup muda поверх контентных webview — DOM-меню больше нет). Панель
+  // не автоматизируется из CDP: проверяем проводку действия — событие
+  // «menu-action» того же вида, что шлёт Core из on_menu_event.
+  const tabsBeforeMenu = (await tabsList(uiWs)).tabs;
+  const victim = tabsBeforeMenu[1];
+  await evalIn(
     uiWs,
-    `(function () {
-       const t = document.querySelectorAll("#tabs .tab")[1];
-       t.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 220, clientY: 24 }));
-       return !document.getElementById("tabMenu").hidden;
-     })()`,
-  );
-  check("контекст-меню вкладки открывается (правый клик по вкладке)", menuOpened === true);
-  await sleep(200);
-  fs.mkdirSync(OUT_DIR, { recursive: true });
-  const menuShot = await uiWs.send("Page.captureScreenshot", { format: "png" });
-  fs.writeFileSync(path.join(OUT_DIR, "tabmenu.png"), Buffer.from(menuShot.data, "base64"));
-  check("скриншот контекст-меню сохранён (e2e/tabs/tabmenu.png)", fs.existsSync(path.join(OUT_DIR, "tabmenu.png")));
-
-  const countBefore = (await tabsList(uiWs)).tabs.length;
-  const menuClosed = await evalIn(
-    uiWs,
-    `(function () {
-       document.querySelector('#tabMenu button[data-act="close"]').click();
-       return document.getElementById("tabMenu").hidden;
-     })()`,
+    `window.__TAURI_INTERNALS__.invoke('plugin:event|emit', ${JSON.stringify({
+      event: "menu-action",
+      payload: { menu: "tab", act: "close", id: victim.id },
+    })})`,
   );
   await sleep(400);
   const afterMenuClose = (await tabsList(uiWs)).tabs;
   check(
-    "контекст-меню: «Закрыть вкладку» закрывает её, меню закрывается",
-    menuClosed === true && afterMenuClose.length === countBefore - 1,
-    `вкладок ${countBefore} → ${afterMenuClose.length}`,
+    "контекст-меню: «Закрыть вкладку» закрывает её (menu-action)",
+    afterMenuClose.length === tabsBeforeMenu.length - 1 && !afterMenuClose.some((t) => t.id === victim.id),
+    `вкладок ${tabsBeforeMenu.length} → ${afterMenuClose.length}`,
   );
 
-  // (8b) контекст-меню на ПУСТОМ месте таб-бара (карточка duopulse-075:
-  // «правый клик возле вкладок — нет "создать новую вкладку"»): меню
-  // открывается, вкладочные действия отключены, «Новая вкладка» работает
-  const emptyMenu = await evalIn(
-    uiWs,
-    `(function () {
-       const bar = document.getElementById("tabbar");
-       const r = bar.getBoundingClientRect();
-       bar.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.right - 8, clientY: r.top + r.height / 2 }));
-       const menu = document.getElementById("tabMenu");
-       const disabled = ["duplicate", "sleep", "close", "closeOthers"].map(
-         (a) => menu.querySelector('button[data-act="' + a + '"]').disabled,
-       );
-       return JSON.stringify({ open: !menu.hidden, disabled, newtab: !menu.querySelector('button[data-act="newtab"]').disabled });
-     })()`,
-  );
-  let emptyState = { open: false, disabled: [], newtab: false };
-  try { emptyState = JSON.parse(emptyMenu); } catch {}
-  check(
-    "контекст-меню на пустом месте: открыто, вкладочные действия отключены, «Новая вкладка» доступна",
-    emptyState.open === true && emptyState.disabled.every(Boolean) && emptyState.newtab === true,
-    emptyMenu,
-  );
+  // (8b) меню пустого места таб-бара (карточка duopulse-075): доступность
+  // пунктов для контекста «без вкладки» покрыта vitest (tab-menu.test.ts,
+  // tabMenuDisabled); здесь — действие «Новая вкладка» по menu-action
   const emptyCountBefore = (await tabsList(uiWs)).tabs.length;
-  const emptyNewTab = await evalIn(
+  await evalIn(
     uiWs,
-    `(function () {
-       document.querySelector('#tabMenu button[data-act="newtab"]').click();
-       return document.getElementById("tabMenu").hidden;
-     })()`,
+    `window.__TAURI_INTERNALS__.invoke('plugin:event|emit', ${JSON.stringify({
+      event: "menu-action",
+      payload: { menu: "tab", act: "newtab", id: null },
+    })})`,
   );
   await sleep(600);
   const emptyAfter = (await tabsList(uiWs)).tabs;
   check(
-    "меню пустого места: «Новая вкладка» создаёт вкладку, меню закрывается",
-    emptyNewTab === true && emptyAfter.length === emptyCountBefore + 1,
+    "меню пустого места: «Новая вкладка» создаёт вкладку (menu-action)",
+    emptyAfter.length === emptyCountBefore + 1,
     `вкладок ${emptyCountBefore} → ${emptyAfter.length}`,
   );
 

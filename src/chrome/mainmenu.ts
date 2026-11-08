@@ -24,7 +24,6 @@ const adblockUpdateBtn = document.getElementById("adblockUpdate") as HTMLButtonE
 
 /** Прочие всплывающие панели хрома (открытие одного закрывает остальные). */
 function closeOtherPanels(): void {
-  (document.getElementById("tabMenu") as HTMLElement).hidden = true;
   (document.getElementById("proxyMenu") as HTMLElement).hidden = true;
   (document.getElementById("duoPanel") as HTMLElement).hidden = true;
   (document.getElementById("vpnPanel") as HTMLElement).hidden = true;

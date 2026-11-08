@@ -5,9 +5,17 @@
 // Ctrl+Shift+Tab активируют соседнюю вкладку по локальному списку, Ctrl+Shift+T
 // зовёт tabs.reopen; когда фокус в контенте, те же клавиши приходят из
 // content/chrome-hotkeys.js через Core — обе стороны сходятся на одном списке.
+//
+// Контекстное меню вкладки (карточка duopulse-086) рендерится в оверлей-окне
+// menu-overlay: контентные webview рисуются поверх HTML UI, и панель,
+// выезжающая за полосу хрома, уходила под страницу. Логика (доступность
+// пунктов, действия) остаётся здесь: открытие — openOverlayMenu с payload,
+// клики по пунктам возвращаются событием «menu-action».
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { TabInfo, TabsListResult } from "../bridge";
+import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
+import { tabMenuDisabled } from "./tab-menu";
 
 const err = (e: unknown): void => console.error("tabbar:", e);
 
@@ -24,9 +32,6 @@ let tabs: TabInfo[] = [];
 const tabbarEl = document.getElementById("tabbar") as HTMLDivElement;
 const tabsEl = document.getElementById("tabs") as HTMLDivElement;
 const newtabBtn = document.getElementById("newtab") as HTMLButtonElement;
-const menuEl = document.getElementById("tabMenu") as HTMLDivElement;
-/** Вкладка, для которой открыто контекстное меню. */
-let menuTabId: string | null = null;
 
 function hostOf(url: string): string {
   try {
@@ -124,8 +129,8 @@ tabsEl.addEventListener("auxclick", (e) => {
 
 // правый клик по вкладке — её меню; по пустому месту таб-бара (карточка
 // duopulse-075: «возле вкладок нет "создать новую вкладку"») — то же меню
-// без вкладочного контекста: доступно «Новая вкладка», вкладочные действия
-// отключены
+// без вкладочного контекста: доступна «Новая вкладка», вкладочные действия
+// отключены (карточка duopulse-086: панель — в оверлей-окне над webview)
 tabbarEl.addEventListener("contextmenu", (e) => {
   const tab = tabElement(e.target);
   e.preventDefault();
@@ -143,61 +148,21 @@ newtabBtn.addEventListener("click", () => {
   void bridge.tabs.open({}).then(apply, err);
 });
 
-// --- контекстное меню вкладки -------------------------------------------------
-/** Меню таб-бара: на вкладке — её действия, на пустом месте (id === null,
- *  карточка duopulse-075) — доступны только «Новая вкладка» и
- *  «Переоткрыть закрытую», вкладочные действия отключены. */
+// --- контекстное меню вкладки (оверлей, карточка duopulse-086) ---------------
+
 function openMenu(id: string | null, x: number, y: number): void {
-  menuTabId = id;
   // прочие панели хрома закрываются (единое «одно меню на экран», mainmenu.ts)
-  for (const other of ["mainMenu", "proxyMenu", "duoPanel"]) {
+  for (const other of ["mainMenu", "proxyMenu", "duoPanel", "vpnPanel"]) {
     const node = document.getElementById(other);
     if (node) node.hidden = true;
   }
-  for (const btn of menuEl.querySelectorAll("button[data-act]")) {
-    (btn as HTMLButtonElement).disabled = false;
-  }
-  const tab = id ? tabs.find((t) => t.id === id) : null;
-  if (!tab) {
-    // нет вкладочного контекста — вкладочные действия недоступны
-    for (const act of ["duplicate", "sleep", "close", "closeOthers"]) {
-      const b = menuEl.querySelector(`[data-act="${act}"]`) as HTMLButtonElement | null;
-      if (b) b.disabled = true;
-    }
-  } else if (tabs.length <= 1) {
-    // «Закрыть другие» безсмысленна для единственной вкладки
-    (menuEl.querySelector('[data-act="closeOthers"]') as HTMLButtonElement).disabled = true;
-  }
-  // «Усыпить» доступно фоновой неспящей вкладке (активная и спящая — нет)
-  const sleepBtn = menuEl.querySelector('[data-act="sleep"]') as HTMLButtonElement | null;
-  if (sleepBtn) {
-    sleepBtn.disabled = !tab || tab.active || tab.sleeping;
-  }
-  menuEl.hidden = false;
-  const appRect = tabsEl.offsetParent?.getBoundingClientRect();
-  const left = Math.min(
-    x - (appRect?.left ?? 0),
-    (appRect?.width ?? x) - menuEl.offsetWidth - 8
-  );
-  menuEl.style.left = `${Math.max(8, left)}px`;
-  menuEl.style.top = `${y - (appRect?.top ?? 0) + 6}px`;
+  openOverlayMenu("tab", x, y, { id, disabled: tabMenuDisabled(tabs, id) });
 }
 
-function closeMenu(): void {
-  menuEl.hidden = true;
-  menuTabId = null;
-}
-
-menuEl.addEventListener("click", (e) => {
-  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-act]");
-  if (!btn) return;
-  // без вкладочного контекста (пустое место бара) доступны только новые
-  // вкладки: newtab/reopen — глобальные действия
-  const id = menuTabId;
-  if (!id && !["newtab", "reopen"].includes(btn.dataset.act ?? "")) return;
+/** Исполнить действие таб-меню (клик в оверлее пришёл «menu-action»). */
+function runMenuAction(act: string, id: string | null): void {
   const tab = id ? tabs.find((t) => t.id === id) : null;
-  closeMenu();
-  switch (btn.dataset.act) {
+  switch (act) {
     case "newtab":
       void bridge.tabs.open({}).then(apply, err);
       break;
@@ -223,18 +188,11 @@ menuEl.addEventListener("click", (e) => {
       if (id) void bridge.tabs.sleep({ id }).then(apply, err);
       break;
   }
-});
+}
 
-// закрытие меню кликом мимо / Escape / прокруткой списка
-window.addEventListener(
-  "mousedown",
-  (e) => {
-    if (!menuEl.hidden && !(e.target as HTMLElement).closest("#tabMenu")) closeMenu();
-  },
-  true
-);
-window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !menuEl.hidden) closeMenu();
+onOverlayMenuAction((a) => {
+  if (a.menu !== "tab") return;
+  runMenuAction(String(a.act ?? ""), (a.id as string | null) ?? null);
 });
 
 // --- горячие клавиши таб-бара в UI (в контенте — content/chrome-hotkeys.js) ---

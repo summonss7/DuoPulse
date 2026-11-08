@@ -254,7 +254,11 @@ pub fn updater_download(
     if resp.status() != 200 {
         return Err(format!("HTTP {}", resp.status()));
     }
-    let total = size.max(resp.header("Content-Length").and_then(|v| v.parse().ok()).unwrap_or(0));
+    let total = size.max(
+        resp.header("Content-Length")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+    );
     let name = url.rsplit('/').next().unwrap_or("duopulse-update.apk");
     let dest = updates_dir()?.join(name);
     let mut file = std::fs::File::create(&dest).map_err(|e| format!("temp: {e}"))?;
@@ -272,7 +276,8 @@ pub fn updater_download(
             break;
         }
         hasher.update(&buf[..n]);
-        file.write_all(&buf[..n]).map_err(|e| format!("write: {e}"))?;
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("write: {e}"))?;
         downloaded += n as u64;
         // троттлинг: событие на ~256 КиБ (и в конце)
         if last_emit == u64::MAX || downloaded.saturating_sub(last_emit) >= 256 * 1024 {
@@ -328,12 +333,15 @@ mod jni_install {
     /// Подключить поток к JVM и отдать env + контекст приложения в замыкание.
     /// Перед detach гасим висящую Java-исключение: отсоединение потока с
     /// pending exception роняет процесс (FATAL в logcat, поймано в novagrid-063).
-    fn with_jni<T>(f: impl FnOnce(&mut JNIEnv, &JObject) -> Result<T, String>) -> Result<T, String> {
+    fn with_jni<T>(
+        f: impl FnOnce(&mut JNIEnv, &JObject) -> Result<T, String>,
+    ) -> Result<T, String> {
         let actx = ndk_context::android_context();
-        let vm = unsafe {
-            jni::JavaVM::from_raw(actx.vm().cast()).map_err(|e| format!("vm: {e}"))?
-        };
-        let mut env = vm.attach_current_thread().map_err(|e| format!("attach: {e}"))?;
+        let vm =
+            unsafe { jni::JavaVM::from_raw(actx.vm().cast()).map_err(|e| format!("vm: {e}"))? };
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|e| format!("attach: {e}"))?;
         let context = unsafe { JObject::from_raw(actx.context().cast()) };
         let out = f(&mut env, &context);
         let _ = env.exception_clear();
@@ -359,7 +367,12 @@ mod jni_install {
     }
 
     /// Строковое поле объекта (getPackageName, getAbsolutePath…).
-    fn call_string(env: &mut JNIEnv, obj: &JObject, name: &str, sig: &str) -> Result<String, String> {
+    fn call_string(
+        env: &mut JNIEnv,
+        obj: &JObject,
+        name: &str,
+        sig: &str,
+    ) -> Result<String, String> {
         let s = call_obj(env, obj, name, sig)?;
         let js = JString::from(s);
         env.get_string(&js)
@@ -368,7 +381,11 @@ mod jni_install {
     }
 
     /// Класс из dex приложения — через classLoader контекста.
-    fn app_class<'a>(env: &mut JNIEnv<'a>, context: &JObject, name: &str) -> Result<JClass<'a>, String> {
+    fn app_class<'a>(
+        env: &mut JNIEnv<'a>,
+        context: &JObject,
+        name: &str,
+    ) -> Result<JClass<'a>, String> {
         let loader = call_obj(env, context, "getClassLoader", "()Ljava/lang/ClassLoader;")?;
         let jname = jstr(env, name)?;
         let class = env
@@ -483,10 +500,7 @@ mod tests {
 
     #[test]
     fn no_apk_means_no_asset() {
-        let assets = vec![
-            asset("DuoPulse_0.1.8_x64-setup.exe"),
-            asset("latest.json"),
-        ];
+        let assets = vec![asset("DuoPulse_0.1.8_x64-setup.exe"), asset("latest.json")];
         assert!(pick_apk(&assets).is_none());
     }
 }

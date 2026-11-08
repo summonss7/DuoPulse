@@ -685,7 +685,11 @@ impl AdblockService {
         let mut selectors: Vec<String> = Vec::new();
         for engine in engine.iter().chain(trusted_engine.iter()) {
             let exceptions = engine.url_cosmetic_resources(url).exceptions;
-            selectors.extend(engine.hidden_class_id_selectors(classes.iter(), ids.iter(), &exceptions));
+            selectors.extend(engine.hidden_class_id_selectors(
+                classes.iter(),
+                ids.iter(),
+                &exceptions,
+            ));
         }
         selectors.sort_unstable();
         selectors.dedup();
@@ -757,11 +761,7 @@ impl AdblockService {
                 name: def.name.clone(),
                 source: def.source.clone(),
                 rules: count_rules(&text),
-                updated_at: meta
-                    .lists
-                    .get(&def.name)
-                    .map(|m| m.updated_at)
-                    .unwrap_or(0),
+                updated_at: meta.lists.get(&def.name).map(|m| m.updated_at).unwrap_or(0),
                 error: String::new(),
             });
             texts.push((def.name.clone(), text, def.trusted));
@@ -1760,8 +1760,10 @@ mod tests {
 
         // перезапуск: источник — «мертвый» URL, refresh_lists его не скачал бы;
         // restore_from_cache поднимает движок без сети
-        let _guard2 =
-            EnvGuard::set("DUOPULSE_ADBLOCK_LISTS", "t=https://nonexistent.invalid/list.txt");
+        let _guard2 = EnvGuard::set(
+            "DUOPULSE_ADBLOCK_LISTS",
+            "t=https://nonexistent.invalid/list.txt",
+        );
         let s2 = AdblockService::new(&profile);
         assert!(!s2.status().ready, "до restore движка ещё нет");
         s2.restore_from_cache();
@@ -2176,7 +2178,10 @@ mod tests {
         s.set_engine(engine);
         let res = s.cosmetic_resources("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
         assert!(
-            res.injected_script.matches("trustedPreventDOMBypass(").count() >= 2,
+            res.injected_script
+                .matches("trustedPreventDOMBypass(")
+                .count()
+                >= 2,
             "оба trusted-prevent-dom-bypass правила quickfix инъецируются (fetch и Request): {}",
             &res.injected_script[..res.injected_script.len().min(300)]
         );
@@ -2481,24 +2486,42 @@ mod tests {
         s.set_engine(trusted_engine(&[QUICKFIX_RULES]));
         let res = s.cosmetic_resources("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
         // ансамбль 072 жив
-        let eio_calls = res.injected_script.matches("trustedEditInboundObject(\"").count();
+        let eio_calls = res
+            .injected_script
+            .matches("trustedEditInboundObject(\"")
+            .count();
         assert_eq!(eio_calls, 7, "7 правил edit-inbound инъецируются");
-        let rpfr_calls = res.injected_script.matches("trustedReplaceFetchResponse(\"").count();
+        let rpfr_calls = res
+            .injected_script
+            .matches("trustedReplaceFetchResponse(\"")
+            .count();
         assert_eq!(rpfr_calls, 4, "4 trusted-rpfr-правила инъецируются");
         // слой 074: перезапись ответов
-        let fetch_prune = res.injected_script.matches("jsonPruneFetchResponse(\"").count();
+        let fetch_prune = res
+            .injected_script
+            .matches("jsonPruneFetchResponse(\"")
+            .count();
         assert!(fetch_prune >= 3, "json-prune-fetch-response: {fetch_prune}");
-        let xhr_prune = res.injected_script.matches("jsonPruneXhrResponse(\"").count();
+        let xhr_prune = res
+            .injected_script
+            .matches("jsonPruneXhrResponse(\"")
+            .count();
         assert!(xhr_prune >= 1, "json-prune-xhr-response: {xhr_prune}");
         let xhr_replace = res
             .injected_script
             .matches("trustedReplaceXhrResponse(\"")
             .count();
         // 2 правила www.youtube.com (третье — tv.youtube.com, ниже)
-        assert!(xhr_replace >= 2, "trusted-replace-xhr-response: {xhr_replace}");
+        assert!(
+            xhr_replace >= 2,
+            "trusted-replace-xhr-response: {xhr_replace}"
+        );
         let tv = s.cosmetic_resources("https://tv.youtube.com/");
         assert!(
-            tv.injected_script.matches("trustedReplaceXhrResponse(\"").count() >= 1,
+            tv.injected_script
+                .matches("trustedReplaceXhrResponse(\"")
+                .count()
+                >= 1,
             "tv.youtube-вариант инъецируется на tv"
         );
         // анти-байпас (алиасы пакета)
@@ -2575,7 +2598,8 @@ mod tests {
         // карточка 074): движок строится из встроенного снапшота, а не
         // пустует. Адрес 127.0.0.1:1 — мгновенный отказ соединения.
         let _env = ENV_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("duopulse-adblock-qf-fb-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("duopulse-adblock-qf-fb-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let _guard = EnvGuard::set(
@@ -2593,7 +2617,10 @@ mod tests {
         assert!(st.lists[0].error.is_none(), "{:?}", st.lists[0].error);
         // кэш записан текстом снапшота — следующий старт без сети пойдёт в
         // ту же ветку (кэш есть → оффлайн-кэш, не фолбэк)
-        assert!(profile.join("filters").join("duopulse-quickfix.txt").exists());
+        assert!(profile
+            .join("filters")
+            .join("duopulse-quickfix.txt")
+            .exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
