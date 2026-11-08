@@ -5030,4 +5030,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Артефакты: builds/duopulse_0.1.7_android_{debug,release}/ (release aarch64
   подписан duopulse-release.keystore, копия — корень builds/ для хаба
   «Скачать» Aila).
-- Коммит: <hash> (feat: duopulse-082)
+- Коммит: dceb76a (feat: duopulse-082)
