@@ -62,6 +62,13 @@ describe("presetSets", () => {
     expect(sets[1].ids).toEqual(["yt:en", "uk"]);
   });
 
+  it("duopulse-094: порядок предпочтений en → ro → ru → ar", () => {
+    // en — язык оригинала → ro прежде ru в «Дуо»
+    const sets = presetSets([base({ original: true })], [tlang("ru"), tlang("ro"), tlang("ar")]);
+    expect(sets.find((s) => s.key === "duo")!.ids).toEqual(["yt:en", "ro"]);
+    expect(sets.find((s) => s.key === "trio")!.ids).toEqual(["yt:en", "ro", "ru"]);
+  });
+
   it("второй перевод не повторяет первый (Трио)", () => {
     const sets = presetSets([base({ original: true })], [tlang("ru"), tlang("ru")]);
     expect(sets.map((s) => s.key)).toEqual(["solo", "duo"]); // третий не построится

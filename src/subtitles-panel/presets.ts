@@ -6,9 +6,9 @@
 
 import type { BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
 
-/** Предпочитаемые языки перевода по порядку (как content/set-defaults:
- * владелец смотрит en-контент, интерфейс русский). */
-export const PREFERRED_TRANSLATION_LANGS: readonly string[] = ["ru", "uk", "en"];
+/** Предпочитаемые языки перевода по порядку (как content/set-defaults;
+ * порядок хозяина — карточка duopulse-094: en → ro → ru → ar). */
+export const PREFERRED_TRANSLATION_LANGS: readonly string[] = ["en", "ro", "ru", "ar"];
 
 export interface PresetSet {
   key: string;

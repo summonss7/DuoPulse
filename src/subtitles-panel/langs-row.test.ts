@@ -59,6 +59,18 @@ describe("fromOptions", () => {
       { id: "yt:en:asr", name: "English · авто (en)" },
     ]);
   });
+
+  it("duopulse-094: приоритетные языки (en→ro→ru→ar) первыми, прочие — в порядке адаптера", () => {
+    const ids = fromOptions([
+      base({ id: "yt:af", lang: "af" }),
+      base({ id: "yt:es", lang: "es" }),
+      base({ id: "yt:ar", lang: "ar" }),
+      base({ id: "yt:ru", lang: "ru" }),
+      base({ id: "yt:ro", lang: "ro" }),
+      base({ id: "yt:en", lang: "en" }),
+    ]).map((o) => o.id);
+    expect(ids).toEqual(["yt:en", "yt:ro", "yt:ru", "yt:ar", "yt:af", "yt:es"]);
+  });
 });
 
 describe("toOptions", () => {
@@ -77,6 +89,14 @@ describe("toOptions", () => {
     const opts = toOptions([tlang("ru")], { lang: "en", translatable: false });
     expect(opts.some((o) => o.group === "platform")).toBe(false);
     expect(opts.some((o) => o.value === "cloud:ru")).toBe(true);
+  });
+
+  it("duopulse-094: приоритетные языки первыми среди tlang платформы", () => {
+    const opts = toOptions(
+      [tlang("es"), tlang("ru"), tlang("pl"), tlang("ro"), tlang("ar")],
+      { lang: "fr", translatable: true },
+    ).filter((o) => o.group === "platform");
+    expect(opts.map((o) => o.value)).toEqual(["ro", "ru", "ar", "es", "pl"]);
   });
 });
 

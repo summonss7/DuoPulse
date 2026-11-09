@@ -7,9 +7,10 @@
 
 import type { AdapterTrackList } from "./adapters/types";
 
-/** Предпочитаемые языки перевода по порядку (владелец смотрит en-контент,
- * интерфейс русский): первый доступный из списка и станет второй строкой. */
-export const PREFERRED_TRANSLATION_LANGS: readonly string[] = ["ru", "uk", "en"];
+/** Предпочитаемые языки перевода по порядку (порядок хозяина, карточка
+ * duopulse-094: en → ro → ru → ar): первый доступный из списка и станет
+ * второй строкой; язык из настроек (defaults.preferredLangs) — ещё раньше. */
+export const PREFERRED_TRANSLATION_LANGS: readonly string[] = ["en", "ro", "ru", "ar"];
 
 /** Дефолтный набор: [оригинал] или [оригинал, перевод]. Оригинал — дорожка
  * с original=true (язык аудио); нет такой — первая базовая. Перевод — tlang

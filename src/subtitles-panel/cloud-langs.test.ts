@@ -5,11 +5,34 @@
 import { describe, expect, it } from "vitest";
 import {
   CLOUD_LANGS,
+  PRIORITY_LANG_ORDER,
   baseLang,
   cloudLangOptions,
+  langPriority,
   translateProgressText,
   translateUnavailableText,
+  withPriorityLangsFirst,
 } from "./cloud-langs";
+
+describe("порядок языков (карточка duopulse-094)", () => {
+  it("CLOUD_LANGS: en→ro→ru→ar первыми, ro в списке", () => {
+    expect(CLOUD_LANGS.slice(0, 4).map((l) => l.code)).toEqual(["en", "ro", "ru", "ar"]);
+    expect(CLOUD_LANGS.some((l) => l.code === "ro")).toBe(true);
+    const codes = CLOUD_LANGS.map((l) => l.code);
+    expect(codes).toEqual([...new Set(codes)]); // без дублей
+  });
+
+  it("langPriority: приоритетные по порядку, подтеги и регистр не мешают", () => {
+    expect(langPriority("en")).toBe(0);
+    expect(langPriority("RO")).toBe(1);
+    expect(langPriority("pt-BR")).toBe(PRIORITY_LANG_ORDER.length); // прочий
+  });
+
+  it("withPriorityLangsFirst: стабильная сортировка — приоритетные первыми", () => {
+    const items = ["es", "ru", "ja", "en", "ro"];
+    expect(withPriorityLangsFirst(items, (l) => l)).toEqual(["en", "ro", "ru", "es", "ja"]);
+  });
+});
 
 describe("cloudLangOptions (селект «+ перевод в…»)", () => {
   it("без источника в наборе переводить нечего — пусто", () => {

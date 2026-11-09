@@ -9,10 +9,19 @@ export interface CloudLangOption {
   name: string;
 }
 
-/** Предлагаемые целевые языки (общее подмножество пар DeepL/Google/Libre). */
+/** Приоритетные языки хозяина (карточка duopulse-094): первыми во всех
+ * списках языков субтитров — английский, румынский, русский, арабский,
+ * далее остальные. Сравнение — по базовому коду (baseLang: «EN-US» → en). */
+export const PRIORITY_LANG_ORDER: readonly string[] = ["en", "ro", "ru", "ar"];
+
+/** Предлагаемые целевые языки (общее подмножество пар DeepL/Google/Libre);
+ * ro добавлен по карточке duopulse-094 (DeepL/Google понимают, Libre —
+ * зависит от инстанса), порядок — приоритетные языки первыми. */
 export const CLOUD_LANGS: readonly CloudLangOption[] = [
-  { code: "ru", name: "Русский" },
   { code: "en", name: "English" },
+  { code: "ro", name: "Română" },
+  { code: "ru", name: "Русский" },
+  { code: "ar", name: "العربية" },
   { code: "uk", name: "Українська" },
   { code: "es", name: "Español" },
   { code: "de", name: "Deutsch" },
@@ -24,7 +33,6 @@ export const CLOUD_LANGS: readonly CloudLangOption[] = [
   { code: "ja", name: "日本語" },
   { code: "zh", name: "中文" },
   { code: "ko", name: "한국어" },
-  { code: "ar", name: "العربية" },
 ];
 
 /** Языки набора/переводов платформы к нижнему регистру и без подтегов
@@ -32,6 +40,25 @@ export const CLOUD_LANGS: readonly CloudLangOption[] = [
 export function baseLang(lang: string): string {
   const lowered = lang.trim().toLowerCase();
   return lowered.split("-")[0] ?? "";
+}
+
+/** Приоритет языка в списке настроек (карточка duopulse-094): 0..n — позиция
+ * в PRIORITY_LANG_ORDER, прочие — после приоритетных; применяется stable-сортом,
+ * относительный порядок прочих не меняется. */
+export function langPriority(lang: string): number {
+  const i = PRIORITY_LANG_ORDER.indexOf(baseLang(lang));
+  return i === -1 ? PRIORITY_LANG_ORDER.length : i;
+}
+
+/** Список языков с приоритетными первыми (stable): en→ro→ru→ar, затем как было. */
+export function withPriorityLangsFirst<T>(items: readonly T[], langOf: (item: T) => string): T[] {
+  return items
+    .map((item, i) => ({ item, i }))
+    .sort((a, b) => {
+      const d = langPriority(langOf(a.item)) - langPriority(langOf(b.item));
+      return d !== 0 ? d : a.i - b.i;
+    })
+    .map((x) => x.item);
 }
 
 /** Языки для селекта «+ перевод в…»: исключены переводы платформы (бесплатный

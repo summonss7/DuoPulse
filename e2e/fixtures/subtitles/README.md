@@ -14,7 +14,8 @@
 | `vtt-broken.vtt` | WebVTT | негативный: нет заголовка WEBVTT, блоки без тайминга, конец < начала |
 | `timedtext.xml` | YouTube XML `<transcript>` | сущности (в т.ч. двойное экранирование `&amp;#39;`), перенос строки, тег `<font>` |
 | `timedtext-legacy.xml` | YouTube XML `<timedtext><p>` | старый формат: атрибуты t/d в миллисекундах |
-| `timedtext.json3` | YouTube JSON3 | склейка `aAppend`-событий автосубтитров, пропуск служебных событий без segs |
+| `timedtext.json3` | YouTube JSON3 | нарастающая прокрутка `aAppend`-событий (duopulse-094), пропуск служебных событий без segs |
+| `timedtext-asr.json3` | YouTube JSON3, ASR | пословный режим автосубтитров (duopulse-094): слово в момент речи, видно последние две строки, cue без смены текста продлеваются |
 | `timedtext-broken.xml` | YouTube XML | негативный: нет start/dur, битые атрибуты, незакрытый элемент |
 | `timedtext-broken.json3` | YouTube JSON3 | негативный: обрезанный JSON |
 

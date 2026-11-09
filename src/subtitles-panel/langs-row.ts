@@ -8,7 +8,7 @@
 // только платформенную часть).
 
 import type { AppliedTrackInfo, BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
-import { baseLang, cloudLangOptions } from "./cloud-langs";
+import { baseLang, cloudLangOptions, withPriorityLangsFirst } from "./cloud-langs";
 import { normalizeTrackId } from "./presets";
 
 /** Перевод строки языков: нет / платформенный / облачный. */
@@ -38,9 +38,10 @@ export function langRowState(tracks: AppliedTrackInfo[]): LangRowState {
   return { fromId: original?.id ?? null, to: { kind: "none" } };
 }
 
-/** Варианты селекта «Язык видео»: базовые дорожки платформы. */
+/** Варианты селекта «Язык видео»: базовые дорожки платформы; приоритетные
+ * языки хозяина — первыми (карточка duopulse-094), прочие — в порядке адаптера. */
 export function fromOptions(base: BaseTrackInfo[]): { id: string; name: string }[] {
-  return base.map((b) => ({
+  return withPriorityLangsFirst(base, (b) => b.lang).map((b) => ({
     id: b.id,
     name: `${b.name}${b.original ? " · оригинал" : ""}${b.kind === "asr" ? " · авто" : ""} (${b.lang})`,
   }));
@@ -54,9 +55,10 @@ export function toOptions(
   from: { lang: string; translatable: boolean } | null,
 ): { value: string; name: string; group: "platform" | "cloud" }[] {
   const fromLang = from ? baseLang(from.lang) : "";
-  const platform = (from?.translatable === false ? [] : translations)
-    .filter((t) => baseLang(t.lang) !== fromLang)
-    .map((t) => ({ value: t.lang, name: `${t.name} (${t.lang})`, group: "platform" as const }));
+  const platform = withPriorityLangsFirst(
+    (from?.translatable === false ? [] : translations).filter((t) => baseLang(t.lang) !== fromLang),
+    (t) => t.lang,
+  ).map((t) => ({ value: t.lang, name: `${t.name} (${t.lang})`, group: "platform" as const }));
   // Непереводимый оригинал — tlang платформы недоступен вовсе: его языки
   // остаются кандидата́ми облака (cloudLangOptions исключает tlang из облака).
   const cloud = cloudLangOptions(

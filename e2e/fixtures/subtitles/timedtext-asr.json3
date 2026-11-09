@@ -1,0 +1,11 @@
+{"events":[
+ {"tStartMs":470,"dDurationMs":2210,"segs":[{"utf8":"we've"}]},
+ {"tStartMs":1080,"dDurationMs":1600,"aAppend":1,"segs":[{"utf8":" got"}]},
+ {"tStartMs":1330,"dDurationMs":1350,"aAppend":1,"segs":[{"utf8":"\n"}]},
+ {"tStartMs":1680,"dDurationMs":1000,"aAppend":1,"segs":[{"utf8":" a"}]},
+ {"tStartMs":2000,"dDurationMs":680,"aAppend":1,"segs":[{"utf8":" problem"}]},
+ {"tStartMs":5000,"dDurationMs":300,"segs":[{"utf8":"\n"}]},
+ {"tStartMs":5300,"dDurationMs":1500,"segs":[{"utf8":"next"}]},
+ {"tStartMs":5800,"dDurationMs":1000,"aAppend":1,"segs":[{"utf8":" phrase"}]},
+ {"tStartMs":6200,"dDurationMs":600,"aAppend":1,"segs":[{"utf8":" here"}]}
+]}

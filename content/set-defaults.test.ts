@@ -34,6 +34,14 @@ describe("defaultSetIds (Alt+D на пустом наборе)", () => {
     expect(defaultSetIds(list([{ lang: "en", original: true }], ["uk", "es"]))[1]).toBe("uk");
   });
 
+  it("duopulse-094: порядок предпочтений en → ro → ru → ar", () => {
+    // en — язык оригинала (сам не перевод) → ro прежде ru
+    expect(defaultSetIds(list([{ lang: "en", original: true }], ["ru", "ro", "es"]))[1]).toBe("ro");
+    expect(defaultSetIds(list([{ lang: "en", original: true }], ["ar", "ru"]))[1]).toBe("ru");
+    // не-en оригинал → en первым
+    expect(defaultSetIds(list([{ lang: "fr", original: true }], ["de", "en"]))[1]).toBe("en");
+  });
+
   it("без флага original — первая базовая дорожка", () => {
     const ids = defaultSetIds(list([{ lang: "fr" }, { lang: "de" }], ["ru"]));
     expect(ids).toEqual(["yt:fr", "ru"]);

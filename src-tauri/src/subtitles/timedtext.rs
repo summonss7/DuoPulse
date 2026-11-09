@@ -7,8 +7,9 @@
 //!   дважды (`&amp;#39;` → `'`): декодируем два прохода, затем вырезаем теги.
 //! - JSON3 (`fmt=json3`): `events[].{tStartMs, dDurationMs, segs[].utf8}`.
 //!   События без `segs` — служебные (окна/формат), пропускаются тихо;
-//!   события с `aAppend` — пословный режим автосубтитров: текст приклеивается
-//!   к предыдущему cue, конец — самый поздний из склеенных.
+//!   события с `aAppend` — пословный режим автосубтитров (карточка
+//!   duopulse-094): разбор нарастающей прокруткой как у нативного плеера —
+//!   слово появляется в момент речи, на экране последние две строки.
 //!
 //! Формат выбирается по первому непробельному символу: `{` — JSON3, иначе XML.
 //! Битые элементы/XML/JSON — предупреждение, разбор продолжается.
@@ -172,7 +173,6 @@ fn timings_of(e: &BytesStart<'_>, n: usize, warnings: &mut Vec<ParseWarning>) ->
 }
 
 pub fn parse_json3(input: &str) -> ParsedCues {
-    let mut cues: Vec<Cue> = Vec::new();
     let mut warnings: Vec<ParseWarning> = Vec::new();
     // normalize снимает BOM (serde_json его не принимает) и CRLF.
     let value: serde_json::Value = match serde_json::from_str(&super::normalize(input)) {
@@ -182,7 +182,10 @@ pub fn parse_json3(input: &str) -> ParsedCues {
                 line: 0,
                 message: format!("битый JSON3 ({err})"),
             });
-            return ParsedCues { cues, warnings };
+            return ParsedCues {
+                cues: Vec::new(),
+                warnings,
+            };
         }
     };
     let Some(events) = value.get("events").and_then(|v| v.as_array()) else {
@@ -190,8 +193,13 @@ pub fn parse_json3(input: &str) -> ParsedCues {
             line: 0,
             message: "нет массива events — дорожка пуста".into(),
         });
-        return ParsedCues { cues, warnings };
+        return ParsedCues {
+            cues: Vec::new(),
+            warnings,
+        };
     };
+    // Контентные события: текст + тайминги; служебные (без segs) пропускаются.
+    let mut content: Vec<Json3Event> = Vec::new();
     for (i, event) in events.iter().enumerate() {
         let Some(start_ms) = event.get("tStartMs").and_then(|v| v.as_i64()) else {
             // Без segs — служебное событие (окна/формат), тихо мимо; с segs,
@@ -211,36 +219,114 @@ pub fn parse_json3(input: &str) -> ParsedCues {
             .iter()
             .filter_map(|s| s.get("utf8").and_then(|v| v.as_str()))
             .collect();
-        let end_ms = start_ms.saturating_add(
-            event
+        content.push(Json3Event {
+            start_ms,
+            dur_ms: event
                 .get("dDurationMs")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0),
-        );
-        if truthy(event.get("aAppend")) {
-            // Пословный режим автосубтитров: приклеиваем к предыдущему cue,
-            // конец — самый поздний из склеенных событий.
-            match cues.last_mut() {
-                Some(prev) => {
-                    prev.text.push_str(&text);
-                    prev.end_ms = prev.end_ms.max(end_ms);
-                }
-                None => cues.push(Cue {
-                    start_ms,
-                    end_ms,
-                    text,
-                }),
-            }
-        } else {
-            cues.push(Cue {
-                start_ms,
-                end_ms,
-                text,
-            });
-        }
+            append: truthy(event.get("aAppend")),
+            text,
+        });
     }
+    let cues = if content.iter().any(|e| e.append) {
+        parse_json3_rolling(&content)
+    } else {
+        // Ручные дорожки: каждое событие — отдельный cue своей длительности.
+        content
+            .into_iter()
+            .map(|e| Cue {
+                start_ms: e.start_ms,
+                end_ms: e.start_ms.saturating_add(e.dur_ms),
+                text: e.text,
+            })
+            .collect()
+    };
     let cues = finalize_cues(cues, &mut warnings);
     ParsedCues { cues, warnings }
+}
+
+/// Контентное событие JSON3 (текст события = склейка utf8 его segs).
+struct Json3Event {
+    start_ms: i64,
+    dur_ms: i64,
+    append: bool,
+    text: String,
+}
+
+/// Пословный режим автосубтитров (aAppend, карточка duopulse-094): слова
+/// приходят отдельными событиями с пословным таймингом, «\n» в segs — конец
+/// строки. Нативный плеер YouTube показывает их нарастающей прокруткой: слово
+/// появляется в момент речи, на экране — последние две строки. Так же живёт и
+/// наш парсер: каждый Content-событие даёт cue «что видно сейчас» (конец —
+/// начало следующего события), длительность показа текста = до следующего
+/// слова; Cue без смены текста продлевают предыдущий. Раньше все слова
+/// приклеивались в один гигантский cue на всё окно — плашка закрывала экран.
+fn parse_json3_rolling(content: &[Json3Event]) -> Vec<Cue> {
+    let mut cues: Vec<Cue> = Vec::new();
+    // Строки «прокрутки»: завершённые (после «\n», храним последние две) и
+    // текущая набираемая (пословный хвост без переноса).
+    let mut completed: std::collections::VecDeque<String> = Default::default();
+    let mut cur = String::new();
+
+    let commit = |completed: &mut std::collections::VecDeque<String>, cur: &mut String| {
+        let line = cur.trim().to_string();
+        cur.clear();
+        if line.is_empty() {
+            return;
+        }
+        completed.push_back(line);
+        while completed.len() > 2 {
+            completed.pop_front();
+        }
+    };
+
+    for (i, ev) in content.iter().enumerate() {
+        // Неприклеиваемое событие посреди строки — новое окно показа: строку
+        // завершаем, текст события начинает следующую.
+        if !ev.append && !cur.trim().is_empty() {
+            commit(&mut completed, &mut cur);
+        }
+        let parts: Vec<&str> = ev.text.split('\n').collect();
+        for (pi, part) in parts.iter().enumerate() {
+            cur.push_str(part);
+            if pi + 1 < parts.len() {
+                commit(&mut completed, &mut cur);
+            }
+        }
+        // Видно последние две строки: завершённые + набираемая (если непуста).
+        let mut lines: Vec<&str> = completed.iter().map(|s| s.as_str()).collect();
+        let head = cur.trim();
+        if !head.is_empty() {
+            lines.push(head);
+        }
+        if lines.len() > 2 {
+            lines.drain(..lines.len() - 2);
+        }
+        let visible = lines.join("\n");
+        if visible.is_empty() {
+            continue;
+        }
+        // Показ тикает до следующего события; последнее — своей длительностью.
+        let end_ms = match content.get(i + 1) {
+            Some(next) => next.start_ms,
+            None => ev.start_ms.saturating_add(ev.dur_ms.max(1)),
+        };
+        match cues.last_mut() {
+            // Текст не сменился (например, событие-«\n») — только продлеваем.
+            Some(prev) if prev.text == visible => prev.end_ms = prev.end_ms.max(end_ms),
+            _ => {
+                if end_ms > ev.start_ms {
+                    cues.push(Cue {
+                        start_ms: ev.start_ms,
+                        end_ms,
+                        text: visible,
+                    });
+                }
+            }
+        }
+    }
+    cues
 }
 
 fn truthy(v: Option<&serde_json::Value>) -> bool {
@@ -259,6 +345,7 @@ mod tests {
     const XML_LEGACY: &str = include_str!("../../../e2e/fixtures/subtitles/timedtext-legacy.xml");
     const XML_BROKEN: &str = include_str!("../../../e2e/fixtures/subtitles/timedtext-broken.xml");
     const JSON3: &str = include_str!("../../../e2e/fixtures/subtitles/timedtext.json3");
+    const ASR_JSON3: &str = include_str!("../../../e2e/fixtures/subtitles/timedtext-asr.json3");
     const JSON3_BROKEN: &str =
         include_str!("../../../e2e/fixtures/subtitles/timedtext-broken.json3");
 
@@ -336,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn json3_fixture_appends_merged_service_events_skipped() {
+    fn json3_fixture_rolling_progressive_service_events_skipped() {
         let parsed = parse_json3(JSON3);
         assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
         assert_eq!(
@@ -344,16 +431,81 @@ mod tests {
             vec![
                 Cue {
                     start_ms: 0,
-                    end_ms: 6_000, // конец пословных приклеек: max(3000, 4000+2000)
-                    text: "hello world".into()
+                    end_ms: 4_000, // до следующего пословного события
+                    text: "hello".into()
                 },
                 Cue {
+                    start_ms: 4_000,
+                    end_ms: 6_000,
+                    text: "hello world".into()
+                },
+                // Неприклеиваемое событие завершило строку — видно две строки
+                Cue {
                     start_ms: 6_000,
-                    end_ms: 8_500, // max(6000+2500, 7000+1000)
+                    end_ms: 7_000,
+                    text: "hello world\nSecond line".into()
+                },
+                // Третья строка вытесняет первую (прокрутка двух строк)
+                Cue {
+                    start_ms: 7_000,
+                    end_ms: 8_000, // последнее событие — своей длительностью
                     text: "Second line\ncontinued".into()
                 },
             ]
         );
+    }
+
+    #[test]
+    fn json3_asr_fixture_rolling_two_lines_word_by_word() {
+        // Карточка duopulse-094: пословные автосубтитры показываются нарастающей
+        // прокруткой (слово появляется в момент речи, на экране — последние две
+        // строки), а не одним гигантским cue на всё окно.
+        let parsed = parse_json3(ASR_JSON3);
+        assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
+        assert_eq!(
+            parsed.cues,
+            vec![
+                Cue {
+                    start_ms: 470,
+                    end_ms: 1_080,
+                    text: "we've".into()
+                },
+                Cue {
+                    start_ms: 1_080,
+                    end_ms: 1_680,
+                    text: "we've got".into()
+                },
+                Cue {
+                    start_ms: 1_680,
+                    end_ms: 2_000,
+                    text: "we've got\na".into()
+                },
+                Cue {
+                    start_ms: 2_000,
+                    end_ms: 5_300,
+                    text: "we've got\na problem".into()
+                },
+                Cue {
+                    start_ms: 5_300,
+                    end_ms: 5_800,
+                    text: "a problem\nnext".into()
+                },
+                Cue {
+                    start_ms: 5_800,
+                    end_ms: 6_200,
+                    text: "a problem\nnext phrase".into()
+                },
+                Cue {
+                    start_ms: 6_200,
+                    end_ms: 6_800,
+                    text: "a problem\nnext phrase here".into()
+                },
+            ]
+        );
+        // Ни один cue не длиннее двух строк — плашка не разрастается на экран.
+        for cue in &parsed.cues {
+            assert!(cue.text.matches('\n').count() <= 1, "{:?}", cue.text);
+        }
     }
 
     #[test]

@@ -22,12 +22,12 @@ describe("preferredLangs (задача 5.1)", () => {
   });
 
   it("мусорные значения — прежний порядок", () => {
-    expect(preferredLangs(win(undefined))).toEqual(["ru", "uk", "en"]);
-    expect(preferredLangs(win({}))[0]).toBe("ru");
-    expect(preferredLangs(win({ subtitles: {} }))[0]).toBe("ru");
-    expect(preferredLangs(win({ subtitles: { defaultTranslationLang: "x" } }))[0]).toBe("ru");
-    expect(preferredLangs(win({ subtitles: { defaultTranslationLang: 42 } }))[0]).toBe("ru");
-    expect(preferredLangs(win("не объект"))[0]).toBe("ru");
+    expect(preferredLangs(win(undefined))).toEqual(["en", "ro", "ru", "ar"]);
+    expect(preferredLangs(win({}))[0]).toBe("en");
+    expect(preferredLangs(win({ subtitles: {} }))[0]).toBe("en");
+    expect(preferredLangs(win({ subtitles: { defaultTranslationLang: "x" } }))[0]).toBe("en");
+    expect(preferredLangs(win({ subtitles: { defaultTranslationLang: 42 } }))[0]).toBe("en");
+    expect(preferredLangs(win("не объект"))[0]).toBe("en");
   });
 });
 
