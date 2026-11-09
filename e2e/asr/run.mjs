@@ -4,13 +4,18 @@
 // Сценарий: локальная страница с <video src=speech.mp4> (SAPI-озвучка,
 // генерится на стенде) → кнопка «Распознать речь (ASR)» duo-панели →
 // локальный движок whisper-server.exe (env DUOPULSE_E2E_ASR_ENGINE; модель —
-// DUOPULSE_E2E_ASR_MODEL, по умолчанию спайковые в %TEMP%\duopulse-asr-proto)
-// → прогресс duoAsrMeta → дорожка asr:en в наборе и на плашке → повторный
-// клик отдаёт из кэша (0 обращений к движку).
+// DUOPULSE_E2E_ASR_MODEL) → прогресс duoAsrMeta → дорожка asr:en в наборе
+// и на плашке → повторный клик отдаёт из кэша (0 обращений к движку).
+//
+// Движок и модель готовит e2e/asr/prepare.mjs (карточка duopulse-091: спайковые
+// %TEMP%\duopulse-asr-proto снесены чисткой) — run.mjs зовёт его сам, когда
+// файлов нет: сборка whisper.cpp @ 284029c (cmake+ninja+MinGW, статика) и модель
+// ggml-base.bin с huggingface складываются в постоянный кэш e2e/asr/.cache/
+// (gitignored; DUOPULSE_E2E_ASR_CACHE — его каталог).
 //
 // Запуск:  node e2e/asr/run.mjs [путь-к-duopulse.exe]
 // Требует собранный debug-exe (cargo build), vite dev поднимает сам.
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -22,12 +27,9 @@ const EXE = process.argv[2] || path.join(ROOT, "src-tauri", "target", "debug", "
 const CDP_PORT = Number(process.env.E2E_ASR_CDP_PORT) || 9239;
 const HTTP_PORT = Number(process.env.E2E_ASR_HTTP_PORT) || 8898; // 8899 занят сервисом Aila (карточка duopulse-035)
 const ASSETS = path.join(ROOT, "e2e", "asr", "assets");
-const ENGINE =
-  process.env.DUOPULSE_E2E_ASR_ENGINE ||
-  path.join(os.tmpdir(), "duopulse-asr-proto", "build", "bin", "whisper-server.exe");
-const MODEL =
-  process.env.DUOPULSE_E2E_ASR_MODEL ||
-  path.join(os.tmpdir(), "duopulse-asr-proto", "models", "ggml-base.bin");
+const CACHE = process.env.DUOPULSE_E2E_ASR_CACHE || path.join(ASSETS, "..", ".cache");
+const ENGINE = process.env.DUOPULSE_E2E_ASR_ENGINE || path.join(CACHE, "bin", "whisper-server.exe");
+const MODEL = process.env.DUOPULSE_E2E_ASR_MODEL || path.join(CACHE, "models", "ggml-base.bin");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const run = (cmd, args, opts = {}) =>
@@ -68,6 +70,13 @@ const SENTENCES = [
 
 async function makeAssets() {
   fs.mkdirSync(ASSETS, { recursive: true });
+  // движок/модель: prepare.mjs соберёт и скачает при первом запуске (duopulse-091)
+  if (!fs.existsSync(ENGINE) || !fs.existsSync(MODEL)) {
+    console.log("[asr] движок/модель не найдены — подготовка (e2e/asr/prepare.mjs, разово, ~5 мин)…");
+    const r = spawnSync(process.execPath, [path.join(import.meta.dirname, "prepare.mjs")], { stdio: "inherit" });
+    if (r.status !== 0 || !fs.existsSync(ENGINE) || !fs.existsSync(MODEL))
+      throw new Error(`prepare.mjs не подготовил движок/модель; пути: ${ENGINE} / ${MODEL} (env DUOPULSE_E2E_ASR_*)`);
+  }
   const mp4 = path.join(ASSETS, "speech.mp4");
   if (fs.existsSync(mp4)) return mp4;
   if (!fs.existsSync(ENGINE)) throw new Error(`whisper-server.exe не найден: ${ENGINE} (DUOPULSE_E2E_ASR_ENGINE)`);
@@ -257,14 +266,36 @@ try {
   const ui = connect(uiTarget.webSocketDebuggerUrl);
   await waitForPage(ui, `typeof window.__duopulse === "object"`, 10000, "bridge-хук window.__duopulse");
   await waitForPage(ui, `!document.getElementById("duoBtn").hidden`, 10000, "кнопка duo видна");
-  // панель — тест-событием (карточка 087: клик кнопки открывает нативное меню)
+  // панель — тест-событием (карточка 087: клик кнопки открывает нативное меню);
+  // duopulse-090: панель duo — child-webview index.html?panel=duo, DOM кнопки
+  // в отдельной CDP-цели; ui остаётся для bridge и событий
   await evalIn(ui, `window.dispatchEvent(new CustomEvent("duo:open-panel"))`);
-  await waitForPage(ui, `!document.getElementById("duoPanel").hidden`, 5000, "панель duo открыта");
-  const btnState = await evalIn(
-    ui,
-    `(function () { const b = document.getElementById("duoAsrBtn"); return { exists: !!b, hidden: !b || b.offsetParent === null }; })()`,
+  let duoTarget = null;
+  for (let i = 0; i < 30 && !duoTarget; i++) {
+    const list = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
+    duoTarget = list.find((x) => x.type === "page" && x.url.includes("?panel=duo")) ?? null;
+    if (!duoTarget) await sleep(400);
+  }
+  if (!duoTarget) throw new Error("панель duo не открыта (цель ?panel=duo)");
+  const duo = connect(duoTarget.webSocketDebuggerUrl);
+  // готовность МОДУЛЯ панели (не только boot): duoAsrBtn есть в статическом
+  // HTML сразу, а листенер вешает модуль после загрузки — ранний клик
+  // теряется (гонка замечена в duopulse-091); предикат — как у e2e/subtitles
+  await waitForPage(
+    duo,
+    `(() => {
+       const p = document.getElementById("duoPanel");
+       if (!p) return 0; // документ ещё грузится (null-safe, duopulse-090)
+       const b = document.getElementById("duoAsrBtn");
+       const tr = p.querySelector("#trLibreUrlField");
+       const plan = p.querySelector("#trDeeplPlanField");
+       return !p.hidden && b && b.offsetParent !== null && tr && plan && tr.hidden !== plan.hidden ? 1 : 0;
+     })()`,
+    50_000,
+    "панель duo готова (модуль + перевод)",
   );
-  check("(2) кнопка «Распознать речь (ASR)» есть в панели duo", btnState.exists && !btnState.hidden);
+  await sleep(300); // refresh() панели (снапшот вкладки)
+  check("(2) кнопка «Распознать речь (ASR)» есть в панели duo", true, ` цель ?panel=duo`);
 
   // (3) настройки: движок/модель на месте, провайдер локальный
   const asrSettings = await evalIn(ui, `window.__duopulse.asr.getSettings()`);
@@ -277,10 +308,10 @@ try {
   );
 
   // (4) клик → конвейер: прогресс-мета доходит до «Готово», whisper-server
-  // поднялся (метка [asr] в журнале Core)
-  await evalIn(ui, `document.getElementById("duoAsrBtn").click()`);
+  // поднялся (метка [asr] в журнале Core); клик и меты — в цели панели (090)
+  await evalIn(duo, `document.getElementById("duoAsrBtn").click()`);
   const doneText = await waitForPage(
-    ui,
+    duo,
     `(function () { const m = document.getElementById("duoAsrMeta"); const t = m && !m.hidden ? m.textContent : ""; return /^Готово|^ASR:/.test(t) ? t : ""; })()`,
     120_000,
     "прогресс ASR до готовности/ошибки",
@@ -304,17 +335,24 @@ try {
     `asr=${asrTrack?.id}, cues=${asrTrack?.cues}, trackCount=${st2.engine.trackCount}`,
   );
 
-  // (6) качество: транскрипт содержит слова скрипта (WER-спайк: base en 3–8 %)
-  const plateText = await waitForPage(
-    tab,
-    `(function () { const rows = window.__duopulseContent?.state().engine.activeRows ?? []; return rows.length ? rows.map((r) => r.text).join(" ") : ""; })()`,
-    8000,
-    "активные cue на плашке",
-  ).catch(() => "");
+  // (6) качество: транскрипт содержит слова скрипта (WER-спайк: base en 3–8 %).
+  // Плашка показывает только активный cue — единичный опрос недетерминирован
+  // (duopulse-091): прогоняем видео по нескольким позициям и копим реплики
+  let corpus = "";
+  for (const t of [4, 10, 16, 22, 28, 34, 40]) {
+    await evalIn(tab, `(function(){ const v = document.querySelector("video"); v.muted = true; v.currentTime = ${t}; v.play().catch(function(){}); })()`);
+    await sleep(400);
+    corpus +=
+      " " +
+      (await evalIn(
+        tab,
+        `(window.__duopulseContent?.state().engine.activeRows ?? []).map(function (r) { return r.text; }).join(" ")`,
+      ));
+  }
   check(
-    "(6) транскрипт осмысленный (слова скрипта на плашке или в cue)",
-    /evening|battery|financial|marathon|weekend|listening/i.test(plateText || JSON.stringify(st2.asrTracks)),
-    (plateText || "").slice(0, 80),
+    "(6) транскрипт осмысленный (слова скрипта в репликах на плашке)",
+    /evening|battery|financial|marathon|weekend|listening/i.test(corpus),
+    corpus.trim().slice(0, 80),
   );
 
   // (7) снапшот панели: дорожка source "asr" (subtitles:list_tracks)
@@ -327,9 +365,9 @@ try {
   );
 
   // (8) кэш: повторный клик — «из кэша», без нового запуска конвейера
-  await evalIn(ui, `document.getElementById("duoAsrBtn").click()`);
+  await evalIn(duo, `document.getElementById("duoAsrBtn").click()`);
   const cacheText = await waitForPage(
-    ui,
+    duo,
     `(function () { const m = document.getElementById("duoAsrMeta"); const t = m && !m.hidden ? m.textContent : ""; return /из кэша|^ASR:/.test(t) ? t : ""; })()`,
     15_000,
     "кэш-хит ASR",
@@ -348,6 +386,7 @@ try {
   );
 
   tab.close();
+  duo.close();
   ui.close();
 } catch (e) {
   failed++;

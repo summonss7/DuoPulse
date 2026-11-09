@@ -194,6 +194,7 @@ node e2e/perf/p05.mjs              # дропы кадров 1080p60
 node e2e/perf/p06.mjs              # отклик UI
 node e2e/perf/p08.mjs              # первый кадр vs контроль (DuoPulse без блокировщика)
 node e2e/subtitles/run.mjs    # субтитры: оверлей, .srt, перевод, офлайн, стиль (105)
+node e2e/asr/run.mjs          # субтитры из речи: «голое» видео → локальный whisper (10; первый запуск сам собирает движок и качает модель — prepare.mjs, кэш e2e/asr/.cache)
 node e2e/youtube/run.mjs      # живой прогон «10 случайных видео» (52)
 node e2e/settings/run.mjs     # перенос профиля одним файлом
 node e2e/update/run.mjs       # установка/обновление/деинсталляция (нужен npm run release)
