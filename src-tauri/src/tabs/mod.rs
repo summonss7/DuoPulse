@@ -32,6 +32,17 @@
 //! Визиты истории (задача 1.4): on_page_load(Finished) внешних http/https
 //! страниц пишет HistoryStore.visit; заголовок страницы (on_title)
 //! подтягивает note_title.
+//!
+//! Инкогнито-вкладки (карточка duopulse-096): помечаются при создании
+//! (tabs.open {incognito} / «Открыть копию в инкогнито» / ссылки из
+//! инкогнито-вкладок). Среда WebView2 — отдельная (data_directory во
+//! временную папку): куки/кэш/хранилища сайтов не касаются профиля и
+//! удаляются при закрытии последней инкогнито-вкладки. Визиты истории не
+//! пишутся (и note_title), в session.json вкладка не попадает; закладки
+//! разрешены (как в браузерах). Стартовая страница — duopulse://incognito
+//! («Вы перешли в режим инкогнито»); уход по адресу превращает вкладку в
+//! обычную контентную (среда остаётся изолированной — она назначена
+//! webview при создании).
 
 mod session;
 mod sleep;
@@ -55,6 +66,22 @@ pub(crate) const CHROME_HEIGHT: f64 = 84.0;
 
 /// Глубина стека закрытых вкладок для tabs.reopen (Ctrl+Shift+T).
 const CLOSED_STACK_CAP: usize = 25;
+
+/// Папка данных изолированной среды WebView2 инкогнито-вкладок (карточка
+/// duopulse-096): отдельная user data folder во %TEMP% — куки/кэш/хранилища
+/// сайтов инкогнито не касаются профиля. Имя фиксированное (не по pid):
+/// папка, оставшаяся после креша/убийства процесса, чистится следующим
+/// стартом; при закрытии последней инкогнито-вкладки — тоже best effort,
+/// файлы, ещё занятые средой, добьёт следующий старт.
+pub(crate) fn incognito_data_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("duopulse-incognito")
+}
+
+/// Удалить данные инкогнито-среды (ошибки занятых файлов молчаливы — см.
+/// incognito_data_dir).
+pub(crate) fn clean_incognito_data() {
+    let _ = std::fs::remove_dir_all(incognito_data_dir());
+}
 
 /// Стартовая страница: первый таб и новые вкладки (кнопка «+», tabs.open без
 /// url) — фирменная «Новая вкладка» (задача 1.5, гайд 06 §7). DUOPULSE_START_URL
@@ -94,8 +121,9 @@ struct TabsState {
     active: Option<usize>,
     /// Счётчик id: tab-1, tab-2… Метки webview не переиспользуются.
     next_seq: u64,
-    /// Стек закрытых для tabs.reopen: (url, позиция в баре на момент закрытия).
-    closed: VecDeque<(String, usize)>,
+    /// Стек закрытых для tabs.reopen: (url, позиция в баре на момент закрытия,
+    /// инкогнито ли была — восстановление сохраняет приватность вкладки).
+    closed: VecDeque<(String, usize, bool)>,
     /// Вкладка в HTML-fullscreen (карточка duopulse-062): видео развёрнуто
     /// на весь экран — webview этой вкладки растянут на всё окно (поверх
     /// полосы хрома), окно — borderless-fullscreen. None — обычный режим.
@@ -124,6 +152,9 @@ struct TabEntry {
     /// unix-ms последней активности (активация/открытие/стоп медиа) — отсчёт
     /// таймаута спящего режима (задача 2.3).
     last_active_ms: i64,
+    /// Инкогнито-вкладка (карточка duopulse-096): изолированная среда
+    /// WebView2, без визитов истории и в session.json не попадает.
+    incognito: bool,
 }
 
 impl TabEntry {
@@ -135,6 +166,7 @@ impl TabEntry {
             active,
             loading: self.loading,
             sleeping: self.sleeping,
+            incognito: self.incognito,
         }
     }
 }
@@ -179,6 +211,18 @@ impl TabManager {
     pub fn url_of(&self, id: &str) -> Option<String> {
         let st = self.state.lock().ok()?;
         st.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone())
+    }
+
+    /// Инкогнито-вкладка ли (карточка duopulse-096) — наследование приватности
+    /// ссылками «в новом окне» (NewWindowRequested из вкладки-источника).
+    pub fn is_incognito(&self, id: &str) -> bool {
+        self.state
+            .lock()
+            .expect("tabs: лок не отравлен")
+            .tabs
+            .iter()
+            .find(|t| t.id == id)
+            .is_some_and(|t| t.incognito)
     }
 
     /// Первая вкладка приложения (вызывается из setup окна): восстановление
@@ -227,6 +271,7 @@ impl TabManager {
             sleeping: false,
             media_playing: false,
             last_active_ms: now_ms(),
+            incognito: false,
         });
         st.active = Some(0);
         Ok(())
@@ -278,6 +323,7 @@ impl TabManager {
                 sleeping: false,
                 media_playing: false,
                 last_active_ms: now_ms(),
+                incognito: false, // сессия инкогнито-вкладок не сохраняется
             });
         }
         // session::load зажимает active в границы; None там не бывает
@@ -304,7 +350,9 @@ impl TabManager {
         let parsed =
             Url::parse(&url).map_err(|e| format!("некорректный URL вкладки «{url}»: {e}"))?;
         let internal = internal_page_name(&parsed).is_some();
-        self.spawn_webview(app, id, &parsed, internal)?;
+        // материализуются только ленивые вкладки восстановленной сессии —
+        // инкогнито туда не попадает (не сохраняется, карточка 096)
+        self.spawn_webview(app, id, &parsed, internal, false)?;
         {
             let mut st = self.state.lock().expect("tabs: лок не отравлен");
             if let Some(entry) = st.tabs.iter_mut().find(|t| t.id == id) {
@@ -360,42 +408,62 @@ impl TabManager {
     }
 
     /// tabs.open: новая вкладка, становится активной (как в браузерах).
-    /// Вызывается из async-команды: создание webview — блокирующий round-trip
-    /// на главный поток, его нельзя делать на потоке цикла событий.
+    /// incognito (карточка duopulse-096) — приватная вкладка: изолированная
+    /// среда, без истории и сессии; без url стартует со страницы
+    /// duopulse://incognito. Вызывается из async-команды: создание webview —
+    /// блокирующий round-trip на главный поток, его нельзя делать на потоке
+    /// цикла событий.
     pub fn open(
         &self,
         app: &AppHandle,
         url: Option<String>,
         position: Option<usize>,
+        incognito: bool,
     ) -> Result<TabsListResult, String> {
-        self.spawn_tab(app, url.unwrap_or_else(default_tab_url), position, true)
+        let url = url.unwrap_or_else(|| {
+            if incognito {
+                "duopulse://incognito".to_string()
+            } else {
+                default_tab_url()
+            }
+        });
+        self.spawn_tab(app, url, position, true, incognito)
     }
 
     /// «Открыть ссылку в новом окне» без перехода (карточка duopulse-088):
     /// NewWindowRequested (target=_blank, средняя кнопка, пункт контекстного
     /// меню) открывает вкладку в фоне — активной остаётся текущая, фокус не
-    /// крадётся; пользователь переключается сам, когда захочет.
-    pub fn open_background(&self, app: &AppHandle, url: String) -> Result<TabsListResult, String> {
-        self.spawn_tab(app, url, None, false)
+    /// крадётся; пользователь переключается сам, когда захочет. Ссылка из
+    /// инкогнито-вкладки наследует приватность (как в браузерах).
+    pub fn open_background(
+        &self,
+        app: &AppHandle,
+        url: String,
+        incognito: bool,
+    ) -> Result<TabsListResult, String> {
+        self.spawn_tab(app, url, None, false, incognito)
     }
 
     /// tabs.reopen (Ctrl+Shift+T): последняя закрытая возвращается на прежнюю
     /// позицию бара. WebView2 не восстанавливает уничтоженный инстанс — вкладка
-    /// создаётся заново по URL (id новый).
+    /// создаётся заново по URL (id новый); инкогнито-вкладка восстанавливается
+    /// инкогнито (карточка duopulse-096).
     pub fn reopen(&self, app: &AppHandle) -> Result<TabsListResult, String> {
-        let (url, index) = {
+        let (url, index, incognito) = {
             let mut st = self.state.lock().expect("tabs: лок не отравлен");
             st.closed
                 .pop_back()
                 .ok_or_else(|| "закрытых вкладок нет".to_string())?
         };
-        self.spawn_tab(app, url, Some(index), true)
+        self.spawn_tab(app, url, Some(index), true, incognito)
     }
 
     /// tabs.close: закрыть вкладку по id; активной становится соседняя
     /// (правая, иначе левая). Закрытие последней — пустой экран, таб-бар жив.
+    /// Закрытие последней инкогнито-вкладки чистит данные изолированной
+    /// среды (карточка duopulse-096; best effort — см. incognito_data_dir).
     pub fn close(&self, app: &AppHandle, id: &str) -> Result<TabsListResult, String> {
-        {
+        let was_last_incognito = {
             let mut st = self.state.lock().expect("tabs: лок не отравлен");
             let index = st
                 .tabs
@@ -403,7 +471,7 @@ impl TabManager {
                 .position(|t| t.id == id)
                 .ok_or_else(|| format!("вкладка {id} не найдена"))?;
             let entry = st.tabs.remove(index);
-            st.closed.push_back((entry.url, index));
+            st.closed.push_back((entry.url, index, entry.incognito));
             if st.closed.len() > CLOSED_STACK_CAP {
                 st.closed.pop_front();
             }
@@ -414,12 +482,26 @@ impl TabManager {
                     _ => Some(a),
                 };
             }
-        }
+            entry.incognito && !st.tabs.iter().any(|t| t.incognito)
+        };
         // Закрыта вкладка-владелец HTML-fullscreen (карточка 062) — выходим
         // из fullscreen: вебview уничтожается и события выхода можно не ждать.
         self.exit_fullscreen(app, None);
         if let Some(wv) = app.get_webview(id) {
             wv.close().map_err(|e| format!("close webview: {e}"))?;
+        }
+        if was_last_incognito {
+            // после close webview файлы среды освобождаются не мгновенно;
+            // пауза в фоне + проверка, что новые инкогнито-вкладки не успели
+            // открыться (не снести свежую среду)
+            let app = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(800));
+                let st = app.state::<TabManager>();
+                if !st.state.lock().map(|s| s.tabs.iter().any(|t| t.incognito)).unwrap_or(true) {
+                    clean_incognito_data();
+                }
+            });
         }
         self.apply_visibility(app);
         Ok(self.finish(app))
@@ -527,8 +609,19 @@ impl TabManager {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let manager = app.state::<TabManager>();
-                    if let Err(e) = manager.open(&app, None, None) {
+                    if let Err(e) = manager.open(&app, None, None, false) {
                         eprintln!("tabs: new tab (ctrl+t): {e}");
+                    }
+                });
+            }
+            // Инкогнито-вкладка (карточка duopulse-096): как ctrl+t — вне
+            // потока цикла событий (создание webview).
+            "ctrl+shift+n" => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let manager = app.state::<TabManager>();
+                    if let Err(e) = manager.open(&app, None, None, true) {
+                        eprintln!("tabs: new incognito tab (ctrl+shift+n): {e}");
                     }
                 });
             }
@@ -669,12 +762,17 @@ impl TabManager {
     /// activate — стать активной (tabs.open/Ctrl+T — как в браузерах) или
     /// открыться в фоне (карточка duopulse-088: «новое окно» не крадёт фокус).
     /// `duopulse://<имя>` — внутренняя страница (webview с UI-бандлом).
+    /// incognito (карточка duopulse-096) — изолированная среда WebView2; такой
+    /// вкладке разрешён только старт с duopulse://incognito (webview грузит
+    /// UI-бандл с полным набором content-скриптов — уход с внутренней страницы
+    /// делает вкладку обычной контентной, как у страницы ошибки, карточка 048).
     fn spawn_tab(
         &self,
         app: &AppHandle,
         url: String,
         position: Option<usize>,
         activate: bool,
+        incognito: bool,
     ) -> Result<TabsListResult, String> {
         let parsed =
             Url::parse(&url).map_err(|e| format!("некорректный URL вкладки «{url}»: {e}"))?;
@@ -701,6 +799,7 @@ impl TabManager {
                     sleeping: false,
                     media_playing: false,
                     last_active_ms: now_ms(),
+                    incognito,
                 },
             );
             // Фоновое открытие (карточка duopulse-088): активной остаётся
@@ -712,7 +811,7 @@ impl TabManager {
             id
         };
 
-        self.spawn_webview(app, &id, &parsed, internal.is_some())?;
+        self.spawn_webview(app, &id, &parsed, internal.is_some(), incognito)?;
         self.apply_visibility(app);
         if !activate {
             // Создание webview может перехватить фокус — возвращаем его
@@ -726,18 +825,28 @@ impl TabManager {
 
     /// Создание webview по назначенному id вкладки (общая часть spawn_tab и
     /// materialize). Вызывать только вне потока цикла событий: add_child —
-    /// блокирующий round-trip на главный поток (см. open).
+    /// блокирующий round-trip на главный поток (см. open). Инкогнито-вкладка
+    /// (карточка duopulse-096) — отдельная среда WebView2 (data_directory во
+    /// временную папку) и старт с UI-бандла: набор content-скриптов тот же,
+    /// что у контентных вкладок — уход со страницы инкогнито на сайт работает
+    /// полноценно (блокировщик, субтитры), среда остаётся изолированной.
     fn spawn_webview(
         &self,
         app: &AppHandle,
         id: &str,
         url: &Url,
         internal: bool,
+        incognito: bool,
     ) -> Result<(), String> {
         let window = app
             .get_window("main")
             .ok_or_else(|| "окно main не найдено".to_string())?;
-        let builder = if internal {
+        let builder = if incognito {
+            build_tab_webview(app, id, WebviewUrl::App("index.html".into()))
+                // маркер для e2e/страницы инкогнито (роутер — по метке webview)
+                .initialization_script("window.__DUOPULSE_INCOGNITO__ = 1;")
+                .data_directory(incognito_data_dir())
+        } else if internal {
             build_page_webview(id)
         } else {
             build_tab_webview(app, id, WebviewUrl::External(url.clone()))
@@ -751,6 +860,15 @@ impl TabManager {
                 .add_child(builder, pos, size)
                 .map_err(|e| format!("создание webview вкладки: {e}"))?
         };
+        // Инкогнито-вкладка с адресом сайта («открыть копию в инкогнито»,
+        // ссылки из приватных вкладок): среда назначается только при создании,
+        // поэтому webview стартует с UI-бандла — сразу уводим его на адрес;
+        // внутренние страницы (duopulse://incognito) живут в самом бандле.
+        if incognito && !internal {
+            webview
+                .navigate(url.clone())
+                .map_err(|e| format!("navigate инкогнито-вкладки: {e}"))?;
+        }
 
         // COM-обработчики WebView2: сетевой перехват M0 + блокировщик (2.1),
         // аутентификация прокси, приём сообщений content (горячие клавиши) —
@@ -777,22 +895,15 @@ impl TabManager {
     /// Сохранить сессию в профиль (session.json). Сессия некритична: ошибка
     /// записи логируется, работа браузера продолжается. DUOPULSE_START_URL
     /// (e2e-стенды) — не сохранять, чтобы стенды не мутировали профили.
+    /// Инкогнито-вкладки в сессию не попадают (карточка duopulse-096):
+    /// проекция — session_projection.
     pub(crate) fn persist_session(&self) {
         if std::env::var("DUOPULSE_START_URL").is_ok() {
             return;
         }
         let (tabs, active) = {
             let st = self.state.lock().expect("tabs: лок не отравлен");
-            (
-                st.tabs
-                    .iter()
-                    .map(|t| SessionTab {
-                        url: t.url.clone(),
-                        title: t.title.clone(),
-                    })
-                    .collect::<Vec<_>>(),
-                st.active,
-            )
+            session_projection(&st.tabs, st.active)
         };
         let session = Session {
             tabs,
@@ -850,8 +961,18 @@ impl TabManager {
                 return;
             }
             entry.url = canonical.clone();
-            (canonical, entry.title.clone().unwrap_or_default())
+            // инкогнито (карточка duopulse-096): адрес вкладки актуализируется
+            // (omnibox), визит истории не пишется
+            if entry.incognito {
+                (String::new(), String::new())
+            } else {
+                (canonical, entry.title.clone().unwrap_or_default())
+            }
         };
+        if visit_url.is_empty() {
+            self.finish(app);
+            return;
+        }
         if let Err(e) = app
             .state::<crate::history::HistoryStore>()
             .visit(&visit_url, &visit_title)
@@ -881,6 +1002,7 @@ impl TabManager {
         };
         let record_visit = matches!(event, PageLoadEvent::Finished)
             && matches!(url.scheme(), "http" | "https")
+            && !entry.incognito // инкогнито: без визитов истории (duopulse-096)
             && !(entry.internal && is_app_origin(app, url));
         if entry.internal && is_app_origin(app, url) {
             entry.loading = matches!(event, PageLoadEvent::Started);
@@ -921,7 +1043,10 @@ impl TabManager {
             return;
         }
         entry.title = Some(title.clone());
-        let note = if entry.internal {
+        // инкогнито (duopulse-096): заголовок в истории не подтягивается —
+        // визитов инкогнито нет, note_title обновил бы последний визит обычной
+        // навигации по совпавшему URL
+        let note = if entry.internal || entry.incognito {
             None
         } else {
             Some(entry.url.clone())
@@ -1045,6 +1170,38 @@ pub(crate) fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Проекция вкладок для session.json (карточка duopulse-096): инкогнито-вкладки
+/// не сохраняются — ни URL, ни заголовки (приватность переживает рестарт).
+/// Активная инкогнито переносится на ближайшую обычную слева (как браузеры:
+/// закрытие приватного окна возвращает туда, откуда пришли), слева обычных
+/// нет — на первую обычную; обычных нет совсем — пустая сессия (старт с чистого
+/// листа, session::load вернёт None).
+fn session_projection(tabs: &[TabEntry], active: Option<usize>) -> (Vec<SessionTab>, Option<usize>) {
+    let normal: Vec<usize> = tabs
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| !t.incognito)
+        .map(|(i, _)| i)
+        .collect();
+    if normal.is_empty() {
+        return (Vec::new(), None);
+    }
+    let chosen = match active {
+        Some(a) if !tabs[a].incognito => a,
+        // активная инкогнито: ближайшая обычная слева, иначе первая обычная
+        Some(a) => normal.iter().copied().filter(|&i| i < a).max().unwrap_or(normal[0]),
+        None => normal[0],
+    };
+    let out = normal
+        .iter()
+        .map(|&i| SessionTab {
+            url: tabs[i].url.clone(),
+            title: tabs[i].title.clone(),
+        })
+        .collect();
+    (out, normal.iter().position(|&i| i == chosen))
+}
+
 // --- страница ошибки загрузки (карточка duopulse-048, docs/02 §6.2) -----------
 // Значения COREWEBVIEW2_WEB_ERROR_STATUS, участвующие в решениях: числа
 // стабильны в API WebView2; словарь живёт здесь, чтобы модуль не зависел от
@@ -1095,6 +1252,7 @@ fn internal_page_name(url: &Url) -> Option<&'static str> {
         "diagnostics" => Some("diagnostics"), // «Диагностика», задача 2.5
         "settings" => Some("settings"), // «Настройки», задача 5.1
         "error" => Some("error"),   // страница ошибки загрузки, карточка 048
+        "incognito" => Some("incognito"), // стартовая страница инкогнито, 096
         _ => None,
     }
 }
@@ -1241,6 +1399,60 @@ mod tests {
             Some("error"),
             "страница ошибки (карточка 048) — внутренняя"
         );
+        assert_eq!(
+            internal_page_name(&Url::parse("duopulse://incognito").unwrap()),
+            Some("incognito"),
+            "стартовая страница инкогнито (карточка 096)"
+        );
+    }
+
+    /// Черновик вкладки для тестов проекции сессии.
+    fn entry(url: &str, incognito: bool) -> TabEntry {
+        TabEntry {
+            id: String::new(),
+            url: url.into(),
+            title: None,
+            loading: false,
+            internal: false,
+            lazy: false,
+            sleeping: false,
+            media_playing: false,
+            last_active_ms: 0,
+            incognito,
+        }
+    }
+
+    /// Проекция сессии (карточка duopulse-096): инкогнито-вкладки не
+    /// сохраняются, активная инкогнито переносится на ближайшую обычную
+    /// слева (нет слева — первая обычная), все инкогнито — пустая сессия.
+    #[test]
+    fn session_projection_drops_incognito() {
+        let tabs = vec![
+            entry("https://a.example/", false),
+            entry("https://secret.example/", true),
+            entry("https://b.example/", false),
+            entry("https://c.example/", false),
+        ];
+        // активная — инкогнито: ближайшая обычная слева (a), инкогнито выпала
+        let (out, active) = session_projection(&tabs, Some(1));
+        assert_eq!(
+            out.iter().map(|t| t.url.as_str()).collect::<Vec<_>>(),
+            vec!["https://a.example/", "https://b.example/", "https://c.example/"]
+        );
+        assert_eq!(active, Some(0));
+        // активная — обычная: она и остаётся
+        let (_, active) = session_projection(&tabs, Some(2));
+        assert_eq!(active, Some(1));
+        // инкогнито левее всех обычных: активной становится первая обычная
+        let mixed = vec![entry("https://x.example/", true), entry("https://y.example/", false)];
+        let (out, active) = session_projection(&mixed, Some(0));
+        assert_eq!(out.len(), 1);
+        assert_eq!(active, Some(0));
+        // только инкогнито — пустая сессия (свежий старт после рестарта)
+        let only = vec![entry("https://x.example/", true)];
+        let (out, active) = session_projection(&only, Some(0));
+        assert!(out.is_empty());
+        assert_eq!(active, None);
     }
 
     /// Фильтр страницы ошибки (карточка 048): отмена (Esc, перебитая

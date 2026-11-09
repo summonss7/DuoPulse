@@ -209,7 +209,6 @@ fn gtx_parse_maps_lines() {
 pub(crate) mod net {
     use super::*;
     use std::collections::HashMap;
-    use std::io::Read;
     use std::sync::Mutex;
     use std::time::Instant;
 

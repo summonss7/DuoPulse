@@ -6,10 +6,12 @@ import type { TabInfo } from "../bridge";
 
 /** Недоступные пункты меню вкладки: без вкладки (пустое место бара) — все
  *  вкладочные, единственная вкладка — «Закрыть другие», активная/спящая —
- *  «Усыпить» (доступна фоновой неспящей). */
+ *  «Усыпить» (доступна фоновой неспящей). Инкогнито-пункты (карточка 096):
+ *  «Новая вкладка инкогнито» доступна всегда, «Открыть копию в инкогнито» —
+ *  вкладочная. */
 export function tabMenuDisabled(list: TabInfo[], id: string | null): string[] {
   const tab = id ? list.find((t) => t.id === id) : null;
-  if (!tab) return ["duplicate", "sleep", "close", "closeOthers"];
+  if (!tab) return ["duplicate", "openIncognito", "sleep", "close", "closeOthers"];
   const disabled: string[] = [];
   if (list.length <= 1) disabled.push("closeOthers");
   if (tab.active || tab.sleeping) disabled.push("sleep");

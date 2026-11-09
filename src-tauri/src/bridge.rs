@@ -107,14 +107,22 @@ pub struct TabInfo {
     /// Спит ли вкладка (приостановлена WebView2; задача 2.3): JS/таймеры
     /// заморожены, состояние страницы сохранено, активация будит.
     pub sleeping: bool,
+    /// Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без
+    /// истории и сессии — значок-шпион в таб-баре, подсказки истории в
+    /// omnibox скрыты.
+    pub incognito: bool,
 }
 
 /// tabs.open: открыть вкладку; без url — стартовая страница (до страницы
 /// «Новая вкладка» задачи 1.5). Новая вкладка становится активной.
+/// incognito (карточка duopulse-096) — приватная вкладка: без url стартует
+/// со страницы duopulse://incognito.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TabsOpenParams {
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(default)]
+    pub incognito: bool,
 }
 
 /// tabs.close: закрыть вкладку по id; активной становится соседняя.
@@ -1583,7 +1591,7 @@ async fn tabs_open(
     manager: tauri::State<'_, crate::tabs::TabManager>,
     params: TabsOpenParams,
 ) -> Result<TabsListResult, String> {
-    manager.open(&app, params.url, None)
+    manager.open(&app, params.url, None, params.incognito)
 }
 
 #[tauri::command]

@@ -3177,6 +3177,10 @@
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
               "loading": {
                 "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
                 "type": "boolean"
@@ -3200,6 +3204,7 @@
             "required": [
               "active",
               "id",
+              "incognito",
               "loading",
               "sleeping",
               "url"
@@ -3252,6 +3257,10 @@
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
               "loading": {
                 "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
                 "type": "boolean"
@@ -3275,6 +3284,7 @@
             "required": [
               "active",
               "id",
+              "incognito",
               "loading",
               "sleeping",
               "url"
@@ -3314,6 +3324,10 @@
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
               "loading": {
                 "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
                 "type": "boolean"
@@ -3337,6 +3351,7 @@
             "required": [
               "active",
               "id",
+              "incognito",
               "loading",
               "sleeping",
               "url"
@@ -3364,8 +3379,12 @@
       "handler": "tabs_open",
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "tabs.open: открыть вкладку; без url — стартовая страница (до страницы «Новая вкладка» задачи 1.5). Новая вкладка становится активной.",
+        "description": "tabs.open: открыть вкладку; без url — стартовая страница (до страницы «Новая вкладка» задачи 1.5). Новая вкладка становится активной. incognito (карточка duopulse-096) — приватная вкладка: без url стартует со страницы duopulse://incognito.",
         "properties": {
+          "incognito": {
+            "default": false,
+            "type": "boolean"
+          },
           "url": {
             "default": null,
             "type": [
@@ -3390,6 +3409,10 @@
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
               "loading": {
                 "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
                 "type": "boolean"
@@ -3413,6 +3436,7 @@
             "required": [
               "active",
               "id",
+              "incognito",
               "loading",
               "sleeping",
               "url"
@@ -3452,6 +3476,10 @@
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
               "loading": {
                 "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
                 "type": "boolean"
@@ -3475,6 +3503,7 @@
             "required": [
               "active",
               "id",
+              "incognito",
               "loading",
               "sleeping",
               "url"
@@ -3527,6 +3556,10 @@
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
               "loading": {
                 "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
                 "type": "boolean"
@@ -3550,6 +3583,7 @@
             "required": [
               "active",
               "id",
+              "incognito",
               "loading",
               "sleeping",
               "url"
@@ -3602,6 +3636,10 @@
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
               "loading": {
                 "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
                 "type": "boolean"
@@ -3625,6 +3663,7 @@
             "required": [
               "active",
               "id",
+              "incognito",
               "loading",
               "sleeping",
               "url"
@@ -5528,6 +5567,10 @@
                 "description": "Идентификатор webview-вкладки.",
                 "type": "string"
               },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
               "loading": {
                 "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
                 "type": "boolean"
@@ -5551,6 +5594,7 @@
             "required": [
               "active",
               "id",
+              "incognito",
               "loading",
               "sleeping",
               "url"

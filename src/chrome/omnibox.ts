@@ -67,6 +67,14 @@ type Row = {
 
 let rows: Row[] = [];
 let sel = -1;
+/** Активная вкладка — инкогнито (карточка duopulse-096): подсказки истории
+ *  и закладок скрыты (как в браузерах — приватный ввод не подсвечивает
+ *  историю профиля), остаётся строка-действие разбора ввода. */
+let incognitoMode = false;
+export function setIncognito(on: boolean): void {
+  if (incognitoMode === on) return;
+  incognitoMode = on;
+}
 /** Счётчик запросов: применяем только ответ последнего (ввод опережает ответы). */
 let seq = 0;
 let timer: number | undefined;
@@ -109,7 +117,19 @@ async function update(): Promise<void> {
   const my = ++seq;
   try {
     let next: Row[];
-    if (!q) {
+    if (incognitoMode) {
+      // инкогнито (карточка 096): никаких совпадений из профиля — только
+      // строка-действие; пустой ввод — нечего показать вовсе
+      if (!q) {
+        rows = [];
+        close();
+        render();
+        return;
+      }
+      const res = await bridge.nav.resolveOmnibox({ input: q });
+      if (my !== seq) return;
+      next = [actionRow(q, res)];
+    } else if (!q) {
       const { hits } = await bridge.history.search({ query: "", limit: 8 });
       if (my !== seq) return;
       next = hits.map(hitRow);

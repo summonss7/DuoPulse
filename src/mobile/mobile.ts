@@ -36,6 +36,9 @@ root.innerHTML = `
       <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7 8 2.5 13.5 7v6a.5.5 0 0 1-.5.5h-3.5v-4h-3v4H3a.5.5 0 0 1-.5-.5z"/></svg>
     </button>
     <span class="m-logo" aria-hidden="true">duo<b>Pulse</b></span>
+    <button id="mPrivate" class="m-private-btn" title="Инкогнито" aria-label="Инкогнито" aria-pressed="false">
+      <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>
+    </button>
     <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo">duo</button>
     <input id="mOmnibox" type="text" placeholder="Адрес или поиск" spellcheck="false"
       autocomplete="off" enterkeyhint="go" />
@@ -65,6 +68,7 @@ root.innerHTML = `
 const omnibox = root.querySelector<HTMLInputElement>("#mOmnibox")!;
 const go = root.querySelector<HTMLButtonElement>("#mGo")!;
 const home = root.querySelector<HTMLButtonElement>("#mHome")!;
+const privateBtn = root.querySelector<HTMLButtonElement>("#mPrivate")!;
 const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
 const start = root.querySelector<HTMLElement>("#mStart")!;
 const tab = root.querySelector<HTMLIFrameElement>("#mTab")!;
@@ -76,6 +80,63 @@ function note(text: string): void {
   status.textContent = text;
   status.hidden = !text;
 }
+
+// ── Инкогнито (карточка duopulse-096): история и вкладки мобильной ветки и
+// так не пишутся (шапка файла); приватный режим чистит куки/хранилища
+// системного WebView (YouTube-плеер в iframe) при входе (чистый старт) и
+// выходе (следов не остаётся). После убийства процесса в инкогнито дочистит
+// следующий запуск по флагу — сам флаг не является следом активности.
+const DIRTY_KEY = "duopulse.mobile.dirtyIncognito";
+let incognito = false;
+
+/** Дочистка после kill в инкогнито: флаг остался — чистим и снимаем. */
+try {
+  if (localStorage.getItem(DIRTY_KEY) === "1") {
+    localStorage.removeItem(DIRTY_KEY);
+    void invoke<string>("mobile_private_cleanup").catch(() => {});
+  }
+} catch {
+  /* localStorage недоступен — нечего дочищать */
+}
+
+function setIncognito(on: boolean): void {
+  incognito = on;
+  privateBtn.classList.toggle("on", on);
+  privateBtn.setAttribute("aria-pressed", String(on));
+  privateBtn.title = on
+    ? "Инкогнито включён — нажмите, чтобы выключить и удалить данные сайтов"
+    : "Инкогнито";
+  document.body.classList.toggle("m-private", on);
+  try {
+    if (on) localStorage.setItem(DIRTY_KEY, "1");
+    else localStorage.removeItem(DIRTY_KEY);
+  } catch {
+    /* приватный режим без localStorage — флаг живёт до перезапуска */
+  }
+  if (!on) {
+    // приватный плеер закрываем: страница остаётся видимой до чистки кук
+    tab.hidden = true;
+    tab.src = "about:blank";
+    start.hidden = false;
+    duoBtn.hidden = true;
+    videoOpen = false;
+    duo.close();
+    duoPanel?.remove();
+    duoPanel = null;
+    omnibox.value = "";
+  }
+  void invoke<string>("mobile_private_cleanup")
+    .then(() =>
+      note(
+        on
+          ? "Инкогнито включён: история не ведётся, куки и данные сайтов удалятся при выключении."
+          : "Инкогнито выключен: куки и данные сайтов удалены.",
+      ),
+    )
+    .catch((e) => note(`Инкогнито: очистка не удалась (${e})`));
+}
+
+privateBtn.addEventListener("click", () => setIncognito(!incognito));
 
 // ── OTA-обновления из центра Aila (этап 3, duopulse-083) ───────────────
 const updateBanner = root.querySelector<HTMLElement>("#mUpdate")!;
@@ -190,7 +251,8 @@ for (const e of MOBILE_SEARCH_ENGINES) {
 engineSel.addEventListener("change", () => {
   engine = normalizeEngine(engineSel.value);
   try {
-    localStorage.setItem(ENGINE_KEY, engine);
+    // инкогнито: выбор движка живёт в памяти до перезапуска (карточка 096)
+    if (!incognito) localStorage.setItem(ENGINE_KEY, engine);
   } catch {
     // приватный режим без localStorage — выбор живёт до перезапуска
   }

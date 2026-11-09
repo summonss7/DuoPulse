@@ -35,6 +35,12 @@ if (panelKind()) {
     void import("./pages/settings"); // задача 5.1: полные настройки + профиль
   } else if (page === "error") {
     void import("./pages/error"); // страница ошибки загрузки, карточка 048
+  } else if (page === "incognito") {
+    void import("./pages/incognito"); // стартовая страница инкогнито, 096
+  } else if ((window as { __DUOPULSE_INCOGNITO__?: number }).__DUOPULSE_INCOGNITO__ === 1) {
+    // инкогнито-вкладка с адресом сайта (карточка 096): webview стартует
+    // с UI-бандла (среда назначается только при создании) и сразу уводится
+    // на адрес (tabs/mod.rs) — вложенный хром не монтируем
   } else {
     void import("./chrome");
   }

@@ -12,6 +12,7 @@ const tab = (over: Partial<TabInfo>): TabInfo =>
     active: false,
     loading: false,
     sleeping: false,
+    incognito: false,
     ...over,
   }) as TabInfo;
 
@@ -19,6 +20,7 @@ describe("tabMenuDisabled", () => {
   it("без вкладки (пустое место бара) — вкладочные действия отключены", () => {
     expect(tabMenuDisabled([tab({ active: true })], null)).toEqual([
       "duplicate",
+      "openIncognito",
       "sleep",
       "close",
       "closeOthers",
@@ -45,5 +47,17 @@ describe("tabMenuDisabled", () => {
   it("спящая фоновая — «Усыпить» отключена", () => {
     const list = [tab({ id: "tab-1", active: true }), tab({ id: "tab-2", sleeping: true })];
     expect(tabMenuDisabled(list, "tab-2")).toEqual(["sleep"]);
+  });
+
+  it("инкогнито-вкладка — пункты инкогнито доступны (карточка 096)", () => {
+    const list = [
+      tab({ id: "tab-1", active: true }),
+      tab({ id: "tab-2", incognito: true }),
+    ];
+    // «Открыть копию в инкогнито» для самой инкогнито — доступно (дубликат)
+    expect(tabMenuDisabled(list, "tab-2")).toEqual([]);
+    // новая вкладка инкогнито доступна и без вкладочного контекста
+    expect(tabMenuDisabled(list, null)).toContain("openIncognito");
+    expect(tabMenuDisabled(list, null)).not.toContain("newIncognito");
   });
 });

@@ -968,7 +968,7 @@ pub(crate) unsafe fn install_content_handlers(
     let env: ICoreWebView2Environment = wv.environment();
     install_request_blocker(&core, &env, app, tab_id);
     install_content_messaging(&core, app, tab_id);
-    install_new_window_handler(&core, app);
+    install_new_window_handler(&core, app, tab_id);
     install_cosmetic_prewarm(&core, app, tab_id);
     install_nav_failure_watcher(&core, app, tab_id);
     install_fullscreen_watcher(&core, app, tab_id);
@@ -1028,11 +1028,12 @@ unsafe fn install_nav_failure_watcher(core: &ICoreWebView2, app: &AppHandle, tab
 /// «открыть ссылку в новом окне» не должно переключать на новое окно —
 /// активной остаётся текущая, см. tabs::open_background).
 #[cfg(windows)]
-unsafe fn install_new_window_handler(core: &ICoreWebView2, app: &AppHandle) {
+unsafe fn install_new_window_handler(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
     use webview2_com::NewWindowRequestedEventHandler;
     use windows_core::PWSTR;
 
     let app = app.clone();
+    let tab_id = tab_id.to_string();
     let res = core.add_NewWindowRequested(
         &NewWindowRequestedEventHandler::create(Box::new(move |_sender, args| {
             let Some(args) = args else {
@@ -1047,9 +1048,12 @@ unsafe fn install_new_window_handler(core: &ICoreWebView2, app: &AppHandle) {
                 return Ok(()); // чужая схема — блокировано
             }
             let app = app.clone();
+            let tab_id = tab_id.clone();
             tauri::async_runtime::spawn(async move {
                 let manager = app.state::<tabs::TabManager>();
-                if let Err(e) = manager.open_background(&app, uri.clone()) {
+                // ссылка из инкогнито-вкладки открывается инкогнито (096)
+                let incognito = manager.is_incognito(&tab_id);
+                if let Err(e) = manager.open_background(&app, uri.clone(), incognito) {
                     eprintln!("tabs: new-window не открыл {uri}: {e}");
                 }
             });
@@ -1158,6 +1162,10 @@ pub(crate) unsafe fn install_content_handlers(
 
 fn main() {
     startup_mark("main");
+    // Данные инкогнито-среды прошлого запуска (карточка duopulse-096):
+    // папка во %TEMP% могла остаться после креша/убийства процесса — чистим
+    // до создания любых webview (среда реюзает папку по имени).
+    tabs::clean_incognito_data();
     // IPC-контракт bridge (задача 1.1): все команды/события — src/bridge.rs.
     // Менеджер вкладок (задача 1.2) — состояние Core для tabs.* и nav.*.
     // История и закладки (задача 1.4) — SQLite в профиле (docs/02 §8):
@@ -1376,6 +1384,11 @@ fn main() {
                         eprintln!("[settings] очистка истории при выходе: {e}");
                     }
                 }
+                // Инкогнито (карточка duopulse-096): данные изолированной
+                // среды WebView2 (куки/кэш приватных вкладок) не должны
+                // пережить выход — добиваем best effort (занятые файлы
+                // дочистит следующий старт, чистка в main()).
+                tabs::clean_incognito_data();
             }
             if let tauri::RunEvent::Ready = event {
                 startup_mark("ready");

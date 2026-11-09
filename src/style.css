@@ -142,6 +142,22 @@ body {
   align-items: center;
   color: var(--text-muted);
 }
+/* Инкогнито-вкладка (карточка duopulse-096): тёмная подложка + фиолетовый
+   акцент кромки — приватные вкладки отличимы с одного взгляда. */
+.tab.incognito {
+  background: color-mix(in srgb, #1b1b2b 78%, var(--bg-surface));
+  color: color-mix(in srgb, var(--text-primary) 80%, #9a8fd8);
+}
+.tab.incognito.active::before {
+  background: #9a8fd8;
+  box-shadow: 0 0 8px color-mix(in srgb, #9a8fd8 60%, transparent);
+}
+.tab-incognito {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: #9a8fd8;
+}
 .tab[data-sleeping="true"]:hover:not(.active) {
   color: var(--text-primary);
 }
@@ -1594,6 +1610,72 @@ body.internal-page {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--text-sm);
+}
+
+/* --- Внутренняя страница «Режим инкогнито» (карточка duopulse-096,
+   duopulse://incognito) ---
+   Центрированная колонка на --bg-base, тёмно-фиолетовый акцент приватного
+   режима (#9a8fd8 — тот же, что кромка инкогнито-вкладок таб-бара). */
+.incg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  height: 100vh;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 32px;
+  box-sizing: border-box;
+  text-align: center;
+  color: var(--text-primary);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.incg-badge {
+  color: #9a8fd8;
+}
+.incg h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+.incg-lead {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+.incg-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+.incg-list li {
+  padding-left: 18px;
+  position: relative;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.incg-list li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.55em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9a8fd8;
+}
+.incg-note {
+  margin: 4px 0 0;
+  color: color-mix(in srgb, var(--text-muted) 75%, var(--bg-base));
+  font-size: var(--text-sm);
+  line-height: 1.5;
 }
 
 /* --- Внутренняя страница ошибки загрузки (карточка duopulse-048,

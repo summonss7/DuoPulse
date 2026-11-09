@@ -27,9 +27,16 @@ use tauri::menu::{CheckMenuItem, ContextMenu, Menu, MenuItem, PredefinedMenuItem
 use tauri::{AppHandle, Manager, Position};
 
 /// Таб-меню: подписи и акселераторы как в разметке index.html (до 086).
+/// Инкогнито-пункты — карточка duopulse-096.
 const TAB_ITEMS: &[(&str, &str, Option<&str>)] = &[
     ("newtab", "Новая вкладка", Some("Ctrl+T")),
+    (
+        "newIncognito",
+        "Новая вкладка инкогнито",
+        Some("Ctrl+Shift+N"),
+    ),
     ("duplicate", "Дублировать вкладку", None),
+    ("openIncognito", "Открыть копию в инкогнито", None),
     ("sleep", "Усыпить вкладку", None),
     ("close", "Закрыть вкладку", None),
     ("closeOthers", "Закрыть другие вкладки", None),

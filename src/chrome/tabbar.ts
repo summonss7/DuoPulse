@@ -53,12 +53,27 @@ function render(): void {
     ...tabs.map((tab) => {
       const el = document.createElement("div");
       el.className = tab.active ? "tab active" : "tab";
+      if (tab.incognito) el.classList.add("incognito");
       el.dataset.id = tab.id;
       el.dataset.loading = String(tab.loading);
       el.dataset.sleeping = String(tab.sleeping);
       el.setAttribute("role", "tab");
       el.setAttribute("aria-selected", String(tab.active));
-      el.title = tab.sleeping ? `${tab.url} — спящая вкладка (активируйте, чтобы разбудить)` : tab.url;
+      el.title = tab.sleeping
+        ? `${tab.url} — спящая вкладка (активируйте, чтобы разбудить)`
+        : tab.incognito
+          ? `${tab.url} — вкладка инкогнито (история не сохраняется)`
+          : tab.url;
+      if (tab.incognito) {
+        // инкогнито-вкладка (карточка duopulse-096): значок-шпион + тёмная
+        // подложка — приватные вкладки отличимы с одного взгляда
+        const spy = document.createElement("span");
+        spy.className = "tab-incognito";
+        spy.title = "Инкогнито";
+        spy.innerHTML =
+          '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>';
+        el.append(spy);
+      }
       if (tab.sleeping) {
         // спящая вкладка (задача 2.3): луна + приглушённый заголовок
         const moon = document.createElement("span");
@@ -166,8 +181,15 @@ function runMenuAction(act: string, id: string | null): void {
     case "newtab":
       void bridge.tabs.open({}).then(apply, err);
       break;
+    case "newIncognito":
+      void bridge.tabs.open({ incognito: true }).then(apply, err);
+      break;
     case "duplicate":
-      if (tab) void bridge.tabs.open({ url: tab.url }).then(apply, err);
+      // дубликат сохраняет приватность вкладки (карточка 096)
+      if (tab) void bridge.tabs.open({ url: tab.url, incognito: tab.incognito }).then(apply, err);
+      break;
+    case "openIncognito":
+      if (tab) void bridge.tabs.open({ url: tab.url, incognito: true }).then(apply, err);
       break;
     case "close":
       if (id) closeTab(id);
@@ -204,6 +226,10 @@ window.addEventListener(
       cycle(e.shiftKey ? -1 : 1);
     } else if (e.shiftKey && !e.repeat && (e.key === "t" || e.key === "T")) {
       void bridge.tabs.reopen().then(apply, err);
+    } else if (e.shiftKey && !e.repeat && (e.key === "n" || e.key === "N")) {
+      // инкогнито-вкладка (карточка 096): в контенте то же ловит
+      // content/chrome-hotkeys.js через Core
+      void bridge.tabs.open({ incognito: true }).then(apply, err);
     } else if (!e.shiftKey && !e.repeat && (e.key === "t" || e.key === "T")) {
       // новая вкладка (карточка duopulse-075): в контенте то же ловит
       // content/chrome-hotkeys.js через Core

@@ -35,6 +35,8 @@
         post(e.shiftKey ? "ctrl+shift+tab" : "ctrl+tab");
       } else if (e.shiftKey && !e.repeat && (e.key === "t" || e.key === "T")) {
         post("ctrl+shift+t");
+      } else if (e.shiftKey && !e.repeat && (e.key === "n" || e.key === "N")) {
+        post("ctrl+shift+n"); /* инкогнито-вкладка, карточка duopulse-096 */
       } else if (!e.shiftKey && !e.repeat && (e.key === "d" || e.key === "D")) {
         post("ctrl+d");
       } else if (!e.shiftKey && !e.repeat && (e.key === "t" || e.key === "T")) {

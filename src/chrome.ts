@@ -4,7 +4,7 @@
 // вход — src/pages/ + роутер src/main.ts; сюда не импортируются.
 import { bridge } from "./bridge";
 import { initTabBar, onTabsChanged } from "./chrome/tabbar";
-import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
+import { initOmnibox, setActiveUrl, setIncognito } from "./chrome/omnibox";
 import { initStar, setActivePage } from "./chrome/star";
 import { closePanel, currentPanel } from "./chrome/panel-window";
 import "./chrome/mainmenu";
@@ -46,6 +46,9 @@ onTabsChanged((tabs) => {
   const active = tabs.find((t) => t.active);
   setActiveUrl(active?.url ?? "");
   setActivePage(active);
+  // инкогнито-вкладка активна (карточка 096): подсказки omnibox не тянут
+  // историю/закладки профиля
+  setIncognito(Boolean(active?.incognito));
 });
 
 // Кнопки навигации (nav.* контракта действуют на активную вкладку).

@@ -1157,6 +1157,10 @@ export interface TabInfo {
    */
   id: string;
   /**
+   * Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.
+   */
+  incognito: boolean;
+  /**
    * Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).
    */
   loading: boolean;
@@ -1180,9 +1184,10 @@ export interface TabsCloseParams {
   id: string;
 }
 /**
- * tabs.open: открыть вкладку; без url — стартовая страница (до страницы «Новая вкладка» задачи 1.5). Новая вкладка становится активной.
+ * tabs.open: открыть вкладку; без url — стартовая страница (до страницы «Новая вкладка» задачи 1.5). Новая вкладка становится активной. incognito (карточка duopulse-096) — приватная вкладка: без url стартует со страницы duopulse://incognito.
  */
 export interface TabsOpenParams {
+  incognito?: boolean;
   url?: string | null;
 }
 /**

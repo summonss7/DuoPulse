@@ -51,6 +51,10 @@ menu.addEventListener("click", (e) => {
     case "newtab":
       void bridge.tabs.open({}).catch(err);
       break;
+    case "newIncognito":
+      // инкогнито-вкладка (карточка duopulse-096): без истории и сессии
+      void bridge.tabs.open({ incognito: true }).catch(err);
+      break;
     case "reopen":
       void bridge.tabs.reopen().catch(err);
       break;
