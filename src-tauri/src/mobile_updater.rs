@@ -322,86 +322,13 @@ pub fn updater_install(path: String) -> Result<String, String> {
 
 #[cfg(target_os = "android")]
 mod jni_install {
-    // JNI-вызовы установки: vm берём из ndk-context (его кладёт tao при
-    // старте, контекст — Application, global ref: не дропаем), классы app'а
-    // — через classLoader контекста: FindClass с нативно подключённого
-    // потока видит только системные классы (как find_class в tauri-runtime).
-    use jni::objects::{JClass, JObject, JString};
-    use jni::JNIEnv;
+    // JNI-примитивы (with_jni/jstr/call_obj/app_class) — общие в
+    // crate::mobile_jni (выделены в duopulse-085), здесь только логика
+    // установки APK.
+    use crate::mobile_jni::{app_class, call_obj, call_string, jstr, with_jni};
+    use jni::objects::JString;
     use std::path::Path;
 
-    /// Подключить поток к JVM и отдать env + контекст приложения в замыкание.
-    /// Перед detach гасим висящую Java-исключение: отсоединение потока с
-    /// pending exception роняет процесс (FATAL в logcat, поймано в novagrid-063).
-    fn with_jni<T>(
-        f: impl FnOnce(&mut JNIEnv, &JObject) -> Result<T, String>,
-    ) -> Result<T, String> {
-        let actx = ndk_context::android_context();
-        let vm =
-            unsafe { jni::JavaVM::from_raw(actx.vm().cast()).map_err(|e| format!("vm: {e}"))? };
-        let mut env = vm
-            .attach_current_thread()
-            .map_err(|e| format!("attach: {e}"))?;
-        let context = unsafe { JObject::from_raw(actx.context().cast()) };
-        let out = f(&mut env, &context);
-        let _ = env.exception_clear();
-        out
-    }
-
-    /// java.lang.String из строки Rust (для сигнатур вызовов).
-    fn jstr<'a>(env: &mut JNIEnv<'a>, s: &str) -> Result<JString<'a>, String> {
-        env.new_string(s).map_err(|e| e.to_string())
-    }
-
-    /// Вызов метода без аргументов, возвращающего объект.
-    fn call_obj<'a>(
-        env: &mut JNIEnv<'a>,
-        obj: &JObject,
-        name: &str,
-        sig: &str,
-    ) -> Result<JObject<'a>, String> {
-        env.call_method(obj, name, sig, &[])
-            .map_err(|e| format!("{name}: {e}"))?
-            .l()
-            .map_err(|e| format!("{name}: {e}"))
-    }
-
-    /// Строковое поле объекта (getPackageName, getAbsolutePath…).
-    fn call_string(
-        env: &mut JNIEnv,
-        obj: &JObject,
-        name: &str,
-        sig: &str,
-    ) -> Result<String, String> {
-        let s = call_obj(env, obj, name, sig)?;
-        let js = JString::from(s);
-        env.get_string(&js)
-            .map(|s| s.to_string_lossy().into_owned())
-            .map_err(|e| format!("{name}: {e}"))
-    }
-
-    /// Класс из dex приложения — через classLoader контекста.
-    fn app_class<'a>(
-        env: &mut JNIEnv<'a>,
-        context: &JObject,
-        name: &str,
-    ) -> Result<JClass<'a>, String> {
-        let loader = call_obj(env, context, "getClassLoader", "()Ljava/lang/ClassLoader;")?;
-        let jname = jstr(env, name)?;
-        let class = env
-            .call_method(
-                &loader,
-                "loadClass",
-                "(Ljava/lang/String;)Ljava/lang/Class;",
-                &[(&jname).into()],
-            )
-            .map_err(|e| format!("loadClass {name}: {e}"))?
-            .l()
-            .map_err(|e| format!("loadClass: {e}"))?;
-        Ok(JClass::from(class))
-    }
-
-    /// Запуск активности контекстом приложения (нужен FLAG_NEW_TASK).
     /// cacheDir приложения (getCacheDir контекста).
     pub fn cache_dir() -> Result<std::path::PathBuf, String> {
         with_jni(|env, context| {

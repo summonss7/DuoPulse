@@ -5,7 +5,7 @@
 //   фаза A «машина-источник»:
 //     1) settings.get_all — все разделы на месте, схема v2 (миграция свежего
 //        профиля отработала на старте);
-//     2) настройки применяются: settings.apply (поисковик google, дефолт
+//     2) настройки применяются: settings.apply (поисковик bing, дефолт Google duopulse-085,
 //        субтитров es + стиль, приватность) — nav.resolve_omnibox сквозно
 //        водит поиск в Google;
 //     3) данные: закладки + визиты истории; секреты: пароль прокси и ключ
@@ -187,23 +187,23 @@ try {
   const a = await launchApp(tmp, CDP_PORT_A);
   try {
     const all0 = await evalIn(a.ws, `window.__duopulse.settings.getAll()`);
-    check("A1 settings.get_all: все разделы, схема v2", !!all0 &&
-      all0.schemaVersion === 2 && all0.search?.engine === "youtube" &&
+    check("A1 settings.get_all: все разделы, схема v3, дефолт Google (duopulse-085)", !!all0 &&
+      all0.schemaVersion === 3 && all0.search?.engine === "google" &&
       all0.subtitles?.defaultTranslationLang === "ru" &&
       all0.privacy?.clearHistoryOnExit === false && Array.isArray(all0.engines) &&
       all0.engines.length === 4, JSON.stringify(all0?.search));
 
-    // поиск до настройки — YouTube
+    // поиск до настройки — Google (дефолт duopulse-085)
     const s0 = await evalIn(a.ws, `window.__duopulse.nav.resolveOmnibox({ input: "тест запроса" })`);
-    check("A2a omnibox до настройки: поиск в YouTube", s0?.isSearch === true &&
-      s0.url.startsWith("https://www.youtube.com/results?search_query="), s0?.url);
+    check("A2a omnibox до настройки: поиск в Google (дефолт)", s0?.isSearch === true &&
+      s0.url.startsWith("https://www.google.com/search?q="), s0?.url);
 
     // применяем настройки
-    await evalIn(a.ws, `window.__duopulse.settings.apply({ search: { engine: "google" },
+    await evalIn(a.ws, `window.__duopulse.settings.apply({ search: { engine: "bing" },
       subtitles: { defaultTranslationLang: "ES ", style: { fontScalePct: 130, position: "top",
       marginPct: 4, plateOpacity: 0.9 } }, privacy: { clearHistoryOnExit: true } })`);
     const s1 = await evalIn(a.ws, `window.__duopulse.nav.resolveOmnibox({ input: "тест запроса" })`);
-    check("A2b omnibox после apply: поиск в Google (сквозно)", s1?.url.startsWith("https://www.google.com/search?q="), s1?.url);
+    check("A2b omnibox после apply: поиск в Bing (смена движка сквозно)", s1?.url.startsWith("https://www.bing.com/search?q="), s1?.url);
     const all1 = await evalIn(a.ws, `window.__duopulse.settings.getAll()`);
     check("A2c apply нормализован: язык es, клампы стиля", all1.subtitles.defaultTranslationLang === "es" &&
       all1.subtitles.style.fontScalePct === 130 && all1.subtitles.style.position === "top" &&
@@ -276,7 +276,7 @@ try {
     const freshHist = await evalIn(b.ws, `window.__duopulse.history.list({ query: null, offset: 0, limit: 100 })`);
     const freshMarks = await evalIn(b.ws, `window.__duopulse.history.bookmarkList({ query: null, offset: 0, limit: 100 })`);
     check("B1 чистая машина: профиль пуст (дефолты, без истории/закладок)",
-      fresh.search?.engine === "youtube" && freshHist?.total === 0 && freshMarks?.total === 0,
+      fresh.search?.engine === "google" && freshHist?.total === 0 && freshMarks?.total === 0,
       `hist=${freshHist?.total}, marks=${freshMarks?.total}`);
 
     const imp = await evalIn(b.ws, `window.__duopulse.settings.import({ path: ${JSON.stringify(profilePath)} })`);
@@ -291,7 +291,7 @@ try {
     const tr = await evalIn(b.ws, `window.__duopulse.translate.getSettings()`);
     const px = await evalIn(b.ws, `window.__duopulse.settings.get({ key: "proxy" })`);
     check("B3 настройки переехали (поиск/субтитры/приватность/прокси/перевод)",
-      after.search?.engine === "google" && after.subtitles?.defaultTranslationLang === "es" &&
+      after.search?.engine === "bing" && after.subtitles?.defaultTranslationLang === "es" &&
       after.subtitles?.style?.fontScalePct === 130 && after.privacy?.clearHistoryOnExit === true &&
       px?.host === "p.example" && px?.hasPassword === true &&
       tr?.provider === "libretranslate" && tr?.hasApiKeys?.includes("libretranslate"),
@@ -303,8 +303,8 @@ try {
       `hist=${hist?.total}, marks=${marks?.total}`);
 
     const sB = await evalIn(b.ws, `window.__duopulse.nav.resolveOmnibox({ input: "ещё запрос" })`);
-    check("B5 omnibox на новой машине: поиск в Google (настройка из файла)",
-      sB?.url.startsWith("https://www.google.com/search?q="), sB?.url);
+    check("B5 omnibox на новой машине: поиск в Bing (настройка из файла)",
+      sB?.url.startsWith("https://www.bing.com/search?q="), sB?.url);
 
     // дефолты субтитров — в контентную вкладку, открытую ПОСЛЕ импорта
     await evalIn(b.ws, `window.__duopulse.tabs.open({ url: "${pageUrl}" })`);
@@ -332,8 +332,8 @@ try {
 
     // settings.json машины-приёмника: без секретов, версия схемы актуальна
     const rawSettings = fs.readFileSync(path.join(tmpB, "DuoPulse", "profile", "settings.json"), "utf8");
-    check("B8 settings.json приёмника: схема v2, секретов нет",
-      rawSettings.includes('"settingsVersion": 2') && !rawSettings.includes("p@ss-e2e") &&
+    check("B8 settings.json приёмника: схема v3, секретов нет",
+      rawSettings.includes('"settingsVersion": 3') && !rawSettings.includes("p@ss-e2e") &&
         !rawSettings.includes("lt-key-e2e"));
   } finally {
     b.ws.close();

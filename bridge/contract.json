@@ -1639,7 +1639,7 @@
                     "$ref": "#/definitions/SearchEngine"
                   }
                 ],
-                "default": "youtube"
+                "default": "google"
               }
             },
             "type": "object"
@@ -2188,7 +2188,7 @@
                     "$ref": "#/definitions/SearchEngine"
                   }
                 ],
-                "default": "youtube"
+                "default": "google"
               }
             },
             "type": "object"

@@ -25,8 +25,22 @@ const input = document.getElementById("omnibox") as HTMLInputElement;
 const panel = document.getElementById("suggest") as HTMLDivElement;
 const goBtn = document.getElementById("go") as HTMLButtonElement;
 
-/** Поисковик по умолчанию — тот же, что в Core (omnibox.rs); выбор — задача 5.1. */
-const SEARCH_ENGINE = "YouTube";
+/** Заголовок поисковика строки-действия («Поиск в …») — из настроек «Поиск»
+ *  (settings.json): по умолчанию Google, выбирается на странице настроек.
+ *  Раньше был хардкод «YouTube» и врал при смене движка (duopulse-085). */
+let searchEngineTitle = "Google";
+
+/** Обновить заголовок движка из Core (снапшот настроек). Неудача — тихо:
+ *  остаётся прежнее значение (настройки не критичны для подсказок). */
+async function refreshEngineTitle(): Promise<void> {
+  try {
+    const all = await bridge.settings.getAll();
+    searchEngineTitle =
+      all.engines.find((e) => e.id === all.search.engine)?.title ?? searchEngineTitle;
+  } catch {
+    // настройки недоступны — не трогаем
+  }
+}
 
 const ICONS = {
   search:
@@ -63,7 +77,7 @@ const err = (e: unknown): void => console.error("omnibox:", e);
 
 function actionRow(q: string, res: NavResolveOmniboxResult): Row {
   return res.isSearch
-    ? { kind: "action-search", main: q, sub: `Поиск в ${SEARCH_ENGINE}`, url: null, icon: "search" }
+    ? { kind: "action-search", main: q, sub: `Поиск в ${searchEngineTitle}`, url: null, icon: "search" }
     : { kind: "action-url", main: res.url, sub: "Перейти по адресу", url: res.url, icon: "arrow" };
 }
 
@@ -226,6 +240,8 @@ export function initOmnibox(): void {
   });
   input.addEventListener("focus", () => {
     input.select();
+    // движок могли сменить в настройках — заголовок строки-действия свежий
+    void refreshEngineTitle();
     void update();
   });
   input.addEventListener("blur", close);

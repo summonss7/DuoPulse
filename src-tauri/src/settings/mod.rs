@@ -24,7 +24,8 @@ use std::path::Path;
 
 /// Версия схемы settings.json. Несовместимое изменение раздела (переименование
 /// поля без умолчания, смена типа) — шаг миграции + bump здесь.
-pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
+/// v3 (duopulse-085): поисковик по умолчанию YouTube → Google.
+pub const SETTINGS_SCHEMA_VERSION: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // Корень файла: каноническое чтение/запись ключей
@@ -110,6 +111,21 @@ pub fn migrate(dir: &Path) -> u32 {
                 }
                 version = 2;
             }
+            // v2 → v3 (duopulse-085): поисковик по умолчанию — Google (был
+            // YouTube). Смену делает только старому дефолту: явно выбранный
+            // пользователем движок (bing/duckduckgo/youtube после v3) не
+            // трогаем — «google по умолчанию, но сменить можно в настройках».
+            2 => {
+                if root
+                    .get("search")
+                    .and_then(|s| s.get("engine"))
+                    .and_then(|e| e.as_str())
+                    == Some("youtube")
+                {
+                    root["search"]["engine"] = serde_json::json!("google");
+                }
+                version = 3;
+            }
             // Новые миграции — дописывать шаги сюда, поднимая константу выше.
             _ => unreachable!("миграция v{version} не описана"),
         }
@@ -180,8 +196,10 @@ pub struct SearchConfig {
 
 impl Default for SearchConfig {
     fn default() -> Self {
+        // duopulse-085: по умолчанию Google (прежде YouTube); выбор —
+        // настройка «Поиск» на странице настроек.
         Self {
-            engine: SearchEngine::Youtube,
+            engine: SearchEngine::Google,
         }
     }
 }
@@ -505,12 +523,12 @@ mod tests {
         let from = migrate(&dir);
         assert_eq!(from, 1);
         let root = load_root(&dir);
-        assert_eq!(root["settingsVersion"], serde_json::json!(2));
+        assert_eq!(root["settingsVersion"], serde_json::json!(3));
         assert_eq!(root["proxy"]["host"], serde_json::json!(""), "старое живо");
         for key in ["search", "subtitles", "appearance", "privacy"] {
             assert!(root.get(key).is_some(), "раздел {key} появился");
         }
-        assert_eq!(load_search(&dir).engine, SearchEngine::Youtube);
+        assert_eq!(load_search(&dir).engine, SearchEngine::Google);
         assert_eq!(
             load_subtitles(&dir).default_translation_lang,
             "ru",
@@ -531,6 +549,32 @@ mod tests {
             serde_json::json!(SETTINGS_SCHEMA_VERSION)
         );
         assert_eq!(load_search(&dir), SearchConfig::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn migrate_v2_youtube_default_flips_to_google() {
+        // duopulse-085: профиль эпохи v2 с материализованным дефолтом
+        // «youtube» — миграция переводит на новый дефолт Google…
+        let dir = tmp_dir("migrate-v2");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"settingsVersion":2,"search":{"engine":"youtube"}}"#,
+        )
+        .unwrap();
+        assert_eq!(migrate(&dir), 2);
+        assert_eq!(load_search(&dir).engine, SearchEngine::Google);
+        // идемпотентность: повторный прогон уже мигрированного — no-op
+        assert_eq!(migrate(&dir), 3);
+        assert_eq!(load_search(&dir).engine, SearchEngine::Google);
+        // …а явно выбранный движок не трогает
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"settingsVersion":2,"search":{"engine":"duckduckgo"}}"#,
+        )
+        .unwrap();
+        migrate(&dir);
+        assert_eq!(load_search(&dir).engine, SearchEngine::Duckduckgo);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

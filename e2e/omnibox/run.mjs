@@ -320,16 +320,16 @@ try {
   );
   const res4 = await evalIn(uiWs, `window.__duopulse.nav.resolveOmnibox({ input: "rust lang" })`);
   check(
-    "разбор «rust lang» (пробел) → поиск YouTube",
+    "разбор «rust lang» (пробел) → поиск Google (дефолт duopulse-085)",
     res4?.isSearch === true &&
-      res4?.url === "https://www.youtube.com/results?search_query=rust%20lang",
+      res4?.url === "https://www.google.com/search?q=rust%20lang",
     JSON.stringify(res4),
   );
   const res5 = await evalIn(uiWs, `window.__duopulse.nav.resolveOmnibox({ input: "кот && 100%" })`);
   check(
     "поисковый запрос кодируется (encodeURIComponent-семантика)",
     res5?.isSearch === true &&
-      res5?.url === "https://www.youtube.com/results?search_query=%D0%BA%D0%BE%D1%82%20%26%26%20100%25",
+      res5?.url === "https://www.google.com/search?q=%D0%BA%D0%BE%D1%82%20%26%26%20100%25",
     JSON.stringify(res5),
   );
 
@@ -361,7 +361,7 @@ try {
   });
   check(
     "ввод «rust»: дропдаун открыт, строка-действие + совпадения",
-    !!st && st.rows[0].kind === "action-search" && st.rows[0].sub === "Поиск в YouTube",
+    !!st && st.rows[0].kind === "action-search" && st.rows[0].sub === "Поиск в Google",
     st ? JSON.stringify(st.rows.slice(0, 3)) : "не дождались",
   );
   check(

@@ -6,7 +6,8 @@
 //! готовый URL: UI на Enter просто зовёт `nav.navigate`.
 //!
 //! Поисковик по умолчанию — настройка «Поиск» задачи 5.1 (settings.json,
-//! раздел "search"; словарь движков и дефолт YouTube — src/settings/mod.rs).
+//! раздел "search"; словарь движков в src/settings/mod.rs, дефолт — Google,
+//! duopulse-085).
 
 /// Разобранный ввод omnibox: готовый URL перехода + признак поиска.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,7 +153,8 @@ fn is_domain(host: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// Дефолтный движок (YouTube) — префикс из настроек задачи 5.1.
+    /// Префикс движка для тестов (YouTube; сам дефолт настроек — Google,
+    /// duopulse-085 — здесь не участвует: resolve_with принимает префикс).
     const YT: &str = "https://www.youtube.com/results?search_query=";
 
     fn url(input: &str) -> String {

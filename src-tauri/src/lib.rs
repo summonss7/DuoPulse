@@ -25,6 +25,8 @@
 // читает).
 
 pub mod duo_mobile;
+pub mod mobile_jni;
+pub mod mobile_open;
 pub mod mobile_updater;
 // Парсеры cue — мобильным таргетам (duopulse-082): parse_auto для duo_fetch_
 // cues. На десктопе либа их не компилирует: оставалась бы тонкой (cdylib
@@ -54,6 +56,7 @@ fn mobile_run() {
             mobile_updater::updater_check,
             mobile_updater::updater_download,
             mobile_updater::updater_install,
+            mobile_open::mobile_open_url,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить DuoPulse (мобильная ветка)");

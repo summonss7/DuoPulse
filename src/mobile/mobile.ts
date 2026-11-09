@@ -10,8 +10,15 @@
 // зарегистрированы (lib.rs — тонкий билдер + Duo-движок), ветка их не зовёт;
 // разбор ввода — локальный resolveMobileInput (src/mobile/platform.ts).
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import "./mobile.css";
-import { resolveMobileInput, videoIdOfEmbed } from "./platform";
+import {
+  MOBILE_SEARCH_ENGINES,
+  normalizeEngine,
+  resolveMobileInput,
+  videoIdOfEmbed,
+  type MobileEngineId,
+} from "./platform";
 import { MobileDuo, type DuoStatus } from "./duo";
 import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
 
@@ -42,9 +49,10 @@ root.innerHTML = `
       <div class="m-mark" aria-hidden="true">duo<b>Pulse</b></div>
       <p class="m-branch">мобильная ветка · субтитры и перевод</p>
       <p class="m-version" id="mVersion"></p>
-      <p class="m-hint">Введите адрес или поисковый запрос. Ссылки YouTube с видео
-        открываются встроенным плеером — кнопка «duo» включает субтитры и
-        перевод (готовые дорожки видео или Google).</p>
+      <p class="m-hint">Ссылки YouTube с видео открываются встроенным плеером —
+        кнопка «duo» включает субтитры и перевод (готовые дорожки видео или
+        Google). Прочие адреса и поиск открываются в браузере телефона.</p>
+      <label class="m-engine">Поиск: <select id="mEngine"></select></label>
       <button class="m-quick" data-url="https://www.youtube.com/watch?v=iG9CE55wbtY">Открыть пример — TED с субтитрами</button>
       <button id="mCheckUpdate" class="m-check-update">Проверить обновления</button>
     </section>
@@ -164,35 +172,66 @@ duoBtn.addEventListener("click", () => {
   })();
 });
 
-/** Загрузить адрес в единственную вкладку (iframe). */
-function navigate(input: string): void {
-  const res = resolveMobileInput(input);
-  if (!res.url) return;
-  tab.src = res.url;
-  tab.hidden = false;
-  start.hidden = true;
-  duoPanel?.remove();
-  duoPanel = null;
-  const videoId = videoIdOfEmbed(res.url);
-  videoOpen = !!videoId;
+// ── Поисковик по умолчанию (duopulse-085): Google, выбор — селектор
+// стартового экрана, хранение — localStorage (у мобильной обёртки нет
+// settings.json и команд Core — см. шапку).
+const ENGINE_KEY = "duopulse.mobile.searchEngine";
+let engine: MobileEngineId = normalizeEngine(
+  (typeof localStorage !== "undefined" && localStorage.getItem(ENGINE_KEY)) || null,
+);
+const engineSel = root.querySelector<HTMLSelectElement>("#mEngine")!;
+for (const e of MOBILE_SEARCH_ENGINES) {
+  const opt = document.createElement("option");
+  opt.value = e.id;
+  opt.textContent = e.title;
+  opt.selected = e.id === engine;
+  engineSel.append(opt);
+}
+engineSel.addEventListener("change", () => {
+  engine = normalizeEngine(engineSel.value);
+  try {
+    localStorage.setItem(ENGINE_KEY, engine);
+  } catch {
+    // приватный режим без localStorage — выбор живёт до перезапуска
+  }
+});
+
+/** Открыть адрес системным браузером (mobile.open_url → Intent ACTION_VIEW):
+ * в iframe страницы с X-Frame-Options (google.com, выдача поисковиков) не
+ * встраиваются — прежде такой ввод «ничего не открывал» (duopulse-085). */
+async function openExternal(url: string): Promise<void> {
+  try {
+    const r = await invoke<string>("mobile_open_url", { url });
+    note(r === "opened" ? `Открыл в браузере: ${url}` : r);
+  } catch (e) {
+    note(`Не удалось открыть: ${e}`);
+  }
+}
+
+/** Загрузить адрес в единственную вкладку (iframe) или системный браузер. */
+async function navigate(input: string): Promise<void> {
+  const res = resolveMobileInput(input, engine);
+  // YouTube-видео — встраиваемый /embed-плеер (единственный официальный
+  // путь в iframe); поиск и прочие адреса — системный браузер.
+  const videoId = res.kind === "url" ? videoIdOfEmbed(res.url) : null;
   if (videoId) {
+    tab.src = res.url;
+    tab.hidden = false;
+    start.hidden = true;
+    duoPanel?.remove();
+    duoPanel = null;
+    videoOpen = true;
     duoBtn.hidden = false;
     void duo.open(videoId);
     note("Плеер YouTube. Нажмите «duo» для субтитров и перевода.");
-  } else {
-    duoBtn.hidden = true;
-    duo.close();
-    if (res.kind === "search") {
-      note("Поиск YouTube. Страницы результатов не встраиваются в iframe — откройте видео, ссылку с /watch можно ввести здесь.");
-    } else {
-      note(res.url);
-    }
+    return;
   }
+  await openExternal(res.url);
 }
 
 function goFromOmnibox(): void {
   const value = omnibox.value;
-  navigate(value);
+  void navigate(value);
   omnibox.blur();
 }
 
@@ -215,7 +254,7 @@ home.addEventListener("click", () => {
 for (const b of root.querySelectorAll<HTMLButtonElement>(".m-quick")) {
   b.addEventListener("click", () => {
     omnibox.value = b.dataset.url ?? "";
-    navigate(b.dataset.url ?? "");
+    void navigate(b.dataset.url ?? "");
   });
 }
 

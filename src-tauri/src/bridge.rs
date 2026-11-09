@@ -1684,7 +1684,7 @@ fn nav_go_forward(
 
 /// nav.resolve_omnibox: разбор ввода адресной строки (URL vs поиск) —
 /// src/omnibox.rs, правила и тесты там. Задача 5.1: поисковик — настройка
-/// «Поиск» (settings.json "search"), дефолт YouTube.
+/// «Поиск» (settings.json "search"), дефолт Google (duopulse-085).
 #[tauri::command]
 fn nav_resolve_omnibox(params: NavResolveOmniboxParams) -> NavResolveOmniboxResult {
     let prefix = crate::settings::load_search(&proxy::profile_dir())

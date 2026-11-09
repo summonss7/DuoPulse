@@ -2,7 +2,14 @@
 // (window.__TAURI__ есть только у мобильной обёртки) и разбор ввода omnibox
 // (пара omnibox.rs + перезапись YouTube-ссылок во встраиваемый плеер).
 import { describe, expect, it } from "vitest";
-import { isTauriMobile, resolveMobileInput, videoIdOfEmbed, youtubeEmbedUrl } from "./platform";
+import {
+  DEFAULT_MOBILE_ENGINE,
+  isTauriMobile,
+  normalizeEngine,
+  resolveMobileInput,
+  videoIdOfEmbed,
+  youtubeEmbedUrl,
+} from "./platform";
 
 describe("isTauriMobile", () => {
   it("есть __TAURI__ — мобильная обёртка", () => {
@@ -76,16 +83,43 @@ describe("resolveMobileInput", () => {
       url: "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1",
     });
   });
-  it("текст со пробелами — поиск YouTube (кодируется)", () => {
+  it("текст со пробелами — поиск (кодируется)", () => {
+    // duopulse-085: поисковик по умолчанию — Google, выбор — движок
     expect(resolveMobileInput("duo pulse тест")).toEqual({
       kind: "search",
-      url: "https://www.youtube.com/results?search_query=duo%20pulse%20%D1%82%D0%B5%D1%81%D1%82",
+      url: "https://www.google.com/search?q=duo%20pulse%20%D1%82%D0%B5%D1%81%D1%82",
     });
   });
-  it("пустой ввод — пустой поиск", () => {
+  it("пустой ввод — стартовая страница поисковика", () => {
     expect(resolveMobileInput("   ")).toEqual({
       kind: "search",
-      url: "https://www.youtube.com/results?search_query=",
+      url: "https://www.google.com/search?q=",
     });
+  });
+  it("выбранный движок задаёт префикс поиска (duopulse-085)", () => {
+    expect(resolveMobileInput("rust lang", "youtube")).toEqual({
+      kind: "search",
+      url: "https://www.youtube.com/results?search_query=rust%20lang",
+    });
+    expect(resolveMobileInput("rust lang", "duckduckgo")).toEqual({
+      kind: "search",
+      url: "https://duckduckgo.com/?q=rust%20lang",
+    });
+    // адреса от движка не зависят
+    expect(resolveMobileInput("example.com", "bing")).toEqual({
+      kind: "url",
+      url: "https://example.com",
+    });
+  });
+});
+
+describe("поисковик мобильной ветки (duopulse-085)", () => {
+  it("по умолчанию — Google", () => {
+    expect(DEFAULT_MOBILE_ENGINE).toBe("google");
+  });
+  it("normalizeEngine: мусор/пусто — дефолт, известный id — сам id", () => {
+    expect(normalizeEngine(null)).toBe("google");
+    expect(normalizeEngine("мусор")).toBe("google");
+    expect(normalizeEngine("bing")).toBe("bing");
   });
 });

@@ -1,0 +1,9 @@
+# duopulse-085: mingw-линкер (x86_64-pc-windows-gnu) авто-экспортирует в cdylib
+# все символы — на большом дереве зависимостей ординалы переваливают за 65 535
+# и ld падает «export ordinal too large» (та же грабля, что в Cargo.toml про
+# «MinGW не строит cdylib»; всплыла на duopulse-085). Windows-артефакт либы
+# никому не нужен: десктоп — бин duopulse.exe, Android .so линкуется NDK lld,
+# где авто-экспорта нет. Глушим авто-экспорт только на этом таргете: .def
+# rustc остаётся, JNI-точки Android-сборки не затронуты (другой линкер).
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]
