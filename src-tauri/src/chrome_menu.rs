@@ -123,7 +123,8 @@ fn check<R: tauri::Runtime>(
     text: &str,
     checked: bool,
 ) -> Result<CheckMenuItem<R>, String> {
-    CheckMenuItem::with_id(app, id, text, true, checked, None::<&str>).map_err(|e| format!("пункт меню: {e}"))
+    CheckMenuItem::with_id(app, id, text, true, checked, None::<&str>)
+        .map_err(|e| format!("пункт меню: {e}"))
 }
 
 fn separator<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PredefinedMenuItem<R>, String> {
@@ -153,16 +154,37 @@ fn build_duo_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
         menu.append(it).map_err(|e| format!("меню: {e}"))
     };
 
-    let enabled = payload.get("enabled").and_then(Value::as_bool).unwrap_or(false);
-    let has_video = payload.get("hasVideo").and_then(Value::as_bool).unwrap_or(false);
+    let enabled = payload
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let has_video = payload
+        .get("hasVideo")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     append(
-        &CheckMenuItem::with_id(app, "duo:toggle", "Показ субтитров", true, enabled, Some("Alt+D"))
-            .map_err(|e| format!("пункт меню: {e}"))?,
+        &CheckMenuItem::with_id(
+            app,
+            "duo:toggle",
+            "Показ субтитров",
+            true,
+            enabled,
+            Some("Alt+D"),
+        )
+        .map_err(|e| format!("пункт меню: {e}"))?,
     )?;
 
     // --- языки текущего видео: оригинал и перевод (подменю, ✓ текущий)
-    let from: Vec<Value> = payload.get("from").and_then(Value::as_array).cloned().unwrap_or_default();
-    let to: Vec<Value> = payload.get("to").and_then(Value::as_array).cloned().unwrap_or_default();
+    let from: Vec<Value> = payload
+        .get("from")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let to: Vec<Value> = payload
+        .get("to")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     if !from.is_empty() || !to.is_empty() {
         append(&separator(app)?)?;
     }
@@ -176,13 +198,16 @@ fn build_duo_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
                 f.get("current").and_then(Value::as_bool).unwrap_or(false),
             )?);
         }
-        let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as _).collect();
+        let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            items.iter().map(|i| i as _).collect();
         append(&submenu(app, "duo-from", "Язык видео", &refs)?)?;
     }
     if !to.is_empty() {
         // «Нет» и платформенные — до разделителя, облачные — после
-        let (mut head, mut cloud): (Vec<CheckMenuItem<tauri::Wry>>, Vec<CheckMenuItem<tauri::Wry>>) =
-            (Vec::new(), Vec::new());
+        let (mut head, mut cloud): (
+            Vec<CheckMenuItem<tauri::Wry>>,
+            Vec<CheckMenuItem<tauri::Wry>>,
+        ) = (Vec::new(), Vec::new());
         for (i, t) in to.iter().enumerate() {
             let item = check(
                 app,
@@ -197,7 +222,8 @@ fn build_duo_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
             }
         }
         let sep = (!cloud.is_empty()).then(|| separator(app)).transpose()?;
-        let mut refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = head.iter().map(|i| i as _).collect();
+        let mut refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            head.iter().map(|i| i as _).collect();
         if let Some(s) = &sep {
             refs.push(s);
         }
@@ -208,69 +234,172 @@ fn build_duo_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
     }
 
     // --- перевод по умолчанию для новых видео (settings.subtitles)
-    let def_langs: Vec<Value> = payload.get("defLangs").and_then(Value::as_array).cloned().unwrap_or_default();
+    let def_langs: Vec<Value> = payload
+        .get("defLangs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     if !def_langs.is_empty() {
         let mut items: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
         let def = payload.get("defLang").and_then(Value::as_str).unwrap_or("");
         for l in &def_langs {
             let code = l.get("code").and_then(Value::as_str).unwrap_or("");
             let name = l.get("name").and_then(Value::as_str).unwrap_or(code);
-            items.push(check(app, &format!("duo:deflang:{code}"), &format!("{name} ({code})"), code == def)?);
+            items.push(check(
+                app,
+                &format!("duo:deflang:{code}"),
+                &format!("{name} ({code})"),
+                code == def,
+            )?);
         }
-        let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as _).collect();
-        append(&submenu(app, "duo-deflang", "Перевод по умолчанию (новые видео)", &refs)?)?;
+        let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            items.iter().map(|i| i as _).collect();
+        append(&submenu(
+            app,
+            "duo-deflang",
+            "Перевод по умолчанию (новые видео)",
+            &refs,
+        )?)?;
     }
 
     // --- формат плашки: позиция, размер, вид (пресеты)
     append(&separator(app)?)?;
     let style = payload.get("style").cloned().unwrap_or_default();
-    let position = style.get("position").and_then(Value::as_str).unwrap_or("bottom");
+    let position = style
+        .get("position")
+        .and_then(Value::as_str)
+        .unwrap_or("bottom");
     let mut pos_items: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
     for (pos, label) in [("bottom", "Низ"), ("top", "Верх")] {
-        pos_items.push(check(app, &format!("duo:pos:{pos}"), label, position == pos)?);
+        pos_items.push(check(
+            app,
+            &format!("duo:pos:{pos}"),
+            label,
+            position == pos,
+        )?);
     }
-    let pos_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = pos_items.iter().map(|i| i as _).collect();
+    let pos_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+        pos_items.iter().map(|i| i as _).collect();
     append(&submenu(app, "duo-pos", "Позиция плашки", &pos_refs)?)?;
 
-    let scale = style.get("fontScalePct").and_then(Value::as_i64).unwrap_or(100) as i32;
+    let scale = style
+        .get("fontScalePct")
+        .and_then(Value::as_i64)
+        .unwrap_or(100) as i32;
     let mut scale_items: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
     for pct in DUO_SCALES {
-        scale_items.push(check(app, &format!("duo:scale:{pct}"), &format!("{pct}%"), *pct == scale)?);
+        scale_items.push(check(
+            app,
+            &format!("duo:scale:{pct}"),
+            &format!("{pct}%"),
+            *pct == scale,
+        )?);
     }
-    let scale_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = scale_items.iter().map(|i| i as _).collect();
+    let scale_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+        scale_items.iter().map(|i| i as _).collect();
     append(&submenu(app, "duo-scale", "Размер плашки", &scale_refs)?)?;
 
     let look = style.get("look").and_then(Value::as_str);
     let mut look_items: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
-    for p in payload.get("lookPresets").and_then(Value::as_array).cloned().unwrap_or_default() {
+    for p in payload
+        .get("lookPresets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
         let id = p.get("id").and_then(Value::as_str).unwrap_or("");
         let label = p.get("label").and_then(Value::as_str).unwrap_or(id);
-        look_items.push(check(app, &format!("duo:look:{id}"), label, look == Some(id))?);
+        look_items.push(check(
+            app,
+            &format!("duo:look:{id}"),
+            label,
+            look == Some(id),
+        )?);
     }
-    look_items.push(check(app, "duo:look:custom", "Свои (точные — на странице настроек)", look.is_none())?);
-    let look_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = look_items.iter().map(|i| i as _).collect();
+    look_items.push(check(
+        app,
+        "duo:look:custom",
+        "Свои (точные — на странице настроек)",
+        look.is_none(),
+    )?);
+    let look_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+        look_items.iter().map(|i| i as _).collect();
     append(&submenu(app, "duo-look", "Вид плашки", &look_refs)?)?;
 
     // --- синхронизация: шаг слайдера панели 100 мс, здесь по 0,5 с
     let mut off_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
-    for (delta, label) in [(-500, "Раньше на 0,5 с"), (0, "Сброс (0 с)"), (500, "Позже на 0,5 с")] {
+    for (delta, label) in [
+        (-500, "Раньше на 0,5 с"),
+        (0, "Сброс (0 с)"),
+        (500, "Позже на 0,5 с"),
+    ] {
         off_items.push(
-            MenuItem::with_id(app, &format!("duo:offset:{delta}"), label, true, None::<&str>)
-                .map_err(|e| format!("пункт меню: {e}"))?,
+            MenuItem::with_id(
+                app,
+                &format!("duo:offset:{delta}"),
+                label,
+                true,
+                None::<&str>,
+            )
+            .map_err(|e| format!("пункт меню: {e}"))?,
         );
     }
-    let off_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = off_items.iter().map(|i| i as _).collect();
-    append(&submenu(app, "duo-offset", "Синхронизация (сдвиг субтитров)", &off_refs)?)?;
+    let off_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+        off_items.iter().map(|i| i as _).collect();
+    append(&submenu(
+        app,
+        "duo-offset",
+        "Синхронизация (сдвиг субтитров)",
+        &off_refs,
+    )?)?;
 
     // --- свои субтитры / ASR / полный вход в настройки
     append(&separator(app)?)?;
-    append(&MenuItem::with_id(app, "duo:file", "Свои субтитры… (.srt / .vtt)", has_video, None::<&str>).map_err(|e| format!("пункт меню: {e}"))?)?;
-    append(&MenuItem::with_id(app, "duo:asr", "Распознать речь (ASR)…", has_video, None::<&str>).map_err(|e| format!("пункт меню: {e}"))?)?;
+    append(
+        &MenuItem::with_id(
+            app,
+            "duo:file",
+            "Свои субтитры… (.srt / .vtt)",
+            has_video,
+            None::<&str>,
+        )
+        .map_err(|e| format!("пункт меню: {e}"))?,
+    )?;
+    append(
+        &MenuItem::with_id(
+            app,
+            "duo:asr",
+            "Распознать речь (ASR)…",
+            has_video,
+            None::<&str>,
+        )
+        .map_err(|e| format!("пункт меню: {e}"))?,
+    )?;
     append(&separator(app)?)?;
-    append(&MenuItem::with_id(app, "duo:settings", "Все настройки субтитров…", true, None::<&str>).map_err(|e| format!("пункт меню: {e}"))?)?;
+    // Полная панель duo (карточка 090): все контролы набора/стиля — в popup-окне
+    // над webview; пункт из 087 остаётся быстрым входом.
+    append(
+        &MenuItem::with_id(
+            app,
+            "duo:panel",
+            "Полная панель субтитров…",
+            true,
+            None::<&str>,
+        )
+        .map_err(|e| format!("пункт меню: {e}"))?,
+    )?;
+    append(
+        &MenuItem::with_id(
+            app,
+            "duo:settings",
+            "Все настройки субтитров…",
+            true,
+            None::<&str>,
+        )
+        .map_err(|e| format!("пункт меню: {e}"))?,
+    )?;
     Ok(menu)
 }
-
 
 /// Показать popup-меню у точки (x/y — клиентские логические координаты
 /// UI-webview). Модально: команда ждёт закрытия в отдельном потоке.
@@ -336,6 +465,7 @@ pub fn emit_action(app: &AppHandle, id: &str) {
             }),
             "file" => serde_json::json!({ "menu": "duo", "act": "file" }),
             "asr" => serde_json::json!({ "menu": "duo", "act": "asr" }),
+            "panel" => serde_json::json!({ "menu": "duo", "act": "panel" }),
             "settings" => serde_json::json!({ "menu": "duo", "act": "settings" }),
             _ => return,
         }

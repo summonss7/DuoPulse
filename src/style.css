@@ -2603,3 +2603,35 @@ input[type="range"] {
 .set-rule > .link:hover {
   color: var(--accent-neon);
 }
+
+/* ---- Панельный режим UI-бандла (карточка duopulse-090) --------------------
+   Панели хрома — child-webview «chrome-panel» в окне main: index.html?panel=
+   <kind>, хром скрыт, панель — весь контент окна. Окно НЕ ресайзится после
+   создания (ловушка спайка 086: ресайз гасит презентацию child-webview) —
+   размер задаётся при открытии, изменившийся контент скроллится внутри.
+   Фон окна — фон панели (края за скруглением не белеют). */
+html[data-panel] body {
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+html[data-panel] #app {
+  display: block;
+}
+html[data-panel] #tabbar,
+html[data-panel] #navbar {
+  display: none;
+}
+html[data-panel] #app > div {
+  position: static;
+}
+html[data-panel] .vpn-panel,
+html[data-panel] .duo-panel,
+html[data-panel] .suggest {
+  max-height: 100vh;
+  overflow-y: auto;
+}
+html[data-panel] #suggest {
+  /* в хроме ширину/позицию задаёт omnibox (inline); в окне — на всю ширину */
+  width: 100% !important;
+  left: auto !important;
+}

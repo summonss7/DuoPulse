@@ -45,6 +45,12 @@ import type {
   TranslationLangInfo,
 } from "../bridge/gen/types";
 import { onOverlayMenuAction, openOverlayMenu } from "../chrome/overlay-menu";
+import {
+  anchorPanel,
+  closePanel as closePanelWindow,
+  openPanel,
+  panelKind,
+} from "../chrome/panel-window";
 import { presetSets, normalizeTrackId } from "./presets";
 import {
   fromChange,
@@ -433,23 +439,22 @@ async function openMenu(): Promise<void> {
   openOverlayMenu("duo", r.left, r.bottom + 6, menuPayload);
 }
 
-function openPanel(): void {
-  closeOtherPanels();
-  panel.style.left = `${btn.offsetLeft}px`;
+/** Полная панель — popup-окно над webview (duopulse-090): все контролы
+ *  набора/стиля; вход — пункт нативного меню и событие e2e «duo:open-panel». */
+function openDuoPanelWindow(): void {
+  const g = anchorPanel("duo", btn, "left");
+  openPanel("duo", g.x, g.y, g.w, g.h);
+}
+
+/** Показ в панельном окне (panel-boot): контент + свежий снапшот. */
+export function openDuoPanelContent(): void {
   panel.hidden = false;
   void refresh();
 }
 
 function closePanel(): void {
   panel.hidden = true;
-}
-
-/** Прочие всплывающие панели хрома — открытие одного закрывает остальные. */
-function closeOtherPanels(): void {
-  for (const id of ["mainMenu", "proxyMenu", "vpnPanel"]) {
-    const node = document.getElementById(id);
-    if (node) node.hidden = true;
-  }
+  if (panelKind()) closePanelWindow();
 }
 
 // --- инициализация ----------------------------------------------------------
@@ -470,7 +475,8 @@ const runLangAction = (a: LangAction): void => {
 };
 
 /** «Свои субтитры…» — нативный выбор файла → subtitles.load_file (панель и
- * пункт нативного меню 087). */
+ * пункт нативного меню 087). В панельном окне диалог модален для панели
+ * (duopulse-090): фокус уйдёт ему, потеря фокуса панелью — не закрытие. */
 const pickSubtitlesFile = (): void => {
   void (async () => {
     try {
@@ -512,6 +518,11 @@ const runMenuAction = (a: Record<string, unknown>): void => {
   const act = String(a.act ?? "");
   if (act === "toggle") {
     void bridge.subtitles.setEnabled({ on: !state.enabled }).catch(err);
+    return;
+  }
+  if (act === "panel") {
+    // Полная панель — popup-окном (duopulse-090): все контролы набора/стиля
+    openDuoPanelWindow();
     return;
   }
   if (act === "from" && menuPayload) {
@@ -581,9 +592,9 @@ export function initDuo(): void {
     if (a.menu === "duo") runMenuAction(a);
   });
 
-  // HTML-панель (087): пользовательского входа нет — над webview её не видно
-  // (спайк 086); открытие событием для e2e-стендов, вернуть панель — 090.
-  window.addEventListener("duo:open-panel", () => openPanel());
+  // Полная панель (duopulse-090) — popup-окном над webview: пользовательский
+  // вход — пункт нативного меню; событие «duo:open-panel» — e2e-стенды.
+  window.addEventListener("duo:open-panel", () => openDuoPanelWindow());
 
   // закрытие кликом мимо / Escape — как у прочих панелей хрома
   window.addEventListener(

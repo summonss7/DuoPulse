@@ -1,8 +1,9 @@
 {
   "identifier": "default",
-  "description": "UI-окно (адресная строка) имеет доступ к командам приложения; дочерний webview content (удалённые сайты) — нет. dialog:default — нативный выбор файла субтитров (панель, задача 3.7).",
+  "description": "UI-окно (адресная строка) имеет доступ к командам приложения; дочерний webview content (удалённые сайты) — нет. dialog:default — нативный выбор файла субтитров (панель, задача 3.7). duopulse-090: окну панелей хрома «chrome-panel» (popup над webview) — тот же набор, что хрому: команды bridge, события, диалоги импорта (.conf/.srt).",
   "windows": [
-    "main"
+    "main",
+    "chrome-panel"
   ],
   "permissions": [
     "core:default",

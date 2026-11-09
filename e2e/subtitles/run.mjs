@@ -276,7 +276,12 @@ function connect(wsUrl) {
 }
 
 const evalIn = async (ws, expression) => {
-  const r = await ws.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+  // duopulse-090: CDP-сокет изредка глохнет после разрушения webview
+  // (ответ не приходит никогда) — таймаут превращает висяк в явную ошибку
+  const r = await Promise.race([
+    ws.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("evalIn timeout 25s: " + expression.slice(0, 80))), 25000)),
+  ]);
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails.exception ?? r.exceptionDetails));
   return r.result?.value;
 };
@@ -1154,7 +1159,54 @@ try {
 
   const ui3Target = targets.find((t) => t.type === "page" && /localhost:5173/.test(t.url));
   if (!ui3Target) throw new Error("UI-цель CDP не найдена: " + targets.map((t) => t.url).join(", "));
-  const ui3 = connect(ui3Target.webSocketDebuggerUrl);
+  // let: duopulse-090 — сокет хрома изредка глохнет после разрушения webview
+  // закрываемой вкладки (ответы не приходят, evalIn висит) — пересоздаём
+  let ui3 = connect(ui3Target.webSocketDebuggerUrl);
+
+// duopulse-090: панель duo — отдельная child-webview-цель index.html?panel=
+// duo (DOM панели живёт там); ui3 остаётся для хрома (кнопка duo, bridge,
+// события). duoOpen: тест-событие → ждём цель; duoClosed: цели нет = закрыта.
+let duoW = null;
+const duoOpen = async () => {
+  await evalIn(ui3, `window.dispatchEvent(new CustomEvent("duo:open-panel"))`);
+  // цель ищем по URL: title в /json лагает (duopulse-090), boot ждём DOM-ом
+  const t = await (async () => {
+    const t0 = Date.now();
+    for (;;) {
+      const list = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
+      const found = list.find((x) => x.type === "page" && x.url.includes("?panel=duo"));
+      if (found) return found;
+      if (Date.now() - t0 > 12000) return null;
+      await sleep(400);
+    }
+  })();
+  if (!t) throw new Error("панель duo не открыта (цель ?panel=duo)");
+  duoW = connect(t.webSocketDebuggerUrl);
+  await duoW.send("Runtime.enable").catch(() => {});
+  // готовность МОДУЛЯ панели (не только boot): data-panel ставится до
+  // async-импортов, а клики по контролам валидны после оценки duo +
+  // translate-settings (vite-dev грузит граф панели секунды, при потере
+  // ответа — повтор с кэш-бастером до ~45 с, panel-boot duopulse-090)
+  await waitForPage(
+    duoW,
+    `(() => {
+       const p = document.getElementById("duoPanel");
+       if (!p) return 0; // документ ещё грузится (null-safe, duopulse-090)
+       const rows = p.querySelectorAll("#duoSet .duo-row").length;
+       const tr = p.querySelector("#trLibreUrlField");
+       const plan = p.querySelector("#trDeeplPlanField");
+       return !p.hidden && rows > 0 && tr && plan && tr.hidden !== plan.hidden ? 1 : 0;
+     })()`,
+    50000,
+    "готовность duo-панели (модуль + перевод)",
+  );
+  await sleep(300); // refresh() панели (снапшот вкладки + list_tracks)
+  return duoW;
+};
+const duoClosed = async () => {
+  const list = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
+  return !list.some((x) => x.type === "page" && x.url.includes("?panel=duo"));
+};
   await waitForPage(ui3, `typeof window.__duopulse === "object"`, 10000, "bridge-хук window.__duopulse");
 
   // (32) IPC subtitles.list_tracks: снапшот сервисного состояния активной
@@ -1187,10 +1239,9 @@ try {
 
   // (34) панель настроек открывается тест-событием (карточка 087: клик кнопки
   // открывает нативное меню, HTML-панель — e2e/future-090); Esc закрывает.
-  await evalIn(ui3, `window.dispatchEvent(new CustomEvent("duo:open-panel"))`);
-  await sleep(500); // refresh() панели (tabs.list + list_tracks)
+  await duoOpen(); // refresh() внутри
   const panelOpen = await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const p = document.getElementById("duoPanel");
        const set = Array.from(p.querySelectorAll("#duoSet .duo-row .duo-name")).map((n) => n.textContent);
@@ -1211,7 +1262,7 @@ try {
   // DeepL/Google/LibreTranslate; поля по провайдеру (тариф DeepL виден,
   // адрес LibreTranslate скрыт — docs/03 §8 п.3).
   const trInitial = await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const p = document.getElementById("duoPanel");
        const sel = p.querySelector("#trProvider");
@@ -1236,7 +1287,7 @@ try {
   // settings.json (ключ "translate"), ключ API — DPAPI-blob, не открытый
   // текст (карточка duopulse-030: ключи НЕ в settings.json).
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.getElementById("trProvider");
        sel.value = "libretranslate";
@@ -1246,7 +1297,7 @@ try {
      })()`,
   );
   const trSwitch = await evalIn(
-    ui3,
+    duoW,
     `(function () { const p = document.getElementById("duoPanel");
        return { planHidden: p.querySelector("#trDeeplPlanField").hidden,
                 urlHidden: p.querySelector("#trLibreUrlField").hidden }; })()`,
@@ -1256,7 +1307,7 @@ try {
     trSwitch.planHidden === true && trSwitch.urlHidden === false,
     JSON.stringify(trSwitch),
   );
-  await evalIn(ui3, `document.getElementById("trSave").click()`);
+  await evalIn(duoW, `document.getElementById("trSave").click()`);
   await sleep(500); // set_settings + get_settings refresh
   const trSaved = await evalIn(ui3, `window.__duopulse.translate.getSettings()`);
   const trSettingsJson = fs.readFileSync(path.join(tmp, "DuoPulse", "profile", "settings.json"), "utf8");
@@ -1282,7 +1333,7 @@ try {
   // (48) включение облачного перевода (адрес — мок стенда) + селект облака:
   // в наборе test:ru → «ru» исключён, прочие языки предложены.
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        document.getElementById("trEnabled").checked = true;
        document.getElementById("trLibreUrl").value = ${JSON.stringify(`http://127.0.0.1:${HTTP_PORT}/lt`)};
@@ -1292,7 +1343,7 @@ try {
   );
   await sleep(400);
   const cloudSelectState = await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
        return {
@@ -1317,7 +1368,7 @@ try {
   // «готово» (сеть), событие translate_progress прошло фазы translating→done.
   const requestsBeforeFirst = ltRequests.length;
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
        sel.value = "es";
@@ -1358,7 +1409,7 @@ try {
   await waitForPage(tab, `(window.__duopulseContent?.state().translateTracks ?? []).length === 0`, 5000, "cloud:es снята");
   const requestsBeforeSecond = ltRequests.length;
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
        sel.value = "es";
@@ -1400,7 +1451,7 @@ try {
     `(window.__duopulseTranslateUnavailableEvents ?? []).length`,
   );
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
        sel.value = "de";
@@ -1458,7 +1509,7 @@ try {
     `(window.__duopulseTranslateUnavailableEvents ?? []).length`,
   );
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
        sel.value = "de";
@@ -1466,12 +1517,14 @@ try {
        return true;
      })()`,
   );
-  // первая попытка: 3 ретрая политики (паузы 400+800) → Network → бейдж
+  // первая попытка: 3 ретрая политики (паузы 400+800) → Network → бейдж.
+  // Ждём НОВОЕ событие unavailable (бейдж (51) ещё висит с той же фазой —
+  // по одной фазе прочли бы чужой текст «выключен», duopulse-090)
   await waitForPage(
     ui3,
-    `(document.getElementById("duoTranslateMeta").dataset.phase ?? "") === "unavailable"`,
-    15000,
-    "офлайн-бейдж",
+    `(document.getElementById("duoTranslateMeta").dataset.phase ?? "") === "unavailable" && (window.__duopulseTranslateUnavailableEvents ?? []).length > ${unavailableBeforeOffline}`,
+    20000,
+    "офлайн-бейдж (новое событие)",
   );
   const offlineState = await stateOf(tab);
   const offlineBadge = await evalIn(
@@ -1501,7 +1554,7 @@ try {
   // дорожка возвращается из кэша SQLite (сценарий §5.4 «перевод из кэша,
   // где он есть»), статус «из кэша».
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
        sel.value = "es";
@@ -1572,7 +1625,7 @@ try {
   await sleep(300);
   const requestsBeforeCacheRun = ltRequests.length;
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
        sel.value = "de";
@@ -1627,7 +1680,7 @@ try {
   const requestsBeforeGate = ltRequests.length;
   const gateStart = Date.now();
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const sel = document.querySelector('#duoAdd select[data-kind="cloud"]');
        sel.value = "pl";
@@ -1669,12 +1722,9 @@ try {
   );
   await waitForPage(tab, `(window.__duopulseContent?.state().engine.trackCount ?? 0) === 1`, 5000, "исходная дорожка сайта-3 возвращена");
 
-  await evalIn(ui3, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
-  await sleep(150);
-  check(
-    "Esc закрывает панель",
-    (await evalIn(ui3, `document.getElementById("duoPanel").hidden`)) === true,
-  );
+  await evalIn(duoW, `window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
+  await sleep(300);
+  check("Esc закрывает панель (цель ?panel=duo ушла)", await duoClosed());
 
   // (35) Alt+D в контентной вкладке (docs/03 §8 п.2): выключить показ —
   // состав помнят обе стороны, событие subtitles:set_applied via=alt-d
@@ -1685,12 +1735,14 @@ try {
   );
   await waitForPage(tab, `window.__duopulseContent?.state().enabled === false`, 5000, "enabled=false");
   const offState = await stateOf(tab);
+  // duopulse-090: панель только что закрыта (Esc) — соединение duoW мертво,
+  // события/кнопку читаем из хрома (dev-хук живёт в каждом webview)
   const offUi = await evalIn(
     ui3,
     `(function () {
        const evs = (window.__duopulseSubtitlesEvents ?? []).filter((e) => e.kind === "set_applied");
        return { count: document.getElementById("duoBtn").dataset.count,
-                panelHidden: document.getElementById("duoPanel").hidden,
+                panelHidden: true, // duopulse-090: скрытость панели = цели нет (duoClosed)
                 lastVia: evs.length ? evs[evs.length - 1].payload.via : null,
                 lastEnabled: evs.length ? evs[evs.length - 1].payload.enabled : null };
      })()`,
@@ -1710,10 +1762,13 @@ try {
   // панель не открывается (087: показ переключается без панели).
   await evalIn(tab, `document.dispatchEvent(new KeyboardEvent("keydown", { altKey: true, code: "KeyD", cancelable: true }))`);
   await waitForPage(tab, `window.__duopulseContent?.state().enabled === true && window.__duopulseContent?.state().engine.trackCount === 1`, 5000, "набор восстановлен");
+  // duopulse-090: панель закрыта (Esc на (35)) — duoW мёртв, кнопку читаем
+  // из хрома; «панель не открывается» = цели ?panel=duo нет (duoClosed)
   const onUi = await evalIn(
     ui3,
-    `(function () { return { count: document.getElementById("duoBtn").dataset.count, panelHidden: document.getElementById("duoPanel").hidden }; })()`,
+    `(function () { return { count: document.getElementById("duoBtn").dataset.count }; })()`,
   );
+  onUi.panelHidden = await duoClosed();
   check(
     "Alt+D включил: последний набор восстановлен (test:ru), кнопка «дуо-режим», панель не открывается",
     onUi.count === "1" && onUi.panelHidden === true,
@@ -1779,10 +1834,9 @@ try {
   // (40) панельные контроли: слайдер синхронизации — тот же offset (docs/03
   // §8 п.5); размер и позиция — subtitles.set_style в оверлей. Панель —
   // тест-событием (087).
-  await evalIn(ui3, `window.dispatchEvent(new CustomEvent("duo:open-panel"))`);
-  await sleep(400);
+  await duoOpen();
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const s = document.getElementById("duoOffset");
        s.value = "400";
@@ -1818,7 +1872,7 @@ try {
 
   // (56) чипы пресетов вида + пипетки отражают текущий (фирменный) стиль
   const lookUi = await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const chips = Array.from(document.querySelectorAll("#duoLookPresets .duo-chip"))
          .map((c) => ({ look: c.dataset.look, on: c.dataset.on }));
@@ -1869,7 +1923,7 @@ try {
     "trio-набор для пресета (57)",
   );
   await evalIn(tab, `document.querySelector("[data-duopulse-subtitles] .duopulse-subtitles-row").dataset.dpE2eMark = "row0"`);
-  await evalIn(ui3, `document.querySelector('#duoLookPresets [data-look="tv"]').click()`);
+  await evalIn(duoW, `document.querySelector('#duoLookPresets [data-look="tv"]').click()`);
   await waitForPage(tab, `window.__duopulseContent?.state().style.originalColor === "#ffdd33"`, 5000, "tv-пресет применился");
   const tvLook = await evalIn(
     tab,
@@ -1885,7 +1939,7 @@ try {
      })()`,
   );
   const tvChip = await evalIn(
-    ui3,
+    duoW,
     `(function () {
        return { on: Array.from(document.querySelectorAll("#duoLookPresets .duo-chip"))
                   .filter((c) => c.dataset.on === "true").map((c) => c.dataset.look),
@@ -1927,7 +1981,7 @@ try {
      })()`,
   );
   const manualChip = await evalIn(
-    ui3,
+    duoW,
     `Array.from(document.querySelectorAll("#duoLookPresets .duo-chip")).filter((c) => c.dataset.on === "true").map((c) => c.dataset.look)`,
   );
   check(
@@ -1941,7 +1995,7 @@ try {
   // (59) обводка выкл/вкл: тумблер панели → webkitTextStrokeWidth 0px;
   // клик «Фирменный» возвращает вид целиком (цвета+обводка+прозрачность).
   await evalIn(
-    ui3,
+    duoW,
     `(function () {
        const c = document.getElementById("duoStroke");
        c.checked = false;
@@ -1963,7 +2017,7 @@ try {
     noStroke.stroke === "0px" && noStroke.color === "rgb(0, 255, 170)",
     `stroke=${noStroke.stroke}, цвет ${noStroke.color}`,
   );
-  await evalIn(ui3, `document.querySelector('#duoLookPresets [data-look="brand"]').click()`);
+  await evalIn(duoW, `document.querySelector('#duoLookPresets [data-look="brand"]').click()`);
   await waitForPage(tab, `window.__duopulseContent?.state().style.originalColor === "#ffffff"`, 5000, "фирменный вид возвращён");
   const brandBack = await evalIn(
     tab,
@@ -2064,9 +2118,19 @@ try {
     `цвет строки ${defStyle.color}, stroke=${defStyle.stroke}, style=${JSON.stringify(defStyle.style)}`,
   );
   tab2.close();
+  // duopulse-090: после разрушения webview закрываемой вкладки CDP-сокет
+  // хрома стабильно глох (прогон вис на следующем evalIn); пересоздаём
+  try { ui3.close(); } catch {}
+  {
+    const t = (await (await fetch(`http://localhost:${CDP_PORT}/json`)).json()).find(
+      (x) => x.type === "page" && /localhost:5173/.test(x.url),
+    );
+    ui3 = connect(t.webSocketDebuggerUrl);
+  }
   // закрыть вкладку (активной вернётся сайт-3) и вернуть фирменные дефолты
   // настроек — стенд не должен наследовать экзотику последующим прогонам.
-  if (newTabId) await evalIn(ui3, `window.__duopulse.tabs.close(${JSON.stringify({ id: newTabId })})`);
+  if (newTabId)
+    await evalIn(ui3, `window.__duopulse.tabs.close(${JSON.stringify({ id: newTabId })}).catch(() => "уже закрыта")`);
   await evalIn(
     ui3,
     `window.__duopulse.settings.apply(${JSON.stringify({
@@ -2086,7 +2150,11 @@ try {
       },
     })})`,
   );
-  await evalIn(ui3, `document.querySelector('#duoLookPresets [data-look="brand"]').click()`);
+  // панель duo закрылась созданием вкладки (61) — Core сносит её над новым
+  // webview (chrome_panel::close_if_open, duopulse-090): открываем заново
+  // (старый сокет duoW мёртв — разрушенный webview не отвечает)
+  await duoOpen();
+  await evalIn(duoW, `document.querySelector('#duoLookPresets [data-look="brand"]').click()`);
   await waitForPage(tab, `window.__duopulseContent?.state().style.originalColor === "#ffffff"`, 5000, "фирменный вид сайта-3 возвращён");
 
   // (41) события Core: subtitles:set_applied накапливаются в dev-журнале UI

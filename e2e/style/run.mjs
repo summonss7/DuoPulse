@@ -152,11 +152,46 @@ const evalIn = async (ws, expression) => {
 };
 
 const shot = async (ws, file) => {
-  await evalIn(ws, `document.fonts.ready.then(() => true)`);
-  const s = await ws.send("Page.captureScreenshot", { format: "png" });
-  fs.writeFileSync(path.join(import.meta.dirname, file), Buffer.from(s.data, "base64"));
+  // первый кадр child-webview лагает (duopulse-090): даём презентации
+  // предъявить контент и шрифты, пустой (менее 2,5 КБ) снимок повторяем
+  await evalIn(ws, `document.fonts.ready.then(() => true)`).catch(() => {});
+  for (let i = 0; i < 4; i++) {
+    await sleep(600);
+    const s = await ws.send("Page.captureScreenshot", { format: "png" });
+    const buf = Buffer.from(s.data, "base64");
+    if (buf.length > 2500 || i === 3) {
+      fs.writeFileSync(path.join(import.meta.dirname, file), buf);
+      return;
+    }
+  }
 };
 
+/** Панель хрома (duopulse-090) — child-webview-цель index.html?panel=<kind>:
+ *  открытие — клик кнопки в UI-webview, DOM панели живёт в СВОЕЙ цели. */
+const panelWs = async (kind, timeout = 12000) => {
+  // цель ищем по URL: title в /json лагает (PANEL-BOOTED появляется с
+  // задержкой >12 с — ложные «панель не открылась», duopulse-090); boot
+  // подтверждаем DOM-проверкой (data-panel ставит panel-boot до данных)
+  const t = await waitFor(
+    () => listTargets().then((l) =>
+      l.find((x) => x.type === "page" && x.url.includes(`?panel=${kind}`))),
+    timeout,
+  );
+  if (!t) return null;
+  const ws = connect(t.webSocketDebuggerUrl, (m) => {
+    if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") {
+      console_.push(`[${kind}] ` + m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
+    }
+  });
+  sockets.push(ws);
+  await ws.send("Runtime.enable").catch(() => {});
+  // готовность = ХОСТ ПОКАЗАН: data-panel ставит bootPanel до async-импортов,
+  // а клики по контролам валидны только после оценки модуля панели (vite dev
+  // трансформирует граф панели секунды — duopulse-090)
+  const host = { main: "mainMenu", proxy: "proxyMenu", suggest: "suggest" }[kind];
+  await waitFor(() => evalIn(ws, `(() => { const el = document.getElementById("${host}"); return el && !el.hidden ? 1 : 0; })()`), 12000);
+  return ws;
+};
 let failures = 0;
 const console_ = [];
 const sockets = [];
@@ -173,6 +208,10 @@ try {
   });
   sockets.push(ui);
   await ui.send("Runtime.enable").catch(() => {});
+  /** Закрыть панель хрома (idempotentно) + blur omnibox (duopulse-090). */
+  const closePanelsNow = async () => {
+    await evalIn(ui, `(async () => { try { await window.__TAURI_INTERNALS__.invoke("ui_panel_close"); } catch {} document.getElementById('omnibox').blur(); return true; })()`).catch(() => {});
+  };
 
   await waitFor(() => evalIn(ui, `typeof window.__duopulse === "object" ? 1 : 0`), 15000);
   await waitFor(() => evalIn(ui, `document.querySelectorAll('.tab').length`), 15000);
@@ -356,9 +395,12 @@ try {
 
   // --- (6) главное меню: пункты открывают заявленное ---------------------------
   await evalIn(ui, `document.getElementById('mainBtn').click()`);
-  const menuOpen = await evalIn(ui, `!document.getElementById('mainMenu').hidden`);
-  await shot(ui, "main-menu.png");
-  await evalIn(ui, `document.querySelector('#mainMenu button[data-act="history"]').click()`);
+  const mainPanel = await panelWs("main");
+  const menuOpen = !!mainPanel && (await evalIn(mainPanel, `!document.getElementById('mainMenu').hidden`));
+  check("главное меню: панель-окно с меню", menuOpen);
+  if (mainPanel) await shot(mainPanel, "main-menu.png");
+  // выбор пункта — кликом в панельной цели (закроет панель, откроет вкладку)
+  if (mainPanel) await evalIn(mainPanel, `document.querySelector('#mainMenu button[data-act="history"]').click()`);
   const histOpened = await waitFor(async () => {
     const res = await evalIn(ui, `window.__duopulse.tabs.list()`);
     return res?.tabs?.find((t) => t.active)?.url?.startsWith("duopulse://history") ?? false;
@@ -379,20 +421,14 @@ try {
 
   // --- (7) меню прокси ----------------------------------------------------------
   await evalIn(ui, `document.getElementById('proxyBtn').click()`);
-  await waitFor(() => evalIn(ui, `!document.getElementById('proxyMenu').hidden`));
-  await shot(ui, "proxy-menu.png");
+  const proxyPanel = await panelWs("proxy");
+  check("меню прокси: панель-окно открыто", !!proxyPanel);
+  if (proxyPanel) await shot(proxyPanel, "proxy-menu.png");
 
   // --- (8) скриншоты: хром, подсказки omnibox, контекст-меню вкладки -----------
   // (подсказки закрываем явно: программный blur при позднем ответе FTS может
   // не закрыть дропдаун — снимки хрома должны быть без случайных панелей)
-  const closePanels = `(() => {
-     document.getElementById('proxyMenu').hidden = true;
-     document.getElementById('mainMenu').hidden = true;
-     document.getElementById('suggest').hidden = true;
-     document.getElementById('omnibox').blur();
-     return true;
-   })()`;
-  await evalIn(ui, closePanels);
+  await closePanelsNow();
   await evalIn(
     ui,
     `(() => {
@@ -402,14 +438,17 @@ try {
        return true;
      })()`,
   );
-  await waitFor(() => evalIn(ui, `!document.getElementById('suggest').hidden && document.querySelectorAll('.suggest-item').length > 0`));
-  await shot(ui, "omnibox-suggest.png");
+  const suggestPanel = await panelWs("suggest");
+  const sugItems = suggestPanel
+    ? await waitFor(() => evalIn(suggestPanel, `document.querySelectorAll('.suggest-item').length > 0 ? 1 : null`), 8000)
+    : null;
+  check("подсказки omnibox: панель-окно со строками", !!sugItems);
+  if (suggestPanel) await shot(suggestPanel, "omnibox-suggest.png");
 
-  await evalIn(ui, closePanels);
-  await evalIn(ui, `document.getElementById('suggest').hidden`);
+  await closePanelsNow();
   // контекст-меню вкладки (карточка duopulse-086) — нативный popup muda
   // поверх webview: DOM-меню больше нет, CDP-снимок не делаем
-  await evalIn(ui, closePanels);
+  await closePanelsNow();
   await shot(ui, "chrome.png");
 
   // стартовая newtab-вкладка (index 0) ещё жива — снимем и её кадр

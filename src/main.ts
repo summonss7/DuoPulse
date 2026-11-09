@@ -14,8 +14,14 @@ import "./bridge/dev-probe";
 // признак — window.__TAURI__ (см. src/mobile/platform.ts); хром и внутренние
 // страницы десктопа на телефоне не живут — своя ветка UI.
 import { isTauriMobile } from "./mobile/platform";
+import { panelKind } from "./chrome/panel-window";
 
-if (isTauriMobile()) {
+// Панельный режим (duopulse-090): popup-окно панели хрома грузит этот же
+// бандл с ?panel=<kind> — хром не инициализируется, показывается только
+// панель (логика — теми же модулями, panel-boot.ts).
+if (panelKind()) {
+  void import("./panel-boot").then((m) => m.bootPanel(panelKind()!));
+} else if (isTauriMobile()) {
   void import("./mobile/mobile");
 } else {
   const page = getCurrentWebview().label.match(/^page-([a-z]+)-\d+$/)?.[1];

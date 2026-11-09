@@ -5,8 +5,11 @@
 // хранятся в Rust (settings.json + пароль в DPAPI). Применение — мгновенное:
 // WebView2 постоянно направлен на локальный SOCKS5-роутер Core, режим
 // переключает роутер, перезапуск не нужен (docs/02 §6.1, карточка duopulse-037).
+// Карточка duopulse-090: форма живёт в popup-окне над webview (panel-window.ts)
+// — инпуты/селект доступны на любой вкладке; открытие — кнопка навбара.
 import { bridge } from "./bridge";
 import type { ProxyConfig, ProxySettings, VpnStatusResult } from "./bridge";
+import { anchorPanel, closePanel, currentPanel, openPanel, panelKind } from "./chrome/panel-window";
 
 const IP_ECHO_URL = "https://api.ipify.org/";
 
@@ -96,37 +99,28 @@ async function save(secret: string | null): Promise<boolean> {
 
 // --- события меню -----------------------------------------------------------
 
-btn.addEventListener("click", async (e) => {
+btn.addEventListener("click", (e) => {
   e.stopPropagation();
-  const open = menu.hidden;
-  if (open) {
-    // прочие панели хрома закрываются (единое «одно меню на экран», mainmenu.ts)
-    const mainMenu = document.getElementById("mainMenu") as HTMLElement | null;
-    const duoPanel = document.getElementById("duoPanel") as HTMLElement | null;
-    const vpnPanel = document.getElementById("vpnPanel") as HTMLElement | null;
-    if (mainMenu) mainMenu.hidden = true;
-    if (duoPanel) duoPanel.hidden = true;
-    if (vpnPanel) vpnPanel.hidden = true;
+  // тумблер: открыто — закрыть; новое окно сносит старую панель (Core)
+  if (currentPanel() === "proxy") {
+    closePanel();
+    return;
   }
-  menu.hidden = !open;
-  if (!menu.hidden) {
-    showError(null);
-    try {
-      await refresh();
-    } catch (e) {
-      showError(String(e));
-    }
-    await refreshStatus().catch(() => {});
-  }
+  const g = anchorPanel("proxy", btn, "right");
+  openPanel("proxy", g.x, g.y, g.w, g.h);
 });
 
-document.addEventListener("click", (e) => {
-  if (!menu.hidden && !menu.contains(e.target as Node)) menu.hidden = true;
-});
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !menu.hidden) menu.hidden = true;
-});
+/** Открытие в панельном окне (panel-boot): показать форму, снапшот + статус. */
+export async function openProxyPanel(): Promise<void> {
+  menu.hidden = false;
+  showError(null);
+  try {
+    await refresh();
+  } catch (e) {
+    showError(String(e));
+  }
+  await refreshStatus().catch(() => {});
+}
 
 // Тумблер — быстрое вкл/выкл (vpn.set_enabled: сохранённый конфиг + новый флаг),
 // форма при этом не сохраняется — только кнопкой «Сохранить» (settings.set).
@@ -166,4 +160,5 @@ passClearEl.addEventListener("click", async (e) => {
 $("proxyIpEcho").addEventListener("click", () => {
   void bridge.nav.navigate({ url: IP_ECHO_URL }).catch(console.error);
   menu.hidden = true;
+  if (panelKind()) closePanel();
 });

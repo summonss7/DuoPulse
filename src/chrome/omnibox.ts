@@ -1,6 +1,6 @@
 // DuoPulse — адресная строка omnibox (задача 1.3, docs/05 §1 src/chrome/Omnibox).
 // Разбор ввода «URL (догадка схемы) или поиск» делает Core (nav.resolve_omnibox,
-// src-tauri/src/omnibox.rs) — UI показывает подсказки и зовёт nav.navigate.
+// src-tauri/src/omnibox.rs) — UI показывает подсказки и зовет nav.navigate.
 //
 // Дропдаун подсказок: строка-действие (что сделает Enter: поиск в YouTube или
 // переход по разобранному адресу) + совпадения истории/закладок из
@@ -10,8 +10,16 @@
 // на фокус адресной строки). Данные — SQLite-хранилище Core (задача 1.4:
 // визиты из on_page_load вкладок; SPA-переходы — карточка duopulse-057 —
 // тоже пишут визиты; закладки).
+//
+// Карточка duopulse-090: дропдаун живёт в popup-ОКНЕ над webview
+// («chrome-panel», панельный режим ?panel=suggest — без фокуса, набор
+// остаётся в omnibox): хром-страница перекрывала HTML-дропдаун (спайк 086).
+// Данные идут событием «suggest-data» (строки + выделение), клик по строке
+// возвращается «suggest-pick» до потери фокуса (mousedown, не click).
+import { emit, listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { HistoryHit, NavResolveOmniboxResult } from "../bridge";
+import { anchorPanel, closePanel, openPanel } from "./panel-window";
 
 const input = document.getElementById("omnibox") as HTMLInputElement;
 const panel = document.getElementById("suggest") as HTMLDivElement;
@@ -48,6 +56,8 @@ let sel = -1;
 /** Счётчик запросов: применяем только ответ последнего (ввод опережает ответы). */
 let seq = 0;
 let timer: number | undefined;
+/** Открыто ли окно подсказок (повторные списки шлём данными, не пересоздавая). */
+let suggestWin = false;
 
 const err = (e: unknown): void => console.error("omnibox:", e);
 
@@ -127,21 +137,38 @@ function render(): void {
   panel.replaceChildren(...rows.map(rowEl));
 }
 
-/** Открыть дропдаун, выровняв по текущей геометрии адресной строки. */
+/** Открыть дропдаун: popup-ОКНО под адресной строкой (duopulse-090), без
+ *  фокуса — набор остаётся в omnibox; DOM-дропдаун в хроме не показывается
+ *  (перекрыт страницей). Дальнейшие списки — данными (sendSuggestData). */
 function open(): void {
-  panel.style.left = `${input.offsetLeft}px`;
-  panel.style.width = `${input.offsetWidth}px`;
-  panel.hidden = false;
+  // высота под текущий список (окно не ресайзится — ловушка child-webview,
+  // duopulse-090); смена списка при том же вводе скроллится внутри
+  const h = Math.min(rows.length, 9) * 36 + 14;
+  const g = anchorPanel("suggest", input, "left", h);
+  openPanel("suggest", g.x, g.y, g.w, g.h);
+  suggestWin = true;
+  // первый список панель запросит сама по «suggest-ready» (её boot ещё идёт —
+  // событие, отправленное сейчас, потерялось бы без слушателя)
   input.setAttribute("aria-expanded", "true");
+}
+
+/** Список строк + выделение → окну подсказок (панельный режим omnibox). */
+function sendSuggestData(): void {
+  void emit("suggest-data", { rows, sel }).catch(err);
 }
 
 function close(): void {
   panel.hidden = true;
   sel = -1;
+  if (suggestWin) {
+    suggestWin = false;
+    closePanel();
+  }
   input.setAttribute("aria-expanded", "false");
 }
 
-/** Подсветить строку (data-sel) без перерисовки списка. */
+/** Подсветить строку: локальный DOM мёртв (дропдаун — отдельное окно,
+ *  duopulse-090) — выделение уходит данными в панельный режим. */
 function highlight(): void {
   for (const [i, el] of [...panel.children].entries()) {
     const on = i === sel;
@@ -149,12 +176,13 @@ function highlight(): void {
     el.setAttribute("aria-selected", String(on));
   }
   (panel.children[sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+  sendSuggestData();
 }
 
 /** ↑/↓: выделение соседней строки по кольцу (из «нет выделения» ↓ — первая, ↑ — последняя). */
 function moveSel(step: number): void {
   if (!rows.length) return;
-  if (panel.hidden) open();
+  if (!suggestWin) open();
   if (sel === -1) sel = step > 0 ? 0 : rows.length - 1;
   else sel = (sel + step + rows.length) % rows.length;
   highlight();
@@ -231,5 +259,44 @@ export function initOmnibox(): void {
     if (row) void goRow(row);
   });
 
+  // Выбор из ОКНА подсказок (duopulse-090): панельный режим шлёт индекс на
+  // mousedown (фокус уходит нашему окну — omnibox теряет его в тот же миг);
+  // применяем той же goRow, что и Enter с выделением.
+  void listen<{ index: number }>("suggest-pick", (ev) => {
+    const row = rows[ev.payload.index];
+    if (row) void goRow(row);
+  });
+
+  // Окно подсказок загрузилось и подписалось — отдать текущий список (без
+  // этого первый список терялся бы в гонке boot панели против update())
+  void listen("suggest-ready", () => {
+    if (suggestWin && rows.length) sendSuggestData();
+  });
+
   goBtn.addEventListener("click", () => void goInput());
+}
+
+/** Панельный режим ?panel=suggest (duopulse-090): окно дропдауна — только
+ *  рендер строк («suggest-data», выделение приходит тем же событием) и
+ *  возврат выбора («suggest-pick», mousedown — до потери фокуса omnibox). */
+export function bootSuggestPanel(): void {
+  panel.hidden = false;
+  panel.style.left = "0px";
+  panel.style.width = "100%";
+  void listen<{ rows: Row[]; sel: number }>("suggest-data", (ev) => {
+    rows = ev.payload.rows;
+    sel = ev.payload.sel;
+    render();
+  });
+  panel.addEventListener("mousedown", (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>(".suggest-item");
+    const i = el ? [...panel.children].indexOf(el) : -1;
+    if (i >= 0 && rows[i]) {
+      e.preventDefault();
+      void emit("suggest-pick", { index: i }).catch(err);
+      closePanel();
+    }
+  });
+  // слушатели на месте — хром шлёт первый список (гонка boot против update)
+  void emit("suggest-ready", {}).catch(err);
 }

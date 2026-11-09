@@ -37,6 +37,7 @@ mod adblock;
 mod asr;
 mod bridge;
 mod chrome_menu;
+mod chrome_panel;
 mod history;
 mod omnibox;
 mod perf;
@@ -85,6 +86,10 @@ pub(crate) const CONTENT_INIT_SCRIPT_SUBTITLES: &str =
 /// вшит в медиапоток — фильтры его не снимают; кнопка — ручная эскалация
 /// (seek в конец секции → перезагрузка с &t=, «лотерея SSAI» из карточки 072).
 pub(crate) const CONTENT_INIT_SCRIPT_AD_SKIP: &str = include_str!("../../content/ad-skip.js");
+/// Закрытие панелей хрома кликом по контенту (карточка duopulse-090): панель —
+/// child-webview, клик «мимо» уходит в документ вкладки; репорт сюда.
+pub(crate) const CONTENT_INIT_SCRIPT_PANEL_CLOSE: &str =
+    include_str!("../../content/panel-close.js");
 
 /// Аргументы окружения WebView2, зафиксированные на старте приложения:
 /// каждая новая вкладка наследует их (сменить можно только перезапуском).
@@ -567,7 +572,10 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
             let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&msg) else {
                 return Ok(());
             };
-            if parsed["duopulse"] == "hotkey" {
+            if parsed["duopulse"] == "close-panel" {
+                // клик по контенту страницы: выпадающая панель хрома — мимо
+                chrome_panel::on_content_close_message(&app);
+            } else if parsed["duopulse"] == "hotkey" {
                 if let Some(key) = parsed["key"].as_str() {
                     app.state::<tabs::TabManager>().handle_hotkey(&app, key);
                 }
@@ -1328,9 +1336,15 @@ fn main() {
 
             // Все вкладки растягиваются при изменении размера окна (в т.ч.
             // скрытые — чтобы активация не показала старую геометрию).
+            // Сдвиг/ресайз main закрывает панель-окно хрома (duopulse-090):
+            // якорь панели у кнопки устаревает.
             window.on_window_event(move |event| {
                 if let WindowEvent::Resized(_) = event {
+                    chrome_panel::close_on_main_geometry_change(&app);
                     app.state::<tabs::TabManager>().relayout(&app);
+                }
+                if let WindowEvent::Moved(_) = event {
+                    chrome_panel::close_on_main_geometry_change(&app);
                 }
             });
 

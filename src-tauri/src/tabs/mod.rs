@@ -742,6 +742,9 @@ impl TabManager {
         } else {
             build_tab_webview(app, id, WebviewUrl::External(url.clone()))
         };
+        // Новый webview встанет выше панели по композитору (порядок создания,
+        // спайк 086) — панель закрываем заранее (duopulse-090).
+        crate::chrome_panel::close_if_open(app);
         let webview = {
             let (pos, size) = content_rect(&window);
             window
@@ -1145,6 +1148,8 @@ fn build_tab_webview(app: &AppHandle, id: &str, start: WebviewUrl) -> WebviewBui
         // Кнопка «Пропустить рекламу» (карточка duopulse-076): активна только
         // на watch-страницах YouTube (host-проверка внутри скрипта).
         .initialization_script(crate::CONTENT_INIT_SCRIPT_AD_SKIP)
+        // Закрытие панелей хрома кликом (duopulse-090): репорт из документа.
+        .initialization_script(crate::CONTENT_INIT_SCRIPT_PANEL_CLOSE)
         // Аргументы те же, что у UI-webview: окружение WebView2 создаётся
         // первым webview, но дублируем для устойчивости к порядку создания.
         .additional_browser_args(crate::startup_proxy_args())

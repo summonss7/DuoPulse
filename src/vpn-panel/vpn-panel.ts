@@ -6,9 +6,12 @@
 // для хоста активной вкладки. Дисклеймер: DuoPulse — только VPN-клиент,
 // серверы пользователя или его провайдера (docs/01 F-12). Индикатор-щит —
 // сигнальные цвета гайда 06 §2, неон — только акценты.
+// Карточка duopulse-090: панель живёт в popup-окне над webview
+// (panel-window.ts) — тумблеры/инпуты/split-правила доступны на любой вкладке.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
+import { anchorPanel, closePanel, currentPanel, openPanel, panelKind } from "../chrome/panel-window";
 import type {
   VpnProfileInfo,
   VpnRulesResult,
@@ -282,9 +285,8 @@ enabledEl.addEventListener("change", async () => {
 
 importEl.addEventListener("click", () => {
   void (async () => {
-    let path: string | null = null;
     try {
-      path = await invoke<string | null>("plugin:dialog|open", {
+      const path = await invoke<string | null>("plugin:dialog|open", {
         options: {
           title: "Профиль WireGuard (.conf)",
           multiple: false,
@@ -395,6 +397,7 @@ $("vpnSiteTunnel").addEventListener("click", () => {
 
 $("vpnSettingsLink").addEventListener("click", () => {
   panel.hidden = true;
+  if (panelKind()) closePanel();
   void bridge.tabs.open({ url: "duopulse://settings" }).catch(err);
 });
 
@@ -438,27 +441,21 @@ void listen<{ domain: string; route: string }>(bridge.events.vpnRouteChanged, (e
   if (!panel.hidden) renderRoutes();
 });
 
-// --- открытие/закрытие (единое «одно меню на экран», mainmenu.ts) -------------
+// --- открытие/закрытие (popup-окно, duopulse-090) -----------------------------
 
 btn.addEventListener("click", (e) => {
   e.stopPropagation();
-  const open = panel.hidden;
-  if (open) {
-    for (const id of ["mainMenu", "proxyMenu", "duoPanel"]) {
-      const node = document.getElementById(id);
-      if (node) node.hidden = true;
-    }
+  // тумблер: открыто — закрыть; новое окно сносит старую панель (Core)
+  if (currentPanel() === "vpn") {
+    closePanel();
+    return;
   }
-  panel.hidden = !open;
-  if (!panel.hidden) void refreshAll().catch((e2) => flashDetail(String(e2)));
+  const g = anchorPanel("vpn", btn, "right");
+  openPanel("vpn", g.x, g.y, g.w, g.h);
 });
 
-document.addEventListener("click", (e) => {
-  if (!panel.hidden && !(e.target as HTMLElement).closest("#vpnPanel, #vpnBtn")) {
-    panel.hidden = true;
-  }
-});
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !panel.hidden) panel.hidden = true;
-});
+/** Открытие в панельном окне (panel-boot): показать панель, полный снапшот. */
+export function openVpnPanel(): void {
+  panel.hidden = false;
+  void refreshAll().catch((e) => flashDetail(String(e)));
+}

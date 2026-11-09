@@ -6,11 +6,28 @@ import { bridge } from "./bridge";
 import { initTabBar, onTabsChanged } from "./chrome/tabbar";
 import { initOmnibox, setActiveUrl } from "./chrome/omnibox";
 import { initStar, setActivePage } from "./chrome/star";
+import { closePanel, currentPanel } from "./chrome/panel-window";
 import "./chrome/mainmenu";
 import "./proxy-menu";
 import "./vpn-panel/vpn-panel";
 import { initDuo } from "./subtitles-panel/duo";
 import { initTranslateSettings } from "./subtitles-panel/translate-settings";
+
+// Клик по хрому вне якорной кнопки закрывает панель-окно (duopulse-090):
+// клики по странице ловит Core (потеря фокуса панелью), клики по хрому — тут.
+// Клик по omnibox не закрывает подсказки — ввод продолжается (focus → update).
+window.addEventListener(
+  "mousedown",
+  (e) => {
+    const kind = currentPanel();
+    if (!kind) return;
+    const t = e.target as HTMLElement;
+    if (kind === "suggest" && t.closest("#omnibox, #go, #suggest")) return;
+    if (t.closest("#mainBtn, #proxyBtn, #vpnBtn, #duoBtn")) return; // тумблеры
+    closePanel();
+  },
+  true,
+);
 
 // Таб-бар (задача 1.2): рендер вкладок, хоткеи, контекст-меню.
 initTabBar();

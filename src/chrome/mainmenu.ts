@@ -4,14 +4,16 @@
 // Задача 2.1: секция блокировщика — тумблер (adblock.set_enabled), живой
 // счётчик (событие adblock:blocked_count), «Отключить на этом сайте»
 // (white-list активной вкладки) и «Обновить списки» (adblock.update_lists).
-// Стиль — единый с контекст-меню вкладки (панель 12px, elevated, гайд 06 §5);
-// открытие закрывает прочие панели хрома (меню вкладки/прокси).
 // Карточка duopulse-067: точка на «⋮» о найденном обновлении (событие
 // updater:check_done; логика — update-badge.ts).
+// Карточка duopulse-090: панель открывается в popup-окне над webview
+// (panel-window.ts; хром-страница под панелью перекрывала её — спайк 086);
+// открытие закрывает прочие панели (одно окно на экран — Core).
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { AdblockBlockedCount, AdblockStatusResult, UpdaterCheckResult } from "../bridge/gen/types";
 import { updateBadgeState, updateBadgeTitle } from "./update-badge";
+import { anchorPanel, closePanel, currentPanel, openPanel, panelKind } from "./panel-window";
 
 const err = (e: unknown): void => console.error("mainmenu:", e);
 const btn = document.getElementById("mainBtn") as HTMLButtonElement;
@@ -22,39 +24,29 @@ const adblockMeta = document.getElementById("adblockMeta") as HTMLDivElement;
 const adblockSiteBtn = document.getElementById("adblockSite") as HTMLButtonElement;
 const adblockUpdateBtn = document.getElementById("adblockUpdate") as HTMLButtonElement;
 
-/** Прочие всплывающие панели хрома (открытие одного закрывает остальные). */
-function closeOtherPanels(): void {
-  (document.getElementById("proxyMenu") as HTMLElement).hidden = true;
-  (document.getElementById("duoPanel") as HTMLElement).hidden = true;
-  (document.getElementById("vpnPanel") as HTMLElement).hidden = true;
-}
-
 btn.addEventListener("click", (e) => {
   e.stopPropagation();
-  const open = menu.hidden;
-  if (open) {
-    closeOtherPanels();
-    void refreshAdblock().catch(err);
+  // тумблер: открыто — закрыть, иначе — popup-окно (старое Core снесет сам)
+  if (currentPanel() === "main") {
+    closePanel();
+    return;
   }
-  menu.hidden = !open;
+  const g = anchorPanel("main", btn, "right");
+  openPanel("main", g.x, g.y, g.w, g.h);
 });
 
-// закрытие кликом мимо / Escape — как у меню вкладки (tabbar.ts)
-window.addEventListener(
-  "mousedown",
-  (e) => {
-    if (!menu.hidden && !(e.target as HTMLElement).closest("#mainMenu, #mainBtn")) menu.hidden = true;
-  },
-  true
-);
-window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !menu.hidden) menu.hidden = true;
-});
+/** Открытие в панельном окне (panel-boot): показать панель и освежить блокировщик. */
+export function openMainMenuPanel(): void {
+  menu.hidden = false;
+  void refreshAdblock().catch(err);
+}
 
 menu.addEventListener("click", (e) => {
   const item = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-act]");
   if (!item) return;
   menu.hidden = true;
+  // выбор пункта закрывает панель-окно (в хроме панель и так не видна)
+  if (panelKind()) closePanel();
   switch (item.dataset.act) {
     case "newtab":
       void bridge.tabs.open({}).catch(err);

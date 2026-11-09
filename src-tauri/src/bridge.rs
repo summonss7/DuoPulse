@@ -3243,6 +3243,8 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         updater_check,
         updater_install,
         app_restart,
-        crate::chrome_menu::ui_menu_open
+        crate::chrome_menu::ui_menu_open,
+        crate::chrome_panel::ui_panel_open,
+        crate::chrome_panel::ui_panel_close
     ])
 }

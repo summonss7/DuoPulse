@@ -216,6 +216,33 @@ try {
   });
   await uiWs.send("Runtime.enable").catch(() => {});
 
+  // Дропдаун подсказок (duopulse-090) — child-webview-цель index.html?panel=
+  // suggest: DOM списка живёт там; цель пересоздаётся на каждый ввод-сеанс.
+  const sugPanelWs = async (timeout = 8000) => {
+    const t = await waitFor(async () => {
+      const list = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
+      // title в /json лагает — цель ищем по URL, boot подтвердит DOM ниже
+      return list.find(
+        (x) => x.type === "page" && x.url.includes("?panel=suggest"),
+      ) ?? null;
+    }, timeout);
+    if (!t) return null;
+    const ws = connect(t.webSocketDebuggerUrl, (m) => {
+      if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") {
+        uiConsole.push("[suggest] " + m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
+      }
+    });
+    await ws.send("Runtime.enable").catch(() => {});
+    // boot панели мог ещё не оцениться (цель появляется раньше DOM-модуля)
+    await waitFor(() => evalIn(ws, `document.documentElement.dataset.panel === "suggest" ? 1 : 0`), 4000).catch(() => {});
+    return ws;
+  };
+  /** Состояние дропдауна: панель живёт своей целью (нет — закрыт). */
+  const suggestOpen = async () => {
+    const w = await sugPanelWs(3000);
+    return w ? await suggestState(w) : { open: false, rows: [] };
+  };
+
   // dev-хук bridge (src/bridge/dev-probe.ts) — ждём готовности
   const probe = await waitFor(
     () => evalIn(uiWs, `typeof window.__duopulse === "object" ? "ready" : ""`),
@@ -329,7 +356,7 @@ try {
   // --- (3) UI-дропдаун: строка-действие + FTS-совпадения -----------------------
   await setInput(uiWs, "rust");
   let st = await waitFor(async () => {
-    const s = await suggestState(uiWs);
+    const s = await suggestOpen();
     return s?.open && s.rows.length >= 2 ? s : null;
   });
   check(
@@ -344,20 +371,21 @@ try {
   );
 
   // скриншот открытого дропдауна (сверка стиля с гайдом 06)
-  const shot = await uiWs.send("Page.captureScreenshot", { format: "png" });
+  const sugShotWs = await sugPanelWs();
+  const shot = await sugShotWs.send("Page.captureScreenshot", { format: "png" });
   fs.writeFileSync(path.join(import.meta.dirname, "suggest.png"), Buffer.from(shot.data, "base64"));
 
   // --- (4) стрелки: выделение двигается ----------------------------------------
   await pressKey(uiWs, "ArrowDown"); // выделение на строку-действие
   await pressKey(uiWs, "ArrowDown"); // …на первую подсказку
-  st = await suggestState(uiWs);
+  st = await suggestOpen();
   check(
     "↑↓ двигают выделение (2×↓ → первая подсказка)",
     st.rows.filter((r) => r.sel).length === 1 && st.rows[1].sel === true,
     JSON.stringify(st.rows.map((r) => r.sel)),
   );
   await pressKey(uiWs, "ArrowUp");
-  st = await suggestState(uiWs);
+  st = await suggestOpen();
   check(
     "↑ возвращает выделение на строку-действие",
     st.rows[0].sel === true && st.rows.filter((r) => r.sel).length === 1,
@@ -367,7 +395,7 @@ try {
   // --- (5) Enter без выделения: тип «URL» → переход по адресу (лок. стенд) ----
   await setInput(uiWs, `127.0.0.1:${HTTP_PORT}/typed`);
   st = await waitFor(async () => {
-    const s = await suggestState(uiWs);
+    const s = await suggestOpen();
     return s?.open && s.rows[0]?.kind === "action-url" ? s : null;
   });
   check(
@@ -386,7 +414,7 @@ try {
   // --- (6) клик по подсказке истории → переход по её адресу --------------------
   await setInput(uiWs, "github");
   const clickRow = await waitFor(async () => {
-    const s = await suggestState(uiWs);
+    const s = await suggestOpen();
     return s?.open && s.rows.some((r) => r.url?.includes("github.com/rust-lang")) ? s : null;
   });
   check(
@@ -394,7 +422,10 @@ try {
     !!clickRow,
     clickRow ? JSON.stringify(clickRow.rows.map((r) => r.url)) : "не дождались",
   );
-  await evalIn(uiWs, `document.querySelector('.suggest-item[data-url*="github.com/rust-lang"]').click()`);
+  {
+    const w = await sugPanelWs();
+    await evalIn(w, `document.querySelector('.suggest-item[data-url*="github.com/rust-lang"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))`);
+  }
   const urlAfterClick = await waitTabSite(uiWs, "https://github.com/rust-lang/rust");
   check(
     "клик по подсказке: вкладка пошла по её адресу",
@@ -409,12 +440,12 @@ try {
   await waitTabUrl(uiWs, `http://127.0.0.1:${HTTP_PORT}/enter`, 10000);
   await setInput(uiWs, "википедия");
   const selRows = await waitFor(async () => {
-    const s = await suggestState(uiWs);
+    const s = await suggestOpen();
     return s?.open && s.rows.length >= 2 ? s : null;
   });
   await pressKey(uiWs, "ArrowDown");
   await pressKey(uiWs, "ArrowDown"); // выделена первая FTS-подсказка
-  st = await suggestState(uiWs);
+  st = await suggestOpen();
   const selected = st.rows.find((r) => r.sel);
   await pressKey(uiWs, "Enter");
   const urlAfterSel = selected ? await waitTabSite(uiWs, selected.url) : null;
@@ -427,7 +458,7 @@ try {
   // --- (8) Esc: дропдаун закрыт, фокус возвращён странице ---------------------
   await setInput(uiWs, "rust");
   await waitFor(async () => {
-    const s = await suggestState(uiWs);
+    const s = await suggestOpen();
     return s?.open;
   });
   await pressKey(uiWs, "Escape");
@@ -443,9 +474,11 @@ try {
 
   // --- (9) пустой ввод — только закладки ---------------------------------------
   await setInput(uiWs, "");
+  // ждём ЦЕЛЕВОЕ состояние: панель живёт отдельным окном, и до прихода
+  // свежего suggest-data в ней виден СТАРЫЙ список (с строкой-действием)
   st = await waitFor(async () => {
-    const s = await suggestState(uiWs);
-    return s?.open && s.rows.length > 0 ? s : null;
+    const s = await suggestOpen();
+    return s?.open && s.rows.length > 0 && s.rows.every((r) => r.kind === "bookmark") ? s : null;
   });
   check(
     "пустой ввод: дропдаун — закладки без строки-действия",
