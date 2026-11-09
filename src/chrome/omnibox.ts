@@ -72,6 +72,15 @@ let seq = 0;
 let timer: number | undefined;
 /** Открыто ли окно подсказок (повторные списки шлём данными, не пересоздавая). */
 let suggestWin = false;
+/** Момент последнего открытия окна подсказок: фокус, вернувшийся сразу после
+ *  (Core отбирает его у созданной панели обратно, duopulse-097), — не
+ *  пользовательский; без guard'а select() затирал карсет и update() звал
+ *  открытие заново — создание webview снова крало фокус, замкнутый цикл. */
+let openedAt = 0;
+/** Отложенное закрытие по blur: мгновенный blur случается в момент создания
+ *  окна подсказок (панель на миг перехватывает фокус, Core возвращает,
+ *  duopulse-097) — закрываем, только если omnibox фокус так и не вернул. */
+let blurTimer: number | undefined;
 
 const err = (e: unknown): void => console.error("omnibox:", e);
 
@@ -115,8 +124,12 @@ async function update(): Promise<void> {
     }
     rows = next;
     sel = -1;
-    if (rows.length) open();
-    else close();
+    if (rows.length) {
+      // окно уже открыто — только данные: пересоздание webview на каждый ввод
+      // перехватывало фокус у адресной строки и убивало набор (duopulse-097)
+      if (suggestWin) sendSuggestData();
+      else open();
+    } else close();
     render();
   } catch (e) {
     err(e);
@@ -159,8 +172,9 @@ function open(): void {
   // duopulse-090); смена списка при том же вводе скроллится внутри
   const h = Math.min(rows.length, 9) * 36 + 14;
   const g = anchorPanel("suggest", input, "left", h);
-  openPanel("suggest", g.x, g.y, g.w, g.h);
+  openPanel("suggest", g.x, g.y, g.w, g.h, false);
   suggestWin = true;
+  openedAt = Date.now();
   // первый список панель запросит сама по «suggest-ready» (её boot ещё идёт —
   // событие, отправленное сейчас, потерялось бы без слушателя)
   input.setAttribute("aria-expanded", "true");
@@ -239,12 +253,23 @@ export function initOmnibox(): void {
     timer = window.setTimeout(() => void update(), 150);
   });
   input.addEventListener("focus", () => {
+    // рефокус сразу после открытия подсказок — фокус вернуло Core после
+    // перехвата его панелью, не пользователь (duopulse-097): не трогаем
+    // каретку и не переоткрываем окно
+    if (Date.now() - openedAt < 350) return;
     input.select();
     // движок могли сменить в настройках — заголовок строки-действия свежий
     void refreshEngineTitle();
     void update();
   });
-  input.addEventListener("blur", close);
+  input.addEventListener("blur", () => {
+    // мгновенный blur от создания панели подсказок — фокус вернётся (Core);
+    // закрываем только если omnibox его не получил (duopulse-097)
+    window.clearTimeout(blurTimer);
+    blurTimer = window.setTimeout(() => {
+      if (document.activeElement !== input) close();
+    }, 150);
+  });
   input.addEventListener("keydown", (e) => {
     switch (e.key) {
       case "ArrowDown":
@@ -287,6 +312,13 @@ export function initOmnibox(): void {
   // этого первый список терялся бы в гонке boot панели против update())
   void listen("suggest-ready", () => {
     if (suggestWin && rows.length) sendSuggestData();
+  });
+
+  // Панель закрыта Core извне (новая вкладка/внутренняя страница, ресайз окна,
+  // клик по контенту — duopulse-090): следующему вводу разрешаем открыть
+  // окно заново, а не слать данные в закрытое
+  void listen("chrome-panel-closed", () => {
+    suggestWin = false;
   });
 
   goBtn.addEventListener("click", () => void goInput());

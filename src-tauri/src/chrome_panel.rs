@@ -75,7 +75,11 @@ pub fn close(app: &AppHandle) {
 }
 
 /// Открыть панель-child-webview у якоря (x/y/w/h — логические координаты
-/// UI-webview; контент уточнит размер через ui_panel_fit).
+/// UI-webview; контент уточнит размер через ui_panel_fit). focus=false — окно
+/// подсказок omnibox: панель не держит фокус (создание child-webview
+/// перехватывает фокус ОС — та же ловушка, что у фоновых вкладок
+/// duopulse-088; фокус возвращаем UI-webview, иначе набор в адресной строке
+/// умирает — duopulse-097).
 #[tauri::command]
 pub async fn ui_panel_open(
     app: AppHandle,
@@ -84,7 +88,7 @@ pub async fn ui_panel_open(
     y: f64,
     w: f64,
     h: f64,
-    _focus: Option<bool>,
+    focus: Option<bool>,
 ) -> Result<(), String> {
     if !matches!(kind.as_str(), "main" | "proxy" | "vpn" | "duo" | "suggest") {
         return Err(format!("неизвестная панель: {kind}"));
@@ -120,6 +124,14 @@ pub async fn ui_panel_open(
             LogicalSize::new(w, h.max(1.0)),
         )
         .map_err(|e| format!("панель-webview: {e}"))?;
+    if !focus.unwrap_or(true) {
+        // duopulse-097: окно подсказок без фокуса — создание webview только что
+        // перехватило его у omnibox; вернём UI-webview, WebView2 восстановит
+        // DOM-фокус последнего элемента (адресной строки), набор продолжается.
+        if let Some(ui) = app.get_webview("main") {
+            let _ = ui.set_focus();
+        }
+    }
     Ok(())
 }
 

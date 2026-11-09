@@ -48,10 +48,19 @@ export function currentPanel(): PanelKind | null {
 
 /** Открыть панель-webview (x/y/w/h — клиентские логические координаты
  *  UI-webview; Core клампит в окно main). Ресайз после открытия запрещён —
- *  размер должен быть точным сразу (см. комментарий модуля). */
-export function openPanel(kind: PanelKind, x: number, y: number, w: number, h: number): void {
+ *  размер должен быть точным сразу (см. комментарий модуля). focus=false —
+ *  окно подсказок omnibox: Core возвращает фокус UI-webview после создания
+ *  панели (duopulse-097), иначе набор в адресной строке умирает. */
+export function openPanel(
+  kind: PanelKind,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  focus = true,
+): void {
   openKind = kind;
-  void invoke("ui_panel_open", { kind, x, y, w, h }).catch((e) => {
+  void invoke("ui_panel_open", { kind, x, y, w, h, focus }).catch((e) => {
     openKind = null;
     console.error("panel-window:", e);
   });
