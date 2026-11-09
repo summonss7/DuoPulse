@@ -303,21 +303,26 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       const ids = defaultSetIds(trackList, preferredLangs());
       if (ids.length > 0) {
         // Транзиентный отказ загрузки (timedtext при троттлинге) не должен
-        // молча раздевать дефолт до оригинала: один повтор через 1.5 с
-        // (duopulse-079), если показ ещё включён и видео то же.
+        // молча раздевать дефолт до оригинала: повторы с нарастающей паузой
+        // (duopulse-079; duopulse-092 — 429 перевода живёт дольше секунды,
+        // один повтор не вытягивал), пока показ включён и видео то же.
         const keyAtEnable = currentVideo?.videoKey ?? null;
-        void selectTracks(ids, via).then((r) => {
-          if (r.failures.length === 0) return;
-          console.error(
-            "[duopulse] дефолт-набор: не загрузились " +
-              r.failures.map((f) => `${f.id} (${f.reason})`).join(", ") +
-              " — повтор через 1.5 с",
-          );
-          window.setTimeout(() => {
-            if (!enabled || currentVideo?.videoKey !== keyAtEnable || pendingEnable !== null) return;
-            void selectTracks(ids, via);
-          }, 1500);
-        });
+        const RETRY_DELAYS_MS = [1500, 7000, 20000, 45000];
+        const attempt = (delayIx: number): void => {
+          void selectTracks(ids, via).then((r) => {
+            if (r.failures.length === 0 || delayIx >= RETRY_DELAYS_MS.length) return;
+            console.error(
+              "[duopulse] дефолт-набор: не загрузились " +
+                r.failures.map((f) => `${f.id} (${f.reason})`).join(", ") +
+                ` — повтор через ${Math.round(RETRY_DELAYS_MS[delayIx] / 1000)} с`,
+            );
+            window.setTimeout(() => {
+              if (!enabled || currentVideo?.videoKey !== keyAtEnable || pendingEnable !== null) return;
+              attempt(delayIx + 1);
+            }, RETRY_DELAYS_MS[delayIx]);
+          });
+        };
+        attempt(0);
         return;
       }
       if (trackList === null) pendingEnable = via;

@@ -801,10 +801,17 @@ export class YouTubeAdapter implements Adapter {
     // Переводы — параллельным fetch поверх живых URL (подпись не покрывает
     // tlang); без живых URL (плеер недоступен) не пробуем — уже отказаны.
     // 429/5xx — платформа рейт-лимитит серийные запросы: повтор с паузой.
+    // Таймаут на попытку (duopulse-092): зависший после SSAI-цепочки запрос
+    // не резолвился никогда — selectTracks вис без failures; таймаут даёт
+    // честный отказ, ретрай включения (1.5 с в enableSubs) — второй шанс.
+    const TRANSLATION_TIMEOUT_MS = 20_000;
     const fetchTranslation = async (url: string): Promise<{ ok: boolean; status: number; body: string }> => {
       let res: Awaited<ReturnType<typeof fetchImpl>> | null = null;
       for (let i = 0; i < 3; i++) {
-        res = await fetchImpl(url, { credentials: "include" });
+        res = await fetchImpl(url, {
+          credentials: "include",
+          signal: AbortSignal.timeout(TRANSLATION_TIMEOUT_MS),
+        });
         if (res.status !== 429 && res.status < 500) break;
         await sleep((i + 1) * 6_000);
       }
