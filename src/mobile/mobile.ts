@@ -173,7 +173,8 @@ function renderUpdate(ui: UpdaterUi): void {
     return;
   }
   if (ui.kind === "installing") {
-    updateBanner.textContent = "Открыт системный установщик — подтвердите установку, приложение обновится само.";
+    updateBanner.textContent =
+      "Открыт системный установщик — подтвердите установку, приложение обновится само. Если Play Protect предупреждает — «Подробнее» → «Всё равно установить»: приложение не из Play Store, идёт с нашего канала обновлений.";
     return;
   }
   if (ui.kind === "needs-permission") {
@@ -189,7 +190,16 @@ function renderUpdate(ui: UpdaterUi): void {
     updateBanner.textContent = `✓ У вас последняя версия (${ui.version})`;
     return;
   }
+  // error: причина + «Повторить», если есть чем повторять (duopulse-101 —
+  // обрыв скачивания лечится повтором с докачкой, а не перезапуском приложения)
   updateBanner.textContent = `Обновления: ${ui.message}`;
+  if (ui.retry) {
+    const btn = document.createElement("button");
+    btn.className = "m-update-btn";
+    btn.textContent = "Повторить";
+    btn.addEventListener("click", () => void (ui.retry === "install" ? updater.install() : updater.check(true)));
+    updateBanner.appendChild(btn);
+  }
 }
 
 const updater = createMobileUpdater(renderUpdate);

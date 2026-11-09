@@ -14,10 +14,17 @@
 // центр деградирует молча — «не удалось проверить» не ошибка (§5).
 //
 // Отличие от NovaGrid: сеть — ureq, а не reqwest (duopulse-082 уже ходит им
-// в мобильной ветке с rustls и вшитыми webpki-roots — грабля NovaGrid с
+// в мобильную ветке с rustls и вшитыми webpki-roots — грабля NovaGrid с
 // rustls-platform-verifier на Android сюда не переносится, отдельный
 // TLS-клиент не нужен). ureq синхронный: команды-функции (как duo_*),
 // скачивание читает into_reader() потоками и троттлит события на ~256 КиБ.
+//
+// Живой телефон (duopulse-101): мобильные сети рвут TCP без FIN/RST — read()
+// висел вечно («скачано 6 из 8 МБ» и баннер замер), поэтому у агента стоит
+// таймаут чтения, а скачивание — до 5 попыток с докачкой Range (CDN канала
+// отдаёт Accept-Ranges: bytes): обрыв на середине не начинает 8 МБ с нуля.
+// Целый скачанный файл (sha256 совпал) переиспользуется — повторное
+// «Обновить» после разрешения источника не качает заново.
 //
 // Десктоп-обновления не трогаем: бин main.rs ездит на tauri-plugin-updater
 // (latest.json, minisign) и манифест v2 не читает — ветки не пересекаются.
@@ -135,12 +142,23 @@ pub(crate) fn pick_apk(assets: &[UpdateAsset]) -> Option<&UpdateAsset> {
 
 // ── Android: сеть, скачивание, установка ───────────────────────────────────
 
-/// Агент OTA: только таймаут соединения — общий timeout() агента duobrain
-/// (20 с) разорвал бы длинное скачивание; чтение потока ведёт команда.
+/// Таймаут одного read(): зависший без FIN/RST сокет (мобильная сеть, VPN)
+/// ошибкается, а не висит вечно. 30 с без единого байта — соединение мертво.
+#[cfg(target_os = "android")]
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Сколько попыток скачать с докачкой: обрывы на живом телефоне бывают
+/// серией (duopulse-101 — 6/8 и 1/8 МБ), каждая следующая продолжает с места.
+#[cfg(target_os = "android")]
+const MAX_ATTEMPTS: u32 = 5;
+
+/// Агент OTA: таймауты соединения и чтения — общий timeout() агента duobrain
+/// (20 с) разорвал бы длинное скачивание, поток читает команда.
 #[cfg(target_os = "android")]
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(10))
+        .timeout_read(READ_TIMEOUT)
         .build()
 }
 
@@ -230,12 +248,53 @@ fn updates_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+#[cfg(any(target_os = "android", test))]
+/// Как поступить с ответом на запрос с Range: 206 — сервер докачивает с
+/// запрошенного байта, остальное (200 — Range проигнорирован, 416 — диапазон
+/// невалиден) — качать с нуля.
+pub(crate) enum ResumeAction {
+    Append,
+    Restart,
+}
+
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn resume_action(status: u16, asked_range: bool) -> ResumeAction {
+    if status == 206 && asked_range {
+        ResumeAction::Append
+    } else {
+        ResumeAction::Restart
+    }
+}
+
 #[cfg(target_os = "android")]
-/// Скачать APK в cacheDir с событиями «duopulse:mobile-updater-progress» и
-/// сверкой sha256 из манифеста. Несовпадение/обрыв удаляют недокачанное —
-/// полу-файлы не выживают. Хост манифеста уже проверен при updater_check,
-/// здесь дополнительно сверяем схему https (URL приходит от фронтенда).
+/// Файл уже лежит целый (sha256 совпал)? Таким переиспользуем скачанное:
+/// повторное «Обновить» после разрешения источника или сбой установки
+/// не требуют новых 8 МБ.
+fn file_matches(dest: &std::path::Path, sha256: &str) -> bool {
+    let Ok(mut f) = std::fs::File::open(dest) else {
+        return false;
+    };
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        match f.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buf[..n]),
+            Err(_) => return false,
+        }
+    }
+    format!("{:x}", hasher.finalize()).eq_ignore_ascii_case(sha256)
+}
+
+#[cfg(target_os = "android")]
 #[tauri::command]
+/// Скачать APK в cacheDir с событиями «duopulse:mobile-updater-progress» и
+/// сверкой sha256 из манифеста. Обрывы не фатальны: до MAX_ATTEMPTS попыток
+/// с докачкой Range (206 → append, 200/416 → с нуля), таймаут чтения
+/// READ_TIMEOUT оживляет зависшие сокеты. Исчерпаны попытки или ошибка
+/// диска — недокачанное удаляется, полу-файлы не выживают. Хост манифеста
+/// уже проверен при updater_check, здесь дополнительно сверяем схему https
+/// (URL приходит от фронтенда).
 pub fn updater_download(
     app: AppHandle,
     url: String,
@@ -246,59 +305,105 @@ pub fn updater_download(
     if parsed.scheme() != "https" {
         return Err(format!("только https, получено {}", parsed.scheme()));
     }
-    let resp = agent()
-        .get(&url)
-        .set("User-Agent", crate::duo_mobile::USER_AGENT)
-        .call()
-        .map_err(|e| format!("сеть: {e}"))?;
-    if resp.status() != 200 {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    let total = size.max(
-        resp.header("Content-Length")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
-    );
     let name = url.rsplit('/').next().unwrap_or("duopulse-update.apk");
     let dest = updates_dir()?.join(name);
-    let mut file = std::fs::File::create(&dest).map_err(|e| format!("temp: {e}"))?;
+    if file_matches(&dest, &sha256) {
+        return Ok(dest.to_string_lossy().into_owned());
+    }
     let mut hasher = Sha256::new();
-    let mut reader = resp.into_reader();
-    let mut buf = vec![0u8; 64 * 1024];
     let mut downloaded: u64 = 0;
+    let mut total = size;
     let mut last_emit: u64 = u64::MAX;
-    loop {
-        let n = reader.read(&mut buf).map_err(|e| {
-            let _ = std::fs::remove_file(&dest);
-            format!("download: {e}")
-        })?;
-        if n == 0 {
-            break;
+    let mut last_err = String::new();
+    let emit = |downloaded: u64, total: u64, last_emit: &mut u64| {
+        let _ = app.emit(
+            "duopulse:mobile-updater-progress",
+            DownloadProgress { downloaded, total },
+        );
+        *last_emit = downloaded;
+    };
+    'attempts: for attempt in 1..=MAX_ATTEMPTS {
+        let mut request = agent().get(&url).set("User-Agent", crate::duo_mobile::USER_AGENT);
+        if downloaded > 0 {
+            request = request.set("Range", format!("bytes={downloaded}-").as_str());
         }
-        hasher.update(&buf[..n]);
-        file.write_all(&buf[..n])
-            .map_err(|e| format!("write: {e}"))?;
-        downloaded += n as u64;
-        // троттлинг: событие на ~256 КиБ (и в конце)
-        if last_emit == u64::MAX || downloaded.saturating_sub(last_emit) >= 256 * 1024 {
-            let _ = app.emit(
-                "duopulse:mobile-updater-progress",
-                DownloadProgress { downloaded, total },
-            );
-            last_emit = downloaded;
+        let resp = match request.call() {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("сеть: {e}");
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                continue 'attempts;
+            }
+        };
+        let status = resp.status();
+        let content_len = resp
+            .header("Content-Length")
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+        let mut file = match resume_action(status, downloaded > 0) {
+            ResumeAction::Append => {
+                // докачка: Content-Length — остаток, файл открываем на дописывание
+                total = total.max(downloaded + content_len);
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&dest)
+                    .map_err(|e| format!("temp: {e}"))?
+            }
+            ResumeAction::Restart => {
+                if status != 200 {
+                    // 416 (диапазон невалиден) и прочие статусы — попробуем
+                    // с нуля на следующей попытке; за CDN бывают transient 5xx
+                    last_err = format!("HTTP {status}");
+                    downloaded = 0;
+                    hasher = Sha256::new();
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    continue 'attempts;
+                }
+                total = total.max(content_len);
+                downloaded = 0;
+                hasher = Sha256::new();
+                std::fs::File::create(&dest).map_err(|e| format!("temp: {e}"))?
+            }
+        };
+        let mut reader = resp.into_reader();
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let n = match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                // обрыв/таймаут чтения: часть остаётся на диске и в хеше,
+                // следующая попытка докачает с этого байта
+                Err(e) => {
+                    last_err = format!("download: {e}");
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    continue 'attempts;
+                }
+            };
+            hasher.update(&buf[..n]);
+            if let Err(e) = file.write_all(&buf[..n]) {
+                // ошибка диска ретраями не лечится
+                let _ = std::fs::remove_file(&dest);
+                return Err(format!("write: {e}"));
+            }
+            downloaded += n as u64;
+            // троттлинг: событие на ~256 КиБ (и в конце)
+            if last_emit == u64::MAX || downloaded.saturating_sub(last_emit) >= 256 * 1024 {
+                emit(downloaded, total, &mut last_emit);
+            }
         }
+        drop(file);
+        emit(downloaded, total, &mut last_emit);
+        let got = format!("{:x}", hasher.finalize());
+        if got.eq_ignore_ascii_case(&sha256) {
+            return Ok(dest.to_string_lossy().into_owned());
+        }
+        // EOF, но хеш не тот — поток оборван «аккуратно»; качаем с нуля
+        last_err = format!("sha256 mismatch: expected {sha256}, got {got}");
+        downloaded = 0;
+        hasher = Sha256::new();
     }
-    let _ = app.emit(
-        "duopulse:mobile-updater-progress",
-        DownloadProgress { downloaded, total },
-    );
-    drop(file);
-    let got = format!("{:x}", hasher.finalize());
-    if !got.eq_ignore_ascii_case(&sha256) {
-        let _ = std::fs::remove_file(&dest);
-        return Err(format!("sha256 mismatch: expected {sha256}, got {got}"));
-    }
-    Ok(dest.to_string_lossy().into_owned())
+    let _ = std::fs::remove_file(&dest);
+    Err(format!("скачивание не удалось за {MAX_ATTEMPTS} попыток: {last_err}"))
 }
 
 #[cfg(target_os = "android")]
@@ -429,5 +534,18 @@ mod tests {
     fn no_apk_means_no_asset() {
         let assets = vec![asset("DuoPulse_0.1.8_x64-setup.exe"), asset("latest.json")];
         assert!(pick_apk(&assets).is_none());
+    }
+
+    #[test]
+    fn resume_action_decisions() {
+        // 206 на запрос с Range — докачиваем
+        assert!(matches!(resume_action(206, true), ResumeAction::Append));
+        // 200 — Range проигнорирован (нет докачки), качаем с нуля
+        assert!(matches!(resume_action(200, true), ResumeAction::Restart));
+        // без Range любой ответ — с нуля
+        assert!(matches!(resume_action(200, false), ResumeAction::Restart));
+        assert!(matches!(resume_action(206, false), ResumeAction::Restart));
+        // 416 — сервер счёл диапазон невалидным, качаем с нуля
+        assert!(matches!(resume_action(416, true), ResumeAction::Restart));
     }
 }

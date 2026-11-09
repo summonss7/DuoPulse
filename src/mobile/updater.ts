@@ -41,7 +41,9 @@ export type UpdaterUi =
   | { kind: "installing"; version: string }
   | { kind: "needs-permission" }
   | { kind: "latest"; version: string }
-  | { kind: "error"; message: string };
+  /** retry — чем повторить из ошибки (кнопка «Повторить», duopulse-101:
+   *  обрыв скачивания больше не тупик). */
+  | { kind: "error"; message: string; retry?: "install" | "check" };
 
 /** Калитка тихой проверки: сессии на телефоне короткие, канал живой —
  * 10 минут (lecards-027; десктоп DuoPulse проверяет раз в сутки). */
@@ -72,7 +74,7 @@ export function uiFromCheck(r: MobileUpdateCheck, manual: boolean): UpdaterUi {
     default:
       // network-error | bad-manifest
       return manual
-        ? { kind: "error", message: r.error ?? "не удалось проверить обновления" }
+        ? { kind: "error", message: r.error ?? "не удалось проверить обновления", retry: "check" }
         : { kind: "idle" };
   }
 }
@@ -138,7 +140,7 @@ export function createMobileUpdater(
         // деградируем честно: ручная — ошибка, тихая — тишина
         setUi(
           manual
-            ? { kind: "error", message: err instanceof Error ? err.message : String(err) }
+            ? { kind: "error", message: err instanceof Error ? err.message : String(err), retry: "check" }
             : { kind: "idle" },
         );
         return;
@@ -154,6 +156,9 @@ export function createMobileUpdater(
     },
 
     async install(): Promise<void> {
+      // гвардия от двойного нажатия: пока качаем/ставим — вторая попытка
+      // молча игнорируется (кнопка «Повторить» в error тоже сюда идёт)
+      if (ui.kind === "downloading" || ui.kind === "installing") return;
       const a = asset;
       if (!a?.sha256 || !a.url) return;
       const version = ui.kind === "available" ? ui.version : pendingVersion;
@@ -165,7 +170,7 @@ export function createMobileUpdater(
         // сам допоставит; needs-permission — источник разрешают и жмут снова
         setUi(res === "needs-permission" ? { kind: "needs-permission" } : { kind: "installing", version });
       } catch (err) {
-        setUi({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+        setUi({ kind: "error", message: err instanceof Error ? err.message : String(err), retry: "install" });
       }
     },
   };
