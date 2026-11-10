@@ -79,6 +79,7 @@ import {
 } from "./adapters/file";
 import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from "./adapters/cloud";
 import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
+import { installSelectionTranslate } from "./translate-select";
 import { preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
@@ -100,6 +101,10 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     (location.hostname === "localhost" && location.port === "5173")
   )
     return;
+  // Перевод выделенного текста (карточка duopulse-098): слушатели contextmenu
+  // и WebMessage begin/result; пункт контекстного меню — нативный (Core).
+  const selectionTranslate = installSelectionTranslate({ post: postToCore });
+
   let currentVideo: DetectedVideo | null = null;
   // Перехват тел timedtext: только на YouTube (initialization script до
   // скриптов страницы; кросс-доменная навигация = новый документ = новый бандл).
@@ -737,6 +742,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       setMemory: { key: string; enabled: boolean; tracks: number }[];
       cloud: ReturnType<typeof cloudTranslateStatus>;
       asr: ReturnType<typeof asrStatus>;
+      translateSelection: ReturnType<typeof selectionTranslate.state>;
     } {
       return {
         videoKey: currentVideo?.videoKey ?? null,
@@ -758,6 +764,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
         })),
         cloud: cloudTranslateStatus(),
         asr: asrStatus(),
+        translateSelection: selectionTranslate.state(),
       };
     },
     /** Список дорожек текущего видео (null — ещё не получен/не YouTube). */

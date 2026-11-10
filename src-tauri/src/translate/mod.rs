@@ -21,6 +21,8 @@ mod google;
 pub(crate) mod http;
 mod libre;
 pub(crate) mod pipeline;
+/// Перевод выделенного текста (карточка duopulse-098, бесплатный gtx).
+pub(crate) mod selection;
 pub(crate) mod watcher;
 
 pub use config::{

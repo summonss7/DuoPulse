@@ -33,6 +33,13 @@ pub trait HttpTransport: Send + Sync {
         headers: &[(&str, &str)],
         body: &serde_json::Value,
     ) -> Result<HttpResponse, TransportError>;
+
+    /// GET-запрос без заголовков (перевод выделения, gtx-эндпоинт,
+    /// selection.rs). Транспорты без GET могут оставить дефолт — внятная
+    /// сетевая ошибка вместо паники.
+    fn get(&self, _url: &str) -> Result<HttpResponse, TransportError> {
+        Err(TransportError("GET не поддерживается транспортом".into()))
+    }
 }
 
 /// Живой транспорт: ureq-агент с таймаутами (connect 10 с, всего 30 с —
@@ -72,6 +79,23 @@ impl HttpTransport for UreqTransport {
         // HTTP-ошибки (4xx/5xx) — НЕ транспортные: ureq отдаёт ответ внутри
         // Err::Status, статус в типизированные ошибки маппируют провайдеры.
         let response = match request.send_string(&body.to_string()) {
+            Ok(r) => r,
+            Err(ureq::Error::Status(code, r)) => {
+                let body = r.into_string().unwrap_or_default();
+                return Ok(HttpResponse { status: code, body });
+            }
+            Err(e) => return Err(TransportError(format!("{e}"))),
+        };
+        let status = response.status();
+        let body = response
+            .into_string()
+            .map_err(|e| TransportError(format!("чтение ответа: {e}")))?;
+        Ok(HttpResponse { status, body })
+    }
+
+    fn get(&self, url: &str) -> Result<HttpResponse, TransportError> {
+        // как в post_json: HTTP-ошибки (4xx/5xx) — не транспортные
+        let response = match self.agent.get(url).call() {
             Ok(r) => r,
             Err(ureq::Error::Status(code, r)) => {
                 let body = r.into_string().unwrap_or_default();
@@ -157,6 +181,19 @@ impl HttpTransport for MockTransport {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             body: body.clone(),
+        });
+        let mut queue = self.responses.lock().unwrap();
+        if queue.is_empty() {
+            panic!("mock: запрос без заготовленного ответа");
+        }
+        queue.remove(0)
+    }
+
+    fn get(&self, url: &str) -> Result<HttpResponse, TransportError> {
+        self.calls.lock().unwrap().push(RecordedRequest {
+            url: url.to_string(),
+            headers: Vec::new(),
+            body: serde_json::Value::Null,
         });
         let mut queue = self.responses.lock().unwrap();
         if queue.is_empty() {

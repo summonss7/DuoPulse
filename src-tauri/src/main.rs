@@ -48,6 +48,7 @@ mod settings;
 mod subtitles;
 mod tabs;
 mod translate;
+mod translate_menu;
 mod updater;
 mod vpn;
 
@@ -545,6 +546,10 @@ unsafe fn referer_of(
 ///   (src/translate/pipeline.rs: батчинг ≤ 2 КБ, контекст пачки, кэш SQLite,
 ///   событие subtitles:translate_progress) и отвечает document-событием
 ///   duopulse-translate-track eval'ом активной вкладки;
+/// - «translate-selection» — смена языка в баббле перевода выделения
+///   (карточка duopulse-098): текст — эхом из меню, gtx-конвейер —
+///   translate_menu::translate_selection_for_page, ответ — WebMessage
+///   «translate-selection-result» тому же документу;
 /// - «asr-begin» — распознавание речи (карточка duopulse-060): content-слой
 ///   добыл URL аудио в контексте страницы (адаптер YouTube / src видео),
 ///   Core скачивает его тем же сетевым путём (SOCKS5-роутер), декодирует,
@@ -746,6 +751,23 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 // Обработчик сразу уходит в spawn_blocking ( COM-поток не
                 // блокируем), прогресс — событием subtitles:translate_progress.
                 translate::handle_translate_request(&app, &tab_id, &parsed);
+            } else if parsed["duopulse"] == "translate-selection" {
+                // Смена языка в баббле перевода выделения (карточка
+                // duopulse-098): текст — из меню (эхом), конвейер — тот же
+                // gtx-перевод; ответ — WebMessage тому же документу.
+                if let (Some(text), Some(target)) =
+                    (parsed["text"].as_str(), parsed["target"].as_str())
+                {
+                    // выбранный в баббле язык — подпись пункта меню в след. раз
+                    translate_menu::note_selection_target(target);
+                    handle_selection_translate(
+                        &app,
+                        sender.as_ref(),
+                        text,
+                        target,
+                        parsed["reqId"].as_u64().unwrap_or(0),
+                    );
+                }
             } else if parsed["duopulse"] == "asr-begin" {
                 // Распознавание речи (карточка duopulse-060): URL аудио — у
                 // content-слоя, конвейер (самофетч → декод → чанки → движок →
@@ -804,10 +826,26 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
     .expect("add_WebMessageReceived");
 }
 
+/// Смена языка перевода выделения (баббл, карточка duopulse-098): фоновый
+/// перевод тем же gtx-конвейером, ответ — документу вкладки (COM-перенос и
+/// сборка ответа — translate_menu::translate_selection_for_page).
+#[cfg(windows)]
+fn handle_selection_translate(
+    app: &AppHandle,
+    core: Option<&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2>,
+    text: &str,
+    target: &str,
+    req_id: u64,
+) {
+    if let Some(core) = core {
+        translate_menu::translate_selection_for_page(app, core, text, target, req_id);
+    }
+}
+
 /// Ответ документу вкладки (WebMessage-канал задачи 2.2): PostWebMessageAsString
 /// доставляет строку в window.chrome.webview «message» top-level документа.
 #[cfg(windows)]
-fn post_to_page(
+pub(crate) fn post_to_page(
     sender: Option<&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2>,
     value: &serde_json::Value,
 ) {
@@ -968,6 +1006,7 @@ pub(crate) unsafe fn install_content_handlers(
     let env: ICoreWebView2Environment = wv.environment();
     install_request_blocker(&core, &env, app, tab_id);
     install_content_messaging(&core, app, tab_id);
+    translate_menu::install_translate_menu(&core, &env, app);
     install_new_window_handler(&core, app, tab_id);
     install_cosmetic_prewarm(&core, app, tab_id);
     install_nav_failure_watcher(&core, app, tab_id);
