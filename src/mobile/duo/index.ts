@@ -13,6 +13,7 @@ import {
   defaultOriginal,
   loadCuesByUrl,
   parsePlayerResponse,
+  titleOfPlayerResponse,
   translateCueTable,
   type DuoInvoke,
   type MobileTrackList,
@@ -31,6 +32,9 @@ export class MobileDuo {
   private settings: DuoMobileSettings = loadDuoSettings();
   private list: MobileTrackList | null = null;
   private videoId: string | null = null;
+  /** Заголовок видео (videoDetails player-ответа) — живёт и без дорожек
+   * (закладки duopulse-104 берут имя отсюда). */
+  private title = "";
   private clock: YtClock | null = null;
   private seq = 0;
   private readonly engine = new SubtitlesEngine({ onRowsChange: (rows) => this.overlay.setRows(rows) });
@@ -62,6 +66,17 @@ export class MobileDuo {
     return this.list;
   }
 
+  /** Заголовок открытого видео (пусто — ещё не прочитан/видео закрыто). */
+  get currentTitle(): string {
+    return this.title;
+  }
+
+  /** id открытого видео (null — видео закрыто); закладки (duopulse-104)
+   *  собирают из него watch-url. */
+  get currentVideoId(): string | null {
+    return this.videoId;
+  }
+
   /** Открылось YouTube-видео (embed). Загружает список дорожек и набор. */
   async open(videoId: string): Promise<void> {
     this.close(false);
@@ -71,6 +86,7 @@ export class MobileDuo {
     try {
       const response = await this.doInvoke("duo_yt_player", { videoId });
       if (seq !== this.seq) return;
+      this.title = titleOfPlayerResponse(response);
       const list = parsePlayerResponse(videoId, response);
       if (!list) {
         this.list = null;
@@ -100,6 +116,7 @@ export class MobileDuo {
     this.clock = null;
     this.videoId = null;
     this.list = null;
+    this.title = "";
     this.onStatus({ text: null, busy: false });
     if (full) void 0;
   }

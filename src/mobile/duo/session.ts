@@ -25,12 +25,21 @@ export type DuoInvoke = (cmd: string, args?: Record<string, unknown>) => Promise
 
 export interface MobileTrackList {
   videoId: string;
+  /** Заголовок видео (videoDetails.title player-ответа; пусто — нет в ответе).
+   * Закладки (duopulse-104) используют его как имя. */
+  title: string;
   base: BaseTrackInfo[];
   translations: TranslationLangInfo[];
   /** baseId → подписанный baseUrl (для загрузки cue и tlang-экспериментов). */
   urls: Map<string, string>;
   /** Языки оригинала (детект адаптера). */
   originalLangs: Set<string>;
+}
+
+/** videoDetails.title из player-ответа (закладки duopulse-104); пусто — нет. */
+export function titleOfPlayerResponse(response: unknown): string {
+  const details = (response as { videoDetails?: { title?: unknown } })?.videoDetails;
+  return typeof details?.title === "string" ? details.title : "";
 }
 
 /** Сформировать id дорожек так же, как normalizeBaseTracks (стем + :2/:3 при
@@ -67,7 +76,14 @@ export function parsePlayerResponse(videoId: string, response: unknown): MobileT
   const originalLangs = originalLangsOf(response);
   const { base, urls } = zipBaseUrls(raw, originalLangs);
   if (base.length === 0 && raw.translationLanguages.length === 0) return null;
-  return { videoId, base, translations: normalizeTranslations(raw), urls, originalLangs };
+  return {
+    videoId,
+    title: titleOfPlayerResponse(response),
+    base,
+    translations: normalizeTranslations(raw),
+    urls,
+    originalLangs,
+  };
 }
 
 /** Дорожка оригинала по умолчанию — как defaultBase адаптера/панели десктопа:

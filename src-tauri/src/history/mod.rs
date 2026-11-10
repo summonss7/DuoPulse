@@ -28,9 +28,12 @@ use rusqlite::Connection;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// HistoryBookmark — тип контракта bridge; реэкспорт для settings/profile.rs.
-pub use crate::bridge::HistoryBookmark;
-use crate::bridge::{
+// Контрактные типы домена history.* — в contract.rs (duopulse-104: мобильная
+// либа компилирует history без десктопного bridge.rs; bridge реэкспортирует).
+pub mod contract;
+// HistoryBookmark — реэкспорт для settings/profile.rs (путь сохранён).
+pub use contract::HistoryBookmark;
+use contract::{
     BookmarkGroupInfo, BookmarkGroupRef, BookmarkGroupRow, HistoryEntry, HistoryHit, HistorySource,
 };
 

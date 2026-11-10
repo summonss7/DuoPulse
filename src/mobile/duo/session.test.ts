@@ -4,7 +4,7 @@
 // ретрай 429 при загрузке cue, пачки перевода gtx.
 
 import { describe, expect, it, vi } from "vitest";
-import { defaultOriginal, loadCuesByUrl, parsePlayerResponse, translateCueTable, zipBaseUrls, type DuoInvoke } from "./session";
+import { defaultOriginal, loadCuesByUrl, parsePlayerResponse, titleOfPlayerResponse, translateCueTable, zipBaseUrls, type DuoInvoke } from "./session";
 import { normalizeBaseTracks, type RawCaptionList } from "../../../content/adapters/youtube";
 
 function rawList(): RawCaptionList {
@@ -51,6 +51,18 @@ describe("parsePlayerResponse", () => {
     const list = parsePlayerResponse("abc12345678", playerResponse())!;
     expect(list.originalLangs.has("ko")).toBe(true);
     expect(defaultOriginal(list)?.id).toBe("yt:ko:asr"); // оригинал-asr впереди ручных
+  });
+
+  it("заголовок видео — из videoDetails.title (закладки duopulse-104)", () => {
+    const resp = {
+      videoDetails: { videoId: "abc12345678", title: "Do schools kill creativity?" },
+      captions: { playerCaptionsTracklistRenderer: rawList() },
+    };
+    expect(titleOfPlayerResponse(resp)).toBe("Do schools kill creativity?");
+    expect(parsePlayerResponse("abc12345678", resp)!.title).toBe("Do schools kill creativity?");
+    // нет videoDetails/заголовка — пустая строка, не падение
+    expect(titleOfPlayerResponse(playerResponse())).toBe("");
+    expect(titleOfPlayerResponse(null)).toBe("");
   });
 });
 

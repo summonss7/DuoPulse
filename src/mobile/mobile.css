@@ -512,3 +512,294 @@ body.m-private .m-bar {
 body.m-private .m-bar input {
   background: #232336;
 }
+
+/* ── Закладки мобильной ветки (карточка duopulse-104): экран со стартовой
+   кнопки, группы-чипы, звёздочка в шапке плеера, long-press-тяга на чип и
+   нижний шит (выбор группы/меню чипа) ── */
+.m-bm {
+  position: absolute; /* поверх старт-экрана/вкладки внутри .m-content */
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+}
+
+.m-bm[hidden] {
+  display: none;
+}
+
+.m-bm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 2px;
+  flex: none;
+}
+
+.m-bm-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.m-bm-back b {
+  font-size: 15px;
+}
+
+.m-bm-back:active {
+  background: var(--hover-neutral);
+}
+
+.m-bm-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: right;
+  max-width: 48%;
+}
+
+.m-bm-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 12px 10px;
+  flex: none;
+  touch-action: pan-x; /* чипы скроллятся вбок, тяга на чип — наша */
+  scrollbar-width: none;
+}
+
+.m-bm-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.m-bm-chip {
+  flex: none;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--bg-warm-2);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.m-bm-chip.m-on {
+  background: var(--accent-neon);
+  color: var(--bg-base);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.m-bm-chip.drop-target {
+  outline: 2px solid var(--accent-neon);
+  box-shadow: var(--glow-neon);
+}
+
+.m-bm-chip-add {
+  color: var(--accent-neon);
+}
+
+.m-bm-chip-input {
+  flex: none;
+  width: 130px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-neon);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.m-bm-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  touch-action: pan-y; /* список скроллится; во время тяги скролл глушим
+                          preventDefault (touchmove non-passive) */
+}
+
+.m-bm-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 16px 4px;
+}
+
+.m-bm-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-warm-2);
+  border-radius: 10px;
+  padding: 8px 4px 8px 12px;
+}
+
+.m-bm-row.m-bm-drag-src {
+  opacity: 0.35;
+}
+
+.m-bm-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: none;
+  border: 0;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  padding: 0;
+}
+
+.m-bm-title {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-bm-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-bm-act {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.m-bm-act:active {
+  background: var(--hover-neutral);
+  color: var(--text-primary);
+}
+
+.m-bm-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--accent-neon);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+/* призрак под пальцем и подпись тяги */
+.m-bm-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0.92;
+  transform: scale(1.03) rotate(1deg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  background: var(--bg-elevated);
+  border-radius: 10px;
+}
+
+.m-bm-drag-hint {
+  position: fixed;
+  z-index: 1000;
+  transform: translateX(-50%);
+  background: var(--accent-neon);
+  color: var(--bg-base);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+body.m-bm-dragging {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* звёздочка в шапке плеера: активная — залита неоном */
+#mStar[data-on="true"] {
+  color: var(--accent-neon);
+}
+
+#mStar[data-on="true"] svg {
+  fill: var(--accent-neon);
+}
+
+/* нижний шит: выбор группы для новой закладки / меню чипа группы */
+.m-sheet-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.m-sheet-wrap[hidden] {
+  display: none;
+}
+
+.m-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.m-sheet {
+  position: relative;
+  margin: 0 8px calc(8px + env(safe-area-inset-bottom));
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-warm-2);
+  border-radius: 14px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-sheet-item {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+}
+
+.m-sheet-item:active {
+  background: var(--hover-neutral);
+}
+
+.m-sheet-new {
+  color: var(--accent-neon);
+}
+
+.m-sheet-input {
+  margin: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-neon);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+}

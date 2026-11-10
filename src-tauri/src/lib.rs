@@ -35,6 +35,14 @@ pub mod mobile_updater;
 // NovaGrid), десктоп-бин собирает модуль сам (main.rs).
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod subtitles;
+// Закладки мобильной ветки (duopulse-104): хранилище history (SQLite,
+// rusqlite bundled — тот же duopulse.db, что на десктопе) + команды
+// history.* в mobile_history. Тоже только мобильным таргетам: десктопные
+// команды регистрирует bridge.rs в бине.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod history;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod mobile_history;
 
 /// Точка входа мобильной обёртки; mobile_entry_point генерирует JNI-связку
 /// для Kotlin-активити из gen/android. На десктоп-таргетах не вызывается
@@ -50,6 +58,17 @@ fn mobile_run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(duo_mobile::DuoManaged::default())
+        // Хранилище закладок (duopulse-104): SQLite в filesDir/profile —
+        // открыть до старта окна; недоступный каталог/диск роняют запуск с
+        // внятной причиной (как десктопный main.rs).
+        .setup(|app| {
+            use tauri::Manager;
+            let dir = mobile_history::profile_dir()?;
+            let store = history::HistoryStore::open(&dir)
+                .map_err(|e| format!("открыть {}: {e}", dir.display()))?;
+            app.manage(store);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             duo_mobile::net::duo_yt_player,
             duo_mobile::net::duo_fetch_cues,
@@ -59,6 +78,17 @@ fn mobile_run() {
             mobile_updater::updater_install,
             mobile_open::mobile_open_url,
             mobile_private::mobile_private_cleanup,
+            mobile_history::history_bookmark_add,
+            mobile_history::history_bookmark_remove,
+            mobile_history::history_bookmark_update,
+            mobile_history::history_bookmark_list,
+            mobile_history::history_group_list,
+            mobile_history::history_group_add,
+            mobile_history::history_group_rename,
+            mobile_history::history_group_remove,
+            mobile_history::history_group_set_sort,
+            mobile_history::history_group_toggle_bookmark,
+            mobile_history::history_bookmark_move,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить DuoPulse (мобильная ветка)");

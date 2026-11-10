@@ -21,6 +21,7 @@ import {
   type MobileEngineId,
 } from "./platform";
 import { MobileDuo, type DuoStatus } from "./duo";
+import { MobileBookmarks } from "./bookmarks";
 import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
 
 const chromeRoot = document.getElementById("app");
@@ -157,6 +158,7 @@ function setIncognito(on: boolean): void {
     duoPanel?.remove();
     duoPanel = null;
     omnibox.value = "";
+    void bookmarks.syncVideo();
   }
   void invoke<string>("mobile_private_cleanup")
     .then(() =>
@@ -238,6 +240,19 @@ function renderUpdate(ui: UpdaterUi): void {
 const updater = createMobileUpdater(renderUpdate);
 void updater.init();
 root.querySelector<HTMLButtonElement>("#mCheckUpdate")!.addEventListener("click", () => void updater.check(true));
+
+// ── закладки (карточка duopulse-104): группы + перекладывание пальцем ────
+// Хранилище — то же history.* (SQLite в профиле приложения, команды — тонкая
+// мобильная либа lib.rs); здесь — экран со стартовой кнопки, звёздочка в
+// шапке открытого видео и long-press-тяга закладки на чип группы.
+const bookmarks = new MobileBookmarks({
+  currentVideo: () => {
+    const id = duo.currentVideoId;
+    return id ? { url: `https://www.youtube.com/watch?v=${id}`, title: duo.currentTitle } : null;
+  },
+  open: (url) => void navigate(url),
+  note,
+});
 
 // ── duo: субтитры и перевод (этап 2) ───────────────────────────────────
 let duoPanel: import("./duo/panel").DuoPanel | null = null;
@@ -328,6 +343,7 @@ async function navigate(input: string): Promise<void> {
     videoOpen = true;
     duoBtn.hidden = false;
     void duo.open(videoId);
+    void bookmarks.syncVideo();
     note("Плеер YouTube. Нажмите «duo» для субтитров и перевода.");
     return;
   }
@@ -353,6 +369,7 @@ home.addEventListener("click", () => {
   duo.close();
   duoPanel?.remove();
   duoPanel = null;
+  void bookmarks.syncVideo();
   note("");
   omnibox.value = "";
   omnibox.focus();
