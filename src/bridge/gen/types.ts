@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 12); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 13); регенерация: npm run gen:bridge.
 
 /**
  * Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).
@@ -13,6 +13,7 @@ export type AsrProviderId = "local" | "openai";
  * Откуда подсказка: посещение из истории или закладка.
  */
 export type HistorySource = "history" | "bookmark";
+export type Nullable_PasswordsCandidateView = PasswordsCandidateView | null;
 /**
  * Поисковые системы omnibox (задача 5.1): выбор по умолчанию — настройка «Поиск». Префикс — шаблон ссылки с encoded-запросом в конце (omnibox.rs).
  */
@@ -92,10 +93,13 @@ export interface DuoPulseBridgeContract {
   NavResolveOmniboxResult: NavResolveOmniboxResult;
   PasswordAddParams: PasswordAddParams;
   PasswordSaveResult: PasswordSaveResult;
+  Nullable_PasswordsCandidateView: Nullable_PasswordsCandidateView;
+  PasswordsCandidateView: PasswordsCandidateView;
   PasswordListParams: PasswordListParams;
   PasswordListResult: PasswordListResult;
   PasswordEntry: PasswordEntry;
   PasswordRemoveParams: PasswordRemoveParams;
+  PasswordsResolveParams: PasswordsResolveParams;
   PasswordRevealParams: PasswordRevealParams;
   PasswordRevealResult: PasswordRevealResult;
   PasswordUpdateParams: PasswordUpdateParams;
@@ -181,6 +185,7 @@ export interface DuoPulseBridgeContract {
   AdblockSiteException: AdblockSiteException;
   PageLoaded: PageLoaded;
   PageVideoDetected: PageVideoDetected;
+  PasswordsSavePrompt: PasswordsSavePrompt;
   PerfStartupMs: PerfStartupMs;
   PerfTabSwitchMs: PerfTabSwitchMs;
   SubtitlesAsrProgress: SubtitlesAsrProgress;
@@ -605,6 +610,18 @@ export interface PasswordSaveResult {
   updated: boolean;
 }
 /**
+ * Вид кандидата для UI (без пароля) — событие и passwords.candidate.
+ */
+export interface PasswordsCandidateView {
+  origin: string;
+  tabId: string;
+  /**
+   * true — логин уже сохранён, бар предлагает обновить пароль.
+   */
+  updated: boolean;
+  username: string;
+}
+/**
  * passwords.list: записи с фильтром (по сайту/логину/названию).
  */
 export interface PasswordListParams {
@@ -638,6 +655,15 @@ export interface PasswordEntry {
 }
 export interface PasswordRemoveParams {
   id: number;
+}
+/**
+ * passwords.resolve_candidate (этап 2 duopulse-108): решение по бару «Сохранить пароль?» — save | never | dismiss.
+ */
+export interface PasswordsResolveParams {
+  /**
+   * save — сохранить/обновить, never — «никогда для этого сайта», dismiss — закрыть.
+   */
+  action: string;
 }
 export interface PasswordRevealParams {
   id: number;
@@ -1572,6 +1598,18 @@ export interface PageVideoDetected {
   canTracks: boolean;
   tabId: string;
   videoKey: string;
+}
+/**
+ * passwords:save_prompt (этап 2 duopulse-108): сабмит формы логина в активной вкладке заслужил бар «Сохранить пароль?» — UI открывает панель pwsave под полосой хрома. Пароль в payload НЕТ — он ждёт решения в Core (passwords/prompts.rs), кнопки бара зовут passwords.resolve_candidate.
+ */
+export interface PasswordsSavePrompt {
+  origin: string;
+  tabId: string;
+  /**
+   * true — логин уже сохранён, бар спрашивает «Обновить пароль?».
+   */
+  updated: boolean;
+  username: string;
 }
 /**
  * payload события perf:startup_ms (фазы страница берёт perf.snapshot'ом).

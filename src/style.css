@@ -2833,3 +2833,76 @@ html[data-panel] #suggest {
 .pw .pw-pass.on {
   color: var(--text-primary); /* показанный пароль — читаемым цветом */
 }
+
+/* --- Бар «Сохранить пароль?» (pwsave-панель, этап 2 duopulse-108) -----------
+   Панель-child-webview под полосой хрома слева (как бабл Chrome): текст
+   кандидата + «Сохранить/Обновить», «Никогда для этого сайта», «×». */
+.pw-save-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(560px, calc(100vw - 16px));
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: var(--lh-ui);
+}
+.pw-save-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--accent-neon);
+}
+.pw-save-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pw-save-text b {
+  color: var(--accent-neon);
+}
+.pw-save-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pw-save-actions button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pw-save-actions button:hover {
+  background: var(--hover-neutral);
+}
+/* главная кнопка — неон-кромка, не заливка (гайд 06 §8) */
+.pw-save-actions #pwSaveAccept {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+  font-weight: 700;
+}
+.pw-save-actions #pwSaveAccept:hover {
+  background: color-mix(in srgb, var(--accent-neon) 10%, transparent);
+  box-shadow: var(--focus-ring-soft);
+}
+.pw-save-actions #pwSaveClose {
+  width: 28px;
+  padding: 0;
+  color: var(--text-muted);
+}
+/* панельный режим: бар — весь контент окна, краёв под скруглением нет */
+html[data-panel="pwsave"] .pw-save-bar {
+  width: 100%;
+  height: 100vh;
+  border: none;
+  border-radius: 0;
+}

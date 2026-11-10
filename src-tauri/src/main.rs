@@ -558,6 +558,13 @@ unsafe fn referer_of(
 ///   транскрибирует (локальный whisper-server / OpenAI-совместимое облако,
 ///   src/asr/pipeline.rs), кэширует и отвечает document-событием
 ///   duopulse-asr-track; прогресс — событие subtitles:asr_progress;
+/// - «password-candidate»/«passwords-lookup»/«passwords-fill» — жизненный
+///   цикл паролей в странице (этап 2 duopulse-108): сабмит формы логина →
+///   кандидат бара «Сохранить пароль?» (passwords/prompts.rs; событие
+///   passwords:save_prompt в UI — без пароля), запрос логинов origin для
+///   автозаполнения (usernames без паролей) и пароль выбранного логина по
+///   клику на поле; инкогнито — молча (не сохраняем и не заполняем),
+///   origin — всегда по URL вкладки Core;
 /// - прочие (IPC tauri обрабатывает свои параллельно) игнорируются.
 #[cfg(windows)]
 unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
@@ -776,6 +783,21 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 // кэш) — src/asr/pipeline.rs; обработчик сразу уходит в
                 // spawn_blocking, прогресс — subtitles:asr_progress.
                 asr::pipeline::handle_asr_begin(&app, &tab_id, &parsed);
+            } else if parsed["duopulse"] == "password-candidate" {
+                // Сабмит формы логина (этап 2 duopulse-108): content-слой
+                // нашёл пару логин+пароль. Решение и пароль — в Core
+                // (passwords/prompts.rs), UI получает событие без пароля.
+                handle_password_candidate(&app, &tab_id, &parsed);
+            } else if parsed["duopulse"] == "passwords-lookup" {
+                // Страница с полем пароля (этап 2 duopulse-108): есть ли
+                // сохранённые логины для origin вкладки — список usernames
+                // (без паролей) тем же документом для автозаполнения.
+                handle_passwords_lookup(&app, &tab_id, sender.as_ref());
+            } else if parsed["duopulse"] == "passwords-fill" {
+                // Клик по полю (этап 2): пароль выбранного логина — тем же
+                // документом. Origin — по URL вкладки Core, содержимому
+                // сообщения не верим: чужие пароли наружу не утекают.
+                handle_passwords_fill(&app, &tab_id, &parsed, sender.as_ref());
             } else if parsed["duopulse"] == "cosmetic" {
                 if let Some(url) = parsed["url"].as_str() {
                     let res = app
@@ -841,6 +863,120 @@ fn handle_selection_translate(
 ) {
     if let Some(core) = core {
         translate_menu::translate_selection_for_page(app, core, text, target, req_id);
+    }
+}
+
+/// Кандидат «Сохранить пароль?» от content-слоя (этап 2 duopulse-108).
+/// Инкогнито и неактивная вкладка — молча; origin — по URL вкладки.
+/// Бар заслужен — событие passwords:save_prompt в UI (payload без пароля).
+#[cfg(windows)]
+fn handle_password_candidate(
+    app: &AppHandle,
+    tab_id: &str,
+    parsed: &serde_json::Value,
+) {
+    let manager = app.state::<tabs::TabManager>();
+    if manager.is_incognito(tab_id) {
+        return; // инкогнито: пароли не сохраняем (duopulse-108)
+    }
+    let Some(tab_url) = manager.url_of(tab_id) else { return };
+    let (Some(username), Some(password)) = (parsed["username"].as_str(), parsed["password"].as_str())
+    else {
+        return;
+    };
+    // бар — активной вкладке (как бабл Chrome): сабмит в фоне не беспокоит
+    if manager.active_id().as_deref() != Some(tab_id) {
+        return;
+    }
+    let title = parsed["title"].as_str().unwrap_or_default().to_string();
+    let prompts = app.state::<passwords::PasswordPrompts>();
+    let store = app.state::<passwords::PasswordStore>();
+    match prompts.offer(&store, tab_id, &tab_url, &title, username, password) {
+        Ok(Some(view)) => {
+            eprintln!(
+                "[passwords] кандидат: {}@{} ({})",
+                view.username,
+                view.origin,
+                if view.updated { "обновление" } else { "новый" }
+            );
+            let _ = bridge::emit::<bridge::PasswordsSavePromptEvent>(
+                app,
+                &bridge::PasswordsSavePrompt {
+                    tab_id: view.tab_id.clone(),
+                    origin: view.origin.clone(),
+                    username: view.username.clone(),
+                    updated: view.updated,
+                },
+            );
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("[passwords] кандидат отклонён: {e}"),
+    }
+}
+
+/// Запрос логинов origin вкладки для автозаполнения (этап 2 duopulse-108):
+/// ответ «passwords-found» тем же документом — usernames без паролей;
+/// пусто/инкогнито — без ответа (заполнять нечем, content молчит).
+#[cfg(windows)]
+fn handle_passwords_lookup(
+    app: &AppHandle,
+    tab_id: &str,
+    sender: Option<&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2>,
+) {
+    let manager = app.state::<tabs::TabManager>();
+    if manager.is_incognito(tab_id) {
+        return; // инкогнито: не заполняем (duopulse-108)
+    }
+    let Some(tab_url) = manager.url_of(tab_id) else { return };
+    let Ok(origin) = passwords::origin_of(&tab_url) else { return };
+    let accounts = app
+        .state::<passwords::PasswordStore>()
+        .accounts_for(&origin)
+        .unwrap_or_default();
+    if accounts.is_empty() {
+        return;
+    }
+    post_to_page(
+        sender,
+        &serde_json::json!({
+            "duopulse": "passwords-found",
+            "origin": origin,
+            "accounts": accounts,
+        }),
+    );
+}
+
+/// Пароль выбранного логина для автозаполнения (этап 2 duopulse-108) —
+/// ответ «passwords-fill-data» тем же документом. Origin — по URL вкладки:
+/// страница получает пароли только своего сайта.
+#[cfg(windows)]
+fn handle_passwords_fill(
+    app: &AppHandle,
+    tab_id: &str,
+    parsed: &serde_json::Value,
+    sender: Option<&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2>,
+) {
+    let manager = app.state::<tabs::TabManager>();
+    if manager.is_incognito(tab_id) {
+        return;
+    }
+    let Some(tab_url) = manager.url_of(tab_id) else { return };
+    let Ok(origin) = passwords::origin_of(&tab_url) else { return };
+    let Some(username) = parsed["username"].as_str() else { return };
+    let password = app
+        .state::<passwords::PasswordStore>()
+        .credential(&origin, username)
+        .ok()
+        .flatten();
+    if let Some(password) = password {
+        post_to_page(
+            sender,
+            &serde_json::json!({
+                "duopulse": "passwords-fill-data",
+                "username": username,
+                "password": password,
+            }),
+        );
     }
 }
 
@@ -1283,6 +1419,7 @@ fn main() {
         .manage(tabs::TabManager::new())
         .manage(history_store)
         .manage(password_store)
+        .manage(passwords::PasswordPrompts::default())
         .manage(perf_store)
         .manage(adblock_service)
         .manage(subtitles::service::SubtitlesService::new())

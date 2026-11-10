@@ -205,6 +205,13 @@ impl TabManager {
         app.get_webview(&id)
     }
 
+    /// id активной вкладки (бар «Сохранить пароль?» предлагается только ей,
+    /// этап 2 duopulse-108 — как бабл Chrome).
+    pub fn active_id(&self) -> Option<String> {
+        let st = self.state.lock().expect("tabs: лок не отравлен");
+        st.active.map(|i| st.tabs[i].id.clone())
+    }
+
     /// Текущий URL вкладки по id — для сетевого перехватчика (задача 2.1:
     /// запасной источник запроса движка adblock). Вызывается из COM-колбэка
     /// WebView2 — лок берётся с падением в None, паника туда невозможна.
@@ -842,14 +849,14 @@ impl TabManager {
             .get_window("main")
             .ok_or_else(|| "окно main не найдено".to_string())?;
         let builder = if incognito {
-            build_tab_webview(app, id, WebviewUrl::App("index.html".into()))
-                // маркер для e2e/страницы инкогнито (роутер — по метке webview)
-                .initialization_script("window.__DUOPULSE_INCOGNITO__ = 1;")
+            build_tab_webview(app, id, WebviewUrl::App("index.html".into()), true)
+                // маркер для e2e/страницы инкогнито (роутер — по метке webview);
+                // сам маркер — первым скриптом внутри build_tab_webview
                 .data_directory(incognito_data_dir())
         } else if internal {
             build_page_webview(id)
         } else {
-            build_tab_webview(app, id, WebviewUrl::External(url.clone()))
+            build_tab_webview(app, id, WebviewUrl::External(url.clone()), false)
         };
         // Новый webview встанет выше панели по композитору (порядок создания,
         // спайк 086) — панель закрываем заранее (duopulse-090).
@@ -889,6 +896,10 @@ impl TabManager {
         let snapshot = self.snapshot();
         self.persist_session();
         emit::<TabsUpdated>(app, &snapshot).ok();
+        // Кандидат бара «Сохранить пароль?» чужой активной вкладке не живёт
+        // (этап 2 duopulse-108): сабмит был в другой вкладке/вкладка закрыта.
+        app.state::<crate::passwords::PasswordPrompts>()
+            .on_tabs_changed(snapshot.tabs.iter().find(|t| t.active).map(|t| t.id.as_str()));
         snapshot
     }
 
@@ -1143,7 +1154,7 @@ impl TabManager {
             "window.__DUOPULSE_ERROR__ = {};",
             serde_json::json!({ "url": url, "code": status, "reason": describe_web_error(status) })
         );
-        let builder = build_tab_webview(app, &new_id, WebviewUrl::App("index.html".into()))
+        let builder = build_tab_webview(app, &new_id, WebviewUrl::App("index.html".into()), false)
             .initialization_script(script);
         let (pos, size) = content_rect(&window);
         let webview = window
@@ -1272,10 +1283,24 @@ fn is_app_origin(app: &AppHandle, url: &Url) -> bool {
 /// страницы ошибки — App-бандл, см. show_error_page), content-скрипты (монитор
 /// M0 + горячие клавиши таб-бара), аргументы окружения старта, трекинг
 /// URL/заголовка.
-fn build_tab_webview(app: &AppHandle, id: &str, start: WebviewUrl) -> WebviewBuilder<tauri::Wry> {
+fn build_tab_webview(
+    app: &AppHandle,
+    id: &str,
+    start: WebviewUrl,
+    incognito: bool,
+) -> WebviewBuilder<tauri::Wry> {
     let app_for_load = app.clone();
     let app_for_title = app.clone();
-    WebviewBuilder::new(id, start)
+    let builder = WebviewBuilder::new(id, start);
+    // Маркер инкогнито (карточка duopulse-096) — ПЕРВЫМ инициализационным
+    // скриптом: контент-скрипты ниже читают его при старте (passwords-fill
+    // этапа 2 duopulse-108 гасит сохранение/автозаполнение по нему).
+    let builder = if incognito {
+        builder.initialization_script("window.__DUOPULSE_INCOGNITO__ = 1;")
+    } else {
+        builder
+    };
+    builder
         // Критерий M0: скрипт выполняется в каждом новом документе
         // (WebView2: AddScriptToExecuteOnDocumentCreatedAsync).
         .initialization_script(crate::CONTENT_INIT_SCRIPT_M0)

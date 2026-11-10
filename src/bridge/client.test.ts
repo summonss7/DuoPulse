@@ -94,6 +94,11 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   },
   "passwords.remove": { path: ["passwords", "remove"], params: { id: 1 } },
   "passwords.reveal": { path: ["passwords", "reveal"], params: { id: 1 } },
+  "passwords.candidate": { path: ["passwords", "candidate"] },
+  "passwords.resolve_candidate": {
+    path: ["passwords", "resolveCandidate"],
+    params: { action: "save" },
+  },
   "nav.go_back": { path: ["nav", "goBack"] },
   "nav.go_forward": { path: ["nav", "goForward"] },
   "nav.reload": { path: ["nav", "reload"] },
@@ -232,7 +237,7 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(12); // v12: passwords.{list,add,update,remove,reveal} (duopulse-107); v11: источник фида updater (GitHub/Aila) — source в UpdaterConfig/UpdaterStatusResult/UpdaterCheckResult (duopulse-049); v10: события vpn:stats + vpn:route_changed, VpnWgState.pingMs (6.5); v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
+    expect(contract.version).toBe(13); // v13: passwords.{candidate,resolve_candidate} + passwords:save_prompt (duopulse-108); v12: passwords.{list,add,update,remove,reveal} (duopulse-107); v11: источник фида updater (GitHub/Aila) — source в UpdaterConfig/UpdaterStatusResult/UpdaterCheckResult (duopulse-049); v10: события vpn:stats + vpn:route_changed, VpnWgState.pingMs (6.5); v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
   });
 
   it("клиент знает все события контракта (listen по имени из bridge.events)", () => {

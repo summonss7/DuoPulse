@@ -47,6 +47,8 @@ import type {
   PasswordRemoveParams,
   PasswordSaveResult,
   PasswordUpdateParams,
+  PasswordsCandidateView,
+  PasswordsResolveParams,
   PerfRunListResult,
   PerfSaveRunParams,
   PerfSnapshotResult,
@@ -180,6 +182,13 @@ export const bridge = {
     remove: (params: PasswordRemoveParams) => invoke<void>("passwords_remove", { params }),
     /** passwords.reveal (duopulse-107): расшифровать пароль записи. */
     reveal: (params: PasswordRevealParams) => invoke<PasswordRevealResult>("passwords_reveal", { params }),
+    /** passwords.candidate (duopulse-108): ожидающий кандидат бара
+     *  «Сохранить пароль?» — без пароля (null — бара нет). */
+    candidate: () => invoke<PasswordsCandidateView | null>("passwords_candidate"),
+    /** passwords.resolve_candidate (duopulse-108): решение по бару —
+     *  save (upsert в хранилище) | never (denylist) | dismiss. */
+    resolveCandidate: (params: PasswordsResolveParams) =>
+      invoke<void>("passwords_resolve_candidate", { params }),
   },
   settings: {
     /** settings.get: значение ключа профиля. */
@@ -377,5 +386,8 @@ export const bridge = {
      *  старта и ручные) — бейдж найденного обновления на «⋮» зажигается/
      *  гаснет по нему (available=false — «последняя версия» или отказ). */
     updaterCheckDone: "updater:check_done",
+    /** passwords.save_prompt (duopulse-108): сабмит формы логина в активной
+     *  вкладке заслужил бар «Сохранить пароль?» (payload без пароля). */
+    passwordsSavePrompt: "passwords:save_prompt",
   } as const,
 };

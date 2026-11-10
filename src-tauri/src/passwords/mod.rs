@@ -12,12 +12,20 @@
 //! логины одного сайта — отдельные записи. Команда list пароль не отдаёт
 //! (только reveal по конкретному id — экран «Пароли», duopulse-107).
 //!
+//! Этап 2 (duopulse-108): denylist never_save («никогда для этого сайта» —
+//! бар не предлагается), accounts_for/credential — данные автозаполнения
+//! (логины сайта и пароль конкретного логина по запросу content-слоя);
+//! ожидающий кандидат бара — prompts.rs.
+//!
 //! Синхронизация с аккаунтом Aila (этап 4, duopulse-110) выведет ключ
 //! блоба из wrap_key входа; локальный формат записей не изменится.
 
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+pub mod prompts;
+pub use prompts::{PasswordCandidate, PasswordPrompts, PasswordsCandidateView};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -105,6 +113,15 @@ pub struct PasswordRemoveParams {
 #[serde(rename_all = "camelCase")]
 pub struct PasswordRevealParams {
     pub id: i64,
+}
+
+/// passwords.resolve_candidate (этап 2 duopulse-108): решение по бару
+/// «Сохранить пароль?» — save | never | dismiss.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordsResolveParams {
+    /// save — сохранить/обновить, never — «никогда для этого сайта», dismiss — закрыть.
+    pub action: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -304,7 +321,11 @@ impl PasswordStore {
                  created_at INTEGER NOT NULL,
                  updated_at INTEGER NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS idx_logins_origin ON logins(origin);",
+             CREATE INDEX IF NOT EXISTS idx_logins_origin ON logins(origin);
+             CREATE TABLE IF NOT EXISTS never_save (
+                 origin     TEXT PRIMARY KEY,
+                 created_at INTEGER NOT NULL
+             );",
         )
         .map_err(|e| format!("миграция passwords.db: {e}"))
     }
@@ -486,6 +507,48 @@ impl PasswordStore {
             .map_err(|_| format!("логин {id} не найден"))?;
         unseal(&self.key, &blob)
     }
+
+    /// Сайт в denylist «никогда не сохранять» (этап 2 duopulse-108):
+    /// бар «Сохранить пароль?» сайту больше не предлагается. На уже
+    /// сохранённые записи и автозаполнение не влияет.
+    pub fn is_denied(&self, origin: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT 1 FROM never_save WHERE origin=?", [origin], |_| Ok(()))
+            .is_ok()
+    }
+
+    /// Добавить сайт в denylist (идемпотентно).
+    pub fn deny(&self, origin: &str) -> Result<(), String> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO never_save (origin, created_at) VALUES (?,?)",
+            rusqlite::params![origin, now_ms()],
+        )
+        .map_err(|e| format!("записать never_save: {e}"))?;
+        Ok(())
+    }
+
+    /// Логины сайта (автозаполнение, этап 2): usernames расшифровываются,
+    /// пароли — нет (отдаются только credential по выбору пользователя).
+    pub fn accounts_for(&self, origin: &str) -> Result<Vec<String>, String> {
+        let mut out = Vec::new();
+        for row in self.rows()? {
+            if row.origin == origin {
+                out.push(unseal(&self.key, &row.user_enc)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Пароль конкретного логина сайта (автозаполнение по клику на поле).
+    pub fn credential(&self, origin: &str, username: &str) -> Result<Option<String>, String> {
+        for row in self.rows()? {
+            if row.origin == origin && unseal(&self.key, &row.user_enc)? == username {
+                return Ok(Some(unseal(&self.key, &row.pass_enc)?));
+            }
+        }
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -657,5 +720,35 @@ mod tests {
         drop(s2);
         drop(s);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn denylist_silences_only_prompts() {
+        let s = store();
+        assert!(!s.is_denied("https://example.com"));
+        s.deny("https://example.com").unwrap();
+        s.deny("https://example.com").unwrap(); // идемпотентно
+        assert!(s.is_denied("https://example.com"));
+        assert!(!s.is_denied("https://other.org"));
+        // сохранённые до deny записи остаются и читаются автозаполнением
+        s.add("https://example.com/", None, "artem", "x").unwrap();
+        assert_eq!(s.accounts_for("https://example.com").unwrap(), vec!["artem"]);
+        assert_eq!(s.credential("https://example.com", "artem").unwrap().as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn accounts_and_credential_scoped_by_origin() {
+        let s = store();
+        s.add("https://example.com/", None, "artem", "p1").unwrap();
+        s.add("https://example.com/", None, "alya", "p2").unwrap();
+        s.add("https://other.org/", None, "artem", "p3").unwrap();
+        let mut accounts = s.accounts_for("https://example.com").unwrap();
+        accounts.sort();
+        assert_eq!(accounts, vec!["alya", "artem"]);
+        // чужой сайт и чужой логин — пусто
+        assert!(s.accounts_for("https://none.io").unwrap().is_empty());
+        assert!(s.credential("https://example.com", "ghost").unwrap().is_none());
+        assert!(s.credential("https://other.org", "alya").unwrap().is_none());
+        assert_eq!(s.credential("https://other.org", "artem").unwrap().as_deref(), Some("p3"));
     }
 }

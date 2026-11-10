@@ -80,6 +80,7 @@ import {
 import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from "./adapters/cloud";
 import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import { installSelectionTranslate } from "./translate-select";
+import { installPasswordFill } from "./passwords-fill";
 import { preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
@@ -104,6 +105,9 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   // Перевод выделенного текста (карточка duopulse-098): слушатели contextmenu
   // и WebMessage begin/result; пункт контекстного меню — нативный (Core).
   const selectionTranslate = installSelectionTranslate({ post: postToCore });
+  // Пароли (этап 2 duopulse-108): формы логина → кандидат «Сохранить пароль?»
+  // по сабмиту и автозаполнение по клику; инкогнито — модуль пассивен.
+  const passwordFill = installPasswordFill({ post: postToCore });
 
   let currentVideo: DetectedVideo | null = null;
   // Перехват тел timedtext: только на YouTube (initialization script до
@@ -743,6 +747,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       cloud: ReturnType<typeof cloudTranslateStatus>;
       asr: ReturnType<typeof asrStatus>;
       translateSelection: ReturnType<typeof selectionTranslate.state>;
+      passwords: ReturnType<typeof passwordFill.state>;
     } {
       return {
         videoKey: currentVideo?.videoKey ?? null,
@@ -765,6 +770,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
         cloud: cloudTranslateStatus(),
         asr: asrStatus(),
         translateSelection: selectionTranslate.state(),
+        passwords: passwordFill.state(),
       };
     },
     /** Список дорожек текущего видео (null — ещё не получен/не YouTube). */

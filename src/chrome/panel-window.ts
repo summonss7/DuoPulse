@@ -18,7 +18,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type PanelKind = "main" | "proxy" | "vpn" | "duo" | "suggest";
+export type PanelKind = "main" | "proxy" | "vpn" | "duo" | "suggest" | "pwsave";
 
 /** Хост-элемент панели в разметке index.html (панельный режим показывает его). */
 export const PANEL_HOST: Record<PanelKind, string> = {
@@ -27,12 +27,15 @@ export const PANEL_HOST: Record<PanelKind, string> = {
   vpn: "vpnPanel",
   duo: "duoPanel",
   suggest: "suggest",
+  pwsave: "pwSaveBar",
 };
+
+const PANEL_KINDS: readonly PanelKind[] = ["main", "proxy", "vpn", "duo", "suggest", "pwsave"];
 
 /** Этот webview — панель? (панельный режим UI-бандла, ?panel=<kind>). */
 export function panelKind(): PanelKind | null {
   const v = new URLSearchParams(location.search).get("panel");
-  return v === "main" || v === "proxy" || v === "vpn" || v === "duo" || v === "suggest" ? v : null;
+  return PANEL_KINDS.includes(v as PanelKind) ? (v as PanelKind) : null;
 }
 
 /** Какая панель сейчас открыта (кнопка-тумблер: повторный клик — закрыть). */
@@ -80,8 +83,8 @@ export function chromeHeight(): number {
 }
 
 /** Замер скрытой панели клоном (visibility:hidden вне экрана): ширина — из
- *  CSS хоста, высота — текущий контент разметки; панель дорисует данные уже
- *  в своём окне (нехватка высоты — внутренний скролл, не ресайз). */
+ * CSS хоста, высота — текущий контент разметки; панель дорисует данные уже
+ * в своём окне (нехватка высоты — внутренний скролл, не ресайз). */
 function measureHost(kind: PanelKind): { w: number; h: number } {
   const host = document.getElementById(PANEL_HOST[kind]);
   if (!host) return { w: 320, h: 400 };
@@ -97,6 +100,12 @@ function measureHost(kind: PanelKind): { w: number; h: number } {
   const w = Math.ceil(r.width) || 320;
   const h = Math.ceil(r.height) || 400;
   return { w, h };
+}
+
+/** Замер хоста панели для открывающего (бар «Сохранить пароль?» меряется
+ *  в хроме до открытия окна — pw-save.ts, общий механизм measureHost). */
+export function measurePanelHost(kind: PanelKind): { w: number; h: number } {
+  return measureHost(kind);
 }
 
 /** Геометрия панельного окна у якоря: под полосой хрома, выравнивание левым

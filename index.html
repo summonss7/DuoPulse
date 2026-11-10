@@ -273,6 +273,17 @@
         <div class="menu-sep" role="separator"></div>
         <button type="button" data-act="proxy">Прокси&hellip;</button>
       </div>
+      <!-- Бар «Сохранить пароль?» (этап 2 duopulse-108): панель pwsave под
+           полосой хрома; текст и кнопки наполняет src/chrome/pw-save.ts -->
+      <div id="pwSaveBar" class="pw-save-bar" hidden role="dialog" aria-label="Сохранение пароля">
+        <span class="pw-save-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="2.8"/><path d="M7.8 7.8 13 13"/><path d="M10.8 10.8l1.5-1.5 1.4 1.4-1.5 1.5z"/></svg></span>
+        <div class="pw-save-text" id="pwSaveText"></div>
+        <div class="pw-save-actions">
+          <button type="button" id="pwSaveAccept" class="primary">Сохранить</button>
+          <button type="button" id="pwSaveNever" class="ghost">Никогда для этого сайта</button>
+          <button type="button" id="pwSaveClose" class="icon-btn" title="Закрыть"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+        </div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

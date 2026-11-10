@@ -86,4 +86,10 @@ export function bootPanel(kind: PanelKind): void {
     void importPanel("подсказки", () => import("./chrome/omnibox"), "/src/chrome/omnibox.ts").then((m) =>
       m?.bootSuggestPanel(),
     );
+  if (kind === "pwsave")
+    // Бар «Сохранить пароль?» (этап 2 duopulse-108): кандидат — из Core
+    // (пароль там же), кнопки решают passwords.resolve_candidate.
+    void importPanel("бар паролей", () => import("./chrome/pw-save"), "/src/chrome/pw-save.ts").then(
+      (m) => m?.openPwSavePanel(),
+    );
 }

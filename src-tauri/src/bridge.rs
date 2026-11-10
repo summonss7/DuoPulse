@@ -62,7 +62,7 @@ use crate::proxy;
 /// v11 (duopulse-067, без bump — совместимое расширение): событие
 /// updater:check_done (итог проверки фида — автопроверки старта и ручных;
 /// бейдж найденного обновления на кнопке «⋮» главного меню).
-pub const CONTRACT_VERSION: u32 = 12;
+pub const CONTRACT_VERSION: u32 = 13;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -192,7 +192,7 @@ pub use crate::history::contract::{
 pub use crate::passwords::{
     PasswordAddParams, PasswordEntry, PasswordListParams, PasswordListResult,
     PasswordRevealParams, PasswordRevealResult, PasswordRemoveParams, PasswordSaveResult,
-    PasswordUpdateParams,
+    PasswordUpdateParams, PasswordsCandidateView, PasswordsResolveParams,
 };
 
 /// settings.get: ключ, значение которого читаем.
@@ -826,6 +826,28 @@ impl BridgeEvent for SubtitlesSetAppliedEvent {
     type Payload = SubtitlesSetApplied;
 }
 
+/// passwords:save_prompt (этап 2 duopulse-108): сабмит формы логина в
+/// активной вкладке заслужил бар «Сохранить пароль?» — UI открывает панель
+/// pwsave под полосой хрома. Пароль в payload НЕТ — он ждёт решения в Core
+/// (passwords/prompts.rs), кнопки бара зовут passwords.resolve_candidate.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordsSavePrompt {
+    pub tab_id: String,
+    pub origin: String,
+    pub username: String,
+    /// true — логин уже сохранён, бар спрашивает «Обновить пароль?».
+    pub updated: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct PasswordsSavePromptEvent;
+
+impl BridgeEvent for PasswordsSavePromptEvent {
+    const NAME: &'static str = "passwords:save_prompt";
+    type Payload = PasswordsSavePrompt;
+}
+
 /// subtitles:translate_progress: конвейер перевода дорожки (задача 4.2,
 /// docs/05 §2) — панель показывает «Перевод… 12/40» и итог (кэш/сеть/ошибка).
 /// Тип и эмит — src/translate/pipeline.rs рядом с конвейером.
@@ -1070,6 +1092,11 @@ pub fn contract_json() -> serde_json::Value {
             "passwords.reveal": { "handler": "passwords_reveal",
                                   "params": schema!(PasswordRevealParams),
                                   "result": schema!(PasswordRevealResult) },
+            "passwords.candidate": { "handler": "passwords_candidate", "params": null,
+                                      "result": schema!(Option<PasswordsCandidateView>) },
+            "passwords.resolve_candidate": { "handler": "passwords_resolve_candidate",
+                                              "params": schema!(PasswordsResolveParams),
+                                              "result": null },
             "settings.get": { "handler": "settings_get", "params": schema!(SettingsGetParams),
                               "result": schema!(ProxySettings) },
             "settings.set": { "handler": "settings_set", "params": schema!(SettingsSetParams),
@@ -1200,6 +1227,7 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles:translate_unavailable": { "payload": schema!(SubtitlesTranslateUnavailable) },
             "subtitles:asr_progress": { "payload": schema!(crate::asr::pipeline::SubtitlesAsrProgress) },
             "updater:check_done": { "payload": schema!(crate::updater::UpdaterCheckResult) },
+            "passwords:save_prompt": { "payload": schema!(PasswordsSavePrompt) },
         },
     })
 }
@@ -1297,6 +1325,10 @@ fn event_names_match_registry() {
             (
                 <crate::updater::UpdaterCheckDoneEvent as BridgeEvent>::NAME,
                 schema!(crate::updater::UpdaterCheckResult),
+            ),
+            (
+                <PasswordsSavePromptEvent as BridgeEvent>::NAME,
+                schema!(PasswordsSavePrompt),
             ),
         ]
         .into_iter()
@@ -1585,6 +1617,28 @@ fn passwords_reveal(
     Ok(PasswordRevealResult {
         password: store.reveal(params.id)?,
     })
+}
+
+/// passwords.candidate (этап 2 duopulse-108): ожидающий кандидат бара
+/// «Сохранить пароль?» без пароля (панель pwsave при загрузке; null — нет).
+#[tauri::command]
+fn passwords_candidate(
+    prompts: tauri::State<'_, crate::passwords::PasswordPrompts>,
+) -> Result<Option<PasswordsCandidateView>, String> {
+    Ok(prompts.view())
+}
+
+/// passwords.resolve_candidate (этап 2): решение по бару — save (upsert в
+/// хранилище), never (сайт в denylist), dismiss (закрыть). Кандидата нет —
+/// тихо (гонка события и панели).
+#[tauri::command]
+fn passwords_resolve_candidate(
+    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    prompts: tauri::State<'_, crate::passwords::PasswordPrompts>,
+    params: PasswordsResolveParams,
+) -> Result<(), String> {
+    prompts.resolve(&store, &params.action)?;
+    Ok(())
 }
 
 /// history.bookmark_add: добавить закладку (upsert по url); groupId — группа
@@ -3025,6 +3079,8 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         passwords_update,
         passwords_remove,
         passwords_reveal,
+        passwords_candidate,
+        passwords_resolve_candidate,
         settings_get,
         settings_set,
         settings_get_all,

@@ -1403,6 +1403,49 @@
         "type": "object"
       }
     },
+    "passwords.candidate": {
+      "handler": "passwords_candidate",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "anyOf": [
+          {
+            "$ref": "#/definitions/PasswordsCandidateView"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "definitions": {
+          "PasswordsCandidateView": {
+            "description": "Вид кандидата для UI (без пароля) — событие и passwords.candidate.",
+            "properties": {
+              "origin": {
+                "type": "string"
+              },
+              "tabId": {
+                "type": "string"
+              },
+              "updated": {
+                "description": "true — логин уже сохранён, бар предлагает обновить пароль.",
+                "type": "boolean"
+              },
+              "username": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "origin",
+              "tabId",
+              "updated",
+              "username"
+            ],
+            "type": "object"
+          }
+        },
+        "title": "Nullable_PasswordsCandidateView"
+      }
+    },
     "passwords.list": {
       "handler": "passwords_list",
       "params": {
@@ -1510,6 +1553,25 @@
           "id"
         ],
         "title": "PasswordRemoveParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "passwords.resolve_candidate": {
+      "handler": "passwords_resolve_candidate",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "passwords.resolve_candidate (этап 2 duopulse-108): решение по бару «Сохранить пароль?» — save | never | dismiss.",
+        "properties": {
+          "action": {
+            "description": "save — сохранить/обновить, never — «никогда для этого сайта», dismiss — закрыть.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "PasswordsResolveParams",
         "type": "object"
       },
       "result": null
@@ -5364,6 +5426,35 @@
         "type": "object"
       }
     },
+    "passwords:save_prompt": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "passwords:save_prompt (этап 2 duopulse-108): сабмит формы логина в активной вкладке заслужил бар «Сохранить пароль?» — UI открывает панель pwsave под полосой хрома. Пароль в payload НЕТ — он ждёт решения в Core (passwords/prompts.rs), кнопки бара зовут passwords.resolve_candidate.",
+        "properties": {
+          "origin": {
+            "type": "string"
+          },
+          "tabId": {
+            "type": "string"
+          },
+          "updated": {
+            "description": "true — логин уже сохранён, бар спрашивает «Обновить пароль?».",
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "origin",
+          "tabId",
+          "updated",
+          "username"
+        ],
+        "title": "PasswordsSavePrompt",
+        "type": "object"
+      }
+    },
     "perf:startup_ms": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -6122,5 +6213,5 @@
       }
     }
   },
-  "version": 12
+  "version": 13
 }
