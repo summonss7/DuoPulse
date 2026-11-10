@@ -824,3 +824,134 @@ body.m-bm-dragging {
   color: var(--text-primary);
   font: inherit;
 }
+
+/* ── Перевод выделенного текста (duopulse-103): чип «Перевести» у long-press-
+   выделения нашей страницы и бабл (инлайн-стили бабла — content/translate-
+   select.ts, гайд 06 §6), лист «Перевести текст…» из меню «⋮». */
+.m-tr-chip {
+  position: fixed;
+  z-index: 2147483646; /* под баблом перевода (тот — 2147483647) */
+  padding: 7px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(189, 254, 79, 0.35);
+  background: rgba(10, 14, 23, 0.96);
+  color: var(--accent-neon);
+  font-size: 13px;
+  font-family: inherit;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.m-tr-chip:active {
+  background: rgba(189, 254, 79, 0.14);
+}
+
+.m-tr-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 40; /* уровень меню «⋮» — выше плашки duo и панели субтитров */
+}
+
+.m-tr-wrap[hidden] {
+  display: none;
+}
+
+.m-tr-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.m-tr-sheet {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-surface);
+  border: 1px solid rgba(189, 254, 79, 0.2);
+  border-radius: 12px;
+}
+
+.m-tr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-primary);
+}
+
+.m-tr-close {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 4px 6px;
+}
+
+.m-tr-input {
+  resize: none;
+  min-height: 84px;
+  max-height: 40vh;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(189, 254, 79, 0.2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+
+.m-tr-row {
+  display: flex;
+  gap: 8px;
+}
+
+.m-tr-lang {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(189, 254, 79, 0.2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.m-tr-go {
+  padding: 8px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--accent-neon);
+  background: var(--bg-elevated);
+  color: var(--accent-neon);
+  font-size: 14px;
+}
+
+.m-tr-go:active {
+  background: rgba(189, 254, 79, 0.12);
+}
+
+.m-tr-go:disabled {
+  opacity: 0.6;
+}
+
+.m-tr-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.m-tr-result {
+  font-size: 15px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.m-tr-err {
+  color: #ff8a80;
+}

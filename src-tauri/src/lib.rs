@@ -73,6 +73,7 @@ fn mobile_run() {
             duo_mobile::net::duo_yt_player,
             duo_mobile::net::duo_fetch_cues,
             duo_mobile::net::duo_translate_texts,
+            duo_mobile::net::duo_translate_selection,
             mobile_updater::updater_check,
             mobile_updater::updater_download,
             mobile_updater::updater_install,

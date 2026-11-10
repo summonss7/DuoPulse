@@ -154,8 +154,10 @@ fn fetch_url_guard() {
 
 // --- gtx-перевод: чистые части (везде, тесты на десктопе) -----------------------
 
-/// Тело gtx dj=1 → соединённый перевод (None — структура не сошлась).
-pub fn parse_gtx_joined(body: &str) -> Option<String> {
+/// Тело gtx dj=1 → (соединённый перевод, детект языка "src"; None — структура
+/// не сошлась). Сестра parse_gtx_joined для перевода выделения (duopulse-103):
+/// баблу нужен детект «en → ru»; пустой src — сервис не сказал.
+pub fn parse_gtx_dj(body: &str) -> Option<(String, String)> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     let sentences = v.get("sentences")?.as_array()?;
     let mut out = String::new();
@@ -163,7 +165,17 @@ pub fn parse_gtx_joined(body: &str) -> Option<String> {
         let trans = s.get("trans")?.as_str()?;
         out.push_str(trans);
     }
-    Some(out)
+    let src = v
+        .get("src")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+    Some((out, src))
+}
+
+/// Тело gtx dj=1 → соединённый перевод (None — структура не сошлась).
+pub fn parse_gtx_joined(body: &str) -> Option<String> {
+    parse_gtx_dj(body).map(|(joined, _)| joined)
 }
 
 /// Соединённый перевод → построчно; длины не совпали (Google смёржил/разбил
@@ -185,6 +197,29 @@ pub fn gtx_cache_key(from: &str, to: &str, texts: &[String]) -> String {
     format!("{from}\u{1}{to}\u{1}{}", texts.join("\u{1}"))
 }
 
+/// Потолок перевода выделения, символов — паритет с десктопным пунктом меню
+/// (translate/selection.rs MAX_SELECTION_CHARS): текст идёт в GET-query.
+pub const MAX_SELECTION_CHARS: usize = 1500;
+
+/// Проверка запроса перевода выделения (duopulse-103): trim текста/цели,
+/// лимит длины; (текст, цель) или ошибка строкой (фронтенд покажет в бабле).
+pub fn check_selection(text: &str, target: &str) -> Result<(String, String), String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("выделение пустое".into());
+    }
+    if text.chars().count() > MAX_SELECTION_CHARS {
+        return Err(format!(
+            "фрагмент длиннее {MAX_SELECTION_CHARS} символов — сократите выделение"
+        ));
+    }
+    let target = target.trim().to_ascii_lowercase();
+    if target.is_empty() {
+        return Err("язык перевода не задан".into());
+    }
+    Ok((text.to_string(), target))
+}
+
 #[test]
 fn gtx_parse_maps_lines() {
     let body = r#"{"sentences":[{"trans":"Доброе утро.\n","orig":"Good morning.\n"},
@@ -201,6 +236,26 @@ fn gtx_parse_maps_lines() {
         gtx_cache_key("en", "ru", &["a".into(), "b".into()]),
         "en\u{1}ru\u{1}a\u{1}b"
     );
+    let (joined, src) = parse_gtx_dj(body).expect("dj-тело разбирается");
+    assert_eq!(joined, "Доброе утро.\nОпять будильник.");
+    assert_eq!(src, "en");
+    // src нет/не строка — детект пуст, перевод на месте
+    let no_src = r#"{"sentences":[{"trans":"Привет."}]}"#;
+    assert_eq!(parse_gtx_dj(no_src).expect("разобралось"), ("Привет.".into(), "".into()));
+    assert!(parse_gtx_dj("<html>Sorry</html>").is_none());
+}
+
+#[test]
+fn selection_request_checks() {
+    assert_eq!(
+        check_selection("  Hello world  ", " RU ").unwrap(),
+        ("Hello world".into(), "ru".into())
+    );
+    assert!(check_selection("   ", "ru").unwrap_err().contains("пустое"));
+    assert!(check_selection("hi", " ").unwrap_err().contains("язык"));
+    let long = "x".repeat(MAX_SELECTION_CHARS + 1);
+    let err = check_selection(&long, "ru").unwrap_err();
+    assert!(err.contains("сократите"), "{err}");
 }
 
 // --- мобильная сетевая часть (cfg(mobile)) -------------------------------------
@@ -258,10 +313,10 @@ pub(crate) mod net {
         }
     }
 
-    /// Один GET gtx для пачки текстов (соединённых \n) → соединённый перевод.
-    /// Хосты пробуем по порядку (GTX_HOSTS — рейт-лимиты рёбер независимые),
-    /// на отказе каждого — пауза и повтор (до 2 попыток на хост, 6 с).
-    fn gtx_get(agent: &ureq::Agent, from: &str, to: &str, joined: &str) -> Result<String, String> {
+    /// Один GET gtx (текст в query) → тело ответа 200. Хосты пробуем по
+    /// порядку (GTX_HOSTS — рейт-лимиты рёбер независимые), на отказе каждого —
+    /// пауза и повтор (до 2 попыток на хост, 6 с).
+    fn gtx_fetch(agent: &ureq::Agent, from: &str, to: &str, joined: &str) -> Result<String, String> {
         let mut query = format!("client=gtx&dj=1&sl={from}&tl={to}&dt=t&q=");
         // q кодируем вручную: ureq-кодировщик не экранирует \n (0x0A) — сервер
         // принимает сырой символ в query, но экранированный вид надёжнее.
@@ -283,10 +338,7 @@ pub(crate) mod net {
                     std::thread::sleep(Duration::from_secs(6));
                 }
                 match get_status(agent, &url) {
-                    Ok((200, body)) => {
-                        return parse_gtx_joined(&body)
-                            .ok_or_else(|| "gtx ответ не разобран".to_string());
-                    }
+                    Ok((200, body)) => return Ok(body),
                     Ok((status, _)) => {
                         last_err = format!("gtx HTTP {status} ({host})");
                     }
@@ -297,6 +349,12 @@ pub(crate) mod net {
             }
         }
         Err(last_err)
+    }
+
+    /// GET gtx для пачки текстов (соединённых \n) → соединённый перевод.
+    fn gtx_get(agent: &ureq::Agent, from: &str, to: &str, joined: &str) -> Result<String, String> {
+        let body = gtx_fetch(agent, from, to, joined)?;
+        parse_gtx_joined(&body).ok_or_else(|| "gtx ответ не разобран".to_string())
     }
 
     /// Перевод пачки: кэш → пакетный GET → построчный фолбэк при несовпадении
@@ -503,6 +561,33 @@ pub(crate) mod net {
             rest = tail;
         }
         Ok(out)
+    }
+
+    /// Результат duo_translate_selection (бабл показывает «en → ru»).
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DuoSelectionTranslation {
+        pub translation: String,
+        pub detected: String,
+    }
+
+    /// Перевод выделенного текста (карточка duopulse-103): мобильный вход в
+    /// тот же gtx-конвейер, что duo_translate_texts — sl=auto (детект языка
+    /// наружу, паритет десктопного пункта меню translate_menu.rs). Кэш не
+    /// нужен: разовые фрагменты, пачки субтитров кэшует duo_translate_texts.
+    #[tauri::command]
+    pub fn duo_translate_selection(
+        text: String,
+        target: String,
+    ) -> Result<DuoSelectionTranslation, String> {
+        let (text, target) = check_selection(&text, &target)?;
+        let body = gtx_fetch(&agent(), "auto", &target, &text)?;
+        let (translation, detected) =
+            parse_gtx_dj(&body).ok_or_else(|| "gtx ответ не разобран".to_string())?;
+        Ok(DuoSelectionTranslation {
+            translation,
+            detected,
+        })
     }
 }
 

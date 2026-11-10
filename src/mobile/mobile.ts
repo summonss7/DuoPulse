@@ -26,6 +26,10 @@ import {
 import { MobileDuo, type DuoStatus } from "./duo";
 import { MobileBookmarks } from "./bookmarks";
 import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
+import {
+  createSelectionPorts,
+  installMobileSelectionTranslate,
+} from "./selection-translate";
 
 const chromeRoot = document.getElementById("app");
 // DOM десктоп-хрома не трогаем, просто прячем: не [hidden] — стили десктопа
@@ -84,6 +88,7 @@ root.innerHTML = `
           </button>
         </div>
         <label class="m-engine">Поиск: <select id="mEngine"></select></label>
+        <button id="mTranslate" class="m-check-update">Перевести текст…</button>
         <button id="mCheckUpdate" class="m-check-update">Проверить обновления</button>
         <p class="m-menu-version" id="mVersionMenu"></p>
       </div>
@@ -299,6 +304,24 @@ duoBtn.addEventListener("click", () => {
     content.appendChild(duoPanel.root);
     duoPanel.refreshList(duo.trackList);
   })();
+});
+
+// ── Перевод выделенного текста (duopulse-103): мобильный вход в gtx-конвейер
+// десктопного пункта «Перевести выделение». Вход два: long-press по тексту
+// нашей страницы (omnibox; кросс-доменный iframe плеера недостижим) → чип
+// «Перевести» у выделения → бабл; и «Перевести текст…» в этом меню — лист с
+// полем ввода. Последний язык — как поисковик, в localStorage (инкогнито —
+// до перезапуска).
+const selectionTranslate = installMobileSelectionTranslate(
+  document,
+  createSelectionPorts(invoke, () => incognito),
+);
+// диагностика стендов (e2e/selection/mobile.mjs)
+(window as { __duopulseMobileTranslate?: () => unknown }).__duopulseMobileTranslate = () =>
+  selectionTranslate.stateSnapshot();
+root.querySelector<HTMLButtonElement>("#mTranslate")!.addEventListener("click", () => {
+  setMenu(false);
+  selectionTranslate.openSheet(content);
 });
 
 // ── Поисковик по умолчанию (duopulse-085): Google, выбор — селектор
