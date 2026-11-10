@@ -11,7 +11,10 @@
 // групп, чипы «Все / группа… / Без группы», сортировка группы (вручную
 // drag&drop / по имени / по дате), перемещение закладки между группами
 // (меню папки: закладка может состоять в нескольких группах или без группы),
-// правка заголовка, удаление. Клик по записи открывает адрес в этой
+// правка заголовка, удаление. Перетаскивание мышью (карточка duopulse-099):
+// строка закладки на чип группы — перекладывание между группами (из вида
+// группы — перенос: убрать из текущей и добавить в целевую), внутри списка
+// в режиме «вручную» — порядок. Клик по записи открывает адрес в этой
 // вкладке (страница заменяется сайтом), Ctrl/средняя кнопка — новая вкладка.
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark, HistoryEntry } from "../bridge";
@@ -93,10 +96,26 @@ const currentGroup = (): BookmarkGroupInfo | undefined =>
 const groupParam = (): number | null =>
   groupSel === "all" ? null : groupSel === "ungrouped" ? -1 : groupSel;
 
-/** Drag&drop доступен: конкретная группа в режиме «вручную», без поиска. */
+/** Drag&drop порядка доступен: конкретная группа в режиме «вручную», без поиска. */
 const dragEnabled = (): boolean => {
   const g = currentGroup();
   return !!g && g.sortBy === "manual" && !query;
+};
+
+/** Drag&drop между группами (карточка duopulse-099): доступен во всей секции
+ *  закладок без поиска — строку можно тащить на чип группы. */
+const groupDragEnabled = (): boolean => section === "bookmarks" && !query;
+
+/** Чип — валидная цель перекладывания: группа (не «Все», не текущий вид) или
+ *  «Без группы» при виде конкретной группы (уход из группы). */
+const validDropTarget = (sel: GroupSel): boolean =>
+  sel !== "all" && sel !== groupSel && (sel !== "ungrouped" || typeof groupSel === "number");
+
+/** Sel чипа из data-атрибута («all»/«ungrouped»/строка id). */
+const chipSelOf = (chip: HTMLElement): GroupSel | undefined => {
+  const s = chip.dataset.sel;
+  if (s === undefined) return undefined;
+  return s === "all" || s === "ungrouped" ? s : Number(s);
 };
 
 /** Открыть адрес: обычный клик — в этой вкладке, Ctrl/средняя — новая. */
@@ -205,10 +224,12 @@ function bookmarkRow(b: HistoryBookmark): HTMLDivElement {
   const edit = actBtn("act-edit", "edit", "Переименовать");
   const del = actBtn("act-del", "cross", "Удалить закладку");
   row.append(folder, edit, del);
-  if (dragEnabled()) {
+  if (groupDragEnabled()) {
     row.draggable = true;
     row.classList.add("draggable");
-    row.title = "Перетащите, чтобы изменить порядок в группе";
+    row.title = dragEnabled()
+      ? "Перетащите внутри списка — порядок, на чип группы — переложить в неё"
+      : "Перетащите на чип группы, чтобы переложить закладку";
   }
   return row;
 }
@@ -312,6 +333,7 @@ function renderChips(): void {
     b.className = "mgr-chip";
     b.textContent = label;
     b.title = title;
+    b.dataset.sel = String(sel); // цель drag&drop (chipSelOf)
     if (groupSel === sel) b.classList.add("active");
     b.addEventListener("click", () => {
       groupSel = sel;
@@ -497,10 +519,38 @@ function closeMenus(): void {
   for (const m of document.querySelectorAll(".mgr-groups-menu")) m.remove();
 }
 
-// --- drag&drop порядка внутри группы (manual) -------------------------------
+// --- drag&drop: порядок внутри группы (manual) и перекладывание между группами
 
 /** Перетаскиваемая закладка (url) — одна на список. */
 let dragUrl = "";
+
+/** Переложить перетащённую закладку в группу-чип (карточка duopulse-099):
+ *  из вида конкретной группы — «перекидывание» (убрать из текущей), затем
+ *  добавить в целевую, если её там ещё нет (закладка может состоять в
+ *  нескольких группах — остальные членства не трогаем). */
+async function dropOnGroup(url: string, target: GroupSel): Promise<void> {
+  const inTarget =
+    typeof target === "number" &&
+    bookmarks.find((b) => b.url === url)?.groups?.some((g) => g.id === target) === true;
+  try {
+    if (typeof groupSel === "number" && groupSel !== target) {
+      await bridge.history.groupToggleBookmark({ url, groupId: groupSel, on: false });
+    }
+    if (typeof target === "number" && !inTarget) {
+      await bridge.history.groupToggleBookmark({ url, groupId: target, on: true });
+    }
+  } catch (e) {
+    showError(e);
+  }
+  await reload();
+}
+
+/** Снять подсветку чипов-целей (drag покинул чип / тяга закончилась). */
+function clearChipMarks(): void {
+  for (const c of chipsEl.querySelectorAll(".mgr-chip.drop-target")) {
+    c.classList.remove("drop-target");
+  }
+}
 
 /** Локальная перестановка + фиксация позиции в Core. */
 function reorder(droppedOn: HTMLElement, after: boolean): void {
@@ -757,9 +807,10 @@ export function initManagerPage(): void {
     if (row?.dataset.url) openUrl(row.dataset.url, true);
   });
 
-  // drag&drop порядка внутри группы (только режим «вручную»)
+  // drag&drop: порядок внутри группы (режим «вручную») + перекладывание
+  // между группами тягой на чип (карточка duopulse-099)
   listEl.addEventListener("dragstart", (e) => {
-    if (!dragEnabled()) {
+    if (!groupDragEnabled()) {
       e.preventDefault();
       return;
     }
@@ -771,7 +822,7 @@ export function initManagerPage(): void {
     if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
   });
   listEl.addEventListener("dragover", (e) => {
-    if (!dragUrl) return;
+    if (!dragUrl || !dragEnabled()) return; // подсветка порядка — только manual
     const row = (e.target as HTMLElement).closest<HTMLElement>(".mgr-entry");
     if (!row || row.dataset.url === dragUrl) return;
     e.preventDefault();
@@ -781,7 +832,7 @@ export function initManagerPage(): void {
     row.classList.add(after ? "drop-after" : "drop-before");
   });
   listEl.addEventListener("drop", (e) => {
-    if (!dragUrl) return;
+    if (!dragUrl || !dragEnabled()) return;
     const row = (e.target as HTMLElement).closest<HTMLElement>(".mgr-entry");
     if (!row) return;
     e.preventDefault();
@@ -793,7 +844,38 @@ export function initManagerPage(): void {
   listEl.addEventListener("dragend", () => {
     dragUrl = "";
     clearDropMarks();
+    clearChipMarks();
     listEl.querySelector(".dragging")?.classList.remove("dragging");
+  });
+  // чипы групп — цели перекладывания: подсветка на пролёте, drop — перенос
+  chipsEl.addEventListener("dragover", (e) => {
+    if (!dragUrl) return;
+    const chip = (e.target as HTMLElement).closest<HTMLElement>(".mgr-chip");
+    const sel = chip ? chipSelOf(chip) : undefined;
+    if (!chip || chip.classList.contains("mgr-chip-add") || sel === undefined) return;
+    if (!validDropTarget(sel)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    clearChipMarks();
+    chip.classList.add("drop-target");
+  });
+  chipsEl.addEventListener("dragleave", (e) => {
+    const chip = (e.target as HTMLElement).closest<HTMLElement>(".mgr-chip");
+    if (chip && !chip.contains(e.relatedTarget as Node | null)) {
+      chip.classList.remove("drop-target");
+    }
+  });
+  chipsEl.addEventListener("drop", (e) => {
+    if (!dragUrl) return;
+    const chip = (e.target as HTMLElement).closest<HTMLElement>(".mgr-chip");
+    const sel = chip ? chipSelOf(chip) : undefined;
+    if (sel === undefined || !validDropTarget(sel)) return;
+    e.preventDefault();
+    const url = dragUrl;
+    dragUrl = "";
+    clearChipMarks();
+    listEl.querySelector(".dragging")?.classList.remove("dragging");
+    void dropOnGroup(url, sel);
   });
   listEl.addEventListener("scroll", closeMenus, { passive: true });
 

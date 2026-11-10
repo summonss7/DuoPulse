@@ -1339,6 +1339,13 @@ body.internal-page {
   border-color: var(--accent-neon);
   color: var(--accent-neon);
 }
+/* цель перекладывания закладки тягой (карточка duopulse-099): чип зальёт
+ * неоном — куда упадёт строка */
+.mgr-chip.drop-target {
+  border-color: var(--accent-neon);
+  background: var(--accent-neon);
+  color: var(--bg-base);
+}
 .mgr-chip-add {
   display: flex;
   align-items: center;
