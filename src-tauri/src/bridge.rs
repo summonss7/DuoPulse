@@ -62,7 +62,7 @@ use crate::proxy;
 /// v11 (duopulse-067, без bump — совместимое расширение): событие
 /// updater:check_done (итог проверки фида — автопроверки старта и ручных;
 /// бейдж найденного обновления на кнопке «⋮» главного меню).
-pub const CONTRACT_VERSION: u32 = 13;
+pub const CONTRACT_VERSION: u32 = 14;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -194,6 +194,44 @@ pub use crate::passwords::{
     PasswordRevealParams, PasswordRevealResult, PasswordRemoveParams, PasswordSaveResult,
     PasswordUpdateParams, PasswordsCandidateView, PasswordsResolveParams,
 };
+
+/// aila.status: состояние аккаунта Aila (этап 4 duopulse-110): вход, сервер,
+/// ревизия облачного блоба паролей и итог последней синхронизации.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AilaStatusResult {
+    pub logged_in: bool,
+    pub username: String,
+    pub display_name: String,
+    pub server: String,
+    pub revision: u64,
+    pub last_sync_at: Option<i64>,
+    pub last_error: Option<String>,
+}
+
+/// aila.login: вход в аккаунт Aila (PBKDF2 на клиенте, серверу уходит только
+/// auth_hash — как у веб-клиента Aila).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AilaLoginParams {
+    pub username: String,
+    pub password: String,
+}
+
+/// aila.sync_now: итог круга синка (pull → merge → push).
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AilaSyncResult {
+    /// записей было в облаке до слияния.
+    pub pulled: u64,
+    /// применено из облака (добавлено/обновлено).
+    pub applied: u64,
+    /// конфликтов пароля: проигравший сохранён записью-дублем.
+    pub conflicts: u64,
+    /// изменения ушли на сервер.
+    pub pushed: bool,
+    pub revision: u64,
+}
 
 /// settings.get: ключ, значение которого читаем.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1097,6 +1135,13 @@ pub fn contract_json() -> serde_json::Value {
             "passwords.resolve_candidate": { "handler": "passwords_resolve_candidate",
                                               "params": schema!(PasswordsResolveParams),
                                               "result": null },
+            "aila.status": { "handler": "aila_status", "params": null,
+                             "result": schema!(AilaStatusResult) },
+            "aila.login": { "handler": "aila_login", "params": schema!(AilaLoginParams),
+                            "result": schema!(AilaStatusResult) },
+            "aila.logout": { "handler": "aila_logout", "params": null, "result": null },
+            "aila.sync_now": { "handler": "aila_sync_now", "params": null,
+                               "result": schema!(AilaSyncResult) },
             "settings.get": { "handler": "settings_get", "params": schema!(SettingsGetParams),
                               "result": schema!(ProxySettings) },
             "settings.set": { "handler": "settings_set", "params": schema!(SettingsSetParams),
@@ -1560,7 +1605,7 @@ fn history_delete_range(
 /// сайту/логину/названию). Пароль — только passwords.reveal по id.
 #[tauri::command]
 fn passwords_list(
-    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
     params: PasswordListParams,
 ) -> Result<PasswordListResult, String> {
     store.list(
@@ -1569,49 +1614,127 @@ fn passwords_list(
     )
 }
 
+/// Свежий снимок состояния аккаунта (общий код login и status).
+fn aila_status_of(account: &std::sync::Arc<crate::aila::AilaAccount>) -> AilaStatusResult {
+    let (logged_in, username, display_name, server, revision, last_sync_at, last_error) =
+        account.status();
+    AilaStatusResult {
+        logged_in,
+        username,
+        display_name,
+        server,
+        revision,
+        last_sync_at,
+        last_error,
+    }
+}
+
+/// aila.status: вход в аккаунт Aila / сервер / последний синк (настройки).
+#[tauri::command]
+fn aila_status(
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
+) -> Result<AilaStatusResult, String> {
+    Ok(aila_status_of(&account))
+}
+
+/// aila.login: вход в аккаунт Aila (соли → PBKDF2 → /api/login; сервер
+/// видит только auth_hash). После входа — первый синк: локальные пароли,
+/// накопленные до входа, сливаются в облако.
+#[tauri::command]
+fn aila_login(
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
+    params: AilaLoginParams,
+) -> Result<AilaStatusResult, String> {
+    account.login(&params.username, &params.password)?;
+    account.schedule_sync();
+    Ok(aila_status_of(&account))
+}
+
+/// aila.logout: выход — локальные пароли остаются, ключи/сессия стираются.
+#[tauri::command]
+fn aila_logout(
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
+) -> Result<(), String> {
+    account.logout();
+    Ok(())
+}
+
+/// aila.sync_now: синхронизировать сейчас (кнопка в настройках) — тот же
+/// круг, что у воркера: pull → merge (конфликты — записями-дублями) → push.
+#[tauri::command]
+fn aila_sync_now(
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
+    store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
+) -> Result<AilaSyncResult, String> {
+    let (pulled, applied, conflicts, pushed, revision) = account.sync_now(&store)?;
+    Ok(AilaSyncResult {
+        pulled,
+        applied,
+        conflicts,
+        pushed,
+        revision,
+    })
+}
+
 /// passwords.add: сохранить логин (upsert по origin+username — повторное
-/// сохранение того же логина обновляет пароль).
+/// сохранение того же логина обновляет пароль). При входе в аккаунт Aila —
+/// пометка на синк (воркер, дебаунс; этап 4 duopulse-110).
 #[tauri::command]
 fn passwords_add(
-    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: PasswordAddParams,
 ) -> Result<PasswordSaveResult, String> {
-    store.add(
+    let res = store.add(
         &params.url,
         params.title.as_deref(),
         &params.username,
         &params.password,
-    )
+    );
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// passwords.update: правка записи (переданные поля).
 #[tauri::command]
 fn passwords_update(
-    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: PasswordUpdateParams,
 ) -> Result<(), String> {
-    store.update(
+    let res = store.update(
         params.id,
         params.url.as_deref(),
         params.title.as_deref(),
         params.username.as_deref(),
         params.password.as_deref(),
-    )
+    );
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// passwords.remove: удалить запись (идемпотентна).
 #[tauri::command]
 fn passwords_remove(
-    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: PasswordRemoveParams,
 ) -> Result<(), String> {
-    store.remove(params.id)
+    let res = store.remove(params.id);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// passwords.reveal: расшифровать пароль записи (экран «Пароли»).
 #[tauri::command]
 fn passwords_reveal(
-    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
     params: PasswordRevealParams,
 ) -> Result<PasswordRevealResult, String> {
     Ok(PasswordRevealResult {
@@ -1633,11 +1756,13 @@ fn passwords_candidate(
 /// тихо (гонка события и панели).
 #[tauri::command]
 fn passwords_resolve_candidate(
-    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
     prompts: tauri::State<'_, crate::passwords::PasswordPrompts>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: PasswordsResolveParams,
 ) -> Result<(), String> {
     prompts.resolve(&store, &params.action)?;
+    aila.schedule_sync(); // save тоже правка хранилища — в облако (этап 4)
     Ok(())
 }
 
@@ -3081,6 +3206,10 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         passwords_reveal,
         passwords_candidate,
         passwords_resolve_candidate,
+        aila_status,
+        aila_login,
+        aila_logout,
+        aila_sync_now,
         settings_get,
         settings_set,
         settings_get_all,

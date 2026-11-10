@@ -6,6 +6,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AdblockSetEnabledParams,
+  AilaLoginParams,
+  AilaStatusResult,
+  AilaSyncResult,
   AdblockStatusResult,
   AppBuildInfoResult,
   AdblockUpdateListsParams,
@@ -189,6 +192,19 @@ export const bridge = {
      *  save (upsert в хранилище) | never (denylist) | dismiss. */
     resolveCandidate: (params: PasswordsResolveParams) =>
       invoke<void>("passwords_resolve_candidate", { params }),
+  },
+  aila: {
+    /** aila.status (duopulse-110): вход в аккаунт Aila / сервер / итог
+     *  последней синхронизации паролей. */
+    status: () => invoke<AilaStatusResult>("aila_status"),
+    /** aila.login (duopulse-110): вход (PBKDF2 на клиенте — серверу уходит
+     *  только auth_hash); после входа — первый синк локальных паролей. */
+    login: (params: AilaLoginParams) => invoke<AilaStatusResult>("aila_login", { params }),
+    /** aila.logout (duopulse-110): выход — локальные пароли остаются. */
+    logout: () => invoke<void>("aila_logout"),
+    /** aila.sync_now (duopulse-110): синхронизировать сейчас (pull → merge
+     *  → push; конфликты — записями-дублями, не молча). */
+    syncNow: () => invoke<AilaSyncResult>("aila_sync_now"),
   },
   settings: {
     /** settings.get: значение ключа профиля. */

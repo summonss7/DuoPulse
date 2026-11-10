@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 13); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 14); регенерация: npm run gen:bridge.
 
 /**
  * Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).
@@ -53,6 +53,9 @@ export interface DuoPulseBridgeContract {
   AdblockStatusResult: AdblockStatusResult;
   AdblockListInfo: AdblockListInfo;
   AdblockUpdateListsParams: AdblockUpdateListsParams;
+  AilaLoginParams: AilaLoginParams;
+  AilaStatusResult: AilaStatusResult;
+  AilaSyncResult: AilaSyncResult;
   AppBuildInfoResult: AppBuildInfoResult;
   AsrClearCacheResult: AsrClearCacheResult;
   AsrSettings: AsrSettings;
@@ -265,6 +268,47 @@ export interface AdblockUpdateListsParams {
    * true — качать даже непротухшие (кнопка «Обновить списки»).
    */
   force?: boolean;
+}
+/**
+ * aila.login: вход в аккаунт Aila (PBKDF2 на клиенте, серверу уходит только auth_hash — как у веб-клиента Aila).
+ */
+export interface AilaLoginParams {
+  password: string;
+  username: string;
+}
+/**
+ * aila.status: состояние аккаунта Aila (этап 4 duopulse-110): вход, сервер, ревизия облачного блоба паролей и итог последней синхронизации.
+ */
+export interface AilaStatusResult {
+  displayName: string;
+  lastError?: string | null;
+  lastSyncAt?: number | null;
+  loggedIn: boolean;
+  revision: number;
+  server: string;
+  username: string;
+}
+/**
+ * aila.sync_now: итог круга синка (pull → merge → push).
+ */
+export interface AilaSyncResult {
+  /**
+   * применено из облака (добавлено/обновлено).
+   */
+  applied: number;
+  /**
+   * конфликтов пароля: проигравший сохранён записью-дублем.
+   */
+  conflicts: number;
+  /**
+   * записей было в облаке до слияния.
+   */
+  pulled: number;
+  /**
+   * изменения ушли на сервер.
+   */
+  pushed: boolean;
+  revision: number;
 }
 /**
  * app.build_info: версия приложения и момент сборки (карточка duopulse-074: бейдж «vX.Y.Z · дата» в шапке браузера). `build_unix` — unix-секунды компиляции (DUOPULSE_BUILD_UNIX из build.rs; 0 — неизвестно), фронтенд форматирует их локальной датой пользователя.

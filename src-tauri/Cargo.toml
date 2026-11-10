@@ -168,6 +168,12 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 # rand — случайные IV и ключ хранилища (уже в дереве транзитивно).
 aes-gcm = "0.10"
 rand = "0.8"
+# Аккаунт Aila и синк паролей (этап 4 duopulse-110): вход — PBKDF2-SHA256
+# 600k как у веб-клиента Aila (auth_hash/wrap_key), ключ синка — HKDF от
+# wrap_key; чистый Rust (RustCrypto), ring не нужен.
+sha2 = "0.10"
+pbkdf2 = "0.12"
+hkdf = "0.12"
 
 # Мобильная ветка lib (duopulse-082; рецепт NovaGrid: сетевые зависимости
 # мобильного пути живут ТОЛЬКО здесь — cdylib десктопа остаётся тонким,

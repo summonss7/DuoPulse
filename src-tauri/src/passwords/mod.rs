@@ -283,9 +283,10 @@ impl PasswordStore {
         Ok(store)
     }
 
-    /// Хранилище с явным ключом (тесты; файл БД — во временном каталоге).
+    /// Хранилище с явным ключом (тесты крейта — и свои, и aila-синка; файл
+    /// БД — во временном каталоге, ключ DPAPI не трогаем).
     #[cfg(test)]
-    fn open_with_key(path: &Path, key: [u8; 32]) -> Result<Self, String> {
+    pub(crate) fn open_with_key(path: &Path, key: [u8; 32]) -> Result<Self, String> {
         let conn = Connection::open(path)
             .map_err(|e| format!("открыть {}: {e}", path.display()))?;
         let store = Self {
@@ -549,6 +550,192 @@ impl PasswordStore {
         }
         Ok(None)
     }
+
+    /// Все записи с расшифрованными username/password (этап 4 duopulse-110:
+    /// сборка документа для облачного блоба). Вне UI-контракта — только синк.
+    pub fn export_full(&self) -> Result<Vec<FullLogin>, String> {
+        let mut out = Vec::new();
+        for row in self.rows()? {
+            out.push(FullLogin {
+                origin: row.origin,
+                url: row.url,
+                title: row.title,
+                username: unseal(&self.key, &row.user_enc)?,
+                password: unseal(&self.key, &row.pass_enc)?,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Сайты denylist «никогда не сохранять» (синк: часть документа).
+    pub fn never_save_origins(&self) -> Result<Vec<String>, String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT origin FROM never_save ORDER BY origin")
+            .map_err(|e| format!("select never_save: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| format!("query never_save: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("прочитать never_save: {e}"))
+    }
+
+    /// Влить записи из облака (этап 4): пара (origin, username) — свежий
+    /// `updated_at` выигрывает; при разном пароле проигравший остаётся
+    /// записью-дублем «username (дубль)» — конфликт не разрешается молча,
+    /// пользователь видит обе версии. Тот же пароль — тянется только мета.
+    /// Denylist — объединение списков.
+    pub fn merge_remote(
+        &self,
+        remote: &[FullLogin],
+        never_save: &[String],
+    ) -> Result<MergeStats, String> {
+        let mut stats = MergeStats::default();
+        let mut conn = self.conn.lock().unwrap();
+        for r in remote {
+            if r.username.trim().is_empty() || r.password.is_empty() {
+                continue; // мусорный документ не ломает слияние
+            }
+            let mut local: Option<(i64, String, i64)> = None; // (id, пароль, updated_at)
+            for row in rows_of(&conn)? {
+                if row.origin == r.origin && unseal(&self.key, &row.user_enc)? == r.username {
+                    local = Some((row.id, unseal(&self.key, &row.pass_enc)?, row.updated_at));
+                    break;
+                }
+            }
+            let Some((id, local_pass, local_updated)) = local else {
+                conn.execute(
+                    "INSERT INTO logins (origin, url, title, user_enc, pass_enc, created_at, updated_at)
+                     VALUES (?,?,?,?,?,?,?)",
+                    rusqlite::params![
+                        r.origin,
+                        r.url,
+                        r.title,
+                        seal(&self.key, &r.username)?,
+                        seal(&self.key, &r.password)?,
+                        r.created_at,
+                        r.updated_at
+                    ],
+                )
+                .map_err(|e| format!("вставить облачный логин: {e}"))?;
+                stats.applied += 1;
+                continue;
+            };
+            if local_pass == r.password {
+                if r.updated_at > local_updated {
+                    conn.execute(
+                        "UPDATE logins SET url=?, title=?, updated_at=? WHERE id=?",
+                        rusqlite::params![r.url, r.title, r.updated_at, id],
+                    )
+                    .map_err(|e| format!("обновить облачную мету: {e}"))?;
+                    stats.applied += 1;
+                }
+                continue;
+            }
+            // Пароли разные: победитель — свежий updated_at, проигравший
+            // сохраняется отдельной записью-дублем.
+            let taken = usernames_of(&conn, &self.key, &r.origin)?;
+            if r.updated_at > local_updated {
+                // облако выиграло: локальная запись переезжает в «дубль»,
+                // её слот занимает облачная версию
+                let dupe = free_dupe_name(&taken, &r.username);
+                conn.execute(
+                    "UPDATE logins SET user_enc=?, updated_at=? WHERE id=?",
+                    rusqlite::params![seal(&self.key, &dupe)?, now_ms(), id],
+                )
+                .map_err(|e| format!("переименовать проигравший логин: {e}"))?;
+                conn.execute(
+                    "INSERT INTO logins (origin, url, title, user_enc, pass_enc, created_at, updated_at)
+                     VALUES (?,?,?,?,?,?,?)",
+                    rusqlite::params![
+                        r.origin,
+                        r.url,
+                        r.title,
+                        seal(&self.key, &r.username)?,
+                        seal(&self.key, &r.password)?,
+                        r.created_at,
+                        r.updated_at
+                    ],
+                )
+                .map_err(|e| format!("вставить облачный логин: {e}"))?;
+                stats.applied += 1;
+            } else {
+                // локальная выиграла: облачная версия — дублем рядом
+                let dupe = free_dupe_name(&taken, &r.username);
+                conn.execute(
+                    "INSERT INTO logins (origin, url, title, user_enc, pass_enc, created_at, updated_at)
+                     VALUES (?,?,?,?,?,?,?)",
+                    rusqlite::params![
+                        r.origin,
+                        r.url,
+                        r.title,
+                        seal(&self.key, &dupe)?,
+                        seal(&self.key, &r.password)?,
+                        r.created_at,
+                        r.updated_at
+                    ],
+                )
+                .map_err(|e| format!("вставить дубль конфликта: {e}"))?;
+            }
+            stats.conflicts += 1;
+        }
+        for origin in never_save {
+            conn.execute(
+                "INSERT OR IGNORE INTO never_save (origin, created_at) VALUES (?,?)",
+                rusqlite::params![origin, now_ms()],
+            )
+            .map_err(|e| format!("слить never_save: {e}"))?;
+        }
+        Ok(stats)
+    }
+}
+
+/// Полная запись логина (синк, этап 4): пароль расшифрован — сериализуется
+/// только в облачный блоб (шифруется ключом синка до отправки).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FullLogin {
+    pub origin: String,
+    pub url: String,
+    pub title: String,
+    pub username: String,
+    pub password: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Итог слияния облачного набора в локальное хранилище.
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct MergeStats {
+    /// записей добавлено/обновлено из облака.
+    pub applied: u64,
+    /// конфликтов пароля: проигравший сохранён записью-дублем.
+    pub conflicts: u64,
+}
+
+/// Юзернеймы сайта (для поиска свободного имени дубля) — расшифровываются
+/// ключом хранилища.
+fn usernames_of(conn: &Connection, key: &[u8; 32], origin: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for row in rows_of(conn)? {
+        if row.origin == origin {
+            out.push(unseal(key, &row.user_enc)?);
+        }
+    }
+    Ok(out)
+}
+
+/// Свободное имя для записи-дубля конфликта: «user (дубль)», «user (дубль 2)»…
+fn free_dupe_name(taken: &[String], username: &str) -> String {
+    let mut name = format!("{username} (дубль)");
+    let mut n = 2;
+    while taken.iter().any(|u| *u == name) {
+        name = format!("{username} (дубль {n})");
+        n += 1;
+    }
+    name
 }
 
 #[cfg(test)]

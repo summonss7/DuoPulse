@@ -19,6 +19,7 @@ import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import { buildDateRu } from "../chrome/app-version";
 import type {
+  AilaStatusResult,
   SettingsAll,
   UpdaterCheckResult,
   UpdaterStatusResult,
@@ -901,6 +902,109 @@ export function initSettingsPage(): void {
   privacyRow.append(clearHistNow, clearCache, privacyStatus);
   privacy.body.append(clearHistLabel, privacyRow);
 
+  // --- 7. Аккаунт Aila: синк паролей между устройствами (этап 4 duopulse-110)
+  const aila = section(
+    "Аккаунт Aila",
+    "Вход в аккаунт семейного сервера Aila — сохранённые пароли и закладки едут " +
+      "с вами на любой компьютер и телефон. Пароли шифруются на устройстве: сервер " +
+      "хранит только шифроблоб. Без входа браузер работает как раньше — всё локально.",
+  );
+  const ailaStatus = el("div", "set-status");
+  ailaStatus.dataset.aila = "status";
+  const ailaUser = document.createElement("input");
+  ailaUser.type = "text";
+  ailaUser.autocomplete = "username";
+  ailaUser.placeholder = "имя в Aila";
+  const ailaPass = document.createElement("input");
+  ailaPass.type = "password";
+  ailaPass.autocomplete = "current-password";
+  ailaPass.placeholder = "пароль Aila";
+  const ailaLoginBtn = document.createElement("button");
+  ailaLoginBtn.type = "button";
+  ailaLoginBtn.className = "primary";
+  ailaLoginBtn.textContent = "Войти";
+  ailaLoginBtn.dataset.aila = "login";
+  const ailaSyncBtn = document.createElement("button");
+  ailaSyncBtn.type = "button";
+  ailaSyncBtn.className = "primary";
+  ailaSyncBtn.textContent = "Синхронизировать сейчас";
+  ailaSyncBtn.dataset.aila = "sync";
+  ailaSyncBtn.hidden = true;
+  const ailaLogoutBtn = document.createElement("button");
+  ailaLogoutBtn.type = "button";
+  ailaLogoutBtn.className = "ghost";
+  ailaLogoutBtn.textContent = "Выйти";
+  ailaLogoutBtn.dataset.aila = "logout";
+  ailaLogoutBtn.hidden = true;
+  const ailaForm = el("div", "set-row");
+  ailaForm.append(ailaUser, ailaPass, ailaLoginBtn);
+  const ailaRow = el("div", "set-row");
+  ailaRow.append(ailaSyncBtn, ailaLogoutBtn, ailaStatus);
+  aila.body.append(ailaForm, ailaRow);
+  /** Перерисовка раздела по aila.status. */
+  const renderAila = (st: AilaStatusResult): void => {
+    ailaUser.hidden = st.loggedIn;
+    ailaPass.hidden = st.loggedIn;
+    ailaLoginBtn.hidden = st.loggedIn;
+    ailaSyncBtn.hidden = !st.loggedIn;
+    ailaLogoutBtn.hidden = !st.loggedIn;
+    if (!st.loggedIn) {
+      ailaStatus.textContent = `Сервер: ${st.server}`;
+      return;
+    }
+    const when = st.lastSyncAt ? new Date(st.lastSyncAt).toLocaleString() : "ещё не было";
+    ailaStatus.textContent = `Вошли: ${st.displayName} (${st.username}) · ${st.server} · синк: ${when}`;
+    if (st.lastError) {
+      ailaStatus.textContent += ` · ошибка: ${st.lastError}`;
+    }
+  };
+  ailaLoginBtn.addEventListener("click", () => {
+    ailaLoginBtn.disabled = true;
+    ailaStatus.textContent = "Входим (вывод ключей ~секунда)…";
+    void bridge.aila
+      .login({ username: ailaUser.value, password: ailaPass.value })
+      .then((st) => {
+        ailaPass.value = "";
+        renderAila(st);
+        ailaStatus.textContent += " — первый синк паролей пошёл.";
+      })
+      .catch((e) => (ailaStatus.textContent = String(e)))
+      .finally(() => (ailaLoginBtn.disabled = false));
+  });
+  ailaLogoutBtn.addEventListener("click", () => {
+    if (!window.confirm("Выйти из аккаунта Aila? Локальные пароли останутся на месте.")) return;
+    void bridge.aila
+      .logout()
+      .then(() => {
+        renderAila({
+          loggedIn: false, username: "", displayName: "", server: "",
+          revision: 0, lastSyncAt: null, lastError: null,
+        });
+        ailaStatus.textContent = "Вышли. Пароли остались локально.";
+      })
+      .catch((e) => (ailaStatus.textContent = String(e)));
+  });
+  ailaSyncBtn.addEventListener("click", () => {
+    ailaSyncBtn.disabled = true;
+    ailaStatus.textContent = "Синхронизируем…";
+    void bridge.aila
+      .syncNow()
+      .then((r) => {
+        const parts = [
+          `из облака применено: ${r.applied}`,
+          `всего в облаке: ${r.pulled}`,
+        ];
+        if (r.conflicts > 0) {
+          parts.push(`конфликтов: ${r.conflicts} (проигравшие — записями-дублями «… (дубль)»)`);
+        }
+        parts.push(r.pushed ? "изменения отправлены" : "изменений не было");
+        ailaStatus.textContent = `Синк завершён — ${parts.join(", ")} (ревизия ${r.revision}).`;
+      })
+      .catch((e) => (ailaStatus.textContent = String(e)))
+      .finally(() => (ailaSyncBtn.disabled = false));
+  });
+  void bridge.aila.status().then(renderAila).catch(err);
+
   // --- 7. Обновления (задача 5.2; источник — duopulse-049) ---------------------
   const upd = section(
     "Обновления",
@@ -1107,7 +1211,7 @@ export function initSettingsPage(): void {
   profileRow.append(exportBtn, importBtn, profileStatus);
   profile.body.append(secretsLabel, secretsWarn, profileRow);
 
-  root.append(appearance.root, search.root, subs.root, tr.root, asr.root, proxy.root, split.root, privacy.root, upd.root, profile.root);
+  root.append(appearance.root, search.root, subs.root, tr.root, asr.root, proxy.root, split.root, privacy.root, aila.root, upd.root, profile.root);
 
   // --- загрузка ---------------------------------------------------------------
 

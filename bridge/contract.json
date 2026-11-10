@@ -346,6 +346,172 @@
         "type": "object"
       }
     },
+    "aila.login": {
+      "handler": "aila_login",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "aila.login: вход в аккаунт Aila (PBKDF2 на клиенте, серверу уходит только auth_hash — как у веб-клиента Aila).",
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "password",
+          "username"
+        ],
+        "title": "AilaLoginParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "aila.status: состояние аккаунта Aila (этап 4 duopulse-110): вход, сервер, ревизия облачного блоба паролей и итог последней синхронизации.",
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSyncAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "loggedIn": {
+            "type": "boolean"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "server": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "displayName",
+          "loggedIn",
+          "revision",
+          "server",
+          "username"
+        ],
+        "title": "AilaStatusResult",
+        "type": "object"
+      }
+    },
+    "aila.logout": {
+      "handler": "aila_logout",
+      "params": null,
+      "result": null
+    },
+    "aila.status": {
+      "handler": "aila_status",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "aila.status: состояние аккаунта Aila (этап 4 duopulse-110): вход, сервер, ревизия облачного блоба паролей и итог последней синхронизации.",
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSyncAt": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "loggedIn": {
+            "type": "boolean"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "server": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "displayName",
+          "loggedIn",
+          "revision",
+          "server",
+          "username"
+        ],
+        "title": "AilaStatusResult",
+        "type": "object"
+      }
+    },
+    "aila.sync_now": {
+      "handler": "aila_sync_now",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "aila.sync_now: итог круга синка (pull → merge → push).",
+        "properties": {
+          "applied": {
+            "description": "применено из облака (добавлено/обновлено).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "conflicts": {
+            "description": "конфликтов пароля: проигравший сохранён записью-дублем.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "pulled": {
+            "description": "записей было в облаке до слияния.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "pushed": {
+            "description": "изменения ушли на сервер.",
+            "type": "boolean"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applied",
+          "conflicts",
+          "pulled",
+          "pushed",
+          "revision"
+        ],
+        "title": "AilaSyncResult",
+        "type": "object"
+      }
+    },
     "app.build_info": {
       "handler": "app_build_info",
       "params": null,
@@ -6213,5 +6379,5 @@
       }
     }
   },
-  "version": 13
+  "version": 14
 }
