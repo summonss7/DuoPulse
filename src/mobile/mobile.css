@@ -421,6 +421,72 @@
   border-color: var(--accent-neon);
 }
 
+/* ── Меню настроек «⋮» (duopulse-102): модальный лист поверх контента,
+   якорится к .m-content (position:relative — см. выше). Внутри — поисковик
+   (переехал со стартового экрана), проверка обновлений, версия. */
+.m-menu-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 40; /* выше плашки duo и панели субтитров */
+}
+.m-menu-wrap[hidden] {
+  display: none; /* авторские display перебивают UA-[hidden] — см. .m-start */
+}
+.m-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+.m-menu {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  min-width: 230px;
+  max-width: calc(100% - 20px);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid rgba(189, 254, 79, 0.25);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.m-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+}
+.m-menu-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+.m-menu-close:active {
+  color: var(--accent-neon);
+}
+.m-menu .m-engine {
+  margin-top: 0; /* на старте был отступ от предыдущего блока */
+}
+.m-menu .m-check-update {
+  margin-top: 0;
+  align-self: flex-start;
+}
+.m-menu-version {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* ── Инкогнито (карточка duopulse-096): кнопка-переключатель в шапке,
    включённый режим — фиолетовый акцент и затемнение шапки (приватные
    вкладки отличимы с одного взгляда). */

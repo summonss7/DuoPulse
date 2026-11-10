@@ -23,3 +23,9 @@
 # зовётся из Rust по имени через JNI — ссылок в Java/Kotlin-коде нет, без
 # keep R8 переименует/удалит класс (грабля novagrid-063)
 -keep class dev.duopulse.mobile.MobileUpdateHelper { *; }
+# duopulse-102: тот же JNI-вызов у внешнего открытия ссылок (MobileOpenHelper.open).
+# Правило proguard-wry.pro «dev.duopulse.mobile.* → native <methods>» держит имя
+# класса, но НЕ его методы: R8 (release, optimization.enable=true) выпилил open(),
+# и каждый ввод omnibox без YouTube-видео падал «helper: Java exception was thrown»
+# (репродьюс живьём на release 0.1.14; смоук duopulse-085 гонял debug — без R8)
+-keep class dev.duopulse.mobile.MobileOpenHelper { *; }

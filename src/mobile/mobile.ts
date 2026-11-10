@@ -4,7 +4,8 @@
 // десктопа (таб-бар + дочерние webview вкладок) на Android не работает —
 // child-webview API Tauri 2 десктоп-only; iframe — минимальный скелет,
 // Duo-субтитры и перевод — этап 2 (duopulse-082): кнопка «duo» + панель
-// настроек + плашка над плеером (src/mobile/duo/).
+// настроек + плашка над плеером (src/mobile/duo/). Меню настроек «⋮» в
+// шапке (поисковик, обновления, версия) — duopulse-102.
 //
 // Команды bridge десктопа (tabs.*/nav.*/history.*) на мобильной обёртке не
 // зарегистрированы (lib.rs — тонкий билдер + Duo-движок), ветка их не зовёт;
@@ -45,6 +46,9 @@ root.innerHTML = `
     <button id="mGo" class="m-go" title="Перейти" aria-label="Перейти">
       <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9M9 4.5 12.5 8 9 11.5"/></svg>
     </button>
+    <button id="mMenu" class="m-icon" title="Настройки" aria-label="Настройки" aria-haspopup="menu" aria-expanded="false">
+      <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
+    </button>
   </header>
   <div id="mUpdate" class="m-update" hidden></div>
   <main class="m-content">
@@ -55,12 +59,24 @@ root.innerHTML = `
       <p class="m-hint">Ссылки YouTube с видео открываются встроенным плеером —
         кнопка «duo» включает субтитры и перевод (готовые дорожки видео или
         Google). Прочие адреса и поиск открываются в браузере телефона.</p>
-      <label class="m-engine">Поиск: <select id="mEngine"></select></label>
       <button class="m-quick" data-url="https://www.youtube.com/watch?v=iG9CE55wbtY">Открыть пример — TED с субтитрами</button>
-      <button id="mCheckUpdate" class="m-check-update">Проверить обновления</button>
     </section>
     <iframe id="mTab" class="m-tab" title="Страница" hidden
       allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    <div id="mMenuWrap" class="m-menu-wrap" hidden>
+      <div class="m-menu-backdrop"></div>
+      <div class="m-menu" role="menu" aria-label="Настройки">
+        <div class="m-menu-head">
+          <b>Настройки</b>
+          <button id="mMenuClose" class="m-menu-close" title="Закрыть" aria-label="Закрыть">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+          </button>
+        </div>
+        <label class="m-engine">Поиск: <select id="mEngine"></select></label>
+        <button id="mCheckUpdate" class="m-check-update">Проверить обновления</button>
+        <p class="m-menu-version" id="mVersionMenu"></p>
+      </div>
+    </div>
   </main>
   <footer class="m-status" id="mStatus" hidden></footer>
 `;
@@ -68,6 +84,8 @@ root.innerHTML = `
 const omnibox = root.querySelector<HTMLInputElement>("#mOmnibox")!;
 const go = root.querySelector<HTMLButtonElement>("#mGo")!;
 const home = root.querySelector<HTMLButtonElement>("#mHome")!;
+const menuBtn = root.querySelector<HTMLButtonElement>("#mMenu")!;
+const menuWrap = root.querySelector<HTMLElement>("#mMenuWrap")!;
 const privateBtn = root.querySelector<HTMLButtonElement>("#mPrivate")!;
 const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
 const start = root.querySelector<HTMLElement>("#mStart")!;
@@ -80,6 +98,21 @@ function note(text: string): void {
   status.textContent = text;
   status.hidden = !text;
 }
+
+// ── Меню настроек (duopulse-102): «⋮» в шапке открывает лист — поисковик,
+// проверка обновлений, версия. До этого селектор движка и «Проверить
+// обновления» жили только на стартовом экране: при открытом видео настроек
+// не было добраться («нигде нет меню настроек» — жалоба Артёма).
+function setMenu(open: boolean): void {
+  menuWrap.hidden = !open;
+  menuBtn.setAttribute("aria-expanded", String(open));
+}
+menuBtn.addEventListener("click", () => setMenu(menuWrap.hidden));
+menuWrap.querySelector(".m-menu-backdrop")!.addEventListener("click", () => setMenu(false));
+menuWrap.querySelector<HTMLButtonElement>("#mMenuClose")!.addEventListener("click", () => setMenu(false));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") setMenu(false);
+});
 
 // ── Инкогнито (карточка duopulse-096): история и вкладки мобильной ветки и
 // так не пишутся (шапка файла); приватный режим чистит куки/хранилища
@@ -312,6 +345,7 @@ omnibox.addEventListener("keydown", (e) => {
   if (e.key === "Enter") goFromOmnibox();
 });
 home.addEventListener("click", () => {
+  setMenu(false);
   tab.hidden = true;
   tab.src = "about:blank";
   start.hidden = false;
@@ -331,9 +365,10 @@ for (const b of root.querySelectorAll<HTMLButtonElement>(".m-quick")) {
 }
 
 // Версия сборки — из контекста приложения (только чтение, доступ есть у
-// любой webview с core:default).
+// любой webview с core:default): стартовый экран и меню настроек.
 void getVersion()
   .then((v) => {
     root.querySelector("#mVersion")!.textContent = `версия ${v}`;
+    root.querySelector("#mVersionMenu")!.textContent = `DuoPulse ${v} · мобильная ветка`;
   })
   .catch(() => {});
