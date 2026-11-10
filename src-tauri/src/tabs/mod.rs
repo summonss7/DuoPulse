@@ -1251,6 +1251,7 @@ fn internal_page_name(url: &Url) -> Option<&'static str> {
         "newtab" => Some("newtab"), // «Новая вкладка», задача 1.5 (гайд 06 §7)
         "diagnostics" => Some("diagnostics"), // «Диагностика», задача 2.5
         "settings" => Some("settings"), // «Настройки», задача 5.1
+        "passwords" => Some("passwords"), // «Пароли», этап 1 duopulse-106
         "error" => Some("error"),   // страница ошибки загрузки, карточка 048
         "incognito" => Some("incognito"), // стартовая страница инкогнито, 096
         _ => None,

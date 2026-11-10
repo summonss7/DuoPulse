@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 11); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 12); регенерация: npm run gen:bridge.
 
 /**
  * Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).
@@ -90,6 +90,15 @@ export interface DuoPulseBridgeContract {
   NavNavigateParams: NavNavigateParams;
   NavResolveOmniboxParams: NavResolveOmniboxParams;
   NavResolveOmniboxResult: NavResolveOmniboxResult;
+  PasswordAddParams: PasswordAddParams;
+  PasswordSaveResult: PasswordSaveResult;
+  PasswordListParams: PasswordListParams;
+  PasswordListResult: PasswordListResult;
+  PasswordEntry: PasswordEntry;
+  PasswordRemoveParams: PasswordRemoveParams;
+  PasswordRevealParams: PasswordRevealParams;
+  PasswordRevealResult: PasswordRevealResult;
+  PasswordUpdateParams: PasswordUpdateParams;
   PerfRunListResult: PerfRunListResult;
   PerfRun: PerfRun;
   PerfSaveRunParams: PerfSaveRunParams;
@@ -575,6 +584,76 @@ export interface NavResolveOmniboxResult {
    */
   isSearch: boolean;
   url: string;
+}
+/**
+ * passwords.add: сохранить логин (upsert по origin+username).
+ */
+export interface PasswordAddParams {
+  password: string;
+  title?: string | null;
+  /**
+   * Адрес сайта (origin выводится на стороне Core).
+   */
+  url: string;
+  username: string;
+}
+export interface PasswordSaveResult {
+  id: number;
+  /**
+   * true — обновили существующую запись (тот же логин на том же сайте).
+   */
+  updated: boolean;
+}
+/**
+ * passwords.list: записи с фильтром (по сайту/логину/названию).
+ */
+export interface PasswordListParams {
+  limit?: number | null;
+  query?: string | null;
+}
+export interface PasswordListResult {
+  items: PasswordEntry[];
+  total: number;
+}
+/**
+ * Запись логина для списка (без пароля — reveal отдельно).
+ */
+export interface PasswordEntry {
+  createdAt: number;
+  id: number;
+  /**
+   * Схема+хост+порт (https://example.com) — ключ автозаполнения.
+   */
+  origin: string;
+  /**
+   * Название сайта/страницы.
+   */
+  title: string;
+  updatedAt: number;
+  /**
+   * Полный адрес страницы входа (если известен).
+   */
+  url: string;
+  username: string;
+}
+export interface PasswordRemoveParams {
+  id: number;
+}
+export interface PasswordRevealParams {
+  id: number;
+}
+export interface PasswordRevealResult {
+  password: string;
+}
+/**
+ * passwords.update: правка записи (переданные поля меняются).
+ */
+export interface PasswordUpdateParams {
+  id: number;
+  password?: string | null;
+  title?: string | null;
+  url?: string | null;
+  username?: string | null;
 }
 /**
  * perf.list_runs (результат): прогоны, новые → старые.

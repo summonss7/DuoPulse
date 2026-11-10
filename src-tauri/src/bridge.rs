@@ -62,7 +62,7 @@ use crate::proxy;
 /// v11 (duopulse-067, без bump — совместимое расширение): событие
 /// updater:check_done (итог проверки фида — автопроверки старта и ручных;
 /// бейдж найденного обновления на кнопке «⋮» главного меню).
-pub const CONTRACT_VERSION: u32 = 11;
+pub const CONTRACT_VERSION: u32 = 12;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -188,6 +188,11 @@ pub use crate::history::contract::{
     HistoryGroupRenameParams, HistoryGroupSetSortParams, HistoryGroupToggleBookmarkParams,
     HistoryListParams, HistoryListResult, HistorySearchParams, HistorySearchResult,
     HistoryVisitParams,
+};
+pub use crate::passwords::{
+    PasswordAddParams, PasswordEntry, PasswordListParams, PasswordListResult,
+    PasswordRevealParams, PasswordRevealResult, PasswordRemoveParams, PasswordSaveResult,
+    PasswordUpdateParams,
 };
 
 /// settings.get: ключ, значение которого читаем.
@@ -1053,6 +1058,18 @@ pub fn contract_json() -> serde_json::Value {
             "history.bookmark_move": { "handler": "history_bookmark_move",
                                        "params": schema!(HistoryBookmarkMoveParams),
                                        "result": null },
+            "passwords.list": { "handler": "passwords_list",
+                                "params": schema!(PasswordListParams),
+                                "result": schema!(PasswordListResult) },
+            "passwords.add": { "handler": "passwords_add", "params": schema!(PasswordAddParams),
+                               "result": schema!(PasswordSaveResult) },
+            "passwords.update": { "handler": "passwords_update",
+                                  "params": schema!(PasswordUpdateParams), "result": null },
+            "passwords.remove": { "handler": "passwords_remove",
+                                  "params": schema!(PasswordRemoveParams), "result": null },
+            "passwords.reveal": { "handler": "passwords_reveal",
+                                  "params": schema!(PasswordRevealParams),
+                                  "result": schema!(PasswordRevealResult) },
             "settings.get": { "handler": "settings_get", "params": schema!(SettingsGetParams),
                               "result": schema!(ProxySettings) },
             "settings.set": { "handler": "settings_set", "params": schema!(SettingsSetParams),
@@ -1505,6 +1522,69 @@ fn history_delete_range(
     params: HistoryDeleteRangeParams,
 ) -> Result<(), String> {
     history.delete_range(params.from_ms, params.to_ms)
+}
+
+/// passwords.list: записи менеджера паролей (без паролей; фильтр — по
+/// сайту/логину/названию). Пароль — только passwords.reveal по id.
+#[tauri::command]
+fn passwords_list(
+    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    params: PasswordListParams,
+) -> Result<PasswordListResult, String> {
+    store.list(
+        params.query.as_deref().unwrap_or(""),
+        params.limit.unwrap_or(500),
+    )
+}
+
+/// passwords.add: сохранить логин (upsert по origin+username — повторное
+/// сохранение того же логина обновляет пароль).
+#[tauri::command]
+fn passwords_add(
+    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    params: PasswordAddParams,
+) -> Result<PasswordSaveResult, String> {
+    store.add(
+        &params.url,
+        params.title.as_deref(),
+        &params.username,
+        &params.password,
+    )
+}
+
+/// passwords.update: правка записи (переданные поля).
+#[tauri::command]
+fn passwords_update(
+    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    params: PasswordUpdateParams,
+) -> Result<(), String> {
+    store.update(
+        params.id,
+        params.url.as_deref(),
+        params.title.as_deref(),
+        params.username.as_deref(),
+        params.password.as_deref(),
+    )
+}
+
+/// passwords.remove: удалить запись (идемпотентна).
+#[tauri::command]
+fn passwords_remove(
+    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    params: PasswordRemoveParams,
+) -> Result<(), String> {
+    store.remove(params.id)
+}
+
+/// passwords.reveal: расшифровать пароль записи (экран «Пароли»).
+#[tauri::command]
+fn passwords_reveal(
+    store: tauri::State<'_, crate::passwords::PasswordStore>,
+    params: PasswordRevealParams,
+) -> Result<PasswordRevealResult, String> {
+    Ok(PasswordRevealResult {
+        password: store.reveal(params.id)?,
+    })
 }
 
 /// history.bookmark_add: добавить закладку (upsert по url); groupId — группа
@@ -2940,6 +3020,11 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         history_group_set_sort,
         history_group_toggle_bookmark,
         history_bookmark_move,
+        passwords_list,
+        passwords_add,
+        passwords_update,
+        passwords_remove,
+        passwords_reveal,
         settings_get,
         settings_set,
         settings_get_all,

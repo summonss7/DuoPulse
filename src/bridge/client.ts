@@ -39,6 +39,14 @@ import type {
   NavNavigateParams,
   NavResolveOmniboxParams,
   NavResolveOmniboxResult,
+  PasswordAddParams,
+  PasswordListParams,
+  PasswordListResult,
+  PasswordRevealParams,
+  PasswordRevealResult,
+  PasswordRemoveParams,
+  PasswordSaveResult,
+  PasswordUpdateParams,
   PerfRunListResult,
   PerfSaveRunParams,
   PerfSnapshotResult,
@@ -158,6 +166,20 @@ export const bridge = {
     /** history.bookmark_move (duopulse-058): переставить закладку внутри
      *  группы (drag&drop; позиция 0 = верх). */
     bookmarkMove: (params: HistoryBookmarkMoveParams) => invoke<void>("history_bookmark_move", { params }),
+  },
+  passwords: {
+    /** passwords.list (duopulse-107): записи менеджера паролей без самих
+     *  паролей; фильтр по сайту/логину/названию. */
+    list: (params: PasswordListParams) => invoke<PasswordListResult>("passwords_list", { params }),
+    /** passwords.add (duopulse-107): сохранить логин (upsert по
+     *  origin+username — повторное сохранение обновляет пароль). */
+    add: (params: PasswordAddParams) => invoke<PasswordSaveResult>("passwords_add", { params }),
+    /** passwords.update (duopulse-107): правка записи (переданные поля). */
+    update: (params: PasswordUpdateParams) => invoke<void>("passwords_update", { params }),
+    /** passwords.remove (duopulse-107): удалить запись (идемпотентна). */
+    remove: (params: PasswordRemoveParams) => invoke<void>("passwords_remove", { params }),
+    /** passwords.reveal (duopulse-107): расшифровать пароль записи. */
+    reveal: (params: PasswordRevealParams) => invoke<PasswordRevealResult>("passwords_reveal", { params }),
   },
   settings: {
     /** settings.get: значение ключа профиля. */

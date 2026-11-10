@@ -1351,6 +1351,246 @@
         "type": "object"
       }
     },
+    "passwords.add": {
+      "handler": "passwords_add",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "passwords.add: сохранить логин (upsert по origin+username).",
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "title": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "description": "Адрес сайта (origin выводится на стороне Core).",
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "password",
+          "url",
+          "username"
+        ],
+        "title": "PasswordAddParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "true — обновили существующую запись (тот же логин на том же сайте).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "updated"
+        ],
+        "title": "PasswordSaveResult",
+        "type": "object"
+      }
+    },
+    "passwords.list": {
+      "handler": "passwords_list",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "passwords.list: записи с фильтром (по сайту/логину/названию).",
+        "properties": {
+          "limit": {
+            "default": null,
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "query": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "PasswordListParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "PasswordEntry": {
+            "description": "Запись логина для списка (без пароля — reveal отдельно).",
+            "properties": {
+              "createdAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "origin": {
+                "description": "Схема+хост+порт (https://example.com) — ключ автозаполнения.",
+                "type": "string"
+              },
+              "title": {
+                "description": "Название сайта/страницы.",
+                "type": "string"
+              },
+              "updatedAt": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "url": {
+                "description": "Полный адрес страницы входа (если известен).",
+                "type": "string"
+              },
+              "username": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "createdAt",
+              "id",
+              "origin",
+              "title",
+              "updatedAt",
+              "url",
+              "username"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/definitions/PasswordEntry"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "PasswordListResult",
+        "type": "object"
+      }
+    },
+    "passwords.remove": {
+      "handler": "passwords_remove",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "PasswordRemoveParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "passwords.reveal": {
+      "handler": "passwords_reveal",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "PasswordRevealParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "PasswordRevealResult",
+        "type": "object"
+      }
+    },
+    "passwords.update": {
+      "handler": "passwords_update",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "passwords.update: правка записи (переданные поля меняются).",
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "password": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "username": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "PasswordUpdateParams",
+        "type": "object"
+      },
+      "result": null
+    },
     "perf.list_runs": {
       "handler": "perf_list_runs",
       "params": null,
@@ -5882,5 +6122,5 @@
       }
     }
   },
-  "version": 11
+  "version": 12
 }

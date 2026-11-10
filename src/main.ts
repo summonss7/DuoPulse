@@ -33,6 +33,8 @@ if (panelKind()) {
     void import("./pages/diagnostics");
   } else if (page === "settings") {
     void import("./pages/settings"); // задача 5.1: полные настройки + профиль
+  } else if (page === "passwords") {
+    void import("./pages/passwords"); // «Пароли», этап 1 duopulse-106
   } else if (page === "error") {
     void import("./pages/error"); // страница ошибки загрузки, карточка 048
   } else if (page === "incognito") {

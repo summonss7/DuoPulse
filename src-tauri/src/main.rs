@@ -30,7 +30,7 @@
 // schemars schema!-макросы в contract_json (bridge.rs) вложены в один json!:
 // с ростом словаря (v2: subtitles.load_file) глубина экспансии превысила
 // дефолт макро-рекурсии rustc (128).
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod adblock;
@@ -40,6 +40,8 @@ mod chrome_menu;
 mod chrome_panel;
 mod history;
 mod omnibox;
+/// Менеджер паролей (этап 1 duopulse-106): passwords.db + ключ под DPAPI.
+mod passwords;
 mod perf;
 mod prefetch;
 mod proxy;
@@ -1227,6 +1229,10 @@ fn main() {
     let adblock_service = std::sync::Arc::new(adblock::AdblockService::new(&profile_dir));
     let history_store = history::HistoryStore::open(&profile_dir)
         .expect("открыть/создать duopulse.db в профиле (docs/02 §8)");
+    // Локальный менеджер паролей (этап 1 duopulse-106): passwords.db в профиле,
+    // username/password — только AES-256-GCM, ключ в passwords.key под DPAPI.
+    let password_store = passwords::PasswordStore::open(&profile_dir)
+        .expect("открыть/создать passwords.db и ключ DPAPI в профиле");
     let perf_store = perf::PerfStore::open(&profile_dir)
         .expect("открыть/создать таблицу perf_runs в duopulse.db (задача 2.5)");
     // Кэш переведённых дорожек (задача 4.2, docs/03 §7): та же duopulse.db,
@@ -1276,6 +1282,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(tabs::TabManager::new())
         .manage(history_store)
+        .manage(password_store)
         .manage(perf_store)
         .manage(adblock_service)
         .manage(subtitles::service::SubtitlesService::new())

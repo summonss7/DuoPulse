@@ -83,6 +83,17 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["history", "bookmarkMove"],
     params: { url: "https://example.com/", groupId: 2, position: 0 },
   },
+  "passwords.list": { path: ["passwords", "list"], params: { query: null, limit: null } },
+  "passwords.add": {
+    path: ["passwords", "add"],
+    params: { url: "https://example.com/", title: null, username: "artem", password: "x" },
+  },
+  "passwords.update": {
+    path: ["passwords", "update"],
+    params: { id: 1, url: null, title: null, username: null, password: "y" },
+  },
+  "passwords.remove": { path: ["passwords", "remove"], params: { id: 1 } },
+  "passwords.reveal": { path: ["passwords", "reveal"], params: { id: 1 } },
   "nav.go_back": { path: ["nav", "goBack"] },
   "nav.go_forward": { path: ["nav", "goForward"] },
   "nav.reload": { path: ["nav", "reload"] },
@@ -221,7 +232,7 @@ describe("bridge-клиент соответствует contract.json", () => {
   });
 
   it("версия контракта зафиксирована (несовместимые изменения — bump + правка тут)", () => {
-    expect(contract.version).toBe(11); // v11: источник фида updater (GitHub/Aila) — source в UpdaterConfig/UpdaterStatusResult/UpdaterCheckResult (duopulse-049); v10: события vpn:stats + vpn:route_changed, VpnWgState.pingMs (6.5); v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
+    expect(contract.version).toBe(12); // v12: passwords.{list,add,update,remove,reveal} (duopulse-107); v11: источник фида updater (GitHub/Aila) — source в UpdaterConfig/UpdaterStatusResult/UpdaterCheckResult (duopulse-049); v10: события vpn:stats + vpn:route_changed, VpnWgState.pingMs (6.5); v9: vpn.{set_mode,get_rules,add_rule,remove_rule} + VpnStatusResult.routing (6.3); v8: vpn.{import_profile,list_profiles,remove_profile,use_profile} (6.2); v7: updater.{status,check,install} (5.2); v6: settings.{get_all,apply,export,import} + translate.clear_cache (5.1); v5: subtitles:translate_unavailable (4.3); v4: subtitles.translate_track + translate_progress (4.2)
   });
 
   it("клиент знает все события контракта (listen по имени из bridge.events)", () => {

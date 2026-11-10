@@ -2724,3 +2724,112 @@ html[data-panel] #suggest {
   width: 100% !important;
   left: auto !important;
 }
+
+/* --- «Пароли» (duopulse-107): страница duopulse://passwords на базе .mgr --- */
+.pw .pw-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+}
+.pw .pw-add:hover {
+  border-color: var(--accent-neon); /* добавление — не деструктивное */
+  color: var(--accent-neon);
+}
+.pw-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 8px 22px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--bg-surface);
+}
+.pw-form[hidden] {
+  display: none;
+}
+.pw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.pw-field input {
+  height: 30px;
+  min-width: 180px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+.pw-field input:focus {
+  border-color: var(--accent-neon);
+  box-shadow: var(--focus-ring);
+}
+.pw-field-pass {
+  position: relative;
+}
+.pw-show {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 22px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--text-muted);
+}
+.pw-show:hover {
+  color: var(--text-primary);
+}
+.pw-save {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--accent-neon);
+  border-radius: var(--radius-control);
+  color: var(--accent-neon);
+  font-size: 12px;
+}
+.pw-save:hover {
+  background: color-mix(in srgb, var(--accent-neon) 12%, transparent);
+}
+.pw-cancel {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.pw-cancel:hover {
+  color: var(--text-primary);
+}
+.pw .pw-user {
+  flex: none;
+  max-width: 22vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.pw .pw-pass {
+  flex: none;
+  max-width: 16vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: var(--font-mono); /* пароль — моно, §4 */
+}
+.pw .pw-pass.on {
+  color: var(--text-primary); /* показанный пароль — читаемым цветом */
+}

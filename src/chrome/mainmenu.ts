@@ -61,6 +61,10 @@ menu.addEventListener("click", (e) => {
     case "history":
       void bridge.tabs.open({ url: "duopulse://history" }).catch(err);
       break;
+    case "passwords":
+      // «Пароли» (этап 1 duopulse-106): локальное хранилище логинов
+      void bridge.tabs.open({ url: "duopulse://passwords" }).catch(err);
+      break;
     case "diagnostics":
       // «Диагностика» (задача 2.5): живые метрики + история прогонов
       void bridge.tabs.open({ url: "duopulse://diagnostics" }).catch(err);

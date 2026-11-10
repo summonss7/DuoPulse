@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.18"
+version = "0.1.19"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
@@ -163,6 +163,11 @@ symphonia = { version = "0.5", default-features = false, features = [
 # engine-whisper-1 пакует их одним архивом. Уже в дереве (транзитивно),
 # без новых загрузок; deflate-only — больше zip'у в Core ничего не надо.
 zip = { version = "4", default-features = false, features = ["deflate"] }
+# Менеджер паролей (этап 1 duopulse-106): username/password в passwords.db
+# шифруются AES-256-GCM (чистый Rust, без ring — МинGW-линкер тянет);
+# rand — случайные IV и ключ хранилища (уже в дереве транзитивно).
+aes-gcm = "0.10"
+rand = "0.8"
 
 # Мобильная ветка lib (duopulse-082; рецепт NovaGrid: сетевые зависимости
 # мобильного пути живут ТОЛЬКО здесь — cdylib десктопа остаётся тонким,
