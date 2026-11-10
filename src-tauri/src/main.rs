@@ -1365,8 +1365,12 @@ fn main() {
         );
     }
     let adblock_service = std::sync::Arc::new(adblock::AdblockService::new(&profile_dir));
-    let history_store = history::HistoryStore::open(&profile_dir)
-        .expect("открыть/создать duopulse.db в профиле (docs/02 §8)");
+    // Arc — хранилище у команд bridge и у воркера синка Aila (этап 5):
+    // закладки синкаются тем же кругом, что и пароли.
+    let history_store = std::sync::Arc::new(
+        history::HistoryStore::open(&profile_dir)
+            .expect("открыть/создать duopulse.db в профиле (docs/02 §8)"),
+    );
     // Локальный менеджер паролей (этап 1 duopulse-106): passwords.db в профиле,
     // username/password — только AES-256-GCM, ключ в passwords.key под DPAPI.
     // Arc — хранилище у команд bridge и у воркера синка Aila (этап 4).
@@ -1374,11 +1378,19 @@ fn main() {
         passwords::PasswordStore::open(&profile_dir)
             .expect("открыть/создать passwords.db и ключ DPAPI в профиле"),
     );
-    // Аккаунт Aila и синк паролей (этап 4 duopulse-110): восстановленный
-    // вход + воркер (без входа воркер просто спит, этапы 1–2 работают).
+    // Аккаунт Aila и синк паролей с закладками (этап 4 duopulse-110, этап 5
+    // duopulse-111): восстановленный вход + воркер; восстановленная сессия
+    // будит первый синк сама (старт — один из триггеров), без входа воркер
+    // просто спит, локальная работа не зависит.
     let aila_account = std::sync::Arc::new(aila::AilaAccount::new(&profile_dir));
-    aila_account.restore();
-    aila_account.start_worker(std::sync::Arc::clone(&password_store));
+    let session_restored = aila_account.restore();
+    aila_account.start_worker(
+        std::sync::Arc::clone(&password_store),
+        std::sync::Arc::clone(&history_store),
+    );
+    if session_restored {
+        aila_account.schedule_sync();
+    }
     let perf_store = perf::PerfStore::open(&profile_dir)
         .expect("открыть/создать таблицу perf_runs в duopulse.db (задача 2.5)");
     // Кэш переведённых дорожек (задача 4.2, docs/03 §7): та же duopulse.db,

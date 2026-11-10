@@ -62,7 +62,11 @@ use crate::proxy;
 /// v11 (duopulse-067, без bump — совместимое расширение): событие
 /// updater:check_done (итог проверки фида — автопроверки старта и ручных;
 /// бейдж найденного обновления на кнопке «⋮» главного меню).
-pub const CONTRACT_VERSION: u32 = 14;
+/// v15 (duopulse-111, этап 5 duopulse-106): закладки в синке аккаунта Aila —
+/// AilaSyncResult расширен полями bookmarksPulled/bookmarksApplied/
+/// bookmarksPushed (серверный ключ appdata "bookmarks", отдельный ключ
+/// HKDF от ключа паролей; merge — объединение по url/имени + надгробия).
+pub const CONTRACT_VERSION: u32 = 15;
 
 // ---------------------------------------------------------------------------
 // Типы команд (params/result)
@@ -218,19 +222,26 @@ pub struct AilaLoginParams {
     pub password: String,
 }
 
-/// aila.sync_now: итог круга синка (pull → merge → push).
+/// aila.sync_now: итог круга синка (pull → merge → push) обоих хранилищ:
+/// пароли (этап 4) + закладки (этап 5 duopulse-111).
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AilaSyncResult {
-    /// записей было в облаке до слияния.
+    /// записей паролей было в облаке до слияния.
     pub pulled: u64,
-    /// применено из облака (добавлено/обновлено).
+    /// паролей применено из облака (добавлено/обновлено).
     pub applied: u64,
     /// конфликтов пароля: проигравший сохранён записью-дублем.
     pub conflicts: u64,
-    /// изменения ушли на сервер.
+    /// изменения ушли на сервер (хотя бы одно хранилище).
     pub pushed: bool,
     pub revision: u64,
+    /// закладок было в облаке до слияния (этап 5).
+    pub bookmarks_pulled: u64,
+    /// закладок/групп применено из облака.
+    pub bookmarks_applied: u64,
+    /// закладочный блоб отправлен на сервер.
+    pub bookmarks_pushed: bool,
 }
 
 /// settings.get: ключ, значение которого читаем.
@@ -1551,7 +1562,7 @@ fn nav_focus_page(
 /// history.search: подсказки omnibox по FTS5-индексу истории и закладок.
 #[tauri::command]
 fn history_search(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     params: HistorySearchParams,
 ) -> Result<HistorySearchResult, String> {
     Ok(HistorySearchResult {
@@ -1563,7 +1574,7 @@ fn history_search(
 /// пишет визиты из on_page_load вкладок).
 #[tauri::command]
 fn history_visit(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     params: HistoryVisitParams,
 ) -> Result<(), String> {
     history.visit(&params.url, &params.title)
@@ -1572,7 +1583,7 @@ fn history_visit(
 /// history.list: история для страницы управления (агрегат по URL).
 #[tauri::command]
 fn history_list(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     params: HistoryListParams,
 ) -> Result<HistoryListResult, String> {
     let (entries, total) = history.list(
@@ -1586,7 +1597,7 @@ fn history_list(
 /// history.delete_urls: удалить записи истории по адресам.
 #[tauri::command]
 fn history_delete_urls(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     params: HistoryDeleteUrlsParams,
 ) -> Result<(), String> {
     history.delete_urls(&params.urls)
@@ -1595,7 +1606,7 @@ fn history_delete_urls(
 /// history.delete_range: удалить историю за диапазон времени.
 #[tauri::command]
 fn history_delete_range(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     params: HistoryDeleteRangeParams,
 ) -> Result<(), String> {
     history.delete_range(params.from_ms, params.to_ms)
@@ -1660,19 +1671,25 @@ fn aila_logout(
 }
 
 /// aila.sync_now: синхронизировать сейчас (кнопка в настройках) — тот же
-/// круг, что у воркера: pull → merge (конфликты — записями-дублями) → push.
+/// круг, что у воркера: pull → merge (пароли: конфликты — записями-дублями;
+/// закладки: объединение + надгробия) → push обоих блобов.
 #[tauri::command]
 fn aila_sync_now(
     account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
 ) -> Result<AilaSyncResult, String> {
-    let (pulled, applied, conflicts, pushed, revision) = account.sync_now(&store)?;
+    let ((pulled, applied, conflicts, pushed, revision), (bm_pulled, bm_applied, bm_pushed)) =
+        account.sync_now(&store, &history)?;
     Ok(AilaSyncResult {
         pulled,
         applied,
         conflicts,
         pushed,
         revision,
+        bookmarks_pulled: bm_pulled,
+        bookmarks_applied: bm_applied,
+        bookmarks_pushed: bm_pushed,
     })
 }
 
@@ -1767,38 +1784,56 @@ fn passwords_resolve_candidate(
 }
 
 /// history.bookmark_add: добавить закладку (upsert по url); groupId — группа
-/// (null — по умолчанию), карточка duopulse-058.
+/// (null — по умолчанию), карточка duopulse-058. При входе в аккаунт Aila —
+/// пометка на синк закладок (этап 5 duopulse-111).
 #[tauri::command]
 fn history_bookmark_add(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryBookmarkAddParams,
 ) -> Result<(), String> {
-    history.bookmark_add_to(&params.url, &params.title, params.group_id)
+    let res = history.bookmark_add_to(&params.url, &params.title, params.group_id);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
-/// history.bookmark_remove: удалить закладку.
+/// history.bookmark_remove: удалить закладку (надгробие синка — удаление
+/// уезжает в облако, этап 5 duopulse-111).
 #[tauri::command]
 fn history_bookmark_remove(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryBookmarkRemoveParams,
 ) -> Result<(), String> {
-    history.bookmark_remove(&params.url)
+    let res = history.bookmark_remove(&params.url);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
-/// history.bookmark_update: переименовать закладку.
+/// history.bookmark_update: переименовать закладку (updated_at — арбитр
+/// свежести при слиянии синка).
 #[tauri::command]
 fn history_bookmark_update(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryBookmarkUpdateParams,
 ) -> Result<(), String> {
-    history.bookmark_update(&params.url, &params.title)
+    let res = history.bookmark_update(&params.url, &params.title);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// history.bookmark_list: закладки для страницы управления (groupId: null —
 /// все, -1 — без группы, id — члены группы в её порядке).
 #[tauri::command]
 fn history_bookmark_list(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     params: HistoryBookmarkListParams,
 ) -> Result<HistoryBookmarkListResult, String> {
     let group = match params.group_id {
@@ -1820,62 +1855,89 @@ fn history_bookmark_list(
 /// history.group_list: группы с числом закладок.
 #[tauri::command]
 fn history_group_list(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
 ) -> Result<HistoryGroupListResult, String> {
     Ok(HistoryGroupListResult {
         groups: history.group_list()?,
     })
 }
 
-/// history.group_add: создать группу.
+/// history.group_add: создать группу. Правки групп — пометка на синк (этап 5).
 #[tauri::command]
 fn history_group_add(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupAddParams,
 ) -> Result<BookmarkGroupInfo, String> {
-    history.group_add(&params.name)
+    let res = history.group_add(&params.name);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// history.group_rename: переименовать группу.
 #[tauri::command]
 fn history_group_rename(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupRenameParams,
 ) -> Result<(), String> {
-    history.group_rename(params.id, &params.name)
+    let res = history.group_rename(params.id, &params.name);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
-/// history.group_remove: удалить группу (закладки остаются).
+/// history.group_remove: удалить группу (закладки остаются; надгробие
+/// синка по имени — удаление уезжает в облако, этап 5).
 #[tauri::command]
 fn history_group_remove(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupRemoveParams,
 ) -> Result<(), String> {
-    history.group_remove(params.id)
+    let res = history.group_remove(params.id);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// history.group_set_sort: режим сортировки группы (manual | title | added).
 #[tauri::command]
 fn history_group_set_sort(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupSetSortParams,
 ) -> Result<(), String> {
-    history.group_set_sort(params.id, &params.sort_by)
+    let res = history.group_set_sort(params.id, &params.sort_by);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// history.group_toggle_bookmark: членство закладки в группе вкл/выкл.
 #[tauri::command]
 fn history_group_toggle_bookmark(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupToggleBookmarkParams,
 ) -> Result<(), String> {
-    history.group_toggle_bookmark(&params.url, params.group_id, params.on)
+    let res = history.group_toggle_bookmark(&params.url, params.group_id, params.on);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// history.bookmark_move: переставить закладку внутри группы (drag&drop).
+/// Позиции — локальный выбор, синком не переносятся (этап 5: url/title/группы).
 #[tauri::command]
 fn history_bookmark_move(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     params: HistoryBookmarkMoveParams,
 ) -> Result<(), String> {
     history.bookmark_move(&params.url, params.group_id, params.position)
@@ -1987,7 +2049,7 @@ fn settings_apply(params: SettingsPatch) -> Result<(), String> {
 /// обращения, действие редкое и инициируется пользователем).
 #[tauri::command]
 fn settings_export(
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     cache: tauri::State<'_, std::sync::Arc<crate::subtitles::cache::TranslationsCache>>,
     asr_cache: tauri::State<'_, crate::asr::cache::AsrCache>,
     params: SettingsExportParams,
@@ -2020,7 +2082,7 @@ fn settings_export(
 #[tauri::command]
 fn settings_import(
     app: tauri::AppHandle,
-    history: tauri::State<'_, crate::history::HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     cache: tauri::State<'_, std::sync::Arc<crate::subtitles::cache::TranslationsCache>>,
     asr_cache: tauri::State<'_, crate::asr::cache::AsrCache>,
     params: SettingsImportParams,

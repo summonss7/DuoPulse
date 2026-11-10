@@ -1,15 +1,19 @@
-// E2E-прогон этапа 4 менеджера паролей (карточка duopulse-110, цепочка
-// duopulse-106): живой синк хранилища паролей через аккаунт Aila.
+// E2E-прогон этапа 4 менеджера паролей (карточка duopulse-110) и этапа 5
+// синка закладок (карточка duopulse-111, цепочка duopulse-106): живой синк
+// хранилищ через аккаунт Aila.
 //   1) поднимается ИЗОЛИРОВАННЫЙ сервер Aila (node src/index.js из D:\Aila,
 //      AILA_DATA во временный каталог, порт случайный) — первый юзер
 //      регистрируется по API (auth_hash = PBKDF2-SHA256 600k, как клиент);
-//   2) DuoPulse (профиль A, чистый): пароль сохраняется ЛОКАЛЬНО до входа,
-//      затем вход в аккаунт через UI настроек (раздел «Аккаунт Aila») —
-//      авто-синк уносит локальные пароли в облако (appdata, ревизия ≥ 1);
-//      блоб на сервере проверяется: только hex-iv/ct, открытого пароля нет;
+//   2) DuoPulse (профиль A, чистый): пароль и закладки с группой сохраняются
+//      ЛОКАЛЬНО до входа, затем вход в аккаунт через UI настроек (раздел
+//      «Аккаунт Aila») — авто-синк уносит пароли (appdata key=passwords) и
+//      закладки (key=bookmarks, отдельный ключ HKDF) в облако (ревизия ≥ 1);
+//      блобы на сервере проверяются: только hex-iv/ct, открытых данных нет;
 //   3) DuoPulse (профиль B, чистый, «другой компьютер»): вход тем же
-//      аккаунтом → авто-синк подтягивает запись → passwords.list/reveal
-//      показывают пароль машины A.
+//      аккаунтом → авто-синк подтягивает пароль (list/reveal) и закладки
+//      (bookmarkList/groupList, членства по именам групп);
+//   4) удаление на B (закладка + группа) уезжает надгробием; перезапуск A
+//      (восстановленная сессия → синк на старте) применяет удаления.
 // Без vite: window.__duopulse доступен на внутренних страницах
 // (duopulse://settings — она же проверяет UI раздела).
 //
@@ -84,6 +88,38 @@ async function killWebViewOf(profile) {
   try {
     await run("powershell", ["-NoProfile", "-Command", ps]);
   } catch {}
+}
+
+/** Дождаться смерти всех CDP-целей порта. Зомби-вебвью прошлого запуска
+ *  держит порт 9226 — свежий exe без порта, а стенд опрашивает СТАРУЮ
+ *  страницу (замороженное состояние): tombstone-проверки врут. */
+async function drainCdp(timeoutMs = 30000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if ((await cdpTargets()).length === 0) return true;
+    await sleep(300);
+  }
+  return (await cdpTargets()).length === 0;
+}
+
+/** Закрыть машину наглухо: exe → вебвью профиля → ни одной CDP-цели
+ *  (иначе следующий запуск машины говорит со зомби). */
+async function closeMachine(app, profile, title) {
+  await gracefulClose(app);
+  await killWebViewOf(profile);
+  if (!(await drainCdp())) {
+    // добить всё наше: exe по пути, вебвью по маркеру временного каталога
+    try {
+      await run("powershell", ["-NoProfile", "-Command",
+        `Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'"` +
+        ` | Where-Object { $_.CommandLine -like '*${path.basename(profile)}*' }` +
+        ` | ForEach-Object { taskkill /PID $_.ProcessId /T /F }`]);
+    } catch {}
+    await killOurExes();
+    if (!(await drainCdp(15000))) {
+      throw new Error(`CDP-цели ${title} не умерли — зомби держит порт ${CDP_PORT}`);
+    }
+  }
 }
 
 const killOurExes = async () => {
@@ -169,10 +205,15 @@ async function waitForSettings(timeoutMs = 60000) {
 const viaSettings = (ws, expr) =>
   evalIn(ws, `(async()=>{ try { return await (${expr}); } catch(e){ return 'ERR:' + e; } })()`);
 
-/** Запуск «машины»: свежий профиль, старт на duopulse://settings. */
+/** void-ответ команды дошёл без ошибки ('ERR:…' — нет). */
+const noErr = (v) => !(typeof v === "string" && v.startsWith("ERR:"));
+
+/** Запуск «машины»: свежий профиль, старт на duopulse://settings.
+ *  stderrexe — в файл рядом с профилем (диагностика воркера синка). */
 function launchMachine(profile) {
+  const errFd = fs.openSync(`${profile}-stderr.log`, "a");
   return spawn(EXE, [], {
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", errFd],
     env: {
       ...process.env,
       APPDATA: profile,
@@ -259,11 +300,29 @@ try {
   }
   check("изолированный сервер Aila поднялся", !!health, health ? health.name : "health не дождались");
 
-  // auth_hash как у клиента: PBKDF2-SHA256(пароль, hex-соль, 600k) → hex
+  // auth_hash как у клиента: PBKDF2-SHA256(пароль, hex-соль, 600k) → hex;
+  // заодно выводим ключи синка (wrap → passwords → bookmarks цепочкой HKDF,
+  // как aila.rs) — стенду нужно ЗАГЛЯНУТЬ в блоб закладок: ждать «ревизия
+  // выросла» нельзя, входной круг машины B сам толкает ревизию (created_at
+  // «Избранное» на разных машинах различается), а круг удалений выходит
+  // только после дебаунса 3 с
   const AUTH_SALT = "a1b2c3d4e5f60718";
   const WRAP_SALT = "1122334455667788";
   const pbkdf2 = (salt) =>
     crypto.pbkdf2Sync(PASS, Buffer.from(salt, "hex"), 600_000, 32, "sha256").toString("hex");
+  const WRAP_KEY = crypto.pbkdf2Sync(PASS, Buffer.from(WRAP_SALT, "hex"), 600_000, 32, "sha256");
+  const hkdf = (ikm, info) =>
+    Buffer.from(crypto.hkdfSync("sha256", ikm, Buffer.from("duopulse"), Buffer.from(info), 32));
+  const BM_KEY = hkdf(hkdf(WRAP_KEY, "duopulse-passwords-v1"), "duopulse-bookmarks-v1");
+  const openBmBlob = (blob) => {
+    const iv = Buffer.from(blob.iv, "hex");
+    const ct = Buffer.from(blob.ct, "hex");
+    const d = crypto.createDecipheriv("aes-256-gcm", BM_KEY, iv);
+    d.setAuthTag(ct.subarray(ct.length - 16));
+    return JSON.parse(
+      Buffer.concat([d.update(ct.subarray(0, ct.length - 16)), d.final()]).toString("utf8"),
+    );
+  };
   const reg = await fetch(`http://127.0.0.1:${AILA_PORT}/api/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -282,8 +341,8 @@ try {
   const ownerToken = (setCookie.match(/aila_sess=([^;]+)/) || [])[1];
   const regBody = await reg.json().catch(() => ({}));
   check("первый пользователь Aila зарегистрирован (владелец)", reg.status === 200 && !!ownerToken, JSON.stringify(regBody));
-  const appdataGet = async () => {
-    const r = await fetch(`http://127.0.0.1:${AILA_PORT}/api/appdata?app=duopulse&key=passwords`, {
+  const appdataGet = async (key = "passwords") => {
+    const r = await fetch(`http://127.0.0.1:${AILA_PORT}/api/appdata?app=duopulse&key=${key}`, {
       headers: { Cookie: `aila_sess=${ownerToken}` },
     });
     return { status: r.status, body: await r.json().catch(() => null) };
@@ -304,6 +363,17 @@ try {
   check("машина A: пароль сохранён локально (до входа)", before && before.id > 0, JSON.stringify(before));
   const localList = await viaSettings(ws, `window.__duopulse.passwords.list({query:'artem', limit:10})`);
   check("машина A: запись видна локально", localList?.total === 1, JSON.stringify(localList?.total));
+
+  // закладки и группа — тоже локально до входа (этап 5 duopulse-111):
+  // без аккаунта поведение прежнее, правки копятся локально
+  const bmWild = await viaSettings(ws, `window.__duopulse.history.bookmarkAdd({url:'https://yt.example/wild', title:'Дикое видео'})`);
+  check("машина A: закладка сохранена локально (до входа)", noErr(bmWild), JSON.stringify(bmWild));
+  const grp = await viaSettings(ws, `window.__duopulse.history.groupAdd({name:'Музыка e2e'})`);
+  check("машина A: группа создана локально", grp && grp.id > 0, JSON.stringify(grp));
+  const bmTrack = await viaSettings(ws, `window.__duopulse.history.bookmarkAdd({url:'https://m.example/track', title:'Трек', groupId:${grp?.id}})`);
+  check("машина A: закладка в группе сохранена локально", noErr(bmTrack), JSON.stringify(bmTrack));
+  const localMarks = await viaSettings(ws, `window.__duopulse.history.bookmarkList({query:'', limit:10})`);
+  check("машина A: закладки видны локально", localMarks?.total === 2, JSON.stringify(localMarks?.total));
 
   const statusA = await loginViaUi(ws);
   check("машина A: вход через UI — статус «Вошли»", /Вошли/.test(statusA), statusA);
@@ -326,12 +396,25 @@ try {
     );
   }
 
-  await gracefulClose(app);
-  await killWebViewOf(profileA);
-  for (let i = 0; i < 20; i++) {
-    if ((await cdpTargets()).length === 0) break;
-    await sleep(300);
+  // закладки уехали отдельным ключом appdata (этап 5): key=bookmarks
+  let cloudBm = null;
+  for (let i = 0; i < 40 && !cloudBm; i++) {
+    const r = await appdataGet("bookmarks");
+    if (r.status === 200 && r.body?.blob?.ct) cloudBm = r.body;
+    else await sleep(500);
   }
+  check("машина A: авто-синк отправил блоб закладок (key=bookmarks)", !!cloudBm && cloudBm.revision >= 1, cloudBm ? `ревизия ${cloudBm.revision}` : "блоб не появился");
+  if (cloudBm) {
+    const raw = Buffer.from(cloudBm.blob.ct, "hex").toString("latin1");
+    check(
+      "облако: блоб закладок шифрованный — сервер не видел url/групп",
+      /^[0-9a-f]+$/.test(cloudBm.blob.ct) && /^[0-9a-f]{24}$/.test(cloudBm.blob.iv) &&
+        !raw.includes("yt.example") && !raw.includes("m.example"),
+      `ct ${cloudBm.blob.ct.length} hex-символов`,
+    );
+  }
+
+  await closeMachine(app, profileA, "машины A (первый запуск)");
 
   // --- 3. машина B: чистый профиль, тот же аккаунт → пароль приехал -------
   const profileB = path.join(tmpRoot, "machineB");
@@ -361,8 +444,104 @@ try {
   const statusAfter = await viaSettings(ws, `window.__duopulse.aila.status()`);
   check("машина B: aila.status — вход + сервер стенда", statusAfter?.loggedIn === true && statusAfter?.server === `http://127.0.0.1:${AILA_PORT}`, JSON.stringify(statusAfter));
 
+  // закладки машины A приехали (этап 5): закладка, группа, членство по имени
+  let bmArrived = null;
+  for (let i = 0; i < 60 && !bmArrived; i++) {
+    const list = await viaSettings(ws, `window.__duopulse.history.bookmarkList({query:'wild', limit:10})`);
+    if (list?.total >= 1) bmArrived = list;
+    else await sleep(500);
+  }
+  check(
+    "машина B: закладка машины A приехала синком",
+    !!bmArrived && bmArrived.bookmarks[0]?.title === "Дикое видео" && bmArrived.bookmarks[0]?.url === "https://yt.example/wild",
+    JSON.stringify(bmArrived?.bookmarks?.[0] ?? bmArrived),
+  );
+  const groupsB = await viaSettings(ws, `window.__duopulse.history.groupList()`);
+  const musicB = (groupsB?.groups || []).find?.((g) => g.name === "Музыка e2e");
+  check("машина B: группа «Музыка e2e» приехала", !!musicB, JSON.stringify(groupsB?.groups ?? groupsB));
+  const trackB = await viaSettings(ws, `window.__duopulse.history.bookmarkList({query:'track', limit:10})`);
+  check(
+    "машина B: членство закладки в группе приехало (по имени)",
+    trackB?.bookmarks?.[0]?.groups?.some?.((g) => g.name === "Музыка e2e") === true,
+    JSON.stringify(trackB?.bookmarks?.[0]?.groups),
+  );
+
+  // удаление на B → надгробия уезжают в облако; ждём их ВНУТРИ блоба
+  // (расшифрованном ключом синка): wild исчез из bookmarks, tombstones несёт
+  // оба ключа. Круг удалений выходит после дебаунса 3 с — ждём до 40 с
+  const rm1 = await viaSettings(ws, `window.__duopulse.history.bookmarkRemove({url:'https://yt.example/wild'})`);
+  const rm2 = musicB
+    ? await viaSettings(ws, `window.__duopulse.history.groupRemove({id:${musicB.id}})`)
+    : "нет группы";
+  check("машина B: закладка и группа удалены локально", noErr(rm1) && noErr(rm2), `${JSON.stringify(rm1)} / ${JSON.stringify(rm2)}`);
+  let tombstoned = false;
+  let tombDetail = "";
+  for (let i = 0; i < 80 && !tombstoned; i++) {
+    const r = await appdataGet("bookmarks");
+    if (r.status === 200 && r.body?.blob?.ct) {
+      try {
+        const doc = openBmBlob(r.body.blob);
+        const wildGoneCloud = !(doc.bookmarks || []).some((b) => b.url === "https://yt.example/wild");
+        const tombs = doc.tombstones || [];
+        const hasWild = tombs.some((t) => t.kind === "bookmark" && t.key === "https://yt.example/wild");
+        const hasMusic = tombs.some((t) => t.kind === "group" && t.key === "Музыка e2e");
+        if (wildGoneCloud && hasWild && hasMusic) tombstoned = true;
+        else tombDetail = `wildGone=${wildGoneCloud} t=${JSON.stringify(tombs)}`;
+      } catch (e) {
+        tombDetail = `блоб не расшифровался: ${e?.message || e}`;
+      }
+    }
+    if (!tombstoned) await sleep(500);
+  }
+  check("машина B: надгробия уехали в облако (в блобе)", tombstoned, tombDetail);
+
+  await closeMachine(app, profileB, "машины B");
+
+  // --- 4. перезапуск машины A: восстановленная сессия → синк на старте -----
+  // применяет удаления машины B (надгробия), данные не портятся
+  app = launchMachine(profileA);
+  ws = await waitForSettings();
+  let wildGone = false;
+  let musicGone = false;
+  for (let i = 0; i < 90 && !(wildGone && musicGone); i++) {
+    if (!wildGone) {
+      const list = await viaSettings(ws, `window.__duopulse.history.bookmarkList({query:'wild', limit:10})`);
+      if (list?.total === 0) wildGone = true;
+    }
+    if (!musicGone) {
+      const groups = await viaSettings(ws, `window.__duopulse.history.groupList()`);
+      if (Array.isArray(groups?.groups) && !groups.groups.some((g) => g.name === "Музыка e2e")) musicGone = true;
+    }
+    if (!(wildGone && musicGone)) await sleep(500);
+  }
+  check("машина A (перезапуск): удаление закладки доехало надгробием", wildGone, wildGone ? "" : "закладка всё ещё на месте");
+  check("машина A (перезапуск): удаление группы доехало надгробием", musicGone, musicGone ? "" : "группа всё ещё на месте");
+  if (!(wildGone && musicGone)) {
+    const st = await viaSettings(ws, `window.__duopulse.aila.status()`);
+    console.log(`--- aila.status машины A (перезапуск): ${JSON.stringify(st)}`);
+  }
+  const survivor = await viaSettings(ws, `window.__duopulse.history.bookmarkList({query:'track', limit:10})`);
+  check(
+    "машина A (перезапуск): соседняя закладка не пострадала (группа удалена — закладка жива)",
+    survivor?.total === 1 && survivor.bookmarks[0]?.url === "https://m.example/track",
+    JSON.stringify(survivor?.bookmarks?.[0] ?? survivor),
+  );
+  const pwStill = await viaSettings(ws, `window.__duopulse.passwords.list({query:'artem', limit:10})`);
+  check("машина A (перезапуск): пароли не пострадали", pwStill?.total === 1, JSON.stringify(pwStill?.total));
+  // диагностика воркера: если круг синка падал — stderr машины знает почему
+  for (const p of [profileA, profileB]) {
+    try {
+      const text = fs.readFileSync(`${p}-stderr.log`, "utf8");
+      const lines = text.split("\n").filter((l) => l.includes("[aila]"));
+      if (lines.length) console.log(`--- [aila]-лог ${path.basename(p)}:\n${lines.slice(0, 8).join("\n")}`);
+      if (!wildGone || !musicGone) {
+        console.log(`--- полный хвост stderr ${path.basename(p)}:\n${text.split("\n").slice(-40).join("\n")}`);
+      }
+    } catch {}
+  }
+
   await gracefulClose(app);
-  await killWebViewOf(profileB);
+  await killWebViewOf(profileA);
 } catch (e) {
   console.error("СТЕНД УПАЛ:", e?.message || e);
   exitCode = 1;

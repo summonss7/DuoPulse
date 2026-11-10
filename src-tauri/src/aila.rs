@@ -1,7 +1,8 @@
-//! Аккаунт Aila и синхронизация паролей (этап 4 цепочки duopulse-110):
-//! вход в аккаунт семейного сервера Aila из DuoPulse и синк хранилища
-//! паролей между устройствами через API appdata (этап 3, карточка Aila
-//! aila-386). Без входа всё работает локально (этапы 1–2 не зависят).
+//! Аккаунт Aila и синхронизация паролей с закладками (этап 4 duopulse-110,
+//! этап 5 duopulse-111): вход в аккаунт семейного сервера Aila из DuoPulse
+//! и синк хранилищ между устройствами через API appdata (этап 3, карточка
+//! Aila aila-386; пароли — ключ "passwords", закладки — ключ "bookmarks").
+//! Без входа всё работает локально (этапы 1–2 не зависят).
 //!
 //! Протокол входа — как у веб-клиента Aila (app/src/lib/crypto.js):
 //! POST /api/login/params {username} → соли (hex); локально выводятся
@@ -10,19 +11,25 @@
 //! Для синка от wrap_key выводится отдельный ключ
 //! HKDF-SHA256(wrap_key, salt="duopulse", info="duopulse-passwords-v1") — он
 //! НЕ расшифровывает enc_vault чата Aila и хранится под DPAPI только пока
-//! выполнен вход; выход — стереть. Сервер во всех сценариях видит один
-//! ciphertext {iv, ct} (hex) = AES-256-GCM(sync_key, JSON хранилища).
+//! выполнен вход; выход — стереть. Ключ закладок (этап 5) выводится цепочкой
+//! от ключа паролей: HKDF-SHA256(passwords_key, salt="duopulse",
+//! info="duopulse-bookmarks-v1") — домены разделены, а сессии этапа 4
+//! (под DPAPI лежит только ключ паролей) получают совместимый ключ без
+//! повторного входа. Сервер во всех сценариях видит один ciphertext
+//! {iv, ct} (hex) = AES-256-GCM(sync_key, JSON хранилища) на каждый ключ.
 //!
 //! Сессия — httpOnly-кука aila_sess (180 дней): токен тоже под DPAPI
 //! (`aila.token`), несекретные username/display/server — `aila-account.json`
 //! в профиле. Смена пароля Aila → wrap_key меняется → повторный вход;
-//! локальные данные при этом не теряются, блоб перезаливается новым ключом.
+//! локальные данные при этом не теряются, блобы перезаливаются новым ключом.
 //!
-//! Слияние (по origin+username): свежий updated_at выигрывает, проигравший
-//! пароль остаётся записью-дублем — конфликт не разрешается молча
-//! (passwords::PasswordStore::merge_remote). Триггеры синка: старт после
-//! восстановления сессии, локальные правки паролей (дебаунс 3 с, бэкофф
-//! при ошибках 30 с → 10 мин) и кнопка в настройках (aila.sync_now).
+//! Слияние паролей (по origin+username): свежий updated_at выигрывает,
+//! проигравший пароль остаётся записью-дублем — конфликт не разрешается
+//! молча (passwords::PasswordStore::merge_remote). Закладки — объединение
+//! по url, группы — по имени, удаление — надгробием
+//! (history::HistoryStore::merge_sync_doc). Триггеры синка: старт после
+//! восстановления сессии, локальные правки паролей/закладок (дебаунс 3 с,
+//! бэкофф при ошибках 30 с → 10 мин) и кнопка в настройках (aila.sync_now).
 
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
@@ -34,6 +41,7 @@ use hkdf::Hkdf;
 use rand::RngCore;
 use sha2::Sha256;
 
+use crate::history::{BookmarkSyncDoc, HistoryStore};
 use crate::passwords::{FullLogin, PasswordStore};
 
 /// Семейный сервер по умолчанию (туннель Cloudflare домашнего ПК);
@@ -41,7 +49,8 @@ use crate::passwords::{FullLogin, PasswordStore};
 pub const DEFAULT_SERVER: &str = "https://aila.skillcoin.pp.ua";
 const COOKIE_NAME: &str = "aila_sess";
 const APP_ID: &str = "duopulse";
-const KEY_ID: &str = "passwords";
+const KEY_PASSWORDS: &str = "passwords";
+const KEY_BOOKMARKS: &str = "bookmarks";
 const PBKDF2_ITERS: u32 = 600_000;
 /// Дебаунс авто-синка после локальных правок.
 const SYNC_DEBOUNCE: Duration = Duration::from_secs(3);
@@ -85,7 +94,19 @@ fn sync_key_of(wrap_key: &[u8; 32]) -> [u8; 32] {
     out
 }
 
-/// JSON-документ облачного блоба (шифруется целиком).
+/// Ключ синка закладок (этап 5 duopulse-111): цепочка от ключа паролей —
+/// HKDF-SHA256(passwords_key, salt="duopulse", info="duopulse-bookmarks-v1").
+/// Цепочка, а не повторный вывод из wrap_key: под DPAPI этап 4 сохранил
+/// только ключ паролей, wrap_key на устройстве не лежит — так сессии этапа 4
+/// получают ключ закладок без повторного входа, а домены попарно разделены.
+fn bookmarks_key_of(passwords_key: &[u8; 32]) -> [u8; 32] {
+    let hk = Hkdf::<Sha256>::new(Some(b"duopulse"), passwords_key);
+    let mut out = [0u8; 32];
+    hk.expand(b"duopulse-bookmarks-v1", &mut out).expect("32Б ок");
+    out
+}
+
+/// JSON-документ облачного блоба паролей (шифруется целиком).
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct VaultDoc {
@@ -96,8 +117,8 @@ struct VaultDoc {
     never_save: Vec<String>,
 }
 
-/// {iv, ct} hex — формат блоба API appdata.
-fn seal_blob(key: &[u8; 32], doc: &VaultDoc) -> Result<serde_json::Value, String> {
+/// {iv, ct} hex — формат блоба API appdata (любой сериализуемый документ).
+fn seal_blob<D: serde::Serialize>(key: &[u8; 32], doc: &D) -> Result<serde_json::Value, String> {
     let plain = serde_json::to_vec(doc).map_err(|e| format!("сериализация хранилища: {e}"))?;
     let mut iv = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut iv);
@@ -108,7 +129,7 @@ fn seal_blob(key: &[u8; 32], doc: &VaultDoc) -> Result<serde_json::Value, String
     Ok(serde_json::json!({ "iv": encode_hex(&iv), "ct": encode_hex(&ct) }))
 }
 
-fn open_blob(key: &[u8; 32], blob: &serde_json::Value) -> Result<VaultDoc, String> {
+fn open_blob<D: serde::de::DeserializeOwned>(key: &[u8; 32], blob: &serde_json::Value) -> Result<D, String> {
     let iv = decode_hex(blob.get("iv").and_then(|v| v.as_str()).unwrap_or(""))
         .filter(|v| v.len() == 12)
         .ok_or("блоб синка без IV")?;
@@ -120,7 +141,7 @@ fn open_blob(key: &[u8; 32], blob: &serde_json::Value) -> Result<VaultDoc, Strin
         .decrypt(Nonce::from_slice(&iv), ct.as_slice())
         .map_err(|_| {
             "не удалось расшифровать облачный блоб — похоже, пароль Aila сменился: \
-             выйдите из аккаунта и войдите снова (локальные пароли на месте)"
+             выйдите из аккаунта и войдите снова (локальные данные на месте)"
                 .to_string()
         })?;
     serde_json::from_slice(&plain).map_err(|e| format!("документ хранилища битый: {e}"))
@@ -134,6 +155,7 @@ struct Session {
     server: String,
     token: String,
     sync_key: [u8; 32],
+    bookmarks_key: [u8; 32],
     revision: u64,
     last_sync_at: Option<i64>,
     last_error: Option<String>,
@@ -230,16 +252,19 @@ impl AilaAccount {
         }
     }
 
-    /// Восстановить сохранённый вход (token/sync-ключ под DPAPI). Сессия
-    /// могла протухнуть — воркер это увидит первым же синком (401).
-    pub fn restore(self: &Arc<Self>) {
+    /// Восстановить сохранённый вход (token/sync-ключи под DPAPI). Ответ —
+    /// был ли вход восстановлен (main тогда будит воркер первым синком).
+    /// Сессия могла протухнуть — воркер это увидит первым же синком (401).
+    pub fn restore(self: &Arc<Self>) -> bool {
         let json_path = self.profile_dir.join("aila-account.json");
         let Ok(text) = std::fs::read_to_string(&json_path) else {
-            return;
+            eprintln!("[aila] restore: нет aila-account.json");
+            return false;
         };
         let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
             let _ = std::fs::remove_file(&json_path); // битый — не повод падать
-            return;
+            eprintln!("[aila] restore: aila-account.json битый — удалён");
+            return false;
         };
         let token_path = self.profile_dir.join("aila.token");
         let key_path = self.profile_dir.join("aila.sync.key");
@@ -247,10 +272,16 @@ impl AilaAccount {
             crate::secrets::load(&token_path),
             crate::secrets::load(&key_path),
         ) else {
-            return;
+            eprintln!(
+                "[aila] restore: DPAPI-секреты не читаются (token={}, key={})",
+                token_path.exists(),
+                key_path.exists()
+            );
+            return false;
         };
         let Some(key_bytes) = decode_hex(&key_hex).filter(|b| b.len() == 32) else {
-            return;
+            eprintln!("[aila] restore: aila.sync.key не hex-32Б");
+            return false;
         };
         let mut sync_key = [0u8; 32];
         sync_key.copy_from_slice(&key_bytes);
@@ -260,20 +291,24 @@ impl AilaAccount {
             server: doc["server"].as_str().unwrap_or_default().to_string(),
             token,
             sync_key,
+            bookmarks_key: bookmarks_key_of(&sync_key),
             ..Session::default()
         };
         if session.username.is_empty() || session.server.is_empty() {
-            return;
+            eprintln!("[aila] restore: аккаунт без username/server");
+            return false;
         }
         session.revision = doc["revision"].as_u64().unwrap_or(0);
         session.last_sync_at = doc["lastSyncAt"].as_i64();
+        eprintln!("[aila] restore: сессия {} восстановлена", session.username);
         *self.session.lock().unwrap() = Some(session);
+        true
     }
 
-    /// Воркер авто-синка: ждёт «грязно» (правки паролей/вход/повтор ошибки),
-    /// дебаунсит, синкает; при ошибке — бэкофф 30с → 2м → 10м (правка за это
-    /// время будит воркер сразу).
-    pub fn start_worker(self: &Arc<Self>, store: Arc<PasswordStore>) {
+    /// Воркер авто-синка: ждёт «грязно» (правки паролей/закладок/вход/повтор
+    /// ошибки), дебаунсит, синкает оба хранилища; при ошибке — бэкофф 30с →
+    /// 2м → 10м (правка за это время будит воркер сразу).
+    pub fn start_worker(self: &Arc<Self>, passwords: Arc<PasswordStore>, history: Arc<HistoryStore>) {
         let account = Arc::clone(self);
         std::thread::spawn(move || {
             let (lock, cvar) = &account.ctl_pair;
@@ -286,7 +321,7 @@ impl AilaAccount {
                 drop(ctl);
                 // дебаунс: правки сыплются серией — собираем одну синхронизацию
                 std::thread::sleep(SYNC_DEBOUNCE);
-                let res = account.sync_round(&store);
+                let res = account.sync_round(&passwords, &history);
                 let mut ctl = lock.lock().unwrap();
                 match res {
                     Ok(_) => {
@@ -299,9 +334,12 @@ impl AilaAccount {
                             s => s * 2,
                         };
                         if let Some(sess) = account.session.lock().unwrap().as_mut() {
-                            sess.last_error = Some(e);
+                            sess.last_error = Some(e.clone());
                         }
-                        eprintln!("[aila] синк не удался, повтор через {}с", ctl.backoff_secs);
+                        eprintln!(
+                            "[aila] синк не удался: {e} — повтор через {}с",
+                            ctl.backoff_secs
+                        );
                         let backoff = Duration::from_secs(ctl.backoff_secs);
                         let (mut c2, _) = cvar.wait_timeout(ctl, backoff).unwrap();
                         c2.dirty = true; // повторить попытку (или свежая правка)
@@ -311,7 +349,7 @@ impl AilaAccount {
         });
     }
 
-    /// Пометить локальные пароли изменёнными — воркер синканет с дебаунсом.
+    /// Пометить локальные данные изменёнными — воркер синканет с дебаунсом.
     pub fn schedule_sync(&self) {
         let (lock, cvar) = &self.ctl_pair;
         let mut ctl = lock.lock().unwrap();
@@ -369,7 +407,9 @@ impl AilaAccount {
             .as_str()
             .unwrap_or(username)
             .to_string();
-        // 4) ключ синка и токен под DPAPI + несекретная метка аккаунта
+        // 4) ключи синка и токен под DPAPI + несекретная метка аккаунта
+        //    (ключ закладок выводится цепочкой от ключа паролей — restore
+        //    пересчитает его из сохранённого aila.sync.key без wrap_key)
         let sync_key = sync_key_of(&wrap_key);
         crate::secrets::save(&self.profile_dir.join("aila.token"), &token)?;
         crate::secrets::save(&self.profile_dir.join("aila.sync.key"), &encode_hex(&sync_key))?;
@@ -388,6 +428,7 @@ impl AilaAccount {
             server,
             token,
             sync_key,
+            bookmarks_key: bookmarks_key_of(&sync_key),
             ..Session::default()
         });
         Ok(())
@@ -411,21 +452,27 @@ impl AilaAccount {
         let _ = std::fs::remove_file(self.profile_dir.join("aila-account.json"));
     }
 
-    /// Один круг синхронизации: pull → merge → push (если разошлись).
-    /// Возвращает (записей в облаке, применено, конфликтов, push?, revision).
-    fn sync_round(
-        self: &Arc<Self>,
-        store: &PasswordStore,
-    ) -> Result<(u64, u64, u64, bool, u64), String> {
-        let (server, token, sync_key) = {
-            let guard = self.session.lock().unwrap();
-            let s = guard.as_ref().ok_or("нет входа в аккаунт Aila")?;
-            (s.server.clone(), s.token.clone(), s.sync_key)
-        };
-        let agent = http_agent();
-        let url = format!("{server}/api/appdata?app={APP_ID}&key={KEY_ID}");
+    /// Один круг синхронизации одного ключа appdata: pull → merge → push
+    /// (если разошлись). `merge` вливает удалённый документ (None — облако
+    /// пусто) в локальное хранилище и возвращает локальный документ к отправке;
+    /// `count_of` — число записей документа (статистика «было в облаке»).
+    /// Ответ — (записей было в облаке, push?, revision после круга).
+    fn appdata_round<D, F>(
+        agent: &ureq::Agent,
+        server: &str,
+        token: &str,
+        key_id: &str,
+        sync_key: &[u8; 32],
+        count_of: impl Fn(&D) -> u64,
+        mut merge: F,
+    ) -> Result<(u64, bool, u64), String>
+    where
+        D: serde::Serialize + serde::de::DeserializeOwned,
+        F: FnMut(Option<&D>) -> Result<D, String>,
+    {
+        let url = format!("{server}/api/appdata?app={APP_ID}&key={key_id}");
         // --- pull ---
-        let (status, text) = get_json(&agent, &url, &token)?;
+        let (status, text) = get_json(agent, &url, token)?;
         match status {
             200 => {}
             401 => return Err("сессия Aila истекла — выйдите и войдите снова".into()),
@@ -434,36 +481,28 @@ impl AilaAccount {
         let pulled: serde_json::Value =
             serde_json::from_str(&text).map_err(|_| "странный ответ /api/appdata".to_string())?;
         let mut revision = pulled["revision"].as_u64().unwrap_or(0);
-        let remote_doc = match pulled["blob"].as_object() {
-            Some(blob) if !blob.is_empty() => Some(open_blob(&sync_key, &pulled["blob"])?),
+        let remote_doc: Option<D> = match pulled["blob"].as_object() {
+            Some(blob) if !blob.is_empty() => Some(open_blob(sync_key, &pulled["blob"])?),
             _ => None,
         };
-        let (remote_logins, remote_never, remote_count) = match remote_doc.as_ref() {
-            Some(doc) => (doc.logins.clone(), doc.never_save.clone(), doc.logins.len() as u64),
-            None => (Vec::new(), Vec::new(), 0),
-        };
+        let remote_count = remote_doc.as_ref().map(count_of).unwrap_or(0);
         // --- merge (локальные правки при этом остаются — push ниже) ---
-        let stats = store.merge_remote(&remote_logins, &remote_never)?;
+        let local_doc = merge(remote_doc.as_ref())?;
         // --- push, если документы разошлись ---
-        let local_doc = VaultDoc {
-            v: 1,
-            logins: store.export_full()?,
-            never_save: store.never_save_origins()?,
-        };
         let same_as_remote = remote_doc
             .as_ref()
             .map(|d| serde_json::to_value(d).ok() == serde_json::to_value(&local_doc).ok())
             == Some(true);
         let mut pushed = false;
         if !same_as_remote {
-            let blob = seal_blob(&sync_key, &local_doc)?;
+            let blob = seal_blob(sync_key, &local_doc)?;
             let (status, text, _) = send_json(
-                &agent, "PUT",
+                agent, "PUT",
                 &format!("{server}/api/appdata"),
                 &serde_json::json!({
-                    "app": APP_ID, "key": KEY_ID, "blob": blob, "if_match": revision,
+                    "app": APP_ID, "key": key_id, "blob": blob, "if_match": revision,
                 }),
-                Some(&token),
+                Some(token),
             )?;
             match status {
                 200 => {
@@ -478,28 +517,21 @@ impl AilaAccount {
                     // следующий круг (последняя запись выигрывает)
                     let winner: serde_json::Value = serde_json::from_str(&text)
                         .map_err(|_| "странный ответ конфликта appdata".to_string())?;
-                    let winner_doc = match winner["blob"].as_object() {
-                        Some(b) if !b.is_empty() => Some(open_blob(&sync_key, &winner["blob"])?),
+                    let winner_doc: Option<D> = match winner["blob"].as_object() {
+                        Some(b) if !b.is_empty() => Some(open_blob(sync_key, &winner["blob"])?),
                         _ => None,
                     };
-                    if let Some(d) = winner_doc {
-                        store.merge_remote(&d.logins, &d.never_save)?;
-                    }
+                    let merged = merge(winner_doc.as_ref())?;
                     revision = winner["revision"].as_u64().unwrap_or(revision);
-                    let merged = VaultDoc {
-                        v: 1,
-                        logins: store.export_full()?,
-                        never_save: store.never_save_origins()?,
-                    };
                     let (status2, text2, _) = send_json(
-                        &agent, "PUT",
+                        agent, "PUT",
                         &format!("{server}/api/appdata"),
                         &serde_json::json!({
-                            "app": APP_ID, "key": KEY_ID,
-                            "blob": seal_blob(&sync_key, &merged)?,
+                            "app": APP_ID, "key": key_id,
+                            "blob": seal_blob(sync_key, &merged)?,
                             "if_match": revision,
                         }),
-                        Some(&token),
+                        Some(token),
                     )?;
                     match status2 {
                         200 => {
@@ -520,7 +552,74 @@ impl AilaAccount {
                 _ => return Err(format!("PUT appdata: сервер ответил {status}")),
             }
         }
+        Ok((remote_count, pushed, revision))
+    }
+
+    /// Один круг синхронизации обоих хранилищ: пароли, затем закладки.
+    /// Ошибка первого прерывает круг (бэкофф повторит оба; слияния
+    /// идемпотентны). Возвращает статистику паролей (в облаке, применено,
+    /// конфликтов, push?, revision) и закладок (в облаке, применено, push?).
+    fn sync_round(
+        self: &Arc<Self>,
+        passwords: &PasswordStore,
+        history: &HistoryStore,
+    ) -> Result<((u64, u64, u64, bool, u64), (u64, u64, bool)), String> {
+        let (server, token, sync_key, bookmarks_key) = {
+            let guard = self.session.lock().unwrap();
+            let s = guard.as_ref().ok_or("нет входа в аккаунт Aila")?;
+            (
+                s.server.clone(),
+                s.token.clone(),
+                s.sync_key,
+                s.bookmarks_key,
+            )
+        };
+        let agent = http_agent();
+        // --- пароли (ключ "passwords") ---
+        let mut pw_stats = crate::passwords::MergeStats::default();
+        let (pw_pulled, pw_pushed, revision) = Self::appdata_round::<VaultDoc, _>(
+            &agent,
+            &server,
+            &token,
+            KEY_PASSWORDS,
+            &sync_key,
+            |d: &VaultDoc| d.logins.len() as u64,
+            |remote| {
+                if let Some(d) = remote {
+                    pw_stats = passwords.merge_remote(&d.logins, &d.never_save)?;
+                }
+                Ok(VaultDoc {
+                    v: 1,
+                    logins: passwords.export_full()?,
+                    never_save: passwords.never_save_origins()?,
+                })
+            },
+        )?;
+        // --- закладки (ключ "bookmarks", этап 5 duopulse-111) ---
+        let mut bm_stats = crate::history::BookmarkMergeStats::default();
+        let (bm_pulled, bm_pushed, _bm_revision) = Self::appdata_round::<BookmarkSyncDoc, _>(
+            &agent,
+            &server,
+            &token,
+            KEY_BOOKMARKS,
+            &bookmarks_key,
+            |d: &BookmarkSyncDoc| d.bookmarks.len() as u64,
+            |remote| {
+                if let Some(d) = remote {
+                    bm_stats = history.merge_sync_doc(d)?;
+                }
+                history.export_sync_doc()
+            },
+        )?;
         let mut guard = self.session.lock().unwrap();
+        eprintln!(
+            "[aila] круг: пароли pulled={pw_pulled} applied={} conflicts={} pushed={pw_pushed} rev={revision}; \
+             закладки pulled={bm_pulled} applied={} removed={} pushed={bm_pushed}",
+            pw_stats.applied,
+            pw_stats.conflicts,
+            bm_stats.applied,
+            bm_stats.removed,
+        );
         if let Some(s) = guard.as_mut() {
             s.revision = revision;
             s.last_sync_at = Some(now_ms());
@@ -537,16 +636,20 @@ impl AilaAccount {
                 .to_string(),
             );
         }
-        Ok((remote_count, stats.applied, stats.conflicts, pushed, revision))
+        Ok((
+            (pw_pulled, pw_stats.applied, pw_stats.conflicts, pw_pushed, revision),
+            (bm_pulled, bm_stats.applied, bm_pushed),
+        ))
     }
 
     /// Синхронизировать сейчас (кнопка в настройках): тот же круг, что у
     /// воркера, но синхронно — статистика уходит в UI.
     pub fn sync_now(
         self: &Arc<Self>,
-        store: &PasswordStore,
-    ) -> Result<(u64, u64, u64, bool, u64), String> {
-        self.sync_round(store)
+        passwords: &PasswordStore,
+        history: &HistoryStore,
+    ) -> Result<((u64, u64, u64, bool, u64), (u64, u64, bool)), String> {
+        self.sync_round(passwords, history)
     }
 
     /// Снимок состояния для UI:
@@ -613,6 +716,24 @@ mod tests {
         assert_ne!(k1, other);
     }
 
+    /// Ключ закладок (этап 5) — цепочка от ключа паролей: детерминированная
+    /// (restore из aila.sync.key даёт ту же), отделена от ключа паролей и от
+    /// чужих аккаунтов.
+    #[test]
+    fn bookmarks_key_chains_from_passwords_key() {
+        let pw = sync_key_of(&key(7));
+        let bm = bookmarks_key_of(&pw);
+        assert_eq!(bm, bookmarks_key_of(&pw)); // детерминизм (restore совместим)
+        assert_ne!(bm, pw); // отделён от блоба паролей
+        assert_ne!(bm, bookmarks_key_of(&sync_key_of(&key(8))));
+        // прямой вывод из wrap_key дал бы ДРУГОЙ ключ — цепочка единственный
+        // канонический путь (иначе машины не сошлись бы)
+        let hk = Hkdf::<Sha256>::new(Some(b"duopulse"), &key(7));
+        let mut direct = [0u8; 32];
+        hk.expand(b"duopulse-bookmarks-v1", &mut direct).expect("ок");
+        assert_ne!(bm, direct);
+    }
+
     #[test]
     fn blob_roundtrip_and_wrong_key_fails() {
         let doc = VaultDoc {
@@ -632,13 +753,48 @@ mod tests {
         // сервер видит только hex-поля
         assert_eq!(blob["iv"].as_str().unwrap().len(), 24);
         assert!(!blob["ct"].as_str().unwrap().contains("s3cret"));
-        let back = open_blob(&key(1), &blob).unwrap();
+        let back: VaultDoc = open_blob(&key(1), &blob).unwrap();
         assert_eq!(back.logins.len(), 1);
         assert_eq!(back.logins[0].password, "s3cret!");
         assert_eq!(back.never_save, vec!["https://spam.io".to_string()]);
         // чужой ключ — честная ошибка
-        assert!(open_blob(&key(2), &blob).is_err());
-        assert!(open_blob(&key(1), &serde_json::json!({ "iv": "xx", "ct": "yy" })).is_err());
+        assert!(open_blob::<VaultDoc>(&key(2), &blob).is_err());
+        assert!(open_blob::<VaultDoc>(&key(1), &serde_json::json!({ "iv": "xx", "ct": "yy" })).is_err());
+    }
+
+    /// Блоб закладок (этап 5): тот же {iv, ct}-формат, ключ закладок отличен
+    /// от ключа паролей — чужой блоб не расшифровывается.
+    #[test]
+    fn bookmarks_blob_roundtrip_with_own_key() {
+        use crate::history::{SyncBookmark, SyncGroup, SyncTombstone};
+        let doc = BookmarkSyncDoc {
+            v: 1,
+            bookmarks: vec![SyncBookmark {
+                url: "https://yt.example/".into(),
+                title: "YouTube".into(),
+                added_at: 1,
+                updated_at: 2,
+                groups: vec!["Избранное".into()],
+            }],
+            groups: vec![SyncGroup {
+                name: "Избранное".into(),
+                sort_by: "manual".into(),
+                created_at: 1,
+            }],
+            tombstones: vec![SyncTombstone {
+                kind: "bookmark".into(),
+                key: "https://gone.example/".into(),
+                deleted_at: 3,
+            }],
+        };
+        let bm_key = bookmarks_key_of(&key(1));
+        let blob = seal_blob(&bm_key, &doc).unwrap();
+        assert!(!blob["ct"].as_str().unwrap().contains("yt.example"));
+        let back: BookmarkSyncDoc = open_blob(&bm_key, &blob).unwrap();
+        assert_eq!(back.bookmarks[0].url, "https://yt.example/");
+        assert_eq!(back.tombstones[0].key, "https://gone.example/");
+        // ключ паролей чужой для блоба закладок — честная ошибка
+        assert!(open_blob::<BookmarkSyncDoc>(&key(2), &blob).is_err());
     }
 
     #[test]

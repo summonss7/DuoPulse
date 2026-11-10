@@ -639,6 +639,7 @@ impl TabManager {
     /// Ctrl+D: закладка активной вкладки — добавить/убрать (внешние http/https
     /// адреса; внутренние страницы и прочие схемы не закладываются). Ответ —
     /// стала ли страница закладкой; событие tabs.updated обновит звёздочку.
+    /// Правка — пометка на синк аккаунта Aila (этап 5 duopulse-111).
     fn toggle_bookmark_active(&self, app: &AppHandle) -> Result<bool, String> {
         let (url, title) = {
             let st = self.state.lock().expect("tabs: лок не отравлен");
@@ -653,8 +654,12 @@ impl TabManager {
             (parsed.to_string(), entry.title.clone().unwrap_or_default())
         };
         let added = app
-            .state::<crate::history::HistoryStore>()
+            .state::<std::sync::Arc<crate::history::HistoryStore>>()
             .toggle_bookmark(&url, &title)?;
+        // и добавление, и удаление — правка хранилища: надгробие/новая
+        // закладка должны уехать в облако (этап 5 duopulse-111)
+        app.state::<std::sync::Arc<crate::aila::AilaAccount>>()
+            .schedule_sync();
         self.finish(app);
         Ok(added)
     }
@@ -985,7 +990,7 @@ impl TabManager {
             return;
         }
         if let Err(e) = app
-            .state::<crate::history::HistoryStore>()
+            .state::<std::sync::Arc<crate::history::HistoryStore>>()
             .visit(&visit_url, &visit_title)
         {
             eprintln!("history: визит SPA не записан ({visit_url}): {e}");
@@ -1034,7 +1039,7 @@ impl TabManager {
         drop(st);
         if record_visit {
             if let Err(e) = app
-                .state::<crate::history::HistoryStore>()
+                .state::<std::sync::Arc<crate::history::HistoryStore>>()
                 .visit(&visit_url, &visit_title)
             {
                 eprintln!("history: визит не записан ({visit_url}): {e}");
@@ -1065,7 +1070,7 @@ impl TabManager {
         drop(st);
         if let Some(url) = note {
             if let Err(e) = app
-                .state::<crate::history::HistoryStore>()
+                .state::<std::sync::Arc<crate::history::HistoryStore>>()
                 .note_title(&url, &title)
             {
                 eprintln!("history: заголовок не обновлён ({url}): {e}");

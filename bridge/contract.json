@@ -471,13 +471,29 @@
       "params": null,
       "result": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "aila.sync_now: итог круга синка (pull → merge → push).",
+        "description": "aila.sync_now: итог круга синка (pull → merge → push) обоих хранилищ: пароли (этап 4) + закладки (этап 5 duopulse-111).",
         "properties": {
           "applied": {
-            "description": "применено из облака (добавлено/обновлено).",
+            "description": "паролей применено из облака (добавлено/обновлено).",
             "format": "uint64",
             "minimum": 0.0,
             "type": "integer"
+          },
+          "bookmarksApplied": {
+            "description": "закладок/групп применено из облака.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "bookmarksPulled": {
+            "description": "закладок было в облаке до слияния (этап 5).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "bookmarksPushed": {
+            "description": "закладочный блоб отправлен на сервер.",
+            "type": "boolean"
           },
           "conflicts": {
             "description": "конфликтов пароля: проигравший сохранён записью-дублем.",
@@ -486,13 +502,13 @@
             "type": "integer"
           },
           "pulled": {
-            "description": "записей было в облаке до слияния.",
+            "description": "записей паролей было в облаке до слияния.",
             "format": "uint64",
             "minimum": 0.0,
             "type": "integer"
           },
           "pushed": {
-            "description": "изменения ушли на сервер.",
+            "description": "изменения ушли на сервер (хотя бы одно хранилище).",
             "type": "boolean"
           },
           "revision": {
@@ -503,6 +519,9 @@
         },
         "required": [
           "applied",
+          "bookmarksApplied",
+          "bookmarksPulled",
+          "bookmarksPushed",
           "conflicts",
           "pulled",
           "pushed",
@@ -6379,5 +6398,5 @@
       }
     }
   },
-  "version": 14
+  "version": 15
 }

@@ -1,5 +1,5 @@
 // GENERATED FILE — НЕ ПРАВИТЬ РУКАМИ.
-// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 14); регенерация: npm run gen:bridge.
+// Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 15); регенерация: npm run gen:bridge.
 
 /**
  * Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).
@@ -289,23 +289,35 @@ export interface AilaStatusResult {
   username: string;
 }
 /**
- * aila.sync_now: итог круга синка (pull → merge → push).
+ * aila.sync_now: итог круга синка (pull → merge → push) обоих хранилищ: пароли (этап 4) + закладки (этап 5 duopulse-111).
  */
 export interface AilaSyncResult {
   /**
-   * применено из облака (добавлено/обновлено).
+   * паролей применено из облака (добавлено/обновлено).
    */
   applied: number;
+  /**
+   * закладок/групп применено из облака.
+   */
+  bookmarksApplied: number;
+  /**
+   * закладок было в облаке до слияния (этап 5).
+   */
+  bookmarksPulled: number;
+  /**
+   * закладочный блоб отправлен на сервер.
+   */
+  bookmarksPushed: boolean;
   /**
    * конфликтов пароля: проигравший сохранён записью-дублем.
    */
   conflicts: number;
   /**
-   * записей было в облаке до слияния.
+   * записей паролей было в облаке до слияния.
    */
   pulled: number;
   /**
-   * изменения ушли на сервер.
+   * изменения ушли на сервер (хотя бы одно хранилище).
    */
   pushed: boolean;
   revision: number;

@@ -966,7 +966,7 @@ export function initSettingsPage(): void {
       .then((st) => {
         ailaPass.value = "";
         renderAila(st);
-        ailaStatus.textContent += " — первый синк паролей пошёл.";
+        ailaStatus.textContent += " — первый синк паролей и закладок пошёл.";
       })
       .catch((e) => (ailaStatus.textContent = String(e)))
       .finally(() => (ailaLoginBtn.disabled = false));
@@ -991,13 +991,15 @@ export function initSettingsPage(): void {
       .syncNow()
       .then((r) => {
         const parts = [
-          `из облака применено: ${r.applied}`,
-          `всего в облаке: ${r.pulled}`,
+          `паролей применено: ${r.applied} (в облаке ${r.pulled})`,
+          `закладок применено: ${r.bookmarksApplied} (в облаке ${r.bookmarksPulled})`,
         ];
         if (r.conflicts > 0) {
-          parts.push(`конфликтов: ${r.conflicts} (проигравшие — записями-дублями «… (дубль)»)`);
+          parts.push(`конфликтов пароля: ${r.conflicts} (проигравшие — записями-дублями «… (дубль)»)`);
         }
-        parts.push(r.pushed ? "изменения отправлены" : "изменений не было");
+        parts.push(
+          r.pushed || r.bookmarksPushed ? "изменения отправлены" : "изменений не было",
+        );
         ailaStatus.textContent = `Синк завершён — ${parts.join(", ")} (ревизия ${r.revision}).`;
       })
       .catch((e) => (ailaStatus.textContent = String(e)))
