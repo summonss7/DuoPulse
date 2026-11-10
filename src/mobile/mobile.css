@@ -20,14 +20,35 @@
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* ── Шапка: ⌂ + логотип + omnibox-пилюля + → ─────────────────────────── */
+/* ── Шапка двухрядная (duopulse-105): ряд кнопок (⌂ + логотип + инкогнито
+   + duo + ⋮), под ним строка адреса на всю ширину — omnibox + ★ + →.
+   Прежде всё жало в один ряд: адрес обрезался кнопками, посмотреть/скопировать
+   его было нельзя. */
 .m-bar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border-bottom: 1px solid rgba(189, 254, 79, 0.14);
+}
+
+.m-bar-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 0;
+}
+
+/* логотип растягивается — кнопки прижимаются к краям, как в системных барах */
+.m-bar-top .m-logo {
+  flex: 1;
+}
+
+/* строка адреса: input забирает всю ширину ряда */
+.m-urlrow {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  background: var(--bg-surface);
-  border-bottom: 1px solid rgba(189, 254, 79, 0.14);
 }
 
 .m-logo {

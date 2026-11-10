@@ -5,7 +5,10 @@
 // child-webview API Tauri 2 десктоп-only; iframe — минимальный скелет,
 // Duo-субтитры и перевод — этап 2 (duopulse-082): кнопка «duo» + панель
 // настроек + плашка над плеером (src/mobile/duo/). Меню настроек «⋮» в
-// шапке (поисковик, обновления, версия) — duopulse-102.
+// шапке (поисковик, обновления, версия) — duopulse-102. Шапка двухрядная:
+// адрес — второй строкой на всю ширину, адрес открытого видео виден в строке
+// целиком (выделить/скопировать/заменить), звёздочка закладки — в строке
+// адреса (duopulse-105).
 //
 // Команды bridge десктопа (tabs.*/nav.*/history.*) на мобильной обёртке не
 // зарегистрированы (lib.rs — тонкий билдер + Duo-движок), ветка их не зовёт;
@@ -34,22 +37,29 @@ root.id = "mobile";
 document.body.appendChild(root);
 root.innerHTML = `
   <header class="m-bar">
-    <button id="mHome" class="m-icon" title="На стартовый экран" aria-label="На стартовый экран">
-      <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7 8 2.5 13.5 7v6a.5.5 0 0 1-.5.5h-3.5v-4h-3v4H3a.5.5 0 0 1-.5-.5z"/></svg>
-    </button>
-    <span class="m-logo" aria-hidden="true">duo<b>Pulse</b></span>
-    <button id="mPrivate" class="m-private-btn" title="Инкогнито" aria-label="Инкогнито" aria-pressed="false">
-      <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>
-    </button>
-    <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo">duo</button>
-    <input id="mOmnibox" type="text" placeholder="Адрес или поиск" spellcheck="false"
-      autocomplete="off" enterkeyhint="go" />
-    <button id="mGo" class="m-go" title="Перейти" aria-label="Перейти">
-      <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9M9 4.5 12.5 8 9 11.5"/></svg>
-    </button>
-    <button id="mMenu" class="m-icon" title="Настройки" aria-label="Настройки" aria-haspopup="menu" aria-expanded="false">
-      <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
-    </button>
+    <div class="m-bar-top">
+      <button id="mHome" class="m-icon" title="На стартовый экран" aria-label="На стартовый экран">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7 8 2.5 13.5 7v6a.5.5 0 0 1-.5.5h-3.5v-4h-3v4H3a.5.5 0 0 1-.5-.5z"/></svg>
+      </button>
+      <span class="m-logo" aria-hidden="true">duo<b>Pulse</b></span>
+      <button id="mPrivate" class="m-private-btn" title="Инкогнито" aria-label="Инкогнито" aria-pressed="false">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>
+      </button>
+      <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo">duo</button>
+      <button id="mMenu" class="m-icon" title="Настройки" aria-label="Настройки" aria-haspopup="menu" aria-expanded="false">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
+      </button>
+    </div>
+    <!-- Адрес — второй строкой на всю ширину (duopulse-105): видно весь
+         адрес, выделяется/копируется долгим тапом, звёздочка закладки —
+         рядом с адресом, а не среди кнопок первой строки -->
+    <div class="m-urlrow" id="mUrlrow">
+      <input id="mOmnibox" type="text" placeholder="Адрес или поиск" spellcheck="false"
+        autocomplete="off" enterkeyhint="go" />
+      <button id="mGo" class="m-go" title="Перейти" aria-label="Перейти">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9M9 4.5 12.5 8 9 11.5"/></svg>
+      </button>
+    </div>
   </header>
   <div id="mUpdate" class="m-update" hidden></div>
   <main class="m-content">
@@ -342,6 +352,9 @@ async function navigate(input: string): Promise<void> {
     duoPanel = null;
     videoOpen = true;
     duoBtn.hidden = false;
+    // адрес открытого видео — в строке: канонический watch-URL (как у
+    // закладки), а не /embed, из которого неясно, где видео (duopulse-105)
+    omnibox.value = `https://www.youtube.com/watch?v=${videoId}`;
     void duo.open(videoId);
     void bookmarks.syncVideo();
     note("Плеер YouTube. Нажмите «duo» для субтитров и перевода.");

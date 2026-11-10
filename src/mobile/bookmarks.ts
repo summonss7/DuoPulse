@@ -88,10 +88,11 @@ export class MobileBookmarks {
     private readonly api: BmInvoke = bridge,
   ) {
     // Скелет: секция внутри .m-content (поверх старт-экрана), звёздочка — в
-    // шапке рядом с duo, шит (низ) — общий для выбора группы и меню чипа.
-    const bar = document.querySelector<HTMLElement>("#mobile .m-bar");
+    // строке адреса (вторая строка шапки, рядом с →; duopulse-105), шит (низ)
+    // — общий для выбора группы и меню чипа.
+    const urlrow = document.querySelector<HTMLElement>("#mobile #mUrlrow");
     const content = document.querySelector<HTMLElement>("#mobile .m-content");
-    if (!bar || !content) throw new Error("mobile: нет каркаса для закладок");
+    if (!urlrow || !content) throw new Error("mobile: нет каркаса для закладок");
 
     this.star = document.createElement("button");
     this.star.id = "mStar";
@@ -101,7 +102,7 @@ export class MobileBookmarks {
     this.star.setAttribute("aria-label", "В избранное");
     this.star.innerHTML =
       '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.8 3.9L8 11l-3.5 1.9.8-3.9-2.9-2.7 3.9-.5z"/></svg>';
-    bar.insertBefore(this.star, bar.querySelector("#mDuo"));
+    urlrow.insertBefore(this.star, urlrow.querySelector("#mGo"));
 
     this.view = document.createElement("section");
     this.view.id = "mBookmarks";
@@ -366,8 +367,8 @@ export class MobileBookmarks {
       empty.className = "m-bm-empty";
       empty.textContent =
         this.groups.length > 1 || this.sel !== "all"
-          ? "В этой группе пока пусто — добавьте видео звёздочкой в шапке плеера"
-          : "Закладок пока нет: откройте видео и нажмите звёздочку в шапке";
+          ? "В этой группе пока пусто — добавьте видео звёздочкой в строке адреса"
+          : "Закладок пока нет: откройте видео и нажмите звёздочку в строке адреса";
       this.listEl.replaceChildren(empty);
       return;
     }
