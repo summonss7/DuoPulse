@@ -1,7 +1,7 @@
 ---
 id: duopulse-109
 title: Синхронизация Aila — этап 3/6 — API appdata на сервере Aila
-status: todo
+status: done
 priority: 3
 created: 2026-11-10
 updated: 2026-11-10
@@ -27,11 +27,20 @@ PBKDF2(пароль, wrap_salt) — не покидает клиент; vault п
 - Лимиты размера/частоты, тесты сервера, CHANGELOG Aila.
 
 ## Критерии готовности
-- [ ] API appdata на сервере Aila работает (GET/PUT/DELETE, конфликт ревизий 409),
+- [x] API appdata на сервере Aila работает (GET/PUT/DELETE, конфликт ревизий 409),
       покрыто тестами сервера
-- [ ] Блобы хранятся только шифрованными; сервер не имеет ключей
-- [ ] Задокументировано в README/CHANGELOG Aila; сервер перезапущен
+- [x] Блобы хранятся только шифрованными; сервер не имеет ключей
+- [x] Задокументировано в README/CHANGELOG Aila; сервер перезапущен
       (schtasks /run /tn AilaRestart при необходимости)
-- [ ] CHANGELOG DuoPulse (этап цепочки duopulse-106), коммиты в обоих проектах + push
+- [x] CHANGELOG DuoPulse (этап цепочки duopulse-106), коммиты в обоих проектах + push
 ## Журнал
 - 10.11.2026: карточка создана (этап цепочки duopulse-106).
+- 10.11.2026, 17:30–17:55: этап закрыт (в проекте D:\Aila карточкой aila-386,
+  коммит 502525b): таблица appdata(user_id, app, key, enc_blob, updated_at,
+  revision), GET/PUT/DELETE /api/appdata (без key — список ключей приложения),
+  оптимистичная блокировка if_match → 409 с актуальным блобом, лимиты 512 КБ /
+  64 ключа / rate-limit. Сервер видит только ciphertext (ключ — HKDF от
+  wrap_key на клиенте, enc_vault не тронут). Тесты: appdata.test.mjs 28 ✓,
+  весь набор сервера Aila 62 pass / 0 fail. Служба перезапущена (AilaRestart),
+  живьем: health 200, /api/appdata без сессии → 401. README/CHANGELOG Aila
+  обновлены. CHANGELOG DuoPulse — запись этапа 3.
