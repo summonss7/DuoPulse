@@ -31,6 +31,10 @@ Thumbs.db
 .env
 .env.*
 
+# Подписи release-APK — секрет, в git не попадает (duet-010)
+src-tauri/gen/android/*.keystore
+*.jks
+
 # Рантайм-артефакт замера P-07 (e2e/adblock/p07.mjs)
 e2e/adblock/p07-last-run.txt
 

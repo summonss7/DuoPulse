@@ -9,6 +9,12 @@ DuoPulse — настольный браузер (Windows-first) для повс
 сайтам средствами самого браузера (внешний прокси SOCKS5/HTTP — уже готов,
 встроенный WireGuard-клиент с split-tunnel — этап M6).
 
+> **English:** DuoPulse is a Windows-first desktop browser built around video:
+> 2–3 simultaneous subtitle tracks in different languages, true 5.1/7.1 surround
+> sound, plus a password manager and bookmark sync. Built on Tauri 2 (Rust) +
+> TypeScript. A portfolio project of the human + AI freelance duo —
+> [duet.barter.pp.ua](https://duet.barter.pp.ua).
+
 Текущая версия — **0.1.9**. Проект в разработке (этап M6 «VPN и доступ
 к заблокированным сайтам»),
 подробный статус — в разделе [«Статус этапов»](#статус-этапов) и
