@@ -299,8 +299,14 @@ try {
   } catch { /* уже мертвы */ }
   uiWs.close();
   app.kill();
+  // npm-обёртка умирает, node/vite-ребёнок на 5173 остаётся — дерево целиком
+  try {
+    await run("powershell", ["-NoProfile", "-Command",
+      `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*vite*bin*vite.js*' -and $_.CommandLine -like '*DuoPulse*' } | ForEach-Object { taskkill /PID $_.ProcessId /T /F }`]);
+  } catch { /* уже мертвы */ }
   vite.kill();
   httpServer.close();
   try { fs.closeSync(appErr); } catch {}
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} // stderr уже в отчёте
   setTimeout(() => process.exit(process.exitCode || 0), 1500).unref();
 }
