@@ -27,6 +27,7 @@ import { MobileDuo, type DuoStatus } from "./duo";
 import { MobileBookmarks } from "./bookmarks";
 import { installMobileAccount } from "./account";
 import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
+import { createMusicDownloader, musicStatusText } from "./download";
 import {
   createSelectionPorts,
   installMobileSelectionTranslate,
@@ -51,6 +52,7 @@ root.innerHTML = `
         <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>
       </button>
       <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo">duo</button>
+      <button id="mMusic" class="m-music-btn" hidden title="Скачать музыку (m4a)">⬇</button>
       <button id="mMenu" class="m-icon" title="Настройки" aria-label="Настройки" aria-haspopup="menu" aria-expanded="false">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
       </button>
@@ -106,6 +108,7 @@ const menuBtn = root.querySelector<HTMLButtonElement>("#mMenu")!;
 const menuWrap = root.querySelector<HTMLElement>("#mMenuWrap")!;
 const privateBtn = root.querySelector<HTMLButtonElement>("#mPrivate")!;
 const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
+const musicBtn = root.querySelector<HTMLButtonElement>("#mMusic")!;
 const start = root.querySelector<HTMLElement>("#mStart")!;
 const tab = root.querySelector<HTMLIFrameElement>("#mTab")!;
 const status = root.querySelector<HTMLElement>("#mStatus")!;
@@ -172,6 +175,7 @@ function setIncognito(on: boolean): void {
     tab.src = "about:blank";
     start.hidden = false;
     duoBtn.hidden = true;
+    musicBtn.hidden = true;
     videoOpen = false;
     duo.close();
     duoPanel?.remove();
@@ -325,6 +329,22 @@ duoBtn.addEventListener("click", () => {
   })();
 });
 
+// ── Загрузка музыки (duopulse-121): «⬇» на экране видео — лучший
+// аудио-формат того же innertube-ответа (обычно m4a ~129 kbps) нативно
+// скачивается в медиатеку «Music/DuoPulse» (yt-dlp на Android нет).
+const music = createMusicDownloader({
+  getVideoId: () => duo.currentVideoId,
+  render: (s) => {
+    musicBtn.disabled = s.kind === "downloading";
+    const text = musicStatusText(s);
+    if (text) note(text);
+  },
+});
+musicBtn.addEventListener("click", () => music.start());
+// диагностика e2e-стендов (как __duopulseMobileTranslate)
+(window as { __duopulseMobileMusic?: () => unknown }).__duopulseMobileMusic = () =>
+  music.stateSnapshot();
+
 // ── Перевод выделенного текста (duopulse-103): мобильный вход в gtx-конвейер
 // десктопного пункта «Перевести выделение». Вход два: long-press по тексту
 // нашей страницы (omnibox; кросс-доменный iframe плеера недостижим) → чип
@@ -394,6 +414,7 @@ async function navigate(input: string): Promise<void> {
     duoPanel = null;
     videoOpen = true;
     duoBtn.hidden = false;
+    musicBtn.hidden = false;
     // адрес открытого видео — в строке: канонический watch-URL (как у
     // закладки), а не /embed, из которого неясно, где видео (duopulse-105)
     omnibox.value = `https://www.youtube.com/watch?v=${videoId}`;
@@ -421,6 +442,7 @@ home.addEventListener("click", () => {
   tab.src = "about:blank";
   start.hidden = false;
   duoBtn.hidden = true;
+  musicBtn.hidden = true;
   duo.close();
   duoPanel?.remove();
   duoPanel = null;

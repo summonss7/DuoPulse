@@ -416,9 +416,18 @@ pub(crate) mod net {
         if !valid_video_id(&video_id) {
             return Err("некорректный videoId".into());
         }
+        player_response(&video_id, &state)
+    }
+
+    /// Player-ответ по videoId с кэшем (общее для субтитров duo_yt_player и
+    /// загрузки музыки mobile_download: один innertube-запрос на видео).
+    pub(crate) fn player_response(
+        video_id: &str,
+        state: &DuoManaged,
+    ) -> Result<serde_json::Value, String> {
         {
             let cache = state.player_cache.lock().expect("duo: лок не отравлен");
-            if let Some((at, v)) = cache.get(&video_id) {
+            if let Some((at, v)) = cache.get(video_id) {
                 if at.elapsed() < PLAYER_TTL {
                     return Ok(v.clone());
                 }
@@ -470,7 +479,7 @@ pub(crate) mod net {
                 cache.remove(&oldest);
             }
         }
-        cache.insert(video_id, (Instant::now(), value.clone()));
+        cache.insert(video_id.to_string(), (Instant::now(), value.clone()));
         Ok(value)
     }
 

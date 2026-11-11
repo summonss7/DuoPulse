@@ -236,6 +236,28 @@
   border-color: var(--accent-neon);
   box-shadow: var(--glow-neon);
 }
+/* «⬇» скачать музыку (duopulse-121): та же пилюля, что «duo», — рядом в шапке
+   открытого видео; на время загрузки гасим (повторный тап только покажет
+   текущий прогресс, старт — один) */
+.m-music-btn {
+  height: 30px;
+  width: 34px;
+  padding: 0;
+  border-radius: 15px;
+  border: 1px solid rgba(189, 254, 79, 0.35);
+  background: var(--bg-elevated);
+  color: var(--accent-neon);
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.m-music-btn:active {
+  border-color: var(--accent-neon);
+  box-shadow: var(--glow-neon);
+}
+.m-music-btn:disabled {
+  opacity: 0.55;
+}
 
 /* Плашка поверх iframe: контейнер прижат к нижнему (или верхнему) краю
    «видео» = .m-content; отступ — % высоты контейнера (marginPct, гайд 06).

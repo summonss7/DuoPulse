@@ -37,6 +37,10 @@ pub mod mobile_jni;
 pub mod mobile_open;
 pub mod mobile_private;
 pub mod mobile_updater;
+// Загрузка музыки с YouTube мобильной веткой (duopulse-121): чистые функции
+// выбора дорожки/имени файла компилируются везде (хостовые тесты), сетевая
+// команда — мобильным таргетам (как mobile_open).
+pub mod mobile_download;
 // Секреты мобильной ветки (duopulse-112): Android-бэкенд тех же save/load,
 // что DPAPI десктопа (синоним по вызову — crate::secrets).
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -119,6 +123,9 @@ fn mobile_run() {
             mobile_updater::updater_install,
             mobile_open::mobile_open_url,
             mobile_private::mobile_private_cleanup,
+            mobile_download::cmd::duo_download_music,
+            #[cfg(debug_assertions)]
+            mobile_download::cmd::duo_debug_save_music,
             mobile_history::history_bookmark_add,
             mobile_history::history_bookmark_remove,
             mobile_history::history_bookmark_update,

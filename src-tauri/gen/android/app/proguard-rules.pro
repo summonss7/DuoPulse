@@ -34,3 +34,6 @@
 # Та же грабля, что 083/102: без Java-ссылок R8 вырезает методы.
 -keep class dev.duopulse.mobile.MobileKeystoreHelper { *; }
 -keep class dev.duopulse.mobile.MobileClipboardHelper { *; }
+# duopulse-121: JNI-хелпер загрузки музыки (MobileDownloadHelper.saveMusic) —
+# та же грабля, что 083/102: без Java-ссылок R8 вырезает метод в release.
+-keep class dev.duopulse.mobile.MobileDownloadHelper { *; }
