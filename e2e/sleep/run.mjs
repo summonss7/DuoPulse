@@ -10,6 +10,10 @@
 //      маркер/поле ввода/счётчики не сбрасываются — вкладка не перезагружалась;
 //   4) исключение «играет звук/видео»: вкладка с <audio autoplay loop>
 //      НЕ усыпляется, аудио продолжает играть;
+//   4b) фон-пауза беззвучного видео (карточка duopulse-117, выбор Артёма):
+//      muted-видео в скрытой вкладке встаёт на паузу (visibilitychange в
+//      content/media-watch.js), вкладка засыпает по обычному таймауту, после
+//      возврата видео остаётся на паузе (как Chrome); со звуком — не трогаем;
 //   5) tabs.sleep вручную: активную — ошибка, играющую — ошибка, фоновую — сон;
 //   6) контекстное меню «Усыпить вкладку» — UI-путь;
 //   7) скриншот таб-бара со спящей вкладкой (луна + приглушение, гайд 06).
@@ -129,6 +133,21 @@ const musicPage = `<html><head><title>music</title></head><body>
   })();
 </script></body></html>`;
 const plainPage = (n) => `<html><head><title>Страница ${n}</title></head><body><h1>/p${n}</h1></body></html>`;
+// Беззвучное видео (карточка duopulse-117): <video muted autoplay loop> —
+// до фон-паузы держал вкладку в исключении спящего режима навсегда.
+const mvideoPage = `<html><head><title>mvideo</title></head><body>
+<h1>mvideo</h1>
+<video id="v" src="/tone.wav" autoplay muted loop playsinline></video>
+<script>
+  (function () {
+    var v = document.getElementById("v");
+    var pub = function () {
+      document.title = "mvideo " + JSON.stringify({ p: v.paused ? 0 : 1 });
+    };
+    v.addEventListener("play", pub); v.addEventListener("pause", pub);
+    setInterval(pub, 250);
+  })();
+</script></body></html>`;
 
 const httpServer = http.createServer((req, res) => {
   if (req.url === "/worker.js") {
@@ -144,6 +163,7 @@ const httpServer = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   if (req.url === "/busy") res.end(busyPage);
   else if (req.url === "/music") res.end(musicPage);
+  else if (req.url === "/mvideo") res.end(mvideoPage);
   else res.end(plainPage(req.url.match(/^\/p(\d+)/)?.[1] ?? 0));
 });
 await new Promise((r) => httpServer.listen(HTTP_PORT, "127.0.0.1", r));
@@ -341,6 +361,49 @@ try {
     "вкладка с играющим звуком НЕ уснула (исключение), звук продолжает играть",
     musicNow.sleeping === false && musicState2?.p === 1,
     `sleeping=${musicNow.sleeping}, audio playing=${musicState2?.p}`,
+  );
+
+  // (7b) фон-пауза беззвучного видео (карточка duopulse-117, выбор Артёма):
+  // muted-видео в скрытой вкладке — на паузу (content/media-watch.js видит
+  // document.hidden: Core прячет webview), Core видит стоп → обычный сон по
+  // таймауту; возврат — видео остаётся на паузе, как Chrome.
+  await evalIn(uiWs, `window.__duopulse.tabs.open({ url: "${url("mvideo")}" })`);
+  const mvideo = await waitFor(uiWs, (t) => t.url.endsWith("/mvideo"), 15000, "вкладка mvideo в списке");
+  const mvideoId = mvideo.id;
+  let mvState;
+  for (let i = 0; i < 30 && mvState?.p !== 1; i++) {
+    mvState = stateOf(await tabBy(uiWs, (t) => t.id === mvideoId));
+    if (mvState?.p !== 1) await sleep(500);
+  }
+  await evalIn(uiWs, `window.__duopulse.tabs.activate({ id: "${p0Id}" })`); // mvideo → фон
+  let mvPaused;
+  for (let i = 0; i < 20 && mvPaused?.p !== 0; i++) {
+    mvPaused = stateOf(await tabBy(uiWs, (t) => t.id === mvideoId));
+    if (mvPaused?.p !== 0) await sleep(500);
+  }
+  check(
+    "беззвучное видео в скрытой вкладке встало на паузу (фон-пауза duopulse-117)",
+    mvPaused?.p === 0,
+    `playing=${mvPaused?.p}`,
+  );
+  const mvSlept = await waitFor(
+    uiWs,
+    (t) => t.id === mvideoId && t.sleeping,
+    SLEEP_AFTER_S * 2 * 1000 + 4000,
+    "сон mvideo после фон-паузы",
+  );
+  check(
+    "вкладка с остановленным фоновым видео уснула по обычному таймауту",
+    mvSlept.sleeping === true,
+  );
+  await evalIn(uiWs, `window.__duopulse.tabs.activate({ id: "${mvideoId}" })`);
+  const mvAwake = await waitFor(uiWs, (t) => t.id === mvideoId && !t.sleeping, 10000, "пробуждение mvideo");
+  await sleep(1000); // даём публикации состояния после пробуждения
+  const mvAfter = stateOf(await tabBy(uiWs, (t) => t.id === mvideoId));
+  check(
+    "после возврата вкладка бодрая, видео осталось на паузе (как Chrome)",
+    mvAwake.sleeping === false && mvAfter?.p === 0,
+    `sleeping=${mvAwake.sleeping}, playing=${mvAfter?.p}`,
   );
 
   // (8) tabs.sleep вручную: активную нельзя, играющую нельзя, фоновую можно

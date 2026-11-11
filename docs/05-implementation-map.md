@@ -117,7 +117,9 @@ vitest `src/bridge/client.test.ts` — команды и события). Сло
 `src-tauri/src/tabs/`), `tabs.{sleep, wake}` (спящий режим — задача 2.3:
 `src-tauri/src/tabs/sleep.rs` — TrySuspend/Resume WebView2 по таймауту
 простоя 5 мин, `TabInfo.sleeping` в снапшотах; исключение «играет звук/видео»
-определяет content/media-watch.js), `nav.{navigate, go_back, go_forward, reload}` (действуют
+определяет content/media-watch.js — он же ставит беззвучное видео скрытой
+вкладки на паузу, чтобы фон засыпал по обычному таймауту — карточка
+duopulse-117), `nav.{navigate, go_back, go_forward, reload}` (действуют
 на активную вкладку), `nav.{resolve_omnibox, focus_page}` + `history.search`
 (задача 1.3: разбор ввода omnibox — `src-tauri/src/omnibox.rs`, подсказки —
 FTS5-индекс `src-tauri/src/history/`), `history.{visit, list, delete_urls,
