@@ -13,6 +13,9 @@
 #      duopulse-063, Android-чип после aila-370); устаревшие DuoPulse-*-android-release.apk
 #      из корня убираются (как setup-файлы в release.mjs: устаревший установщик
 #      без апдейтера — ловушка). Debug в хаб не идёт.
+#   5. подписанный release-APK публикуется в канал обновлений Aila
+#      (манифест v2 — 📡 «в канале» хаба и проверка обновлений в приложении)
+#      общим издателем D:\Scheduler\tools\publish-update.cjs (aila-388).
 # Подпись release: keystore src-tauri/gen/android/duopulse-release.keystore,
 # пароль в gitignored src-tauri/gen/android/keystore.properties (схема
 # novagrid-059; нет файла — APK без подписи, на телефон не встанет).
@@ -98,12 +101,36 @@ if [ "$TYPE" = "release" ]; then
   HUB_APK="DuoPulse-$VER-android-release$SUFFIX.apk"
   cp -f "$APK_SRC" "$ROOT/builds/$HUB_APK"
   echo "хаб «Скачать» Aila: $HUB_APK — обновлён (корень builds/)"
-  # без кавычек вокруг $(ls): иначе весь список — одно слово и цикл не
-  # видит устаревшие APK (duopulse-083: 0.1.6 переживал чистку 0.1.8)
-  for name in $(ls "$ROOT/builds"); do
-    if [ "$name" != "$HUB_APK" ] && [[ "$name" =~ ^DuoPulse-[0-9.]+-android-release(-unsigned)?\.apk$ ]]; then
-      rm -f "$ROOT/builds/$name"
-      echo "хаб «Скачать» Aila: $name — убран (устарел)"
-    fi
-  done
+  # чистка устаревших — только для подписанной сборки: неподписанная кладётся
+  # рядом с суффиксом -unsigned и не должна выгонять из хаба последний
+  # рабочий подписанный APK
+  if [ -n "$SIGNED" ]; then
+    # без кавычек вокруг $(ls): иначе весь список — одно слово и цикл не
+    # видит устаревшие APK (duopulse-083: 0.1.6 переживал чистку 0.1.8)
+    for name in $(ls "$ROOT/builds"); do
+      if [ "$name" != "$HUB_APK" ] && [[ "$name" =~ ^DuoPulse-[0-9.]+-android-release(-unsigned)?\.apk$ ]]; then
+        rm -f "$ROOT/builds/$name"
+        echo "хаб «Скачать» Aila: $name — убран (устарел)"
+      fi
+    done
+  fi
+
+  # 5) канал обновлений Aila (aila-388): каждый мобильный release обязан
+  #    попадать и в него — манифест v2 (📡 «в канале» в хабе «Скачать» и
+  #    проверка обновлений в самом приложении) раньше двигал только десктоп
+  #    (release.mjs), и версия канала отставала от последней Android-сборки
+  #    (0.1.16–0.1.20). Издатель общий — publish-update.cjs (aila-163):
+  #    manifest.json + history.jsonl + «📦 Обновление …» в «Хабе ИИ».
+  #    Notes — последняя запись CHANGELOG (правило: запись дописывается в
+  #    конец к моменту релиза). Debug и неподписанные APK в канал не идут;
+  #    неуспех публикации — ошибка сборки (канал не должен молча отставать).
+  if [ -n "$SIGNED" ] && [ -f "D:/Scheduler/tools/publish-update.cjs" ]; then
+    echo "==> Публикация в канал обновлений Aila…"
+    MSYS_NO_PATHCONV=1 node "D:/Scheduler/tools/publish-update.cjs" duopulse \
+      --version "$VER" \
+      --extra "$(cygpath -m "$ROOT/builds/$HUB_APK")" \
+      --notes-file "$(cygpath -m "$ROOT/CHANGELOG.md")" \
+      || { echo "!! Публикация в канал Aila не удалась — канал отстанет от сборки." \
+           "   Aila включена? Повторите: node D:/Scheduler/tools/publish-update.cjs duopulse --version $VER --extra builds/$HUB_APK --notes-file CHANGELOG.md" >&2; exit 1; }
+  fi
 fi
