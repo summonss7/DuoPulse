@@ -1,7 +1,13 @@
 // DuoPulse — тесты модели страницы ошибки (карточка duopulse-048): хост
 // правила и решение кнопки «этот сайт — через туннель».
 import { describe, expect, it } from "vitest";
-import { directAction, directActionAvailable, errorHost, tunnelAction } from "./error-view";
+import {
+  directAction,
+  directActionAvailable,
+  errorHost,
+  routeContextNote,
+  tunnelAction,
+} from "./error-view";
 
 describe("errorHost — хост для split-правила", () => {
   it("внешний адрес даёт домен без www", () => {
@@ -66,5 +72,33 @@ describe("directActionAvailable — когда показывать кнопку
     expect(directActionAvailable({ mode: "off", routing: "off" })).toBe(false);
     expect(directActionAvailable({ mode: "proxy", routing: "global" })).toBe(false);
     expect(directActionAvailable(null)).toBe(false);
+  });
+});
+
+describe("routeContextNote — подсказка маршрута упавшей загрузки (duopulse-114)", () => {
+  it("глобальный туннель — поясняет маршрут и ведёт к кнопке «напрямую»", () => {
+    const note = routeContextNote({
+      mode: "wg",
+      routing: "global",
+      wg: { profileName: "MyTunel-полный" },
+    });
+    expect(note).toContain("туннель");
+    expect(note).toContain("MyTunel-полный");
+    expect(note).toContain("напрямую");
+  });
+  it("туннель без имени профиля — текст без «undefined»", () => {
+    const note = routeContextNote({ mode: "wg", routing: "global" });
+    expect(note).toContain("туннель");
+    expect(note).not.toContain("undefined");
+  });
+  it("split — сайт шёл напрямую, подсказка не нужна", () => {
+    expect(routeContextNote({ mode: "wg", routing: "split" })).toBeNull();
+  });
+  it("внешний прокси — поясняет маршрут", () => {
+    expect(routeContextNote({ mode: "proxy", routing: "off" })).toContain("прокси");
+  });
+  it("прямой маршрут и нет статуса — пояснять нечего", () => {
+    expect(routeContextNote({ mode: "off", routing: "off" })).toBeNull();
+    expect(routeContextNote(null)).toBeNull();
   });
 });

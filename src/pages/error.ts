@@ -8,7 +8,13 @@
 // duopulse://error) — заглушка без действий.
 import { bridge } from "../bridge";
 import type { VpnStatusResult } from "../bridge/gen/types";
-import { directAction, directActionAvailable, errorHost, tunnelAction } from "./error-view";
+import {
+  directAction,
+  directActionAvailable,
+  errorHost,
+  routeContextNote,
+  tunnelAction,
+} from "./error-view";
 
 const err = (e: unknown): void => console.error("error-page:", e);
 
@@ -115,6 +121,15 @@ if (ctx) {
     void bridge
       .vpn.status()
       .then((st: VpnStatusResult): void => {
+        // Подсказка маршрута (duopulse-114): сайт грузился через туннель/прокси —
+        // без контекста «код 9» выглядит багом браузера.
+        const hint = routeContextNote(st);
+        if (hint) {
+          const p = document.createElement("p");
+          p.className = "err-route";
+          p.textContent = hint;
+          root.insertBefore(p, actions);
+        }
         // туннель не поднят — сайт и так идёт напрямую, кнопка не нужна
         if (!directActionAvailable(st)) return;
         const first = actions.querySelector("button:not(.primary)");

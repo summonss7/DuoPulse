@@ -1724,6 +1724,7 @@ body.internal-page {
   color: var(--text-muted);
 }
 .errp .err-reason,
+.errp .err-route,
 .errp .err-note {
   margin: 0;
   max-width: 64ch;
