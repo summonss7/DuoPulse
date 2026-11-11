@@ -47,6 +47,12 @@ todo | in_progress | review | done | blocked.
 - **Команды**: npm run dev | build (включают build-content) | typecheck | release;
   npm run gen:bridge (после правок Rust-команд).
 - **Тесты**: npm run test (vitest).
+- **Релизы**: версия одна на всех (tauri.conf.json = package.json = Cargo.toml; рассинхрон
+  проверяет android-build.sh, синхронизирует release.mjs). Мобильный release публикуется в
+  канал Aila автоматически (android-build.sh, aila-388); десктоп-релиз (`npm run release`,
+  оба канала + хаб + C:\DuoPulse) обязан выходить В ТОМ ЖЕ СЕАНСЕ, что и задача, менявшая
+  десктопный код (src/, src-tauri/, bridge/, content/), — иначе Windows-канал отстаёт:
+  0.1.16–0.1.20 вышли только мобильными, десктоп застрял на 0.1.15 (duopulse-120).
 - **Отчётность**: CHANGELOG.md в корне; карточки — CARDS/; планы — ROADMAP.md.
 
 <!-- E2E-ИНСТРУМЕНТЫ -->
