@@ -243,6 +243,21 @@ pub fn server_url() -> String {
         .unwrap_or_else(|| DEFAULT_SERVER.to_string())
 }
 
+/// Адрес сервера для конкретного профиля: файл `aila-server.txt` в каталоге
+/// профиля (одна строка http(s)://…) перекрывает env и дефолт. На Android env
+/// нет — файл это способ e2e-стенда указать телефону на изолированный сервер
+/// (adb push в filesDir/profile) и путь самохостинга семейного сервера.
+pub fn server_url_for(profile_dir: &std::path::Path) -> String {
+    if let Ok(text) = std::fs::read_to_string(profile_dir.join("aila-server.txt")) {
+        let t = text.trim();
+        if t.starts_with("http://") || t.starts_with("https://") {
+            return t.to_string();
+        }
+        eprintln!("[aila] aila-server.txt не похож на адрес — игнорирую");
+    }
+    server_url()
+}
+
 impl AilaAccount {
     pub fn new(profile_dir: &std::path::Path) -> Self {
         Self {
@@ -365,7 +380,7 @@ impl AilaAccount {
         if username.is_empty() || password.is_empty() {
             return Err("имя и пароль не заполнены".into());
         }
-        let server = server_url();
+        let server = server_url_for(&self.profile_dir);
         let agent = http_agent();
         // 1) соли (несуществующий юзер получает фейковые — вход честно падает)
         let (_, text, _) = send_json(
@@ -657,7 +672,15 @@ impl AilaAccount {
     pub fn status(&self) -> (bool, String, String, String, u64, Option<i64>, Option<String>) {
         let guard = self.session.lock().unwrap();
         match guard.as_ref() {
-            None => (false, String::new(), String::new(), server_url(), 0, None, None),
+            None => (
+                false,
+                String::new(),
+                String::new(),
+                server_url_for(&self.profile_dir),
+                0,
+                None,
+                None,
+            ),
             Some(s) => (
                 true,
                 s.username.clone(),

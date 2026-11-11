@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.19"
+version = "0.1.20"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
@@ -163,14 +163,12 @@ symphonia = { version = "0.5", default-features = false, features = [
 # engine-whisper-1 пакует их одним архивом. Уже в дереве (транзитивно),
 # без новых загрузок; deflate-only — больше zip'у в Core ничего не надо.
 zip = { version = "4", default-features = false, features = ["deflate"] }
-# Менеджер паролей (этап 1 duopulse-106): username/password в passwords.db
-# шифруются AES-256-GCM (чистый Rust, без ring — МинGW-линкер тянет);
-# rand — случайные IV и ключ хранилища (уже в дереве транзитивно).
+# Менеджер паролей/аккаунт Aila (duopulse-106/110): криптокрейты
+# aes-gcm/rand/pbkdf2/hkdf/sha2 — чистый Rust (RustCrypto, без ring),
+# объявлены сразу в двух ветках: здесь (десктоп-бин) и в мобильной секции
+# ниже (пароли/синк на телефоне, этап 6 duopulse-112).
 aes-gcm = "0.10"
 rand = "0.8"
-# Аккаунт Aila и синк паролей (этап 4 duopulse-110): вход — PBKDF2-SHA256
-# 600k как у веб-клиента Aila (auth_hash/wrap_key), ключ синка — HKDF от
-# wrap_key; чистый Rust (RustCrypto), ring не нужен.
 sha2 = "0.10"
 pbkdf2 = "0.12"
 hkdf = "0.12"
@@ -190,6 +188,13 @@ quick-xml = "0.36"
 sha2 = "0.10"
 jni = "0.21"
 ndk-context = "0.1"
+# Аккаунт Aila, синк и пароли мобильной ветки (этап 6 duopulse-112): те же
+# чистые RustCrypto-крейты, что у десктопа (passwords/mod.rs + aila.rs),
+# ring не нужен — тонкий экспорт cdylib сохраняется.
+aes-gcm = "0.10"
+rand = "0.8"
+pbkdf2 = "0.12"
+hkdf = "0.12"
 # Закладки мобильной ветки (duopulse-104): то же хранилище history — SQLite
 # (bundled — собирается NDK-cc из исходников, системная libsqlite не нужна),
 # schemars — производные JsonSchema контрактных типов history/contract.rs.

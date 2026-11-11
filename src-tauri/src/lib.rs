@@ -23,12 +23,34 @@
 // центра Aila /updates/duopulse, APK-ассет, системная установка; десктоп
 // обновляется своим tauri-plugin-updater по latest.json и манифест v2 не
 // читает).
+//
+// Этап 6 (duopulse-112, цепочка duopulse-106): аккаунт Aila и синк на
+// мобильной ветке — общее с десктопом ядро (aila.rs: вход PBKDF2, синк
+// блобов appdata «passwords»/«bookmarks»; passwords/mod.rs: AES-GCM
+// SQLite-хранилище), секреты — AndroidKeyStore (secrets.rs → Kotlin-хелпер
+// MobileKeystoreHelper). Команды — mobile_account (login/logout/status/
+// sync_now, список/копирование паролей, буфер обмена); правки закладок
+// будят воркер (mobile_history). Без входа всё локально, как прежде.
 
 pub mod duo_mobile;
 pub mod mobile_jni;
 pub mod mobile_open;
 pub mod mobile_private;
 pub mod mobile_updater;
+// Секреты мобильной ветки (duopulse-112): Android-бэкенд тех же save/load,
+// что DPAPI десктопа (синоним по вызову — crate::secrets).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod secrets;
+// Хранилище паролей (duopulse-112): тот же модуль, что в десктоп-бине
+// (main.rs); платформенно-нейтрален — ключ под secrets (AndroidKeystore).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod passwords;
+// Аккаунт Aila и синк (duopulse-112): общее ядро с десктопом, у десктопа
+// компилируется бином (main.rs), здесь — мобильным таргетам либы.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod aila;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod mobile_account;
 // Парсеры cue — мобильным таргетам (duopulse-082): parse_auto для duo_fetch_
 // cues. На десктопе либа их не компилирует: оставалась бы тонкой (cdylib
 // Windows/MinGW не тянет экспорт тяжёлых деревьев — quick-xml, ср. рецепт
@@ -62,11 +84,30 @@ fn mobile_run() {
         // открыть до старта окна; недоступный каталог/диск роняют запуск с
         // внятной причиной (как десктопный main.rs).
         .setup(|app| {
+            use std::sync::Arc;
             use tauri::Manager;
             let dir = mobile_history::profile_dir()?;
-            let store = history::HistoryStore::open(&dir)
-                .map_err(|e| format!("открыть {}: {e}", dir.display()))?;
-            app.manage(store);
+            // закладки — как в 104; пароли и аккаунт Aila — этап 6 (112):
+            // открываются до старта окна; недоступный каталог роняет запуск
+            // с внятной причиной (как десктопный main.rs)
+            let history = Arc::new(
+                history::HistoryStore::open(&dir)
+                    .map_err(|e| format!("открыть {}: {e}", dir.display()))?,
+            );
+            let passwords = Arc::new(
+                passwords::PasswordStore::open(&dir)
+                    .map_err(|e| format!("открыть пароли: {e}"))?,
+            );
+            let account = Arc::new(aila::AilaAccount::new(&dir));
+            // восстановленный вход — первый синк сразу (как main.rs этапа 4):
+            // протухшая сессия всплывёт первым же кругом (401 → ошибка статуса)
+            if account.restore() {
+                account.schedule_sync();
+            }
+            account.start_worker(Arc::clone(&passwords), Arc::clone(&history));
+            app.manage(history);
+            app.manage(passwords);
+            app.manage(account);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -90,6 +131,13 @@ fn mobile_run() {
             mobile_history::history_group_set_sort,
             mobile_history::history_group_toggle_bookmark,
             mobile_history::history_bookmark_move,
+            mobile_account::aila_status,
+            mobile_account::aila_login,
+            mobile_account::aila_logout,
+            mobile_account::aila_sync_now,
+            mobile_account::mobile_passwords_list,
+            mobile_account::mobile_passwords_reveal,
+            mobile_account::mobile_clipboard_copy,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить DuoPulse (мобильная ветка)");

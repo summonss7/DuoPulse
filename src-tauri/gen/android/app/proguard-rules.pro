@@ -29,3 +29,8 @@
 # и каждый ввод omnibox без YouTube-видео падал «helper: Java exception was thrown»
 # (репродьюс живьём на release 0.1.14; смоук duopulse-085 гонял debug — без R8)
 -keep class dev.duopulse.mobile.MobileOpenHelper { *; }
+# duopulse-112: JNI-хелперы аккаунта Aila — Keystore-секреты (синоним DPAPI
+# десктопа: ключ синка/токен) и системный буфер обмена для паролей.
+# Та же грабля, что 083/102: без Java-ссылок R8 вырезает методы.
+-keep class dev.duopulse.mobile.MobileKeystoreHelper { *; }
+-keep class dev.duopulse.mobile.MobileClipboardHelper { *; }

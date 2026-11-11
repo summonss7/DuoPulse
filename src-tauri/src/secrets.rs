@@ -2,12 +2,18 @@
 //! CurrentUser-blob, открытого секрета нет. Общий код для пароля прокси
 //! (vpn/proxy-pass.bin, задача 1.8 — прежде жил в proxy.rs) и ключей API
 //! провайдеров перевода (translate/keys/*.bin, задача 4.1).
+//!
+//! Android (этап 6 duopulse-112): та же пара protect/unprotect через ключ
+//! AES-256-GCM в системном AndroidKeyStore — Kotlin-хелпер
+//! MobileKeystoreHelper (gen/android), вызов из Rust по JNI; блоб на диске —
+//! base64-строка "v1:…". Хранит ключ синка/токен аккаунта Aila мобильной
+//! ветки и ключ passwords.key (как DPAPI на десктопе).
 
 use std::path::Path;
 
 /// Зашифровать секрет DPAPI (CurrentUser, без UI-промпта).
+#[cfg(windows)]
 fn protect(data: &[u8]) -> Result<Vec<u8>, String> {
-    #[cfg(windows)]
     {
         use windows::Win32::Security::Cryptography::{
             CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
@@ -35,16 +41,27 @@ fn protect(data: &[u8]) -> Result<Vec<u8>, String> {
             Ok(bytes)
         }
     }
-    #[cfg(not(windows))]
-    {
-        let _ = data;
-        Err("DPAPI доступен только на Windows".into())
-    }
+}
+
+/// Зашифровать секрет ключом AndroidKeyStore (мобильная ветка, duopulse-112):
+/// на диске — base64-блоб "v1:…" от MobileKeystoreHelper.
+#[cfg(target_os = "android")]
+fn protect(data: &[u8]) -> Result<Vec<u8>, String> {
+    let plain = std::str::from_utf8(data).map_err(|_| "секрет не utf-8".to_string())?;
+    let blob = keystore_call("seal", plain)?;
+    Ok(blob.into_bytes())
+}
+
+/// Платформа без хранилища секретов (ни Windows, ни Android): честная ошибка,
+/// silent-fallback с открытым текстом хуже отказа.
+#[cfg(not(any(windows, target_os = "android")))]
+fn protect(_data: &[u8]) -> Result<Vec<u8>, String> {
+    Err("хранилище секретов доступно только на Windows/Android".into())
 }
 
 /// Расшифровать DPAPI-blob.
+#[cfg(windows)]
 fn unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
-    #[cfg(windows)]
     {
         use windows::Win32::Security::Cryptography::{
             CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
@@ -72,11 +89,19 @@ fn unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
             Ok(bytes)
         }
     }
-    #[cfg(not(windows))]
-    {
-        let _ = blob;
-        Err("DPAPI доступен только на Windows".into())
-    }
+}
+
+/// Расшифровать блоб AndroidKeyStore (мобильная ветка).
+#[cfg(target_os = "android")]
+fn unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
+    let text = std::str::from_utf8(blob).map_err(|_| "блоб секрета не utf-8".to_string())?;
+    let plain = keystore_call("unseal", text)?;
+    Ok(plain.into_bytes())
+}
+
+#[cfg(not(any(windows, target_os = "android")))]
+fn unprotect(_blob: &[u8]) -> Result<Vec<u8>, String> {
+    Err("хранилище секретов доступно только на Windows/Android".into())
 }
 
 /// Сохранить секрет по пути (шифруется DPAPI; каталог создаётся).
@@ -105,6 +130,36 @@ pub fn clear(path: &Path) {
 /// Есть ли файл секрета (UI показывает «сохранён»).
 pub fn exists(path: &Path) -> bool {
     path.is_file()
+}
+
+/// Статический вызов MobileKeystoreHelper.seal/unseal (Android): ответ
+/// «error: …» Kotlin уже погасил исключение — превращаем в Err.
+#[cfg(target_os = "android")]
+fn keystore_call(method: &str, arg: &str) -> Result<String, String> {
+    crate::mobile_jni::with_jni(|env, context| {
+        let helper =
+            crate::mobile_jni::app_class(env, context, "dev.duopulse.mobile.MobileKeystoreHelper")?;
+        let jarg = crate::mobile_jni::jstr(env, arg)?;
+        let r = env
+            .call_static_method(
+                &helper,
+                method,
+                "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
+                &[context.into(), (&jarg).into()],
+            )
+            .map_err(|e| format!("keystore {method}: {e}"))?
+            .l()
+            .map_err(|e| format!("keystore {method}: {e}"))?;
+        let js = jni::objects::JString::from(r);
+        let out = env
+            .get_string(&js)
+            .map(|s| s.to_string_lossy().into_owned())
+            .map_err(|e| format!("keystore {method}: {e}"))?;
+        if let Some(err) = out.strip_prefix("error: ") {
+            return Err(format!("keystore {method}: {err}"));
+        }
+        Ok(out)
+    })
 }
 
 #[cfg(test)]

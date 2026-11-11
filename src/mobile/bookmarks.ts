@@ -200,6 +200,14 @@ export class MobileBookmarks {
     if (start) start.hidden = false;
   }
 
+  /** Обновить экран после синка аккаунта Aila (duopulse-112): перечитать
+   *  открытый список и звёздочку — данные могли прийти из облака. */
+  async refreshIfOpen(): Promise<void> {
+    if (this.view.hidden) return;
+    await this.reload();
+    await this.syncVideo();
+  }
+
   /** Перечитать группы + закладки текущего вида. */
   async reload(): Promise<void> {
     try {

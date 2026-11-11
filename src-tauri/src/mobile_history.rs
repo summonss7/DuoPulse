@@ -9,6 +9,10 @@
 //!
 //! Модуль компилируется только мобильными таргетами (lib.rs) — как history:
 //! на десктопе команды уже есть в bridge.rs, дубль в либе не нужен.
+//!
+//! Этап 6 (duopulse-112): мутаторы будят воркер синка аккаунта Aila
+//! (schedule_sync, как Ctrl+D десктопа на этапе 5) — локальные правки
+//! закладок уезжают в облако с дебаунсом, без входа вызов — no-op.
 
 use crate::history::contract::{
     BookmarkGroupInfo, HistoryBookmarkAddParams, HistoryBookmarkListParams,
@@ -43,35 +47,44 @@ fn files_dir() -> Result<std::path::PathBuf, String> {
 /// (null — по умолчанию), как на десктопе (duopulse-058).
 #[tauri::command]
 pub fn history_bookmark_add(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryBookmarkAddParams,
 ) -> Result<(), String> {
-    history.bookmark_add_to(&params.url, &params.title, params.group_id)
+    history.bookmark_add_to(&params.url, &params.title, params.group_id)?;
+    account.schedule_sync();
+    Ok(())
 }
 
 /// history.bookmark_remove: удалить закладку (идемпотентна).
 #[tauri::command]
 pub fn history_bookmark_remove(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryBookmarkRemoveParams,
 ) -> Result<(), String> {
-    history.bookmark_remove(&params.url)
+    history.bookmark_remove(&params.url)?;
+    account.schedule_sync();
+    Ok(())
 }
 
 /// history.bookmark_update: переименовать закладку.
 #[tauri::command]
 pub fn history_bookmark_update(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryBookmarkUpdateParams,
 ) -> Result<(), String> {
-    history.bookmark_update(&params.url, &params.title)
+    history.bookmark_update(&params.url, &params.title)?;
+    account.schedule_sync();
+    Ok(())
 }
 
 /// history.bookmark_list: закладки (groupId: null — все, -1 — без группы,
 /// id — члены группы в её порядке).
 #[tauri::command]
 pub fn history_bookmark_list(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
     params: HistoryBookmarkListParams,
 ) -> Result<HistoryBookmarkListResult, String> {
     let group = match params.group_id {
@@ -91,7 +104,7 @@ pub fn history_bookmark_list(
 /// history.group_list: группы с числом закладок.
 #[tauri::command]
 pub fn history_group_list(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
 ) -> Result<HistoryGroupListResult, String> {
     Ok(HistoryGroupListResult {
         groups: history.group_list()?,
@@ -101,54 +114,72 @@ pub fn history_group_list(
 /// history.group_add: создать группу.
 #[tauri::command]
 pub fn history_group_add(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupAddParams,
 ) -> Result<BookmarkGroupInfo, String> {
-    history.group_add(&params.name)
+    let group = history.group_add(&params.name)?;
+    account.schedule_sync();
+    Ok(group)
 }
 
 /// history.group_rename: переименовать группу.
 #[tauri::command]
 pub fn history_group_rename(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupRenameParams,
 ) -> Result<(), String> {
-    history.group_rename(params.id, &params.name)
+    history.group_rename(params.id, &params.name)?;
+    account.schedule_sync();
+    Ok(())
 }
 
 /// history.group_remove: удалить группу (закладки остаются).
 #[tauri::command]
 pub fn history_group_remove(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupRemoveParams,
 ) -> Result<(), String> {
-    history.group_remove(params.id)
+    history.group_remove(params.id)?;
+    account.schedule_sync();
+    Ok(())
 }
 
 /// history.group_set_sort: режим сортировки группы (manual | title | added).
 #[tauri::command]
 pub fn history_group_set_sort(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupSetSortParams,
 ) -> Result<(), String> {
-    history.group_set_sort(params.id, &params.sort_by)
+    history.group_set_sort(params.id, &params.sort_by)?;
+    account.schedule_sync();
+    Ok(())
 }
 
 /// history.group_toggle_bookmark: членство закладки в группе вкл/выкл
 /// (перекладывание пальцем между группами — duopulse-104).
 #[tauri::command]
 pub fn history_group_toggle_bookmark(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupToggleBookmarkParams,
 ) -> Result<(), String> {
-    history.group_toggle_bookmark(&params.url, params.group_id, params.on)
+    history.group_toggle_bookmark(&params.url, params.group_id, params.on)?;
+    account.schedule_sync();
+    Ok(())
 }
 
 /// history.bookmark_move: переставить закладку внутри группы (позиция 0 — верх).
 #[tauri::command]
 pub fn history_bookmark_move(
-    history: tauri::State<'_, HistoryStore>,
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    account: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryBookmarkMoveParams,
 ) -> Result<(), String> {
-    history.bookmark_move(&params.url, params.group_id, params.position)
+    history.bookmark_move(&params.url, params.group_id, params.position)?;
+    account.schedule_sync();
+    Ok(())
 }

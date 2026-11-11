@@ -25,6 +25,7 @@ import {
 } from "./platform";
 import { MobileDuo, type DuoStatus } from "./duo";
 import { MobileBookmarks } from "./bookmarks";
+import { installMobileAccount } from "./account";
 import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
 import {
   createSelectionPorts,
@@ -88,6 +89,7 @@ root.innerHTML = `
           </button>
         </div>
         <label class="m-engine">Поиск: <select id="mEngine"></select></label>
+        <div id="mAila"></div>
         <button id="mTranslate" class="m-check-update">Перевести текст…</button>
         <button id="mCheckUpdate" class="m-check-update">Проверить обновления</button>
         <p class="m-menu-version" id="mVersionMenu"></p>
@@ -122,6 +124,8 @@ function note(text: string): void {
 function setMenu(open: boolean): void {
   menuWrap.hidden = !open;
   menuBtn.setAttribute("aria-expanded", String(open));
+  // статус аккаунта живой: воркер синка меняет его в фоне (duopulse-112)
+  if (open) void account.refresh();
 }
 menuBtn.addEventListener("click", () => setMenu(menuWrap.hidden));
 menuWrap.querySelector(".m-menu-backdrop")!.addEventListener("click", () => setMenu(false));
@@ -268,6 +272,21 @@ const bookmarks = new MobileBookmarks({
   open: (url) => void navigate(url),
   note,
 });
+
+// ── Аккаунт Aila (этап 6 duopulse-112): блок в меню «⋮», листы входа и
+// паролей; синк паролей/закладок — общее ядро с десктопом (aila.rs). После
+// круга синка обновляем закладки (открытый экран и звёздочку) — данные
+// могли прийти из облака.
+const account = installMobileAccount(
+  {
+    note,
+    closeMenu: () => setMenu(false),
+    onSynced: () => {
+      void bookmarks.refreshIfOpen();
+    },
+  },
+  root.querySelector<HTMLElement>("#mAila")!,
+);
 
 // ── duo: субтитры и перевод (этап 2) ───────────────────────────────────
 let duoPanel: import("./duo/panel").DuoPanel | null = null;

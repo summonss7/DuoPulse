@@ -955,3 +955,204 @@ body.m-bm-dragging {
 .m-tr-err {
   color: #ff8a80;
 }
+
+/* ── Аккаунт Aila (этап 6 duopulse-112): блок в меню «⋮», листы входа и
+   паролей. Листы — как «Перевод текста» (m-tr-*): шторка снизу поверх
+   контента, бэкдрап закрывает. */
+.m-acc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--bg-warm-2);
+  border-radius: 10px;
+}
+
+.m-acc-head {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.m-acc-status {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.m-acc-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.m-acc-row button {
+  flex: 1 1 auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--bg-warm-2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.m-acc-row button:active {
+  background: var(--hover-neutral);
+}
+
+.m-acc-row button[data-acc="login"] {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+}
+
+.m-acc-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.m-acc-sheet {
+  position: relative;
+  margin: 0 8px calc(8px + env(safe-area-inset-bottom));
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-warm-2);
+  border-radius: 14px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 78%;
+}
+
+.m-acc-sheet .m-tr-head {
+  padding: 8px 12px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.m-acc-sheet .m-tr-close {
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  padding: 4px 8px;
+}
+
+.m-acc-input {
+  margin: 0 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--bg-warm-2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.m-acc-input:focus {
+  outline: none;
+  border-color: var(--accent-neon);
+}
+
+.m-acc-go {
+  margin: 0 6px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-neon);
+  background: var(--bg-base);
+  color: var(--accent-neon);
+  font: inherit;
+  font-weight: 600;
+}
+
+.m-acc-go:disabled {
+  opacity: 0.6;
+}
+
+.m-acc-err {
+  margin: 0 8px;
+  color: #ff9d9d;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.m-acc-hint {
+  margin: 0 8px 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.m-acc-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.m-acc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-base);
+}
+
+.m-acc-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.m-acc-item-title {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.m-acc-item-sub {
+  color: var(--text-secondary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.m-acc-item-pass {
+  color: var(--accent-neon);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.m-acc-item-btns {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.m-acc-btn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--bg-warm-2);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.m-acc-btn:active {
+  background: var(--hover-neutral);
+}
+
+.m-acc-empty {
+  margin: 12px 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
