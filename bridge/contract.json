@@ -814,6 +814,194 @@
         "type": "object"
       }
     },
+    "download.begin": {
+      "handler": "download_begin",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "download.begin: что и как скачать с активной/указанной страницы.",
+        "properties": {
+          "audioMp3": {
+            "default": false,
+            "description": "Формат аудио: mp3 (конвертация, нужен ffmpeg) либо m4a без перекодировки.",
+            "type": "boolean"
+          },
+          "dir": {
+            "description": "Каталог назначения (None — настройка «Загрузки», иначе системный Downloads).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "description": "video | audio | subs.",
+            "type": "string"
+          },
+          "quality": {
+            "default": "",
+            "description": "best | 1080 | 720 | 480 | 360 (video).",
+            "type": "string"
+          },
+          "rangeEndSec": {
+            "description": "Конец диапазона (None до конца видео).",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "rangeStartSec": {
+            "description": "Диапазон куска, сек (video/audio): начало.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "trackId": {
+            "default": "",
+            "description": "id дорожки из списка адаптера (subs): «yt:en», «yt:en+ru», «ru».",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "description": "URL страницы/видео (для video/audio; субтитры берутся активной вкладки).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "DownloadBeginParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "jobId": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "title": "DownloadBeginResult",
+        "type": "object"
+      }
+    },
+    "download.cancel": {
+      "handler": "download_cancel",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "jobId": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "title": "DownloadCancelParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "download.status": {
+      "handler": "download_status",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "DownloadJobInfo": {
+            "description": "Одно задание в download.status (панель показывает живые и последние).",
+            "properties": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "eta": {
+                "type": "string"
+              },
+              "jobId": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "mode": {
+                "description": "video | audio | subs.",
+                "type": "string"
+              },
+              "outPath": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "percent": {
+                "description": "0–100 (фазы без процентов — 0).",
+                "format": "double",
+                "type": "number"
+              },
+              "phase": {
+                "description": "prepare | tools | download | convert | subs | done | error | canceled.",
+                "type": "string"
+              },
+              "speed": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "eta",
+              "jobId",
+              "mode",
+              "percent",
+              "phase",
+              "speed"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "defaultDir": {
+            "description": "Эффективный каталог загрузок (настройка либо системный Downloads).",
+            "type": "string"
+          },
+          "denoReady": {
+            "description": "deno.exe на месте (JS-runtime экстрактора YouTube).",
+            "type": "boolean"
+          },
+          "ffmpegReady": {
+            "description": "ffmpeg.exe на месте (нужен качеству >360p, mp3, диапазонам).",
+            "type": "boolean"
+          },
+          "jobs": {
+            "description": "Живые и последние задания (свежие первыми).",
+            "items": {
+              "$ref": "#/definitions/DownloadJobInfo"
+            },
+            "type": "array"
+          },
+          "ytdlpReady": {
+            "description": "yt-dlp.exe на месте (иначе докачается при первом video/audio).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "defaultDir",
+          "denoReady",
+          "ffmpegReady",
+          "jobs",
+          "ytdlpReady"
+        ],
+        "title": "DownloadStatusResult",
+        "type": "object"
+      }
+    },
     "history.bookmark_add": {
       "handler": "history_bookmark_add",
       "params": {
@@ -2106,6 +2294,20 @@
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
+          "DownloadConfig": {
+            "description": "Раздел \"downloads\" settings.json. Появился после v3 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).",
+            "properties": {
+              "dir": {
+                "default": null,
+                "description": "Каталог загрузок (None — системный Downloads).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
           "PrivacyConfig": {
             "description": "Раздел \"privacy\" settings.json (задача 5.1).",
             "properties": {
@@ -2290,6 +2492,16 @@
         },
         "description": "settings.apply: частичный патч разделов (неназванные не меняются). Прокси-пароль и ключи API — только существующими командами (settings.set proxy / translate.set_settings: секреты идут в DPAPI, не в патче).",
         "properties": {
+          "downloads": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/DownloadConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "privacy": {
             "anyOf": [
               {
@@ -2592,6 +2804,20 @@
               "pro"
             ],
             "type": "string"
+          },
+          "DownloadConfig": {
+            "description": "Раздел \"downloads\" settings.json. Появился после v3 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).",
+            "properties": {
+              "dir": {
+                "default": null,
+                "description": "Каталог загрузок (None — системный Downloads).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
           },
           "LocalModelSize": {
             "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).",
@@ -2908,6 +3134,14 @@
             ],
             "description": "Распознавание речи (карточка duopulse-060): движок/модель/ключ."
           },
+          "downloads": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/DownloadConfig"
+              }
+            ],
+            "description": "Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров."
+          },
           "engines": {
             "items": {
               "$ref": "#/definitions/SearchEngineInfo"
@@ -2958,6 +3192,7 @@
           "adblockEnabled",
           "appearance",
           "asr",
+          "downloads",
           "engines",
           "privacy",
           "proxy",
@@ -5568,6 +5803,85 @@
           "site"
         ],
         "title": "AdblockSiteException",
+        "type": "object"
+      }
+    },
+    "download:finished": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "download:finished — задание завершилось (успех/отмена/ошибка).",
+        "properties": {
+          "canceled": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "jobId": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "mode": {
+            "description": "video | audio | subs.",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "canceled",
+          "jobId",
+          "mode",
+          "ok"
+        ],
+        "title": "DownloadFinished",
+        "type": "object"
+      }
+    },
+    "download:progress": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "download:progress — живой прогресс задания.",
+        "properties": {
+          "eta": {
+            "type": "string"
+          },
+          "jobId": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "percent": {
+            "format": "double",
+            "type": "number"
+          },
+          "phase": {
+            "description": "tools | download | convert | subs.",
+            "type": "string"
+          },
+          "speed": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "eta",
+          "jobId",
+          "percent",
+          "phase",
+          "speed"
+        ],
+        "title": "DownloadProgress",
         "type": "object"
       }
     },

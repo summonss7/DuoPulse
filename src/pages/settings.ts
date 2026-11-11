@@ -902,6 +902,38 @@ export function initSettingsPage(): void {
   privacyRow.append(clearHistNow, clearCache, privacyStatus);
   privacy.body.append(clearHistLabel, privacyRow);
 
+  // --- 6a. Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров ---
+  const downloads = section(
+    "Загрузки",
+    "Каталог для скачиваемого видео, музыки и субтитров (кнопка «⬇» в адресной строке).",
+  );
+  const dlDirStatus = el("div", "set-status");
+  const dlDirRow = el("div", "set-row");
+  const dlDirText = el("span", "set-hint");
+  dlDirText.style.overflow = "hidden";
+  dlDirText.style.textOverflow = "ellipsis";
+  const dlDirBtn = document.createElement("button");
+  dlDirBtn.type = "button";
+  dlDirBtn.className = "ghost";
+  dlDirBtn.textContent = "Выбрать каталог…";
+  dlDirBtn.addEventListener("click", () => {
+    void (async () => {
+      try {
+        const path = await invoke<string | null>("plugin:dialog|open", {
+          options: { title: "Каталог загрузок", directory: true, multiple: false },
+        });
+        if (!path) return;
+        await bridge.settings.apply({ downloads: { dir: path } });
+        dlDirText.textContent = path;
+        dlDirStatus.textContent = "Каталог сохранён.";
+      } catch (e) {
+        dlDirStatus.textContent = String(e);
+      }
+    })();
+  });
+  dlDirRow.append(dlDirBtn, dlDirText, dlDirStatus);
+  downloads.body.append(dlDirRow);
+
   // --- 7. Аккаунт Aila: синк паролей между устройствами (этап 4 duopulse-110)
   const aila = section(
     "Аккаунт Aila",
@@ -1292,6 +1324,7 @@ export function initSettingsPage(): void {
       strokeCheck.checked = st.textStroke ?? true;
       markLookChip();
       clearHist.checked = all.privacy.clearHistoryOnExit ?? false;
+      dlDirText.textContent = all.downloads.dir ?? "Системная папка «Загрузки»";
       const up = all.updater;
       updChannel.value = up.channel ?? "stable";
       updSource.value = up.source ?? "github";

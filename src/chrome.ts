@@ -13,6 +13,7 @@ import "./proxy-menu";
 import "./vpn-panel/vpn-panel";
 import { initDuo } from "./subtitles-panel/duo";
 import { initTranslateSettings } from "./subtitles-panel/translate-settings";
+import { initDownloadButton } from "./download-panel/panel";
 
 // Клик по хрому вне якорной кнопки закрывает панель-окно (duopulse-090):
 // клики по странице ловит Core (потеря фокуса панелью), клики по хрому — тут.
@@ -24,7 +25,7 @@ window.addEventListener(
     if (!kind) return;
     const t = e.target as HTMLElement;
     if (kind === "suggest" && t.closest("#omnibox, #go, #suggest")) return;
-    if (t.closest("#mainBtn, #proxyBtn, #vpnBtn, #duoBtn")) return; // тумблеры
+    if (t.closest("#mainBtn, #proxyBtn, #vpnBtn, #duoBtn, #dlBtn")) return; // тумблеры
     closePanel();
   },
   true,
@@ -43,6 +44,8 @@ initPwSaveBar();
 initDuo();
 // Секция «Перевод» duo-панели: провайдеры DeepL/Google/LibreTranslate (4.1).
 initTranslateSettings();
+// Кнопка «⬇» + панель «Скачать» (карточка duopulse-118).
+initDownloadButton();
 
 // URL активной вкладки — в адресную строку (кроме моментов ввода); сюда же —
 // звёздочка (SPA-навигация и Ctrl+D из контента тоже приходят tabs.updated).

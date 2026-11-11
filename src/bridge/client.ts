@@ -19,6 +19,10 @@ import type {
   AsrTestResult,
   BookmarkGroupInfo,
   BridgeVersionResult,
+  DownloadBeginParams,
+  DownloadBeginResult,
+  DownloadCancelParams,
+  DownloadStatusResult,
   HistoryBookmarkAddParams,
   HistoryBookmarkListParams,
   HistoryBookmarkListResult,
@@ -351,6 +355,16 @@ export const bridge = {
      *  обещание команды при успехе не разрешается. */
     install: () => invoke<void>("updater_install"),
   },
+  download: {
+    /** download.begin (карточка duopulse-118): запустить загрузку — видео/
+     *  музыка с текущей страницы (yt-dlp) или субтитры выбранным языком
+     *  (контент-адаптер активной вкладки); прогресс — события download:*. */
+    begin: (params: DownloadBeginParams) => invoke<DownloadBeginResult>("download_begin", { params }),
+    /** download.cancel: отменить задание (убить yt-dlp / снять ожидание). */
+    cancel: (params: DownloadCancelParams) => invoke<void>("download_cancel", { params }),
+    /** download.status: инструменты (yt-dlp/ffmpeg), каталог и задания. */
+    status: () => invoke<DownloadStatusResult>("download_status"),
+  },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */
     restart: () => invoke<void>("app_restart"),
@@ -405,5 +419,11 @@ export const bridge = {
     /** passwords.save_prompt (duopulse-108): сабмит формы логина в активной
      *  вкладке заслужил бар «Сохранить пароль?» (payload без пароля). */
     passwordsSavePrompt: "passwords:save_prompt",
+    /** download.progress (карточка duopulse-118): живой прогресс задания
+     *  загрузки — докачка инструментов / загрузка / обработка ffmpeg. */
+    downloadProgress: "download:progress",
+    /** download.finished (карточка duopulse-118): задание завершилось
+     *  (успех с путём файла / отмена / ошибка). */
+    downloadFinished: "download:finished",
   } as const,
 };

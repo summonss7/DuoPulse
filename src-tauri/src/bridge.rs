@@ -194,7 +194,7 @@ pub use crate::history::contract::{
     HistoryVisitParams,
 };
 pub use crate::passwords::{
-    PasswordAddParams, PasswordEntry, PasswordListParams, PasswordListResult, PasswordRemoveParams,
+    PasswordAddParams, PasswordListParams, PasswordListResult, PasswordRemoveParams,
     PasswordRevealParams, PasswordRevealResult, PasswordSaveResult, PasswordUpdateParams,
     PasswordsCandidateView, PasswordsResolveParams,
 };
@@ -316,6 +316,8 @@ pub struct SettingsAll {
     pub translate: crate::translate::TranslateSettings,
     /// Распознавание речи (карточка duopulse-060): движок/модель/ключ.
     pub asr: crate::asr::config::AsrSettings,
+    /// Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров.
+    pub downloads: crate::settings::DownloadConfig,
 }
 
 /// settings.apply: частичный патч разделов (неназванные не меняются).
@@ -332,6 +334,8 @@ pub struct SettingsPatch {
     pub privacy: Option<crate::settings::PrivacyConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updater: Option<crate::settings::UpdaterConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloads: Option<crate::settings::DownloadConfig>,
 }
 
 /// settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на
@@ -1263,7 +1267,15 @@ pub fn contract_json() -> serde_json::Value {
             "updater.check": { "handler": "updater_check", "params": null,
                                "result": schema!(crate::updater::UpdaterCheckResult) },
             "updater.install": { "handler": "updater_install", "params": null,
-                                 "result": null },
+                                  "result": null },
+            "download.begin": { "handler": "download_begin",
+                                 "params": schema!(crate::download::DownloadBeginParams),
+                                 "result": schema!(crate::download::DownloadBeginResult) },
+            "download.cancel": { "handler": "download_cancel",
+                                  "params": schema!(crate::download::DownloadCancelParams),
+                                  "result": null },
+            "download.status": { "handler": "download_status", "params": null,
+                                  "result": schema!(crate::download::DownloadStatusResult) },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -1284,6 +1296,8 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles:asr_progress": { "payload": schema!(crate::asr::pipeline::SubtitlesAsrProgress) },
             "updater:check_done": { "payload": schema!(crate::updater::UpdaterCheckResult) },
             "passwords:save_prompt": { "payload": schema!(PasswordsSavePrompt) },
+            "download:progress": { "payload": schema!(crate::download::DownloadProgress) },
+            "download:finished": { "payload": schema!(crate::download::DownloadFinished) },
         },
     })
 }
@@ -1385,6 +1399,14 @@ fn event_names_match_registry() {
             (
                 <PasswordsSavePromptEvent as BridgeEvent>::NAME,
                 schema!(PasswordsSavePrompt),
+            ),
+            (
+                <crate::download::DownloadProgressEvent as BridgeEvent>::NAME,
+                schema!(crate::download::DownloadProgress),
+            ),
+            (
+                <crate::download::DownloadFinishedEvent as BridgeEvent>::NAME,
+                schema!(crate::download::DownloadFinished),
             ),
         ]
         .into_iter()
@@ -2019,6 +2041,7 @@ fn settings_get_all(
         adblock_enabled: adblock.status().enabled,
         translate: crate::translate::settings_view(&dir),
         asr: crate::asr::config::settings_view(&dir),
+        downloads: crate::settings::load_downloads(&dir),
     })
 }
 
@@ -2039,6 +2062,9 @@ fn settings_apply(params: SettingsPatch) -> Result<(), String> {
     }
     if let Some(updater) = params.updater {
         crate::settings::save_updater(&dir, &updater)?;
+    }
+    if let Some(downloads) = params.downloads {
+        crate::settings::save_downloads(&dir, &downloads)?;
     }
     Ok(())
 }
@@ -3319,6 +3345,9 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         updater_check,
         updater_install,
         app_restart,
+        crate::download::download_begin,
+        crate::download::download_cancel,
+        crate::download::download_status,
         crate::chrome_menu::ui_menu_open,
         crate::chrome_panel::ui_panel_open,
         crate::chrome_panel::ui_panel_close

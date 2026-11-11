@@ -18,7 +18,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type PanelKind = "main" | "proxy" | "vpn" | "duo" | "suggest" | "pwsave";
+export type PanelKind = "main" | "proxy" | "vpn" | "duo" | "download" | "suggest" | "pwsave";
 
 /** Хост-элемент панели в разметке index.html (панельный режим показывает его). */
 export const PANEL_HOST: Record<PanelKind, string> = {
@@ -26,11 +26,20 @@ export const PANEL_HOST: Record<PanelKind, string> = {
   proxy: "proxyMenu",
   vpn: "vpnPanel",
   duo: "duoPanel",
+  download: "downloadPanel",
   suggest: "suggest",
   pwsave: "pwSaveBar",
 };
 
-const PANEL_KINDS: readonly PanelKind[] = ["main", "proxy", "vpn", "duo", "suggest", "pwsave"];
+const PANEL_KINDS: readonly PanelKind[] = [
+  "main",
+  "proxy",
+  "vpn",
+  "duo",
+  "download",
+  "suggest",
+  "pwsave",
+];
 
 /** Этот webview — панель? (панельный режим UI-бандла, ?panel=<kind>). */
 export function panelKind(): PanelKind | null {

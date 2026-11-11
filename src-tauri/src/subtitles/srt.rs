@@ -9,6 +9,28 @@
 
 use super::{finalize_cues, parse_timing_line, strip_markup, Cue, ParseWarning, ParsedCues};
 
+/// Сборка SubRip из cue (карточка duopulse-118: выгрузка дорожки в файл).
+/// Формат симметричен парсеру: `HH:MM:SS,mmm --> HH:MM:SS,mmm`, текст как есть
+/// (строки внутри cue уже `\n`), нумерация с 1 по порядку.
+pub fn write_srt(cues: &[Cue]) -> String {
+    fn stamp(ms: i64) -> String {
+        let ms = ms.max(0);
+        let (h, rest) = (ms / 3_600_000, ms % 3_600_000);
+        let (m, rest) = (rest / 60_000, rest % 60_000);
+        let (s, ms) = (rest / 1000, rest % 1000);
+        format!("{h:02}:{m:02}:{s:02},{ms:03}")
+    }
+    let mut out = String::new();
+    for (i, c) in cues.iter().enumerate() {
+        out.push_str(&(i + 1).to_string());
+        out.push('\n');
+        out.push_str(&format!("{} --> {}\n", stamp(c.start_ms), stamp(c.end_ms)));
+        out.push_str(&c.text);
+        out.push_str("\n\n");
+    }
+    out
+}
+
 pub fn parse(input: &str) -> ParsedCues {
     let src = super::normalize(input);
     let mut cues: Vec<Cue> = Vec::new();
@@ -192,5 +214,28 @@ mod tests {
             }]
         );
         assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn write_srt_roundtrip() {
+        // duopulse-118: выгрузка дорожки — сборка SubRip и обратный разбор
+        let cues = vec![
+            Cue {
+                start_ms: 0,
+                end_ms: 1_500,
+                text: "первая реплика".into(),
+            },
+            Cue {
+                start_ms: 3_661_500,
+                end_ms: 3_662_250,
+                text: "многострочная\nвторая".into(),
+            },
+        ];
+        let srt = write_srt(&cues);
+        assert!(srt.contains("00:00:00,000 --> 00:00:01,500"));
+        assert!(srt.contains("01:01:01,500 --> 01:01:02,250"));
+        let back = parse(&srt);
+        assert_eq!(back.cues, cues, "write → parse без потерь");
+        assert!(back.warnings.is_empty());
     }
 }

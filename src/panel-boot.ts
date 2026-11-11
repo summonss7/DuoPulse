@@ -82,6 +82,13 @@ export function bootPanel(kind: PanelKind): void {
       "/src/subtitles-panel/translate-settings.ts",
     ).then((m) => m?.initTranslateSettings());
   }
+  if (kind === "download")
+    // Панель «Скачать» (карточка duopulse-118): видео/музыка/субтитры/
+    // фрагмент с активной страницы; initDownloadButton в панельном окне не
+    // нужен (кнопка — в хроме), только контент.
+    void importPanel("загрузка", () => import("./download-panel/panel"), "/src/download-panel/panel.ts").then(
+      (m) => m?.openDownloadPanelContent(),
+    );
   if (kind === "suggest")
     void importPanel("подсказки", () => import("./chrome/omnibox"), "/src/chrome/omnibox.ts").then((m) =>
       m?.bootSuggestPanel(),

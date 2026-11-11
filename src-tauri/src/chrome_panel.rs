@@ -92,7 +92,7 @@ pub async fn ui_panel_open(
 ) -> Result<(), String> {
     if !matches!(
         kind.as_str(),
-        "main" | "proxy" | "vpn" | "duo" | "suggest" | "pwsave"
+        "main" | "proxy" | "vpn" | "duo" | "download" | "suggest" | "pwsave"
     ) {
         return Err(format!("неизвестная панель: {kind}"));
     }

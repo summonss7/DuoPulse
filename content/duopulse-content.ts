@@ -81,6 +81,7 @@ import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from ".
 import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import { installSelectionTranslate } from "./translate-select";
 import { installPasswordFill } from "./passwords-fill";
+import { installSubsDownload } from "./download-subs";
 import { preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
@@ -678,6 +679,21 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     const detail = (e as CustomEvent<{ ids?: string[] }>).detail;
     if (Array.isArray(detail?.ids)) void selectTracks(detail.ids);
   });
+
+  // Выгрузка дорожки в файл (карточка duopulse-118): панель загрузки → Core
+  // eval'ит duopulse-download-subs {reqId, trackId}; дорожка грузится тем же
+  // адаптером (набор показа не трогается), cues — WebMessage'ом в Core,
+  // который пишет .srt в каталог загрузок.
+  installSubsDownload(
+    document,
+    { post: postToCore },
+    {
+      adapter,
+      getTrackList: () => trackList,
+      parser,
+      title: () => document.title,
+    },
+  );
 
   // Панельный путь задачи 3.6: Core прочитал файл с диска (subtitles.load_file)
   // и доставил cue этим событием (eval активной вкладки — паттерн

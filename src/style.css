@@ -2716,6 +2716,7 @@ html[data-panel] #app > div {
 }
 html[data-panel] .vpn-panel,
 html[data-panel] .duo-panel,
+html[data-panel] .dl-panel,
 html[data-panel] .suggest {
   max-height: 100vh;
   overflow-y: auto;
@@ -2906,4 +2907,184 @@ html[data-panel="pwsave"] .pw-save-bar {
   height: 100vh;
   border: none;
   border-radius: 0;
+}
+
+/* --- Панель «Скачать» (карточка duopulse-118) --------------------------------
+   Видео/музыка/субтитры с активной страницы + фрагменты. Паттерн duo-панели
+   (090): хост в разметке хрома, панельный режим показывает его в своём окне. */
+.dl-panel {
+  position: absolute;
+  top: 100%;
+  z-index: 130;
+  width: 372px;
+  padding: 14px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-soft);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.dl-panel[hidden] {
+  display: none;
+}
+/* display:flex/inline-flex полей и строк перебивает атрибут hidden —
+   показ полей по режиму (video/audio/subs) обязан скрывать честно */
+.dl-panel [hidden] {
+  display: none;
+}
+.dl-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.dl-title {
+  font-weight: 600;
+}
+.dl-url {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+.dl-modes {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.dl-modes button {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.dl-modes button.on {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+}
+.dl-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.dl-field > span {
+  color: var(--text-secondary);
+}
+.dl-select {
+  min-width: 180px;
+}
+.dl-no-tracks {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  margin-bottom: 8px;
+}
+.dl-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.dl-range-on {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.dl-range input[type="text"] {
+  width: 64px;
+  text-align: center;
+}
+.dl-range-sep {
+  color: var(--text-muted);
+}
+.dl-dir {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.dl-dir-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  direction: rtl; /* длинный путь — виден хвост (имя файла) */
+  text-align: left;
+}
+.dl-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.dl-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+.dl-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent-neon);
+  transition: width 0.3s ease;
+}
+.dl-progress-text {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.dl-done {
+  margin-bottom: 8px;
+  color: var(--accent-neon);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.dl-error {
+  margin-bottom: 8px;
+  color: var(--danger);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.dl-hint {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.dl-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 8px 0;
+}
+.dl-jobs {
+  margin-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dl-job {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

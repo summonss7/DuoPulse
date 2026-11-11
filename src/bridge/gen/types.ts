@@ -66,6 +66,11 @@ export interface DuoPulseBridgeContract {
   AsrConfig: AsrConfig;
   AsrTestResult: AsrTestResult;
   BridgeVersionResult: BridgeVersionResult;
+  DownloadBeginParams: DownloadBeginParams;
+  DownloadBeginResult: DownloadBeginResult;
+  DownloadCancelParams: DownloadCancelParams;
+  DownloadStatusResult: DownloadStatusResult;
+  DownloadJobInfo: DownloadJobInfo;
   HistoryBookmarkAddParams: HistoryBookmarkAddParams;
   HistoryBookmarkListParams: HistoryBookmarkListParams;
   HistoryBookmarkListResult: HistoryBookmarkListResult;
@@ -116,6 +121,7 @@ export interface DuoPulseBridgeContract {
   PerfTabSwitchInfo: PerfTabSwitchInfo;
   PerfTabs: PerfTabs;
   SettingsPatch: SettingsPatch;
+  DownloadConfig: DownloadConfig;
   PrivacyConfig: PrivacyConfig;
   SearchConfig: SearchConfig;
   SearchEngine: SearchEngine;
@@ -186,6 +192,8 @@ export interface DuoPulseBridgeContract {
   VpnUseProfileParams: VpnUseProfileParams;
   AdblockBlockedCount: AdblockBlockedCount;
   AdblockSiteException: AdblockSiteException;
+  DownloadFinished: DownloadFinished;
+  DownloadProgress: DownloadProgress;
   PageLoaded: PageLoaded;
   PageVideoDetected: PageVideoDetected;
   PasswordsSavePrompt: PasswordsSavePrompt;
@@ -424,6 +432,93 @@ export interface AsrTestResult {
  */
 export interface BridgeVersionResult {
   version: number;
+}
+/**
+ * download.begin: что и как скачать с активной/указанной страницы.
+ */
+export interface DownloadBeginParams {
+  /**
+   * Формат аудио: mp3 (конвертация, нужен ffmpeg) либо m4a без перекодировки.
+   */
+  audioMp3?: boolean;
+  /**
+   * Каталог назначения (None — настройка «Загрузки», иначе системный Downloads).
+   */
+  dir?: string | null;
+  /**
+   * video | audio | subs.
+   */
+  mode: string;
+  /**
+   * best | 1080 | 720 | 480 | 360 (video).
+   */
+  quality?: string;
+  /**
+   * Конец диапазона (None до конца видео).
+   */
+  rangeEndSec?: number | null;
+  /**
+   * Диапазон куска, сек (video/audio): начало.
+   */
+  rangeStartSec?: number | null;
+  /**
+   * id дорожки из списка адаптера (subs): «yt:en», «yt:en+ru», «ru».
+   */
+  trackId?: string;
+  /**
+   * URL страницы/видео (для video/audio; субтитры берутся активной вкладки).
+   */
+  url?: string;
+}
+export interface DownloadBeginResult {
+  jobId: number;
+}
+export interface DownloadCancelParams {
+  jobId: number;
+}
+export interface DownloadStatusResult {
+  /**
+   * Эффективный каталог загрузок (настройка либо системный Downloads).
+   */
+  defaultDir: string;
+  /**
+   * deno.exe на месте (JS-runtime экстрактора YouTube).
+   */
+  denoReady: boolean;
+  /**
+   * ffmpeg.exe на месте (нужен качеству >360p, mp3, диапазонам).
+   */
+  ffmpegReady: boolean;
+  /**
+   * Живые и последние задания (свежие первыми).
+   */
+  jobs: DownloadJobInfo[];
+  /**
+   * yt-dlp.exe на месте (иначе докачается при первом video/audio).
+   */
+  ytdlpReady: boolean;
+}
+/**
+ * Одно задание в download.status (панель показывает живые и последние).
+ */
+export interface DownloadJobInfo {
+  error?: string | null;
+  eta: string;
+  jobId: number;
+  /**
+   * video | audio | subs.
+   */
+  mode: string;
+  outPath?: string | null;
+  /**
+   * 0–100 (фазы без процентов — 0).
+   */
+  percent: number;
+  /**
+   * prepare | tools | download | convert | subs | done | error | canceled.
+   */
+  phase: string;
+  speed: string;
 }
 /**
  * history.bookmark_add: добавить закладку (url — ключ; повторное добавление обновляет заголовок, пустой заголовок сохраняет прежний).
@@ -833,10 +928,20 @@ export interface PerfTabs {
  * settings.apply: частичный патч разделов (неназванные не меняются). Прокси-пароль и ключи API — только существующими командами (settings.set proxy / translate.set_settings: секреты идут в DPAPI, не в патче).
  */
 export interface SettingsPatch {
+  downloads?: DownloadConfig | null;
   privacy?: PrivacyConfig | null;
   search?: SearchConfig | null;
   subtitles?: SubtitlesConfig | null;
   updater?: UpdaterConfig | null;
+}
+/**
+ * Раздел "downloads" settings.json. Появился после v3 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).
+ */
+export interface DownloadConfig {
+  /**
+   * Каталог загрузок (None — системный Downloads).
+   */
+  dir?: string | null;
 }
 /**
  * Раздел "privacy" settings.json (задача 5.1).
@@ -993,6 +1098,10 @@ export interface SettingsAll {
    * Распознавание речи (карточка duopulse-060): движок/модель/ключ.
    */
   asr: AsrSettings;
+  /**
+   * Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров.
+   */
+  downloads: DownloadConfig;
   engines: SearchEngineInfo[];
   privacy: PrivacyConfig;
   proxy: ProxySettings;
@@ -1640,6 +1749,33 @@ export interface AdblockBlockedCount {
 export interface AdblockSiteException {
   on: boolean;
   site: string;
+}
+/**
+ * download:finished — задание завершилось (успех/отмена/ошибка).
+ */
+export interface DownloadFinished {
+  canceled: boolean;
+  error?: string | null;
+  jobId: number;
+  /**
+   * video | audio | subs.
+   */
+  mode: string;
+  ok: boolean;
+  path?: string | null;
+}
+/**
+ * download:progress — живой прогресс задания.
+ */
+export interface DownloadProgress {
+  eta: string;
+  jobId: number;
+  percent: number;
+  /**
+   * tools | download | convert | subs.
+   */
+  phase: string;
+  speed: string;
 }
 /**
  * page:loaded: документ загружен (M3 — детектор контента; каркас с 1.1).

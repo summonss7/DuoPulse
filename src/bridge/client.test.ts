@@ -207,6 +207,21 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "updater.status": { path: ["updater", "status"] },
   "updater.check": { path: ["updater", "check"] },
   "updater.install": { path: ["updater", "install"] },
+  "download.begin": {
+    path: ["download", "begin"],
+    params: {
+      mode: "audio",
+      url: "https://www.youtube.com/watch?v=abc",
+      trackId: "",
+      quality: "",
+      audioMp3: false,
+      rangeStartSec: 12,
+      rangeEndSec: 95,
+      dir: null,
+    },
+  },
+  "download.cancel": { path: ["download", "cancel"], params: { jobId: 3 } },
+  "download.status": { path: ["download", "status"] },
   "app.restart": { path: ["app", "restart"] },
   "app.build_info": { path: ["app", "buildInfo"] },
 };

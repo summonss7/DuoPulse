@@ -19,6 +19,7 @@
         <input id="omnibox" type="text" placeholder="Введите адрес или поисковый запрос" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest" />
         <div id="suggest" class="suggest" hidden role="listbox" aria-label="Подсказки адресной строки"></div>
         <button id="duoBtn" class="duo-btn" title="Субтитры DuoPulse — клик: включить и настроить языки, Alt+D: вкл/выкл" hidden>duo<span class="duo-dots" aria-hidden="true"><i></i><i></i><i></i></span></button>
+        <button id="dlBtn" class="icon-btn dl-btn" title="Скачать с этой страницы: видео, музыку, субтитры или фрагмент" hidden aria-haspopup="dialog"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/><path d="M2.8 11.5v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2"/></svg></button>
         <button id="go" class="go">Перейти</button>
         <button id="starBtn" class="icon-btn star-btn" title="Добавить в избранное (Ctrl+D)" hidden aria-pressed="false"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l2 4.1 4.5.7-3.3 3.1.8 4.5L8 12.1l-4 2.1.8-4.5L1.5 6.6 6 5.9z"/></svg></button>
         <button id="libBtn" class="icon-btn" title="История и закладки"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></button>
@@ -194,6 +195,59 @@
             <input type="checkbox" id="duoStroke" checked /><span>Обводка</span>
           </label>
         </div>
+      </div>
+      <!-- Панель «Скачать» (карточка duopulse-118): видео/музыка/субтитры с
+           активной страницы, выбор качества/языка/фрагмента; наполняет
+           src/download-panel/panel.ts -->
+      <div id="downloadPanel" class="dl-panel" hidden role="dialog" aria-label="Панель загрузки">
+        <div class="dl-head">
+          <span class="dl-title">Скачать</span>
+          <span class="dl-url" id="dlUrl" title=""></span>
+        </div>
+        <div class="dl-modes" id="dlModes" role="tablist">
+          <button type="button" data-mode="video" class="on">Видео</button>
+          <button type="button" data-mode="audio">Музыка</button>
+          <button type="button" data-mode="subs">Субтитры</button>
+        </div>
+        <label class="dl-field" id="dlQualityField">
+          <span>Качество</span>
+          <select id="dlQuality" class="dl-select"></select>
+        </label>
+        <label class="dl-field" id="dlAudioField">
+          <span>Формат музыки</span>
+          <select id="dlAudioFormat" class="dl-select"></select>
+        </label>
+        <label class="dl-field" id="dlLangField">
+          <span>Язык субтитров</span>
+          <select id="dlLang" class="dl-select"></select>
+        </label>
+        <div class="dl-no-tracks" id="dlNoTracks" hidden>Дорожек субтитров нет (не YouTube-видео или список ещё не получен)</div>
+        <div class="dl-range" id="dlRange">
+          <label class="dl-range-on">
+            <input type="checkbox" id="dlRangeOn" />
+            <span>Фрагмент</span>
+          </label>
+          <input id="dlRangeStart" type="text" placeholder="0:00" spellcheck="false" autocomplete="off" />
+          <span class="dl-range-sep">&rarr;</span>
+          <input id="dlRangeEnd" type="text" placeholder="до конца" spellcheck="false" autocomplete="off" />
+          <span class="dl-hint">мм:сс</span>
+        </div>
+        <div class="dl-dir">
+          <span class="dl-dir-path" id="dlDir" title=""></span>
+          <button type="button" id="dlDirBtn" class="link">Изменить&hellip;</button>
+        </div>
+        <div class="dl-progress" id="dlProgress" hidden>
+          <div class="dl-bar"><i id="dlBarFill"></i></div>
+          <span class="dl-progress-text" id="dlProgressText"></span>
+          <button type="button" id="dlCancel" class="ghost">Отмена</button>
+        </div>
+        <div class="dl-done" id="dlDone" hidden></div>
+        <div class="dl-error" id="dlError" hidden></div>
+        <div class="dl-actions">
+          <button type="button" id="dlGo" class="primary">Скачать</button>
+        </div>
+        <div class="dl-hint" id="dlToolsHint">Видео и музыка качаются через yt-dlp — при первом запуске в профиль докачаются инструменты: yt-dlp (~18&nbsp;МБ), deno (~40&nbsp;МБ, нужен YouTube) и ffmpeg (~95&nbsp;МБ, качество/фрагменты); один раз.</div>
+        <div class="dl-jobs" id="dlJobs"></div>
       </div>
       <div id="vpnPanel" class="vpn-panel" hidden role="dialog" aria-label="Панель VPN">
         <div class="vpn-row vpn-head">

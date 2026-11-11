@@ -481,6 +481,27 @@ pub fn save_updater(dir: &Path, cfg: &UpdaterConfig) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров
+// ---------------------------------------------------------------------------
+
+/// Раздел "downloads" settings.json. Появился после v3 — сериализуется с
+/// serde-умолчаниями, миграция не нужна (отсутствие валидно).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DownloadConfig {
+    /// Каталог загрузок (None — системный Downloads).
+    pub dir: Option<String>,
+}
+
+pub fn load_downloads(dir: &Path) -> DownloadConfig {
+    load_section(dir, "downloads")
+}
+
+pub fn save_downloads(dir: &Path, cfg: &DownloadConfig) -> Result<(), String> {
+    save_section(dir, "downloads", cfg)
+}
+
+// ---------------------------------------------------------------------------
 // Тесты
 // ---------------------------------------------------------------------------
 
@@ -779,6 +800,30 @@ mod tests {
         // каналы знают сегмент пути фида (подписи селекта — в UI)
         assert_eq!(UpdateChannel::Canary.path(), "canary");
         assert_eq!(UpdateChannel::Stable.path(), "stable");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn downloads_config_roundtrip_and_defaults() {
+        // duopulse-118: раздел загрузок — отсутствие/битый = дефолт (системный
+        // Downloads, поле dir None)
+        let dir = tmp_dir("downloads");
+        assert_eq!(load_downloads(&dir), DownloadConfig { dir: None });
+        write_key(&dir, "downloads", &serde_json::json!("мусор")).unwrap();
+        assert_eq!(load_downloads(&dir), DownloadConfig::default());
+        save_downloads(
+            &dir,
+            &DownloadConfig {
+                dir: Some("D:/Музыка".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            load_downloads(&dir),
+            DownloadConfig {
+                dir: Some("D:/Музыка".into())
+            }
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

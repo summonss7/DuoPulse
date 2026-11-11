@@ -25,7 +25,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod prompts;
-pub use prompts::{PasswordCandidate, PasswordPrompts, PasswordsCandidateView};
+pub use prompts::{PasswordPrompts, PasswordsCandidateView};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};

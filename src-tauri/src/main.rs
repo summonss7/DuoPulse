@@ -40,6 +40,9 @@ mod asr;
 mod bridge;
 mod chrome_menu;
 mod chrome_panel;
+/// Загрузка видео/аудио/субтитров (карточка duopulse-118): yt-dlp + ffmpeg
+/// по требованию, субтитры — контент-адаптером активной вкладки.
+mod download;
 mod history;
 mod omnibox;
 /// Менеджер паролей (этап 1 duopulse-106): passwords.db + ключ под DPAPI.
@@ -561,6 +564,9 @@ unsafe fn referer_of(
 ///   транскрибирует (локальный whisper-server / OpenAI-совместимое облако,
 ///   src/asr/pipeline.rs), кэширует и отвечает document-событием
 ///   duopulse-asr-track; прогресс — событие subtitles:asr_progress;
+/// - «download-subs» — ответ контент-слоя на duopulse-download-subs (карточка
+///   duopulse-118: download.begin subs → eval в активную вкладку): cues дорожки
+///   выбранного языка — заданию загрузки, поток пишет .srt в каталог загрузок;
 /// - «password-candidate»/«passwords-lookup»/«passwords-fill» — жизненный
 ///   цикл паролей в странице (этап 2 duopulse-108): сабмит формы логина →
 ///   кандидат бара «Сохранить пароль?» (passwords/prompts.rs; событие
@@ -726,6 +732,16 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                         }),
                     };
                     post_to_page(sender.as_ref(), &reply);
+                }
+            } else if parsed["duopulse"] == "download-subs" {
+                // Ответ content-слоя на duopulse-download-subs (карточка
+                // duopulse-118): cues дорожки выбранного языка — заданию
+                // загрузки (поток ждёт в канале, напишет .srt в каталог).
+                if let Some(req_id) = parsed["reqId"].as_u64() {
+                    let service = app.state::<download::DownloadService>();
+                    if !service.deliver_subs_reply(req_id, parsed.clone()) {
+                        eprintln!("[download] subs reqId={req_id}: задание не найдено/успло");
+                    }
                 }
             } else if parsed["duopulse"] == "font-request" {
                 // Гарнитура субтитров (карточка duopulse-068): контент-оверлей
@@ -1482,6 +1498,7 @@ fn main() {
         .manage(asr_cache)
         .manage(asr_jobs)
         .manage(updater::UpdaterService::new())
+        .manage(download::DownloadService::default())
         .manage(router)
         .manage(rules_store)
         .setup(move |app| {
