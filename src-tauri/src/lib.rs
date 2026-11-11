@@ -41,6 +41,10 @@ pub mod mobile_updater;
 // выбора дорожки/имени файла компилируются везде (хостовые тесты), сетевая
 // команда — мобильным таргетам (как mobile_open).
 pub mod mobile_download;
+// Приём PDF из «Открыть с помощью» (карточка duopulse-119): Kotlin-хелпер
+// MobilePdfHelper + команды mobile_pdf_take/mobile_pdf_chunk (просмотрщик
+// pdf.js во фронтенде); валидатор пути — чистый, тесты на хосте.
+pub mod mobile_pdf;
 // Секреты мобильной ветки (duopulse-112): Android-бэкенд тех же save/load,
 // что DPAPI десктопа (синоним по вызову — crate::secrets).
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -124,6 +128,8 @@ fn mobile_run() {
             mobile_open::mobile_open_url,
             mobile_private::mobile_private_cleanup,
             mobile_download::cmd::duo_download_music,
+            mobile_pdf::mobile_pdf_take,
+            mobile_pdf::mobile_pdf_chunk,
             #[cfg(debug_assertions)]
             mobile_download::cmd::duo_debug_save_music,
             mobile_history::history_bookmark_add,

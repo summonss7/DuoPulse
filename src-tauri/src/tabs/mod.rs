@@ -241,24 +241,45 @@ impl TabManager {
     /// webview внутри setup — блокирующий round-trip на ещё не качающий цикл:
     /// задерживал старт цикла (и с ним первую отрисовку таб-бара) — задача 2.4
     /// перевела сюда и свежий старт (раньше первая вкладка создавалась в setup).
-    pub fn init(&self, _app: &AppHandle) -> Result<(), String> {
+    pub fn init(
+        &self,
+        _app: &AppHandle,
+        // стартовый URL поверх нового таба (карточка duopulse-119): PDF из
+        // argv (двойной клик по файлу / «Открыть с помощью» — Windows)
+        start_override: Option<String>,
+    ) -> Result<(), String> {
         let restore = if std::env::var("DUOPULSE_START_URL").is_err() {
             session::load(&crate::proxy::profile_dir())
         } else {
             None
         };
-        match restore {
-            Some(session) => self.restore_entries(session),
-            None => self.spawn_lazy_first()?,
+        match (restore, start_override) {
+            (Some(session), Some(url)) => {
+                // файл при живой сессии: сессию восстановить, файл — активной
+                // вкладкой сверху (как браузеры, запущенные с URL в argv)
+                self.restore_entries(session);
+                self.push_lazy_entry(url)?;
+            }
+            (Some(session), None) => self.restore_entries(session),
+            (None, url) => self.spawn_lazy_first(url)?,
         }
         Ok(())
     }
 
     /// Первая вкладка свежего старта (сессии нет): ленивая запись со стартовым
     /// URL, webview создаёт spawn_restore_materialize по RunEvent::Ready —
-    /// как у восстановленных вкладок (задача 2.4, docs/04 §1.3).
-    fn spawn_lazy_first(&self) -> Result<(), String> {
-        let url = default_tab_url();
+    /// как у восстановленных вкладок (задача 2.4, docs/04 §1.3). url —
+    /// переопределение старта (PDF из argv, карточка duopulse-119); None —
+    /// стандартная «Новая вкладка».
+    fn spawn_lazy_first(&self, url: Option<String>) -> Result<(), String> {
+        let url = url.unwrap_or_else(default_tab_url);
+        self.push_lazy_entry(url)
+    }
+
+    /// Ленивая запись вкладки в конец бара + активация (материализация —
+    /// spawn_restore_materialize по Ready): стартовый PDF из argv при живой
+    /// сессии (карточка duopulse-119) и первая вкладка свежего старта.
+    fn push_lazy_entry(&self, url: String) -> Result<(), String> {
         let parsed =
             Url::parse(&url).map_err(|e| format!("некорректный стартовый URL «{url}»: {e}"))?;
         let name = internal_page_name(&parsed);
@@ -280,7 +301,9 @@ impl TabManager {
             last_active_ms: now_ms(),
             incognito: false,
         });
-        st.active = Some(0);
+        // push_lazy_entry вызывается и поверх восстановленной сессии —
+        // активна всегда новая (последняя) запись
+        st.active = Some(st.tabs.len() - 1);
         Ok(())
     }
 

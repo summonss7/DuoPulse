@@ -1,7 +1,7 @@
 {
   "name": "duopulse",
   "private": true,
-  "version": "0.1.22",
+  "version": "0.1.23",
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -19,7 +19,8 @@
     "android:icons": "node scripts/make-android-icons.mjs && node node_modules/@tauri-apps/cli/tauri.js icon src-tauri/icons/source-1024.png"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2"
+    "@tauri-apps/api": "^2",
+    "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
     "@adguard/scriptlets": "^2.5.1",

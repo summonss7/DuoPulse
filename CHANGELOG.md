@@ -5491,3 +5491,55 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   release: оба канала Aila+GitHub, хаб «Скачать» и C:\DuoPulse обновлены) — обе
   платформы в одном сеансе. backup.bat 21:12.
 - Коммит: см. git log (feat(mobile): duopulse-121 — …).
+
+## 12.11.2026, 00:40 — duopulse-119: просмотр PDF + ассоциация файлов (.pdf) на Windows и Android
+
+- Начало работы: 11.11.2026, 23:21
+- Окончание работы: 12.11.2026, 00:40
+- Что сделано:
+  - DuoPulse стал системным просмотрщиком PDF на обеих платформах (пожелание
+    Артёма, w_rEjiuP1aoW6Bn5cS). Десктоп: tauri.conf.json bundle.fileAssociations
+    (.pdf, Viewer) — NSIS-установщик регистрирует HKCU-ассоциацию «DuoPulse PDF»
+    (двойной клик/«Открыть с помощью» → duopulse.exe "%1"); файл открывается
+    вкладкой со встроенным просмотрщиком WebView2 (edge_pdf: страницы, зум,
+    поиск, печать — отдельный просмотрщик не потребовался, живая проба);
+    tauri-plugin-single-instance: PDF при живом браузере открывается вкладкой
+    в работающем экземпляре (argv форвардится, второй процесс гаснет —
+    профиль/SQLite/session.json не переживают двух владельцев); argv-старт
+    (pdf_arg_candidate/pdf_arg_url, main.rs): свежий старт — файл вместо нового
+    таба, живая сессия — файл активной вкладкой сверху (tabs.init override,
+    push_lazy_entry).
+  - Android: intent-фильтры application/pdf (VIEW + SEND/SEND_MULTIPLE —
+    генерируются tauri-CLI из fileAssociations) — DuoPulse предлагается в
+    «Открыть с помощью» и «Поделиться»; Kotlin-хелпер MobilePdfHelper копирует
+    content-URI в cache/pdf (onCreate/onNewIntent, ошибки строкой); команды
+    mobile_pdf_take/mobile_pdf_chunk (base64-куски по 512 КБ, путь валидируется —
+    только cache/pdf, не произвольные файлы); просмотрщик pdf.js во фронтенде
+    (src/mobile/pdf.ts: canvas c DPR, листание/зум, имя файла в omnibox,
+    закрытие кнопкой/«домой»; динамический импорт — рабочий чанк не грузится,
+    пока PDF не открыт; диагностический хук __duopulseMobilePdf). R8-keep
+    для хелпера.
+  - Документация: README (строка «Возможности»), ROADMAP («Изменения плана»).
+- Как проверено:
+  - vitest 442 (4 новых: сборка base64-кусков, листание, зум); cargo test
+    369 bin + 16 lib (4 новых: argv-кандидат/URL, валидатор cache-путей);
+    typecheck ✓.
+  - Десктоп живьём (CDP): холодный старт «duopulse.exe файл.pdf» → PDF-вкладка
+    активна (edge_pdf рендерит, скриншот); второй запуск с другим PDF при
+    живом приложении → остался один процесс, в первом открылась вторая вкладка;
+    установленная 0.1.23: таб-бар/омнибокс показывают файл; реестр:
+    HKCU\Software\Classes\.pdf → «DuoPulse PDF» → duopulse.exe "%1"
+    (прежний обработчик сохранён бэкапом NSIS, восстановится при удалении).
+  - Эмулятор (AVD duopulse36): pm query-activities — DuoPulse в списке
+    обработчиков application/pdf; VIEW-интент (content:// + grant, как реальный
+    файловый менеджер) → просмотрщик открылся (скриншот: тулбар, 1/2, 100%,
+    текст страницы); листание/зум по кнопкам; onNewIntent при живом приложении
+    переключил на второй файл; SEND (EXTRA_STREAM) → открылся; закрытие
+    возвращает стартовый экран. Release-APK смоук (R8): VIEW-интент →
+    просмотрщик. Грабли scoped storage: am start без --grant-read-uri-permission даёт
+    SecurityException (scoped storage) — реальный отправитель всегда выдаёт
+    грант; fileAssociations на Android tauri-CLI вписывает в gen/android
+    манифест сам (блок AUTO-GENERATED).
+  - Релизы 0.1.23 в одном сеансе: NSIS → GitHub Pages + Aila (оба канала) +
+    хаб «Скачать» + C:\DuoPulse; APK (подписанный) → канал Aila автоматически.
+- Коммит: см. git log (feat(pdf): duopulse-119).

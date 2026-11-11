@@ -32,6 +32,7 @@ import {
   createSelectionPorts,
   installMobileSelectionTranslate,
 } from "./selection-translate";
+import { createMobilePdf } from "./pdf";
 
 const chromeRoot = document.getElementById("app");
 // DOM десктоп-хрома не трогаем, просто прячем: не [hidden] — стили десктопа
@@ -355,6 +356,34 @@ const selectionTranslate = installMobileSelectionTranslate(
   document,
   createSelectionPorts(invoke, () => incognito),
 );
+
+// ── Просмотрщик PDF (карточка duopulse-119): DuoPulse — системный
+// просмотрщик application/pdf (intent-filter); файл из «Открыть с
+// помощью» рисуется pdf.js (WebView Android PDF не рендерит). poll — на
+// старте (холодный запуск с файлом) и по возврату фокуса (onNewIntent при
+// живом приложении; visibilitychange срабатывает надёжно focus-события
+// WebView). Десктоп ветки не касается: там PDF показывает WebView2.
+const pdfView = createMobilePdf({
+  note,
+  host: content,
+  start,
+  tab,
+  showInOmnibox: (text) => {
+    omnibox.value = text;
+  },
+  setVideoButtons: (visible) => {
+    duoBtn.hidden = !visible;
+    musicBtn.hidden = !visible;
+  },
+});
+void pdfView.poll();
+window.addEventListener("focus", () => void pdfView.poll());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void pdfView.poll();
+});
+// диагностика стендов (как __duopulseMobileTranslate/__duopulseMobileMusic)
+(window as { __duopulseMobilePdf?: () => unknown }).__duopulseMobilePdf = () =>
+  pdfView.snapshot();
 // диагностика стендов (e2e/selection/mobile.mjs)
 (window as { __duopulseMobileTranslate?: () => unknown }).__duopulseMobileTranslate = () =>
   selectionTranslate.stateSnapshot();
@@ -407,6 +436,7 @@ async function navigate(input: string): Promise<void> {
   // путь в iframe); поиск и прочие адреса — системный браузер.
   const videoId = res.kind === "url" ? videoIdOfEmbed(res.url) : null;
   if (videoId) {
+    pdfView.close();
     tab.src = res.url;
     tab.hidden = false;
     start.hidden = true;
@@ -438,6 +468,7 @@ omnibox.addEventListener("keydown", (e) => {
 });
 home.addEventListener("click", () => {
   setMenu(false);
+  pdfView.close();
   tab.hidden = true;
   tab.src = "about:blank";
   start.hidden = false;

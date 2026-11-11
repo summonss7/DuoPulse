@@ -37,3 +37,7 @@
 # duopulse-121: JNI-хелпер загрузки музыки (MobileDownloadHelper.saveMusic) —
 # та же грабля, что 083/102: без Java-ссылок R8 вырезает метод в release.
 -keep class dev.duopulse.mobile.MobileDownloadHelper { *; }
+# duopulse-119: JNI-хелпер приёма PDF из «Открыть с помощью»
+# (MobilePdfHelper.take) — та же грабля, что 083/102/121: без Java-ссылок
+# R8 вырезает метод в release.
+-keep class dev.duopulse.mobile.MobilePdfHelper { *; }

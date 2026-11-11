@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.22"
+version = "0.1.23"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
@@ -57,6 +57,11 @@ tauri = { version = "2", features = ["unstable"] }
 # Мобильная ветка обновляется своим путём (этап 3, duopulse-083: APK-манифест
 # центра Aila + системная установка).
 tauri-plugin-updater = "2"
+# Одиночный экземпляр (карточка duopulse-119): ассоциация .pdf открывает
+# файл в уже запущенном DuoPulse (argv форвардится вторым стартом), а не во
+# втором процессе — профиль (SQLite/session.json) не переживает двух
+# владельцев. Десктоп-only: мобильной ветке не нужен.
+tauri-plugin-single-instance = "2"
 # JSON Schema из Rust-типов: единый источник IPC-контракта bridge (задача 1.1,
 # docs/05 §2) — из схем генерируются TS-типы (src/bridge/gen/types.ts).
 schemars = "0.8"

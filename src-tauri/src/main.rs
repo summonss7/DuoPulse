@@ -1481,6 +1481,27 @@ fn main() {
         .on_menu_event(|app, event| {
             chrome_menu::emit_action(app, &event.id.0);
         })
+        // Одиночный экземпляр (карточка duopulse-119): PDF, открытый из
+        // проводника при живом DuoPulse, не должен поднимать второй процесс
+        // (профиль/SQLite/session.json не переживают двух владельцев) —
+        // второй старт форвардит argv первому и гаснет. Регистрируется
+        // ПЕРВЫМ плагином (требование документации Tauri).
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            if let Some(url) = pdf_arg_url(&argv, &cwd) {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let manager = app.state::<tabs::TabManager>();
+                    if let Err(e) = manager.open(&app, Some(url.to_string()), None, false) {
+                        eprintln!("[pdf] открыть из второго экземпляра: {e}");
+                    }
+                });
+            }
+            // Без PDF в argv — просто поднять окно живого экземпляра
+            if let Some(w) = app.get_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         // Автообновление (задача 5.2): конфиг plugins.updater (pubkey/фид) и
         // состояние UpdaterExt::updater_builder — драйвится из src/updater.rs.
@@ -1592,8 +1613,11 @@ fn main() {
             let window: Window<tauri::Wry> =
                 app.get_window("main").expect("окно main создано выше");
             // Первая вкладка (стартовый URL / DUOPULSE_START_URL) — задача 1.2;
-            // ленивая постановка + материализация по Ready — задача 2.4.
-            app.state::<tabs::TabManager>().init(&app)?;
+            // ленивая постановка + материализация по Ready — задача 2.4. Старт
+            // с PDF из argv (duopulse-119) подменяет новый таб файлом (при
+            // живой сессии — доп. активной вкладкой).
+            let start_pdf = pdf_arg_url(&std::env::args().collect::<Vec<_>>(), "");
+            app.state::<tabs::TabManager>().init(&app, start_pdf.map(|u| u.to_string()))?;
             startup_mark("tab-init");
 
             // Все вкладки растягиваются при изменении размера окна (в т.ч.
@@ -1680,6 +1704,34 @@ fn build_unix_stamp() -> u64 {
     env!("DUOPULSE_BUILD_UNIX").parse::<u64>().unwrap_or(0)
 }
 
+/// Ассоциация PDF (карточка duopulse-119): вытащить из argv путь к .pdf —
+/// так Windows shell запускает «Открыть с помощью → DuoPulse» и двойной
+/// клик (duopulse.exe "C:\Docs\file.pdf"). Флаги и прочие аргументы
+/// (в т.ч. флаги dev-стенда) игнорируются; расширение — без учёта регистра.
+fn pdf_arg_candidate<I: IntoIterator<Item = String>>(args: I) -> Option<std::path::PathBuf> {
+    args.into_iter()
+        .skip(1)
+        .map(std::path::PathBuf::from)
+        .find(|p| {
+            !p.starts_with("-")
+                && p.extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+        })
+}
+
+/// Кандидат из argv → file://-URL существующего файла (относительный путь
+/// достраивается от cwd — argv второго экземпляра приходит с cwd плагина).
+fn pdf_arg_url(args: &[String], cwd: &str) -> Option<tauri::Url> {
+    let mut path = pdf_arg_candidate(args.iter().cloned())?;
+    if path.is_relative() && !cwd.is_empty() {
+        path = std::path::Path::new(cwd).join(path);
+    }
+    if !path.is_file() {
+        return None;
+    }
+    tauri::Url::from_file_path(path.canonicalize().ok()?).ok()
+}
+
 /// Заголовок главного окна: «DuoPulse 0.1.6 · 07.11.2026 14:32» — версия
 /// + локальные дата/время сборки (карточка duopulse-078; до этого версия
 /// дублировалась бейджем в навбаре от CARGO_PKG_VERSION и отставала на
@@ -1703,8 +1755,49 @@ fn window_title(version: &str, build_unix: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_unix_stamp, window_title};
+    use super::{build_unix_stamp, pdf_arg_candidate, pdf_arg_url, window_title};
     use chrono::TimeZone;
+
+    #[test]
+    fn pdf_arg_candidate_filters_flags_and_other_exts() {
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // флаги стендов/путей без .pdf пропускаются, регистр не важен
+        assert_eq!(
+            pdf_arg_candidate(args(&["duopulse.exe", "--DUOPULSE_SLEEP_AFTER_SECS=0"])),
+            None
+        );
+        assert_eq!(
+            pdf_arg_candidate(args(&[
+                "duopulse.exe",
+                "C:\\Docs\\readme.md",
+                "D:/Docs/report.PDF"
+            ]))
+            .map(|p| p.to_string_lossy().into_owned()),
+            Some("D:/Docs/report.PDF".into())
+        );
+    }
+
+    #[test]
+    fn pdf_arg_url_only_existing_file() {
+        let dir = std::env::temp_dir().join("duopulse-pdf-arg-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("документ.pdf"); // кириллица/пробелы — как из shell
+        std::fs::write(&file, b"%PDF-1.4").unwrap();
+        let argv = vec!["duopulse.exe".to_string(), file.to_string_lossy().into_owned()];
+        let url = pdf_arg_url(&argv, "").expect("существующий .pdf — URL");
+        assert_eq!(url.scheme(), "file");
+        assert!(url
+            .to_string()
+            .to_lowercase()
+            .contains("%d0%b4%d0%be%d0%ba%d1%83%d0%bc%d0%b5%d0%bd%d1%82.pdf"));
+        // несуществующий файл — None (второй экземпляр с мусорным argv)
+        let gone = vec![
+            "duopulse.exe".to_string(),
+            dir.join("нет такого.pdf").to_string_lossy().into_owned(),
+        ];
+        assert!(pdf_arg_url(&gone, "").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn title_with_build_stamp() {
