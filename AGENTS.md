@@ -72,6 +72,12 @@ todo | in_progress | review | done | blocked.
   скриптлетов, rpnt-пейлоад в DOM, UA-токены, `.ad-showing`, SSAP/USDAI-маркер в
   stats for nerds; `--deep` — плотный дамп во время рекламы (playerResponse, патчи
   нативов). Результат — e2e/adblock/ssai-last-run.json (gitignore, рантайм-артефакт).
+- `e2e/tabs/mem-hang-probe.mjs` — стенд «много вкладок → память/зависание»
+  (карточка 115): N вкладок локального «тяжёлого» сайта (HEAVY=1 — играющее видео
+  + JS-куча), режим живых адресов URLS=http://…,http://…; меряет дерево
+  duopulse.exe+msedgewebview2 (МБ/процессы), свободную память системы и
+  round-trip UI→Core (зависание = таймаут). Отчёт — e2e/tabs/mem-hang-last-run.json
+  (gitignore, рантайм-артефакт).
 
 Новые временные файлы в корне не накапливать: одноразовое — `%TEMP%`, постоянное — `e2e/`.
 <!-- /E2E-ИНСТРУМЕНТЫ -->
