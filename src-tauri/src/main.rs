@@ -550,10 +550,11 @@ unsafe fn referer_of(
 ///   (src/translate/pipeline.rs: батчинг ≤ 2 КБ, контекст пачки, кэш SQLite,
 ///   событие subtitles:translate_progress) и отвечает document-событием
 ///   duopulse-translate-track eval'ом активной вкладки;
-/// - «translate-selection» — смена языка в баббле перевода выделения
-///   (карточка duopulse-098): текст — эхом из меню, gtx-конвейер —
-///   translate_menu::translate_selection_for_page, ответ — WebMessage
-///   «translate-selection-result» тому же документу;
+/// - «translate-selection» — смена языков в баббле перевода выделения
+///   (карточки duopulse-098/116): текст — эхом из меню, источник и цели —
+///   выбор бабла, gtx-конвейер — translate_menu::translate_selection_for_
+///   page, ответ — WebMessage «translate-selection-result» тому же
+///   документу;
 /// - «asr-begin» — распознавание речи (карточка duopulse-060): content-слой
 ///   добыл URL аудио в контексте страницы (адаптер YouTube / src видео),
 ///   Core скачивает его тем же сетевым путём (SOCKS5-роутер), декодирует,
@@ -763,21 +764,37 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 // блокируем), прогресс — событием subtitles:translate_progress.
                 translate::handle_translate_request(&app, &tab_id, &parsed);
             } else if parsed["duopulse"] == "translate-selection" {
-                // Смена языка в баббле перевода выделения (карточка
-                // duopulse-098): текст — из меню (эхом), конвейер — тот же
+                // Смена языков в баббле перевода выделения (карточки
+                // duopulse-098/116): текст — из меню (эхом), источник и
+                // несколько целей — выбор бабла; конвейер — тот же
                 // gtx-перевод; ответ — WebMessage тому же документу.
-                if let (Some(text), Some(target)) =
-                    (parsed["text"].as_str(), parsed["target"].as_str())
-                {
-                    // выбранный в баббле язык — подпись пункта меню в след. раз
-                    translate_menu::note_selection_target(target);
-                    handle_selection_translate(
-                        &app,
-                        sender.as_ref(),
-                        text,
-                        target,
-                        parsed["reqId"].as_u64().unwrap_or(0),
-                    );
+                if let Some(text) = parsed["text"].as_str() {
+                    let source = parsed["source"].as_str().unwrap_or("auto").to_string();
+                    let targets: Vec<String> = parsed["targets"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .or_else(|| {
+                            parsed["target"]
+                                .as_str()
+                                .map(|t| vec![t.to_string()])
+                        })
+                        .unwrap_or_default();
+                    if !targets.is_empty() {
+                        // выбранные в бабле языки — подпись пункта меню в след. раз
+                        translate_menu::note_selection_langs(&source, &targets);
+                        handle_selection_translate(
+                            &app,
+                            sender.as_ref(),
+                            text,
+                            &source,
+                            &targets,
+                            parsed["reqId"].as_u64().unwrap_or(0),
+                        );
+                    }
                 }
             } else if parsed["duopulse"] == "asr-begin" {
                 // Распознавание речи (карточка duopulse-060): URL аудио — у
@@ -852,19 +869,20 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
     .expect("add_WebMessageReceived");
 }
 
-/// Смена языка перевода выделения (баббл, карточка duopulse-098): фоновый
-/// перевод тем же gtx-конвейером, ответ — документу вкладки (COM-перенос и
-/// сборка ответа — translate_menu::translate_selection_for_page).
+/// Смена языков перевода выделения (бабл, карточки duopulse-098/116):
+/// фоновый перевод тем же gtx-конвейером на каждую цель, ответ — документу
+/// вкладки (COM-перенос и сборка ответа — translate_menu::translate_selection_for_page).
 #[cfg(windows)]
 fn handle_selection_translate(
     app: &AppHandle,
     core: Option<&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2>,
     text: &str,
-    target: &str,
+    source: &str,
+    targets: &[String],
     req_id: u64,
 ) {
     if let Some(core) = core {
-        translate_menu::translate_selection_for_page(app, core, text, target, req_id);
+        translate_menu::translate_selection_for_page(app, core, text, source, targets, req_id);
     }
 }
 

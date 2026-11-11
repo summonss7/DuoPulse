@@ -579,17 +579,25 @@ pub(crate) mod net {
         pub detected: String,
     }
 
-    /// Перевод выделенного текста (карточка duopulse-103): мобильный вход в
-    /// тот же gtx-конвейер, что duo_translate_texts — sl=auto (детект языка
-    /// наружу, паритет десктопного пункта меню translate_menu.rs). Кэш не
-    /// нужен: разовые фрагменты, пачки субтитров кэшует duo_translate_texts.
+    /// Перевод выделенного текста (карточка duopulse-103, источник —
+    /// duopulse-116): мобильный вход в тот же gtx-конвейер, что
+    /// duo_translate_texts; источник — опционально (нет — авто, детект
+    /// языка наружу, паритет десктопного бабла). Кэш не нужен: разовые
+    /// фрагменты, пачки субтитров кэшует duo_translate_texts.
     #[tauri::command]
     pub fn duo_translate_selection(
         text: String,
         target: String,
+        source: Option<String>,
     ) -> Result<DuoSelectionTranslation, String> {
         let (text, target) = check_selection(&text, &target)?;
-        let body = gtx_fetch(&agent(), "auto", &target, &text)?;
+        let source = source
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("auto")
+            .to_ascii_lowercase();
+        let body = gtx_fetch(&agent(), &source, &target, &text)?;
         let (translation, detected) =
             parse_gtx_dj(&body).ok_or_else(|| "gtx ответ не разобран".to_string())?;
         Ok(DuoSelectionTranslation {

@@ -15,23 +15,28 @@ function controller(p: ReturnType<typeof ports>): MobileSelectionTranslate {
   return st;
 }
 
-/** Порты с управляемым переводом (resolved/отклон по тесту). */
-function ports(impl?: (text: string, target: string) => Promise<{ translation: string; detected: string }>) {
-  const saved: string[] = [];
+/** Порты с управляемым переводом (resolved/отклон по тесту); calls —
+ * журнал аргументов translate (проверки источника duopulse-116). */
+function ports(
+  impl?: (text: string, target: string, source: string) => Promise<{ translation: string; detected: string }>,
+) {
+  const saved: string[][] = [];
   const loaded = { value: "" };
+  const calls: Array<[string, string, string]> = [];
   return {
     saved,
     loaded,
+    calls,
     translate:
       impl ??
-      (async (text: string, target: string) => ({
-        translation: `[${target}] ${text}`,
-        detected: "en",
-      })),
-    loadTarget: () => loaded.value,
-    saveTarget: (code: string) => {
-      saved.push(code);
-      loaded.value = code;
+      (async (text: string, target: string, source: string) => {
+        calls.push([text, target, source]);
+        return { translation: `[${target}] ${text}`, detected: "en" };
+      }),
+    loadTargets: () => (loaded.value ? loaded.value.split(",") : []),
+    saveTargets: (targets: string[]) => {
+      saved.push(targets);
+      loaded.value = targets.join(",");
     },
   };
 }
@@ -139,7 +144,7 @@ describe("чип у выделения → бабл", () => {
     await new Promise((r) => setTimeout(r));
     const bubble = document.querySelector("[data-duopulse-translate]")!;
     expect(bubble.textContent).toContain("[de] Hello");
-    expect(p.saved).toEqual(["de"]);
+    expect(p.saved).toEqual([["ru", "de"]]); // выбор добавил язык, не заменил
     expect(st.stateSnapshot().target).toBe("de");
   });
 
@@ -237,25 +242,96 @@ describe("лист «Перевести текст…»", () => {
   });
 });
 
+describe("несколько целей и источник (duopulse-116)", () => {
+  it("добавление цели в бабле переводит на обе, чип × убирает язык", async () => {
+    const p = ports();
+    const st = controller(p);
+    st.start();
+    inputWithSelection("Hello world", 0, 5);
+    document.querySelector(".m-tr-chip")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((r) => setTimeout(r));
+    const select = document.querySelector("[data-duopulse-translate] select") as HTMLSelectElement;
+    select.value = "de";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((r) => setTimeout(r));
+    let bubble = document.querySelector("[data-duopulse-translate]")!;
+    expect(bubble.textContent).toContain("[ru] Hello");
+    expect(bubble.textContent).toContain("[de] Hello");
+    expect(st.stateSnapshot().targets).toEqual(["ru", "de"]);
+    // чип «×» убирает язык — повтор уже без него
+    (bubble.querySelector('button[aria-label="Убрать Русский"]') as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r));
+    bubble = document.querySelector("[data-duopulse-translate]")!;
+    expect(bubble.textContent).toContain("[de] Hello");
+    expect(bubble.textContent).not.toContain("[ru] Hello");
+    expect(p.saved[p.saved.length - 1]).toEqual(["de"]);
+  });
+
+  it("селект источника («Авто» → язык) уходит в конвейер", async () => {
+    const p = ports();
+    const st = controller(p);
+    st.start();
+    inputWithSelection("Hello", 0, 5);
+    document.querySelector(".m-tr-chip")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((r) => setTimeout(r));
+    const src = document.querySelector(
+      '[data-duopulse-translate] select[aria-label="Язык оригинала"]',
+    ) as HTMLSelectElement;
+    src.value = "en";
+    src.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((r) => setTimeout(r));
+    expect(p.calls[p.calls.length - 1]).toEqual(["Hello", "ru", "en"]);
+    expect(st.stateSnapshot().source).toBe("en");
+    // маркер детекта при явном источнике не нужен — язык и так известен
+    const bubble = document.querySelector("[data-duopulse-translate]")!;
+    expect(bubble.textContent).toContain("[ru] Hello");
+    expect(bubble.textContent).not.toContain("en → ru");
+  });
+
+  it("частичная ошибка рендерится по своему языку, вторая цель живёт", async () => {
+    const p = ports(async (text, target) => {
+      if (target === "de") throw new Error("gtx 429");
+      return { translation: `[${target}] ${text}`, detected: "en" };
+    });
+    const st = controller(p);
+    st.start();
+    inputWithSelection("Hello", 0, 5);
+    document.querySelector(".m-tr-chip")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await new Promise((r) => setTimeout(r));
+    const select = document.querySelector("[data-duopulse-translate] select") as HTMLSelectElement;
+    select.value = "de";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((r) => setTimeout(r));
+    const bubble = document.querySelector("[data-duopulse-translate]")!;
+    expect(bubble.textContent).toContain("[ru] Hello");
+    expect(bubble.textContent).toContain("Не получилось: gtx 429");
+    expect(st.stateSnapshot()).toMatchObject({ visible: true, pending: false });
+  });
+});
+
 describe("createSelectionPorts", () => {
-  it("translate зовёт команду и валидирует ответ; язык хранится (инкогнито — нет)", async () => {
+  it("translate зовёт команду (с источником) и валидирует ответ; языки хранятся (инкогнито — нет)", async () => {
     const invoke = vi.fn(async () => ({ translation: "Привет", detected: "en" }));
     let inc = false;
     const p = createSelectionPorts(invoke, () => inc);
     localStorage.removeItem("duopulse.mobile.translateTarget");
-    expect(p.loadTarget()).toBe("ru");
-    expect(await p.translate("Hi", "ru")).toEqual({ translation: "Привет", detected: "en" });
-    expect(invoke).toHaveBeenCalledWith("duo_translate_selection", { text: "Hi", target: "ru" });
-    p.saveTarget("de");
-    expect(p.loadTarget()).toBe("de");
+    expect(p.loadTargets()).toEqual(["ru"]);
+    expect(await p.translate("Hi", "ru", "auto")).toEqual({ translation: "Привет", detected: "en" });
+    expect(invoke).toHaveBeenCalledWith("duo_translate_selection", {
+      text: "Hi",
+      target: "ru",
+      source: "auto",
+    });
+    p.saveTargets(["de", "ro"]);
+    expect(p.loadTargets()).toEqual(["de", "ro"]);
     inc = true;
-    p.saveTarget("fr");
-    expect(p.loadTarget()).toBe("de");
+    p.saveTargets(["fr"]);
+    expect(p.loadTargets()).toEqual(["de", "ro"]);
     localStorage.removeItem("duopulse.mobile.translateTarget");
   });
 
   it("пустой ответ конвейера — ошибка", async () => {
     const p = createSelectionPorts(async () => ({ translation: "" }));
-    await expect(p.translate("Hi", "ru")).rejects.toThrow("пустой ответ");
+    await expect(p.translate("Hi", "ru", "auto")).rejects.toThrow("пустой ответ");
   });
 });

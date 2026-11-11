@@ -1,31 +1,40 @@
-// Перевод выделенного текста — мобильная ветка (карточка duopulse-103).
-// Десктоп: правый клик → нативный пункт «Перевести выделение» (translate_menu.
-// rs, WebView2 ContextMenuRequested) → бабл у выделения. В мобильном WebView
-// нет ни правого клика, ни контекстного меню композитора, а единственный
-// контент — кросс-доменный iframe плеера (выделение в нём недостижимо из
-// родительской страницы) — поэтому вход два, оба ведут в один gtx-конвейер
-// (команда duo_translate_selection: тот же эндпоинт, что duo_translate_texts,
-// плюс sl=auto и детект языка):
+// Перевод выделенного текста — мобильная ветка (карточка duopulse-103,
+// источник и несколько целей — duopulse-116). Десктоп: правый клик →
+// нативный пункт «Перевести выделение» (translate_menu.rs, WebView2
+// ContextMenuRequested) → бабл у выделения. В мобильном WebView нет ни
+// правого клика, ни контекстного меню композитора, а единственный контент —
+// кросс-доменный iframe плеера (выделение в нём недостижимо из родительской
+// страницы) — поэтому вход два, оба ведут в один gtx-конвейер (команда
+// duo_translate_selection: тот же эндпоинт, что duo_translate_texts,
+// источник опционален — нет, так auto + детект языка):
 //   1) long-press по выделяемому тексту нашей страницы (omnibox и пр. —
 //      системные ручки выделения) → плавающий чип «Перевести» у выделения →
 //      бабл перевода (TranslateBubble из content-модуля десктопа — DOM без
-//      каналов, стиль гайд 06 §6);
+//      каналов, стиль гайд 06 §6; селект источника и чипы нескольких целей);
 //   2) «Перевести текст…» в меню «⋮» шапки → лист с полем ввода (текст можно
-//      вставить откуда угодно) и селектом языка.
-// Последний язык запоминается в localStorage (как поисковик duopulse-085;
-// инкогнито — до перезапуска), бабл и лист стартуют с него.
+//      вставить откуда угодно) и селектом языка (одна цель, источник — авто).
+// Последние языки запоминаются в localStorage (как поисковик duopulse-085;
+// инкогнито — до перезапуска), бабл и лист стартуют с них.
 
-import { SELECTION_LANGS, TranslateBubble, type AnchorPoint } from "../../content/translate-select";
+import {
+  MAX_SELECTION_TARGETS,
+  SELECTION_LANGS,
+  SOURCE_AUTO,
+  TranslateBubble,
+  type AnchorPoint,
+  type SelectionLangs,
+  type SelectionResultItem,
+} from "../../content/translate-select";
 
 /** Транспорт invoke (в юнит-тестах подменяется фейком — паттерн duo/session). */
 export type SelectionInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 /** Порты конвейера перевода (тесты подменяют). */
 export interface MobileSelectionPorts {
-  translate(text: string, target: string): Promise<{ translation: string; detected: string }>;
-  /** Последний выбранный язык ("" — не задан, берём «ru»). */
-  loadTarget(): string;
-  saveTarget(code: string): void;
+  translate(text: string, target: string, source: string): Promise<{ translation: string; detected: string }>;
+  /** Последние выбранные языки ([] — не задано, берём [«ru»]). */
+  loadTargets(): string[];
+  saveTargets(targets: string[]): void;
 }
 
 /** Диагностика стендов (window.__duopulseMobileTranslate). */
@@ -36,8 +45,12 @@ export interface MobileSelectionState {
   visible: boolean;
   /** Открыт ли лист «Перевести текст…». */
   sheet: boolean;
-  /** Текущий язык перевода. */
+  /** Основная цель (последняя выбранная; подпись меню и листа). */
   target: string;
+  /** Все цели текущего бабла (duopulse-116). */
+  targets: string[];
+  /** Источник текущего бабла ("auto" — автоопределение). */
+  source: string;
   /** Ждём результат. */
   pending: boolean;
   /** Последняя ошибка конвейера ("" — не было). */
@@ -46,9 +59,19 @@ export interface MobileSelectionState {
 
 const TARGET_KEY = "duopulse.mobile.translateTarget";
 
-/** Язык из localStorage → код SELECTION_LANGS или «ru» (дефолт десктопа). */
-function normalizeTarget(raw: string): string {
-  return SELECTION_LANGS.some((l) => l.code === raw) ? raw : "ru";
+/** Языки из localStorage (список через запятую) → коды SELECTION_LANGS
+ * без дублей или [«ru»] (дефолт десктопа). */
+export function normalizeTargets(raw: string): string[] {
+  const valid = SELECTION_LANGS.map((l) => l.code);
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const code = part.trim();
+    if (valid.includes(code) && !out.includes(code)) {
+      out.push(code);
+      if (out.length >= MAX_SELECTION_TARGETS) break;
+    }
+  }
+  return out.length > 0 ? out : ["ru"];
 }
 
 /** Порты на tauri-командах (invoke + localStorage; incognito — не писать). */
@@ -57,8 +80,8 @@ export function createSelectionPorts(
   incognito: () => boolean = () => false,
 ): MobileSelectionPorts {
   return {
-    async translate(text, target) {
-      const r = (await invoke("duo_translate_selection", { text, target })) as {
+    async translate(text, target, source) {
+      const r = (await invoke("duo_translate_selection", { text, target, source })) as {
         translation?: unknown;
         detected?: unknown;
       };
@@ -70,16 +93,16 @@ export function createSelectionPorts(
         detected: typeof r.detected === "string" ? r.detected : "",
       };
     },
-    loadTarget() {
+    loadTargets() {
       try {
-        return normalizeTarget(localStorage.getItem(TARGET_KEY) ?? "");
+        return normalizeTargets(localStorage.getItem(TARGET_KEY) ?? "");
       } catch {
-        return "ru"; // localStorage недоступен — дефолт сессии
+        return ["ru"]; // localStorage недоступен — дефолт сессии
       }
     },
-    saveTarget(code) {
+    saveTargets(targets) {
       try {
-        if (!incognito()) localStorage.setItem(TARGET_KEY, code);
+        if (!incognito()) localStorage.setItem(TARGET_KEY, targets.join(","));
       } catch {
         /* приватный режим без localStorage — выбор живёт до перезапуска */
       }
@@ -97,7 +120,7 @@ export interface ReadSelection {
  * Текущее выделение документа: input/textarea (long-press в omnibox — ручки
  * системные, window.getSelection про input ничего не знает) или обычный text
  * (range-прямоугольник). Выделение внутри бабла/чипа перевода — не считаем
- * (перевод перевода по кругу). null — выделения нет/пустое.
+ * (перевод перевода по кругу). null — выделения нет/пусто.
  */
 export function readSelection(doc: Document): ReadSelection | null {
   const view = doc.defaultView;
@@ -131,9 +154,9 @@ export function readSelection(doc: Document): ReadSelection | null {
 
 /**
  * Контроллер перевода выделения мобильной ветки: чип у выделения → бабл
- * (TranslateBubble content-модуля), лист ручного ввода из меню «⋮». Язык —
- * один на оба входа (последний выбранный), смена в селекте бабла/листа
- * перезапускает конвейер с эхом оригинала.
+ * (TranslateBubble content-модуля), лист ручного ввода из меню «⋮». Языки —
+ * источник + список целей на бабл (последние выбранные, localStorage),
+ * смена селектов/чипов бабла перезапускает конвейер с эхом оригинала.
  */
 export class MobileSelectionTranslate {
   private readonly bubble: TranslateBubble;
@@ -141,12 +164,17 @@ export class MobileSelectionTranslate {
   private sheet: HTMLElement | null = null;
   private cached: ReadSelection = { text: "", anchor: { x: 16, y: 16 } };
   private original = "";
-  private target: string;
+  private langs: SelectionLangs;
+  /** Токен актуального прогона: устаревшие ответы (языки сменили/бабл
+   * закрыли) не трогают бабл. */
+  private runToken = 0;
   private state: MobileSelectionState = {
     chip: false,
     visible: false,
     sheet: false,
     target: "ru",
+    targets: ["ru"],
+    source: SOURCE_AUTO,
     pending: false,
     lastError: "",
   };
@@ -156,13 +184,23 @@ export class MobileSelectionTranslate {
     private readonly doc: Document,
     private readonly ports: MobileSelectionPorts,
   ) {
-    this.target = normalizeTarget(ports.loadTarget());
-    this.state.target = this.target;
+    const loaded = ports.loadTargets();
+    this.langs = { source: SOURCE_AUTO, targets: loaded.length > 0 ? loaded : ["ru"] };
+    this.state = {
+      ...this.state,
+      target: this.primary(this.langs),
+      targets: [...this.langs.targets],
+    };
     this.bubble = new TranslateBubble(
       doc,
-      (code) => this.retarget(code),
+      (langs) => this.onLangsChange(langs),
       () => this.closeBubble(),
     );
+  }
+
+  /** Основная цель — последняя выбранная (подписи, статус, e2e). */
+  private primary(langs: SelectionLangs): string {
+    return langs.targets[langs.targets.length - 1] ?? "ru";
   }
 
   /** Слушатели документа (selectionchange/select + закрытие); идемпотентен. */
@@ -201,7 +239,7 @@ export class MobileSelectionTranslate {
 
   /** Диагностика стендов (window.__duopulseMobileTranslate). */
   stateSnapshot(): MobileSelectionState {
-    return { ...this.state };
+    return { ...this.state, targets: [...this.state.targets] };
   }
 
   /** Снять слушатели документа (тесты; в живой странице живёт доunload). */
@@ -258,42 +296,72 @@ export class MobileSelectionTranslate {
       e.preventDefault();
       e.stopPropagation();
       this.hideChip();
-      void this.run(this.cached.text, this.target, this.cached.anchor);
+      void this.run(this.cached.text, this.langs, this.cached.anchor);
     });
     this.doc.body.appendChild(chip);
     this.chip = chip;
     return chip;
   }
 
-  /** Прогон конвейера: бабл «Переводим…» → результат/ошибка. */
-  private async run(text: string, target: string, anchor: AnchorPoint): Promise<void> {
+  /** Прогон конвейера: бабл «Переводим…» → перевод на каждую цель
+   * (последовательно — бюджет gtx мал) → результат/ошибки по языкам. */
+  private async run(text: string, langs: SelectionLangs, anchor: AnchorPoint): Promise<void> {
+    const token = ++this.runToken;
     this.original = text;
-    this.target = target;
-    this.bubble.show(anchor, target);
-    this.state = { ...this.state, visible: true, target, pending: true };
-    try {
-      const r = await this.ports.translate(text, target);
-      // устаревший ответ (язык сменили/бабл закрыли) — мимо
-      if (!this.bubble.visible || this.bubble.target !== target) return;
-      this.bubble.setResult(r.translation, text, r.detected, target);
-      this.state = { ...this.state, visible: true, target, pending: false };
-    } catch (e) {
-      if (!this.bubble.visible) return;
-      const message = e instanceof Error ? e.message : String(e);
-      this.bubble.setError(message);
-      this.state = { ...this.state, visible: true, lastError: message, pending: false };
+    this.langs = langs;
+    this.bubble.show(anchor, langs);
+    this.state = {
+      ...this.state,
+      visible: true,
+      target: this.primary(langs),
+      targets: [...langs.targets],
+      source: langs.source,
+      pending: true,
+    };
+    const items: SelectionResultItem[] = [];
+    let lastError = "";
+    for (const target of langs.targets) {
+      try {
+        const r = await this.ports.translate(text, target, langs.source);
+        items.push({ target, ok: true, translation: r.translation, detected: r.detected });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        lastError = message;
+        items.push({ target, ok: false, error: message });
+      }
     }
+    // устаревший ответ (языки сменили/бабл закрыли) — мимо
+    if (!this.bubble.visible || token !== this.runToken) return;
+    if (items.length === 1 && !items[0].ok) {
+      this.bubble.setError(items[0].error ?? "нет ответа");
+    } else {
+      this.bubble.setResult(text, items, langs);
+    }
+    this.state = {
+      ...this.state,
+      visible: true,
+      pending: false,
+      lastError: lastError || this.state.lastError,
+    };
   }
 
-  /** Смена языка в селекте бабла: помним выбор, повтор с эхом оригинала. */
-  private retarget(code: string): void {
+  /** Смена источника/целей в бабле: помним выбор, повтор с эхом оригинала. */
+  private onLangsChange(langs: SelectionLangs): void {
     if (!this.original) return; // ещё нечего переводить
-    this.ports.saveTarget(code);
+    this.langs = langs;
+    this.ports.saveTargets(langs.targets);
+    this.state = {
+      ...this.state,
+      target: this.primary(langs),
+      targets: [...langs.targets],
+      source: langs.source,
+    };
     const anchor = { ...this.cached.anchor };
-    void this.run(this.original, code, anchor);
+    void this.run(this.original, langs, anchor);
   }
 
   private closeBubble(): void {
+    this.runToken++; // летящие ответы закрывающегося бабла не догонят
     this.bubble.close();
     this.state = { ...this.state, visible: false, pending: false };
   }
@@ -329,7 +397,7 @@ export class MobileSelectionTranslate {
       const opt = doc.createElement("option");
       opt.value = l.code;
       opt.textContent = l.name;
-      opt.selected = l.code === this.target;
+      opt.selected = l.code === this.primary(this.langs);
       sel.append(opt);
     }
     const input = wrap.querySelector<HTMLTextAreaElement>(".m-tr-input")!;
@@ -350,16 +418,16 @@ export class MobileSelectionTranslate {
         return;
       }
       const target = sel.value;
-      this.ports.saveTarget(target);
-      this.target = target;
-      this.state = { ...this.state, sheet: true, target, pending: true };
+      this.ports.saveTargets([target]);
+      this.langs = { ...this.langs, targets: [target] };
+      this.state = { ...this.state, sheet: true, target, targets: [target], pending: true };
       go.disabled = true;
       go.textContent = "Переводим…";
       result.hidden = true;
       meta.hidden = true;
       void (async () => {
         try {
-          const r = await this.ports.translate(text, target);
+          const r = await this.ports.translate(text, target, SOURCE_AUTO);
           meta.hidden = false;
           meta.textContent =
             r.detected && r.detected !== target ? `${r.detected} → ${target}` : target;

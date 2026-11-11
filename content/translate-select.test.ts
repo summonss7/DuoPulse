@@ -1,11 +1,17 @@
-// Юнит-тесты перевода выделенного текста (карточка duopulse-098): канал
-// Core → бабл (begin/result/ошибка), смена языка (эхо-запрос), закрытие
-// (×, клик мимо, Esc), якорь по выделению/клику. DOM — happy-dom; канал
-// Core отсутствует (нет window.chrome.webview) — контроллер получает
+// Юнит-тесты перевода выделенного текста (карточки duopulse-098/116): канал
+// Core → бабл (begin/result/ошибка, несколько целевых языков и источник),
+// смена языков (эхо-запрос: замена/добавление цели, чип «×», источник),
+// закрытие (×, клик мимо, Esc), якорь по выделению/клику. DOM — happy-dom;
+// канал Core отсутствует (нет window.chrome.webview) — контроллер получает
 // сообщения напрямую через onCoreMessage-обработчик, перехваченный тут же.
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SelectionTranslate, SELECTION_LANGS, selectionLangName } from "./translate-select";
+import {
+  SelectionTranslate,
+  SELECTION_LANGS,
+  parseSelectionLangs,
+  selectionLangName,
+} from "./translate-select";
 import type { AnchorPoint } from "./translate-select";
 
 /** Перехват onCoreMessage: content/messaging в happy-dom без канала —
@@ -58,194 +64,329 @@ function selectTextInBody(): void {
 beforeEach(() => {
   document.body.innerHTML = "";
   // баблы живут на documentElement — переживают body-очистку, снимаем сами
-  document.documentElement
-    .querySelectorAll("[data-duopulse-translate]")
-    .forEach((n) => n.remove());
-  coreListeners = [];
+  document.documentElement.querySelectorAll("[data-duopulse-translate]").forEach((n) => n.remove());
+  coreListeners = []; // контроллеры прошлых тестов не слушают новый документ
 });
 
 describe("SELECTION_LANGS", () => {
   it("ru первый, дефолт меню Core", () => {
-    expect(SELECTION_LANGS[0]?.code).toBe("ru");
-    expect(selectionLangName("ru")).toBe("Русский");
-    expect(selectionLangName("??")).toBe("??");
+    expect(SELECTION_LANGS[0].code).toBe("ru");
+    expect(selectionLangName("ro")).toBe("Română");
+  });
+});
+
+describe("parseSelectionLangs", () => {
+  it("берёт targets+source, чистит мусор и дубли, режет лимит", () => {
+    const langs = parseSelectionLangs({
+      targets: ["ru", "xx", "ru", "ro", "de", "fr"],
+      source: "en",
+    });
+    expect(langs.targets).toEqual(["ru", "ro", "de", "fr"]); // лимит 4
+    expect(langs.source).toBe("en");
+  });
+
+  it("фолбэк поля target и дефолты", () => {
+    expect(parseSelectionLangs({ target: "de" })).toEqual({ source: "auto", targets: ["de"] });
+    expect(parseSelectionLangs({})).toEqual({ source: "auto", targets: ["ru"] });
+    expect(parseSelectionLangs({ targets: ["xx"], source: "zz" })).toEqual({
+      source: "auto",
+      targets: ["ru"],
+    });
   });
 });
 
 describe("канал Core → бабл", () => {
-  it("begin показывает «Переводим…» с языком из меню", () => {
-    const { ctrl } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
-    expect(ctrl.state()).toMatchObject({ visible: true, target: "ru", pending: true });
-    const root = document.querySelector("[data-duopulse-translate]");
-    expect(root?.textContent).toContain("Переводим…");
+  it("begin показывает «Переводим…» с языками из меню", () => {
+    const { ctrl } = makeHarness();
+    postFromCore({
+      duopulse: "translate-selection-begin",
+      reqId: 7,
+      source: "auto",
+      targets: ["ru", "ro"],
+    });
+    const bubble = document.querySelector("[data-duopulse-translate]")!;
+    expect(bubble.textContent).toContain("Переводим…");
+    expect(ctrl.state()).toMatchObject({
+      visible: true,
+      source: "auto",
+      targets: ["ru", "ro"],
+      pending: true,
+    });
+    // пока переводим — селекты заблокированы и запросов нет
+    const select = bubble.querySelector("select") as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(
+      (bubble.querySelector('select[aria-label="Язык оригинала"]') as HTMLSelectElement).disabled,
+    ).toBe(true);
   });
 
-  it("result заполняет перевод, оригинал и детект «en → ru»", () => {
-    const { ctrl } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
+  it("result рендерит перевод на каждый язык, эхо оригинала и детект", () => {
+    const { ctrl } = makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru", "ro"] });
     postFromCore({
       duopulse: "translate-selection-result",
-      reqId: 1,
+      reqId: 7,
       ok: true,
-      target: "ru",
-      detected: "en",
-      translation: "привет мир",
       original: "hello world",
+      items: [
+        { target: "ru", ok: true, translation: "привет мир", detected: "en" },
+        { target: "ro", ok: true, translation: "salut lumea", detected: "en" },
+      ],
     });
-    const root = document.querySelector("[data-duopulse-translate]");
-    expect(root?.textContent).toContain("привет мир");
-    expect(root?.textContent).toContain("hello world");
-    expect(root?.textContent).toContain("en → ru");
-    expect(ctrl.state()).toMatchObject({ visible: true, target: "ru", pending: false });
+    const bubble = document.querySelector("[data-duopulse-translate]")!;
+    expect(bubble.textContent).toContain("hello world");
+    expect(bubble.textContent).toContain("привет мир");
+    expect(bubble.textContent).toContain("salut lumea");
+    expect(bubble.textContent).toContain("en → ru"); // детект → цель
+    expect(ctrl.state()).toMatchObject({ pending: false, targets: ["ru", "ro"] });
   });
 
-  it("ошибка конвейера — текст ошибки в бабле, lastError в статусе", () => {
-    const { ctrl } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
+  it("частичная ошибка живёт в своей строке, не глушит второй язык", () => {
+    makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru", "de"] });
     postFromCore({
       duopulse: "translate-selection-result",
-      reqId: 1,
+      reqId: 7,
+      ok: true,
+      original: "hello",
+      items: [
+        { target: "ru", ok: true, translation: "привет", detected: "en" },
+        { target: "de", ok: false, error: "слишком много запросов" },
+      ],
+    });
+    const bubble = document.querySelector("[data-duopulse-translate]")!;
+    expect(bubble.textContent).toContain("привет");
+    expect(bubble.textContent).toContain("Не получилось: слишком много запросов");
+  });
+
+  it("общая ошибка конвейера (кулдаун) — текст ошибки в бабле", () => {
+    const { ctrl } = makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
+    postFromCore({
+      duopulse: "translate-selection-result",
+      reqId: 7,
       ok: false,
-      target: "ru",
-      error: "сеть недоступна",
+      error: "бесплатный сервис перевода просит подождать ~118 с",
     });
-    const root = document.querySelector("[data-duopulse-translate]");
-    expect(root?.textContent).toContain("Не получилось: сеть недоступна");
-    expect(ctrl.state().lastError).toBe("сеть недоступна");
+    const bubble = document.querySelector("[data-duopulse-translate]")!;
+    expect(bubble.textContent).toContain("Не получилось");
+    expect(bubble.textContent).toContain("подождать");
+    expect(ctrl.state().lastError).toContain("подождать");
   });
 
-  it("устаревший ответ (язык сменился) не затирает новый запрос", () => {
-    const { ctrl, posted } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
+  it("устаревший ответ (reqId не тот) не затирает новый запрос", () => {
+    const { posted } = makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
     postFromCore({
       duopulse: "translate-selection-result",
-      reqId: 1,
+      reqId: 7,
       ok: true,
-      target: "ru",
-      detected: "en",
-      translation: "привет",
-      original: "hi",
+      original: "hello",
+      items: [{ target: "ru", ok: true, translation: "привет", detected: "en" }],
     });
-    // пользователь переключил язык в селекте бабла
-    const select = document.querySelector("[data-duopulse-translate] select") as HTMLSelectElement;
-    select.value = "de";
-    select.dispatchEvent(new Event("change"));
-    expect(ctrl.state()).toMatchObject({ target: "de", pending: true });
-    expect(posted[posted.length - 1]).toMatchObject({
-      duopulse: "translate-selection",
-      text: "hi",
-      target: "de",
-    });
-    // поздний ответ старого запроса (ru) — мимо
+    const bubble = document.querySelector("[data-duopulse-translate]")!;
+    // смена языка — собственный reqId контроллера
+    const select = bubble.querySelector("select") as HTMLSelectElement;
+    select.value = "en";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(bubble.textContent).toContain("Переводим…");
+    // ответ на СТАРЫЙ reqId меню — мимо, бабл ждёт собственный
     postFromCore({
       duopulse: "translate-selection-result",
-      reqId: 1,
+      reqId: 7,
       ok: true,
-      target: "ru",
-      detected: "en",
-      translation: "привет (старый)",
-      original: "hi",
+      original: "hello",
+      items: [{ target: "ru", ok: true, translation: "старый ответ", detected: "en" }],
     });
-    const root = document.querySelector("[data-duopulse-translate]");
-    expect(root?.textContent).toContain("Переводим…"); // ждём de, старое не вписалось
+    expect(bubble.textContent).toContain("Переводим…");
+    expect(bubble.textContent).not.toContain("старый ответ");
+    // собственный reqId — принимается
+    const own = posted[0]["reqId"] as number;
+    postFromCore({
+      duopulse: "translate-selection-result",
+      reqId: own,
+      ok: true,
+      original: "hello",
+      items: [{ target: "en", ok: true, translation: "hello itself", detected: "en" }],
+    });
+    expect(document.querySelector("[data-duopulse-translate]")!.textContent).toContain(
+      "hello itself",
+    );
   });
 
   it("ответ после закрытия бабла игнорируется", () => {
-    const { ctrl } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
-    ctrl.close();
+    makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     postFromCore({
       duopulse: "translate-selection-result",
-      reqId: 1,
+      reqId: 7,
       ok: true,
-      target: "ru",
-      translation: "привет",
-      original: "hi",
+      original: "hello",
+      items: [{ target: "ru", ok: true, translation: "привет", detected: "en" }],
     });
     expect(document.querySelector("[data-duopulse-translate]")).toBeNull();
   });
 });
 
-describe("смена языка", () => {
-  it("пока первый перевод не пришёл, селект заблокирован и запросов нет", () => {
-    const { posted } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
-    const select = document.querySelector("[data-duopulse-translate] select") as HTMLSelectElement;
-    expect(select.disabled).toBe(true);
-    select.value = "en";
-    select.dispatchEvent(new Event("change"));
-    expect(posted.filter((m) => m["duopulse"] === "translate-selection")).toHaveLength(0);
-  });
-
-  it("после результата смена языка шлёт эхо-запрос с reqId", () => {
-    const { posted } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, target: "ru" });
+describe("смена языков (эхо-запрос)", () => {
+  function withResult(targets: string[], source = "auto"): Harness {
+    const h = makeHarness();
+    postFromCore({
+      duopulse: "translate-selection-begin",
+      reqId: 7,
+      source,
+      targets,
+    });
     postFromCore({
       duopulse: "translate-selection-result",
       reqId: 7,
       ok: true,
-      target: "ru",
-      translation: "привет",
-      original: "hello",
+      original: "hello world",
+      items: targets.map((t) => ({
+        target: t,
+        ok: true,
+        translation: `[${t}] hello world`,
+        detected: "en",
+      })),
     });
-    const select = document.querySelector("[data-duopulse-translate] select") as HTMLSelectElement;
-    expect(select.disabled).toBe(false);
-    select.value = "fr";
-    select.dispatchEvent(new Event("change"));
-    const req = posted.find((m) => m["duopulse"] === "translate-selection");
-    expect(req).toMatchObject({ text: "hello", target: "fr" });
-    expect(typeof req?.["reqId"]).toBe("number");
+    return h;
+  }
+
+  it("пока первый перевод не пришёл, селект заблокирован и запросов нет", () => {
+    const { posted } = makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
+    const select = document.querySelector(
+      "[data-duopulse-translate] select",
+    ) as HTMLSelectElement;
+    select.value = "en";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(posted).toEqual([]);
+  });
+
+  it("смена селекта добавляет язык к активным, запрос с эхом оригинала", () => {
+    const { posted } = withResult(["ru"]);
+    const select = document.querySelector(
+      "[data-duopulse-translate] select",
+    ) as HTMLSelectElement;
+    select.value = "en";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({
+      duopulse: "translate-selection",
+      text: "hello world",
+      source: "auto",
+      targets: ["ru", "en"],
+    });
+    expect(typeof posted[0]["reqId"]).toBe("number");
+  });
+
+  it("несколько целей: смена селекта — добавление языка, чип «×» убирает", () => {
+    const { posted } = withResult(["ru", "ro"]);
+    const select = document.querySelector(
+      "[data-duopulse-translate] select",
+    ) as HTMLSelectElement;
+    select.value = "de";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(posted[0]).toMatchObject({ targets: ["ru", "ro", "de"] });
+    // пока ответ не пришёл, чип заблокирован; ответим — и уберём язык
+    postFromCore({
+      duopulse: "translate-selection-result",
+      reqId: posted[0]["reqId"],
+      ok: true,
+      original: "hello world",
+      items: ["ru", "ro", "de"].map((t) => ({
+        target: t,
+        ok: true,
+        translation: `[${t}] hello world`,
+        detected: "en",
+      })),
+    });
+    const x = document.querySelector(
+      'button[aria-label="Убрать Română"]',
+    ) as HTMLButtonElement;
+    x.click();
+    expect(posted[1]).toMatchObject({ targets: ["ru", "de"] });
+    // единственный чип убрать нельзя
+    const y = document.querySelector(
+      'button[aria-label="Убрать Русский"]',
+    ) as HTMLButtonElement;
+    y.click();
+    expect(posted).toHaveLength(2);
+  });
+
+  it("селект источника меняет source запроса", () => {
+    const { posted } = withResult(["ru"]);
+    const src = document.querySelector(
+      '[data-duopulse-translate] select[aria-label="Язык оригинала"]',
+    ) as HTMLSelectElement;
+    src.value = "en";
+    src.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(posted[0]).toMatchObject({ source: "en", targets: ["ru"] });
+    // при явном источнике детект-метка не показывается (язык и так выбран)
+    expect(document.querySelector("[data-duopulse-translate]")!.textContent).not.toContain(
+      "en → ru",
+    );
+  });
+
+  it("запрос уходит в загрузку («Переводим…») и статусы ведут языки", () => {
+    const { ctrl } = withResult(["ru"]);
+    const select = document.querySelector(
+      "[data-duopulse-translate] select",
+    ) as HTMLSelectElement;
+    select.value = "ro";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(document.querySelector("[data-duopulse-translate]")!.textContent).toContain(
+      "Переводим…",
+    );
+    expect(ctrl.state()).toMatchObject({ targets: ["ru", "ro"], pending: true });
   });
 });
 
 describe("закрытие бабла", () => {
   it("кнопка ×", () => {
-    const { ctrl } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
-    (document.querySelector("[data-duopulse-translate] button") as HTMLButtonElement).click();
-    expect(ctrl.state().visible).toBe(false);
+    makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
+    (document.querySelector('button[aria-label="Закрыть перевод"]') as HTMLButtonElement).click();
     expect(document.querySelector("[data-duopulse-translate]")).toBeNull();
   });
 
   it("Esc и клик мимо", () => {
-    const { ctrl } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(ctrl.state().visible).toBe(false);
-
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 2, target: "ru" });
-    document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
-    expect(ctrl.state().visible).toBe(false);
+    makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.querySelector("[data-duopulse-translate]")).toBeNull();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 8, targets: ["ru"] });
+    document.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(document.querySelector("[data-duopulse-translate]")).toBeNull();
   });
 
   it("клик по самому баблу не закрывает", () => {
-    const { ctrl } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
-    const root = document.querySelector("[data-duopulse-translate]") as HTMLDivElement;
-    root.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
-    expect(ctrl.state().visible).toBe(true);
+    makeHarness();
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
+    const bubble = document.querySelector("[data-duopulse-translate]")!;
+    bubble.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    expect(document.querySelector("[data-duopulse-translate]")).not.toBeNull();
   });
 });
 
 describe("якорь бабла", () => {
   it("по живому выделению (конец прямоугольника)", () => {
-    const { ctrl } = makeHarness({ x: 400, y: 300 });
+    const { ctrl } = makeHarness({ x: 40, y: 40 });
     selectTextInBody();
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
+    const bubble = document.querySelector("[data-duopulse-translate]") as HTMLElement;
+    expect(bubble.style.left).not.toBe("0px");
     expect(ctrl.state().visible).toBe(true);
-    const root = document.querySelector("[data-duopulse-translate]") as HTMLDivElement;
-    // happy-dom rect нулевой — клампы вытащат координату клика; главное — показан
-    expect(root.style.left).not.toBe("");
   });
 
   it("по клику правой кнопкой, когда выделения нет", () => {
-    const { ctrl } = makeHarness({ x: 40, y: 60 });
-    postFromCore({ duopulse: "translate-selection-begin", reqId: 1, target: "ru" });
-    const root = document.querySelector("[data-duopulse-translate]") as HTMLDivElement;
-    const left = Number.parseFloat(root.style.left);
-    const top = Number.parseFloat(root.style.top);
+    makeHarness({ x: 200, y: 150 });
+    postFromCore({ duopulse: "translate-selection-begin", reqId: 7, targets: ["ru"] });
+    const bubble = document.querySelector("[data-duopulse-translate]") as HTMLElement;
+    const left = Number.parseFloat(bubble.style.left);
+    const top = Number.parseFloat(bubble.style.top);
     expect(left).toBeGreaterThanOrEqual(0);
-    expect(top).toBeGreaterThan(60); // под точкой клика
+    expect(top).toBeGreaterThan(150); // под точкой клика
   });
 });
