@@ -323,7 +323,9 @@ pub fn updater_download(
         *last_emit = downloaded;
     };
     'attempts: for attempt in 1..=MAX_ATTEMPTS {
-        let mut request = agent().get(&url).set("User-Agent", crate::duo_mobile::USER_AGENT);
+        let mut request = agent()
+            .get(&url)
+            .set("User-Agent", crate::duo_mobile::USER_AGENT);
         if downloaded > 0 {
             request = request.set("Range", format!("bytes={downloaded}-").as_str());
         }
@@ -403,7 +405,9 @@ pub fn updater_download(
         hasher = Sha256::new();
     }
     let _ = std::fs::remove_file(&dest);
-    Err(format!("скачивание не удалось за {MAX_ATTEMPTS} попыток: {last_err}"))
+    Err(format!(
+        "скачивание не удалось за {MAX_ATTEMPTS} попыток: {last_err}"
+    ))
 }
 
 #[cfg(target_os = "android")]

@@ -33,7 +33,8 @@ pub fn profile_dir() -> Result<std::path::PathBuf, String> {
 fn files_dir() -> Result<std::path::PathBuf, String> {
     crate::mobile_jni::with_jni(|env, context| {
         let dir = crate::mobile_jni::call_obj(env, context, "getFilesDir", "()Ljava/io/File;")?;
-        let s = crate::mobile_jni::call_string(env, &dir, "getAbsolutePath", "()Ljava/lang/String;")?;
+        let s =
+            crate::mobile_jni::call_string(env, &dir, "getAbsolutePath", "()Ljava/lang/String;")?;
         Ok(std::path::PathBuf::from(s))
     })
 }

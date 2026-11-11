@@ -90,7 +90,10 @@ pub fn aila_sync_now(
     history: tauri::State<'_, Arc<HistoryStore>>,
 ) -> Result<SyncStatsMobile, String> {
     let (passwords, bookmarks) = account.sync_now(passwords.inner(), history.inner())?;
-    Ok(SyncStatsMobile { passwords, bookmarks })
+    Ok(SyncStatsMobile {
+        passwords,
+        bookmarks,
+    })
 }
 
 /// passwords.list (мобильное подмножество): записи без паролей.
@@ -99,7 +102,10 @@ pub fn mobile_passwords_list(
     passwords: tauri::State<'_, Arc<PasswordStore>>,
     params: PasswordListParams,
 ) -> Result<PasswordListResult, String> {
-    passwords.list(params.query.as_deref().unwrap_or(""), params.limit.unwrap_or(200))
+    passwords.list(
+        params.query.as_deref().unwrap_or(""),
+        params.limit.unwrap_or(200),
+    )
 }
 
 /// passwords.reveal: пароль записи — только по явному запросу (кнопка
@@ -143,7 +149,10 @@ pub fn mobile_clipboard_copy(text: String) -> Result<(), String> {
                 .map_err(|e| format!("clipboard: {e}"))?;
             match out.as_str() {
                 "copied" => Ok(()),
-                other => Err(format!("буфер обмена: {}", other.strip_prefix("error: ").unwrap_or(&other))),
+                other => Err(format!(
+                    "буфер обмена: {}",
+                    other.strip_prefix("error: ").unwrap_or(&other)
+                )),
             }
         })
     }

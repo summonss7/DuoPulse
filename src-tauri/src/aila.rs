@@ -90,7 +90,8 @@ fn pbkdf2_32(password: &str, salt_hex: &str) -> Result<[u8; 32], String> {
 fn sync_key_of(wrap_key: &[u8; 32]) -> [u8; 32] {
     let hk = Hkdf::<Sha256>::new(Some(b"duopulse"), wrap_key);
     let mut out = [0u8; 32];
-    hk.expand(b"duopulse-passwords-v1", &mut out).expect("32Б ок");
+    hk.expand(b"duopulse-passwords-v1", &mut out)
+        .expect("32Б ок");
     out
 }
 
@@ -102,7 +103,8 @@ fn sync_key_of(wrap_key: &[u8; 32]) -> [u8; 32] {
 fn bookmarks_key_of(passwords_key: &[u8; 32]) -> [u8; 32] {
     let hk = Hkdf::<Sha256>::new(Some(b"duopulse"), passwords_key);
     let mut out = [0u8; 32];
-    hk.expand(b"duopulse-bookmarks-v1", &mut out).expect("32Б ок");
+    hk.expand(b"duopulse-bookmarks-v1", &mut out)
+        .expect("32Б ок");
     out
 }
 
@@ -129,7 +131,10 @@ fn seal_blob<D: serde::Serialize>(key: &[u8; 32], doc: &D) -> Result<serde_json:
     Ok(serde_json::json!({ "iv": encode_hex(&iv), "ct": encode_hex(&ct) }))
 }
 
-fn open_blob<D: serde::de::DeserializeOwned>(key: &[u8; 32], blob: &serde_json::Value) -> Result<D, String> {
+fn open_blob<D: serde::de::DeserializeOwned>(
+    key: &[u8; 32],
+    blob: &serde_json::Value,
+) -> Result<D, String> {
     let iv = decode_hex(blob.get("iv").and_then(|v| v.as_str()).unwrap_or(""))
         .filter(|v| v.len() == 12)
         .ok_or("блоб синка без IV")?;
@@ -323,7 +328,11 @@ impl AilaAccount {
     /// Воркер авто-синка: ждёт «грязно» (правки паролей/закладок/вход/повтор
     /// ошибки), дебаунсит, синкает оба хранилища; при ошибке — бэкофф 30с →
     /// 2м → 10м (правка за это время будит воркер сразу).
-    pub fn start_worker(self: &Arc<Self>, passwords: Arc<PasswordStore>, history: Arc<HistoryStore>) {
+    pub fn start_worker(
+        self: &Arc<Self>,
+        passwords: Arc<PasswordStore>,
+        history: Arc<HistoryStore>,
+    ) {
         let account = Arc::clone(self);
         std::thread::spawn(move || {
             let (lock, cvar) = &account.ctl_pair;
@@ -384,7 +393,8 @@ impl AilaAccount {
         let agent = http_agent();
         // 1) соли (несуществующий юзер получает фейковые — вход честно падает)
         let (_, text, _) = send_json(
-            &agent, "POST",
+            &agent,
+            "POST",
             &format!("{server}/api/login/params"),
             &serde_json::json!({ "username": username }),
             None,
@@ -398,7 +408,8 @@ impl AilaAccount {
         let wrap_key = pbkdf2_32(password, &wrap_salt)?;
         // 3) вход — серверу уходит только auth_hash
         let (status, text, set_cookie) = send_json(
-            &agent, "POST",
+            &agent,
+            "POST",
             &format!("{server}/api/login"),
             &serde_json::json!({
                 "username": username,
@@ -416,8 +427,8 @@ impl AilaAccount {
         let Some(token) = set_cookie.as_deref().and_then(token_of_set_cookie) else {
             return Err("сервер Aila не выдал сессию (нет куки aila_sess)".into());
         };
-        let doc: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|_| "странный ответ /api/login".to_string())?;
+        let doc: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| "странный ответ /api/login".to_string())?;
         let display_name = doc["user"]["display_name"]
             .as_str()
             .unwrap_or(username)
@@ -427,7 +438,10 @@ impl AilaAccount {
         //    пересчитает его из сохранённого aila.sync.key без wrap_key)
         let sync_key = sync_key_of(&wrap_key);
         crate::secrets::save(&self.profile_dir.join("aila.token"), &token)?;
-        crate::secrets::save(&self.profile_dir.join("aila.sync.key"), &encode_hex(&sync_key))?;
+        crate::secrets::save(
+            &self.profile_dir.join("aila.sync.key"),
+            &encode_hex(&sync_key),
+        )?;
         let _ = std::fs::write(
             self.profile_dir.join("aila-account.json"),
             serde_json::json!({
@@ -456,7 +470,8 @@ impl AilaAccount {
         if let Some(s) = &sess {
             let agent = http_agent();
             let _ = send_json(
-                &agent, "POST",
+                &agent,
+                "POST",
                 &format!("{}/api/logout", s.server),
                 &serde_json::json!({}),
                 Some(&s.token),
@@ -512,7 +527,8 @@ impl AilaAccount {
         if !same_as_remote {
             let blob = seal_blob(sync_key, &local_doc)?;
             let (status, text, _) = send_json(
-                agent, "PUT",
+                agent,
+                "PUT",
                 &format!("{server}/api/appdata"),
                 &serde_json::json!({
                     "app": APP_ID, "key": key_id, "blob": blob, "if_match": revision,
@@ -539,7 +555,8 @@ impl AilaAccount {
                     let merged = merge(winner_doc.as_ref())?;
                     revision = winner["revision"].as_u64().unwrap_or(revision);
                     let (status2, text2, _) = send_json(
-                        agent, "PUT",
+                        agent,
+                        "PUT",
                         &format!("{server}/api/appdata"),
                         &serde_json::json!({
                             "app": APP_ID, "key": key_id,
@@ -652,7 +669,13 @@ impl AilaAccount {
             );
         }
         Ok((
-            (pw_pulled, pw_stats.applied, pw_stats.conflicts, pw_pushed, revision),
+            (
+                pw_pulled,
+                pw_stats.applied,
+                pw_stats.conflicts,
+                pw_pushed,
+                revision,
+            ),
             (bm_pulled, bm_stats.applied, bm_pushed),
         ))
     }
@@ -669,7 +692,17 @@ impl AilaAccount {
 
     /// Снимок состояния для UI:
     /// (вход?, username, display, сервер, revision, последний синк, ошибка).
-    pub fn status(&self) -> (bool, String, String, String, u64, Option<i64>, Option<String>) {
+    pub fn status(
+        &self,
+    ) -> (
+        bool,
+        String,
+        String,
+        String,
+        u64,
+        Option<i64>,
+        Option<String>,
+    ) {
         let guard = self.session.lock().unwrap();
         match guard.as_ref() {
             None => (
@@ -753,7 +786,8 @@ mod tests {
         // канонический путь (иначе машины не сошлись бы)
         let hk = Hkdf::<Sha256>::new(Some(b"duopulse"), &key(7));
         let mut direct = [0u8; 32];
-        hk.expand(b"duopulse-bookmarks-v1", &mut direct).expect("ок");
+        hk.expand(b"duopulse-bookmarks-v1", &mut direct)
+            .expect("ок");
         assert_ne!(bm, direct);
     }
 
@@ -782,7 +816,9 @@ mod tests {
         assert_eq!(back.never_save, vec!["https://spam.io".to_string()]);
         // чужой ключ — честная ошибка
         assert!(open_blob::<VaultDoc>(&key(2), &blob).is_err());
-        assert!(open_blob::<VaultDoc>(&key(1), &serde_json::json!({ "iv": "xx", "ct": "yy" })).is_err());
+        assert!(
+            open_blob::<VaultDoc>(&key(1), &serde_json::json!({ "iv": "xx", "ct": "yy" })).is_err()
+        );
     }
 
     /// Блоб закладок (этап 5): тот же {iv, ct}-формат, ключ закладок отличен
@@ -839,7 +875,12 @@ mod tests {
         let store = PasswordStore::open_with_key(&dir.join("m.db"), key(3)).unwrap();
         // локальная запись ДО входа — при первом синке уезжает в облако
         store
-            .add("https://example.com/login", Some("Example"), "artem", "local-pass")
+            .add(
+                "https://example.com/login",
+                Some("Example"),
+                "artem",
+                "local-pass",
+            )
             .unwrap();
 
         // облако: тот же сайт, тот же юзер, СТАРЫЙ пароль — локальная
@@ -853,11 +894,15 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         };
-        let st = store.merge_remote(std::slice::from_ref(&remote_old), &[]).unwrap();
+        let st = store
+            .merge_remote(std::slice::from_ref(&remote_old), &[])
+            .unwrap();
         assert_eq!((st.applied, st.conflicts), (0, 1));
         let full = store.export_full().unwrap();
         assert_eq!(full.len(), 2);
-        assert!(full.iter().any(|f| f.password == "local-pass" && f.username == "artem"));
+        assert!(full
+            .iter()
+            .any(|f| f.password == "local-pass" && f.username == "artem"));
         assert!(full
             .iter()
             .any(|f| f.password == "cloud-old" && f.username.contains("дубль")));
@@ -873,7 +918,9 @@ mod tests {
             created_at: 1,
             updated_at: now_ms() + 1000,
         };
-        let st = store.merge_remote(std::slice::from_ref(&remote_new), &[]).unwrap();
+        let st = store
+            .merge_remote(std::slice::from_ref(&remote_new), &[])
+            .unwrap();
         assert_eq!(st.applied, 1);
         let full = store.export_full().unwrap();
         assert!(full
@@ -893,12 +940,16 @@ mod tests {
             updated_at: now_ms() + 2000,
         };
         let before = store.export_full().unwrap().len();
-        let st = store.merge_remote(std::slice::from_ref(&same), &[]).unwrap();
+        let st = store
+            .merge_remote(std::slice::from_ref(&same), &[])
+            .unwrap();
         assert_eq!(st.conflicts, 0);
         assert_eq!(store.export_full().unwrap().len(), before);
 
         // denylist — объединение
-        store.merge_remote(&[], &["https://spam.io".into()]).unwrap();
+        store
+            .merge_remote(&[], &["https://spam.io".into()])
+            .unwrap();
         assert!(store.is_denied("https://spam.io"));
         drop(store); // SQLite держит файл — закрываем до удаления каталога
         std::fs::remove_dir_all(&dir).unwrap();

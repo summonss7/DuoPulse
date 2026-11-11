@@ -7,9 +7,10 @@
 //!   дважды (`&amp;#39;` → `'`): декодируем два прохода, затем вырезаем теги.
 //! - JSON3 (`fmt=json3`): `events[].{tStartMs, dDurationMs, segs[].utf8}`.
 //!   События без `segs` — служебные (окна/формат), пропускаются тихо;
-//!   события с `aAppend` — пословный режим автосубтитров (карточка
-//!   duopulse-094): разбор нарастающей прокруткой как у нативного плеера —
-//!   слово появляется в момент речи, на экране последние две строки.
+//!   события с `aAppend` — пословный режим автосубтитров (карточки
+//!   duopulse-094, duopulse-113): слово появляется в момент речи, на
+//!   экране всегда ОДНА строка — набираемая; завершённая (уже проговорённая)
+//!   строка держится только до первого слова следующей, стопки строк нет.
 //!
 //! Формат выбирается по первому непробельному символу: `{` — JSON3, иначе XML.
 //! Битые элементы/XML/JSON — предупреждение, разбор продолжается.
@@ -254,30 +255,28 @@ struct Json3Event {
     text: String,
 }
 
-/// Пословный режим автосубтитров (aAppend, карточка duopulse-094): слова
-/// приходят отдельными событиями с пословным таймингом, «\n» в segs — конец
-/// строки. Нативный плеер YouTube показывает их нарастающей прокруткой: слово
-/// появляется в момент речи, на экране — последние две строки. Так же живёт и
-/// наш парсер: каждый Content-событие даёт cue «что видно сейчас» (конец —
-/// начало следующего события), длительность показа текста = до следующего
-/// слова; Cue без смены текста продлевают предыдущий. Раньше все слова
+/// Пословный режим автосубтитров (aAppend, карточки duopulse-094, duopulse-113):
+/// слова приходят отдельными событиями с пословным таймингом, «\n» в segs —
+/// конец строки. На экране всегда одна строка — набираемая (слово появляется
+/// в момент речи); завершённая строка уже проговорена и держится только до
+/// первого слова следующей (пауза между фразами), стопки «старая над новой»
+/// больше нет — пожелание Артёма (duopulse-113; до этого показывали последние
+/// две строки прокруткой, как нативный плеер — duopulse-094). Каждый content-cue
+/// — «что видно сейчас» (конец — начало следующего события), cue без смены
+/// текста продлевают предыдущий. Раньше (до duopulse-094) все слова
 /// приклеивались в один гигантский cue на всё окно — плашка закрывала экран.
 fn parse_json3_rolling(content: &[Json3Event]) -> Vec<Cue> {
     let mut cues: Vec<Cue> = Vec::new();
-    // Строки «прокрутки»: завершённые (после «\n», храним последние две) и
-    // текущая набираемая (пословный хвост без переноса).
-    let mut completed: std::collections::VecDeque<String> = Default::default();
+    // Набираемая строка (пословный хвост без переноса) и последняя завершённая
+    // («\n») — её показываем в паузе, пока не началась следующая.
+    let mut held = String::new();
     let mut cur = String::new();
 
-    let commit = |completed: &mut std::collections::VecDeque<String>, cur: &mut String| {
+    let commit = |held: &mut String, cur: &mut String| {
         let line = cur.trim().to_string();
         cur.clear();
-        if line.is_empty() {
-            return;
-        }
-        completed.push_back(line);
-        while completed.len() > 2 {
-            completed.pop_front();
+        if !line.is_empty() {
+            *held = line;
         }
     };
 
@@ -285,25 +284,20 @@ fn parse_json3_rolling(content: &[Json3Event]) -> Vec<Cue> {
         // Неприклеиваемое событие посреди строки — новое окно показа: строку
         // завершаем, текст события начинает следующую.
         if !ev.append && !cur.trim().is_empty() {
-            commit(&mut completed, &mut cur);
+            commit(&mut held, &mut cur);
         }
         let parts: Vec<&str> = ev.text.split('\n').collect();
         for (pi, part) in parts.iter().enumerate() {
             cur.push_str(part);
             if pi + 1 < parts.len() {
-                commit(&mut completed, &mut cur);
+                commit(&mut held, &mut cur);
             }
         }
-        // Видно последние две строки: завершённые + набираемая (если непуста).
-        let mut lines: Vec<&str> = completed.iter().map(|s| s.as_str()).collect();
-        let head = cur.trim();
-        if !head.is_empty() {
-            lines.push(head);
-        }
-        if lines.len() > 2 {
-            lines.drain(..lines.len() - 2);
-        }
-        let visible = lines.join("\n");
+        // Видна одна строка: набираемая, пуста — завершённая (пауза между фразами).
+        let visible = match cur.trim() {
+            "" => held.as_str(),
+            head => head,
+        };
         if visible.is_empty() {
             continue;
         }
@@ -320,7 +314,7 @@ fn parse_json3_rolling(content: &[Json3Event]) -> Vec<Cue> {
                     cues.push(Cue {
                         start_ms: ev.start_ms,
                         end_ms,
-                        text: visible,
+                        text: visible.to_string(),
                     });
                 }
             }
@@ -439,27 +433,28 @@ mod tests {
                     end_ms: 6_000,
                     text: "hello world".into()
                 },
-                // Неприклеиваемое событие завершило строку — видно две строки
+                // Строка «Second line\n» пришла целиком: завершённая видна
+                // до начала следующей (пауза), без стопки строк
                 Cue {
                     start_ms: 6_000,
                     end_ms: 7_000,
-                    text: "hello world\nSecond line".into()
+                    text: "Second line".into()
                 },
-                // Третья строка вытесняет первую (прокрутка двух строк)
                 Cue {
                     start_ms: 7_000,
                     end_ms: 8_000, // последнее событие — своей длительностью
-                    text: "Second line\ncontinued".into()
+                    text: "continued".into()
                 },
             ]
         );
     }
 
     #[test]
-    fn json3_asr_fixture_rolling_two_lines_word_by_word() {
-        // Карточка duopulse-094: пословные автосубтитры показываются нарастающей
-        // прокруткой (слово появляется в момент речи, на экране — последние две
-        // строки), а не одним гигантским cue на всё окно.
+    fn json3_asr_fixture_rolling_single_line_word_by_word() {
+        // Карточки duopulse-094/113: пословные автосубтитры показываются
+        // ОДНОЙ строкой — набираемое слово в момент речи, завершённая строка
+        // (уже проговорённая) не висит над новой, а держится лишь до первого
+        // слова следующей фразы (события-«\n» продлевают показ).
         let parsed = parse_json3(ASR_JSON3);
         assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
         assert_eq!(
@@ -470,6 +465,7 @@ mod tests {
                     end_ms: 1_080,
                     text: "we've".into()
                 },
+                // событие-«\n» (1330) не сменило текст — показ продлен до «a»
                 Cue {
                     start_ms: 1_080,
                     end_ms: 1_680,
@@ -478,33 +474,34 @@ mod tests {
                 Cue {
                     start_ms: 1_680,
                     end_ms: 2_000,
-                    text: "we've got\na".into()
+                    text: "a".into()
                 },
+                // событие-«\n» (5000) продлило фразу до слова «next»
                 Cue {
                     start_ms: 2_000,
                     end_ms: 5_300,
-                    text: "we've got\na problem".into()
+                    text: "a problem".into()
                 },
                 Cue {
                     start_ms: 5_300,
                     end_ms: 5_800,
-                    text: "a problem\nnext".into()
+                    text: "next".into()
                 },
                 Cue {
                     start_ms: 5_800,
                     end_ms: 6_200,
-                    text: "a problem\nnext phrase".into()
+                    text: "next phrase".into()
                 },
                 Cue {
                     start_ms: 6_200,
                     end_ms: 6_800,
-                    text: "a problem\nnext phrase here".into()
+                    text: "next phrase here".into()
                 },
             ]
         );
-        // Ни один cue не длиннее двух строк — плашка не разрастается на экран.
+        // На экране всегда одна строка — уже проговоренное не показывается.
         for cue in &parsed.cues {
-            assert!(cue.text.matches('\n').count() <= 1, "{:?}", cue.text);
+            assert!(!cue.text.contains('\n'), "{:?}", cue.text);
         }
     }
 

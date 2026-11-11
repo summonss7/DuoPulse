@@ -34,6 +34,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod adblock;
+/// Аккаунт Aila и синк паролей между устройствами (этап 4 duopulse-106).
+mod aila;
 mod asr;
 mod bridge;
 mod chrome_menu;
@@ -42,8 +44,6 @@ mod history;
 mod omnibox;
 /// Менеджер паролей (этап 1 duopulse-106): passwords.db + ключ под DPAPI.
 mod passwords;
-/// Аккаунт Aila и синк паролей между устройствами (этап 4 duopulse-106).
-mod aila;
 mod perf;
 mod prefetch;
 mod proxy;
@@ -872,17 +872,16 @@ fn handle_selection_translate(
 /// Инкогнито и неактивная вкладка — молча; origin — по URL вкладки.
 /// Бар заслужен — событие passwords:save_prompt в UI (payload без пароля).
 #[cfg(windows)]
-fn handle_password_candidate(
-    app: &AppHandle,
-    tab_id: &str,
-    parsed: &serde_json::Value,
-) {
+fn handle_password_candidate(app: &AppHandle, tab_id: &str, parsed: &serde_json::Value) {
     let manager = app.state::<tabs::TabManager>();
     if manager.is_incognito(tab_id) {
         return; // инкогнито: пароли не сохраняем (duopulse-108)
     }
-    let Some(tab_url) = manager.url_of(tab_id) else { return };
-    let (Some(username), Some(password)) = (parsed["username"].as_str(), parsed["password"].as_str())
+    let Some(tab_url) = manager.url_of(tab_id) else {
+        return;
+    };
+    let (Some(username), Some(password)) =
+        (parsed["username"].as_str(), parsed["password"].as_str())
     else {
         return;
     };
@@ -899,7 +898,11 @@ fn handle_password_candidate(
                 "[passwords] кандидат: {}@{} ({})",
                 view.username,
                 view.origin,
-                if view.updated { "обновление" } else { "новый" }
+                if view.updated {
+                    "обновление"
+                } else {
+                    "новый"
+                }
             );
             let _ = bridge::emit::<bridge::PasswordsSavePromptEvent>(
                 app,
@@ -929,8 +932,12 @@ fn handle_passwords_lookup(
     if manager.is_incognito(tab_id) {
         return; // инкогнито: не заполняем (duopulse-108)
     }
-    let Some(tab_url) = manager.url_of(tab_id) else { return };
-    let Ok(origin) = passwords::origin_of(&tab_url) else { return };
+    let Some(tab_url) = manager.url_of(tab_id) else {
+        return;
+    };
+    let Ok(origin) = passwords::origin_of(&tab_url) else {
+        return;
+    };
     let accounts = app
         .state::<std::sync::Arc<passwords::PasswordStore>>()
         .accounts_for(&origin)
@@ -962,9 +969,15 @@ fn handle_passwords_fill(
     if manager.is_incognito(tab_id) {
         return;
     }
-    let Some(tab_url) = manager.url_of(tab_id) else { return };
-    let Ok(origin) = passwords::origin_of(&tab_url) else { return };
-    let Some(username) = parsed["username"].as_str() else { return };
+    let Some(tab_url) = manager.url_of(tab_id) else {
+        return;
+    };
+    let Ok(origin) = passwords::origin_of(&tab_url) else {
+        return;
+    };
+    let Some(username) = parsed["username"].as_str() else {
+        return;
+    };
     let password = app
         .state::<std::sync::Arc<passwords::PasswordStore>>()
         .credential(&origin, username)

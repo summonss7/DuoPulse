@@ -90,7 +90,10 @@ pub async fn ui_panel_open(
     h: f64,
     focus: Option<bool>,
 ) -> Result<(), String> {
-    if !matches!(kind.as_str(), "main" | "proxy" | "vpn" | "duo" | "suggest" | "pwsave") {
+    if !matches!(
+        kind.as_str(),
+        "main" | "proxy" | "vpn" | "duo" | "suggest" | "pwsave"
+    ) {
         return Err(format!("неизвестная панель: {kind}"));
     }
     // предыдущая панель уходит (единое «одно меню на экран»); поколение

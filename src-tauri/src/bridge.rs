@@ -194,9 +194,9 @@ pub use crate::history::contract::{
     HistoryVisitParams,
 };
 pub use crate::passwords::{
-    PasswordAddParams, PasswordEntry, PasswordListParams, PasswordListResult,
-    PasswordRevealParams, PasswordRevealResult, PasswordRemoveParams, PasswordSaveResult,
-    PasswordUpdateParams, PasswordsCandidateView, PasswordsResolveParams,
+    PasswordAddParams, PasswordEntry, PasswordListParams, PasswordListResult, PasswordRemoveParams,
+    PasswordRevealParams, PasswordRevealResult, PasswordSaveResult, PasswordUpdateParams,
+    PasswordsCandidateView, PasswordsResolveParams,
 };
 
 /// aila.status: состояние аккаунта Aila (этап 4 duopulse-110): вход, сервер,

@@ -48,7 +48,12 @@ pub fn call_obj<'a>(
 }
 
 /// Строковое поле объекта (getPackageName, getAbsolutePath…).
-pub fn call_string(env: &mut JNIEnv, obj: &JObject, name: &str, sig: &str) -> Result<String, String> {
+pub fn call_string(
+    env: &mut JNIEnv,
+    obj: &JObject,
+    name: &str,
+    sig: &str,
+) -> Result<String, String> {
     let s = call_obj(env, obj, name, sig)?;
     let js = JString::from(s);
     env.get_string(&js)
@@ -59,7 +64,11 @@ pub fn call_string(env: &mut JNIEnv, obj: &JObject, name: &str, sig: &str) -> Re
 /// Класс из dex приложения — через classLoader контекста: FindClass с
 /// нативно подключённого потока видит только системные классы (как
 /// find_class в tauri-runtime).
-pub fn app_class<'a>(env: &mut JNIEnv<'a>, context: &JObject, name: &str) -> Result<JClass<'a>, String> {
+pub fn app_class<'a>(
+    env: &mut JNIEnv<'a>,
+    context: &JObject,
+    name: &str,
+) -> Result<JClass<'a>, String> {
     let loader = call_obj(env, context, "getClassLoader", "()Ljava/lang/ClassLoader;")?;
     let jname = jstr(env, name)?;
     let class = env

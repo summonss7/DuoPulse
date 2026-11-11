@@ -505,7 +505,12 @@ impl TabManager {
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(800));
                 let st = app.state::<TabManager>();
-                if !st.state.lock().map(|s| s.tabs.iter().any(|t| t.incognito)).unwrap_or(true) {
+                if !st
+                    .state
+                    .lock()
+                    .map(|s| s.tabs.iter().any(|t| t.incognito))
+                    .unwrap_or(true)
+                {
                     clean_incognito_data();
                 }
             });
@@ -904,7 +909,13 @@ impl TabManager {
         // Кандидат бара «Сохранить пароль?» чужой активной вкладке не живёт
         // (этап 2 duopulse-108): сабмит был в другой вкладке/вкладка закрыта.
         app.state::<crate::passwords::PasswordPrompts>()
-            .on_tabs_changed(snapshot.tabs.iter().find(|t| t.active).map(|t| t.id.as_str()));
+            .on_tabs_changed(
+                snapshot
+                    .tabs
+                    .iter()
+                    .find(|t| t.active)
+                    .map(|t| t.id.as_str()),
+            );
         snapshot
     }
 
@@ -1192,7 +1203,10 @@ pub(crate) fn now_ms() -> i64 {
 /// закрытие приватного окна возвращает туда, откуда пришли), слева обычных
 /// нет — на первую обычную; обычных нет совсем — пустая сессия (старт с чистого
 /// листа, session::load вернёт None).
-fn session_projection(tabs: &[TabEntry], active: Option<usize>) -> (Vec<SessionTab>, Option<usize>) {
+fn session_projection(
+    tabs: &[TabEntry],
+    active: Option<usize>,
+) -> (Vec<SessionTab>, Option<usize>) {
     let normal: Vec<usize> = tabs
         .iter()
         .enumerate()
@@ -1205,7 +1219,12 @@ fn session_projection(tabs: &[TabEntry], active: Option<usize>) -> (Vec<SessionT
     let chosen = match active {
         Some(a) if !tabs[a].incognito => a,
         // активная инкогнито: ближайшая обычная слева, иначе первая обычная
-        Some(a) => normal.iter().copied().filter(|&i| i < a).max().unwrap_or(normal[0]),
+        Some(a) => normal
+            .iter()
+            .copied()
+            .filter(|&i| i < a)
+            .max()
+            .unwrap_or(normal[0]),
         None => normal[0],
     };
     let out = normal
@@ -1468,14 +1487,21 @@ mod tests {
         let (out, active) = session_projection(&tabs, Some(1));
         assert_eq!(
             out.iter().map(|t| t.url.as_str()).collect::<Vec<_>>(),
-            vec!["https://a.example/", "https://b.example/", "https://c.example/"]
+            vec![
+                "https://a.example/",
+                "https://b.example/",
+                "https://c.example/"
+            ]
         );
         assert_eq!(active, Some(0));
         // активная — обычная: она и остаётся
         let (_, active) = session_projection(&tabs, Some(2));
         assert_eq!(active, Some(1));
         // инкогнито левее всех обычных: активной становится первая обычная
-        let mixed = vec![entry("https://x.example/", true), entry("https://y.example/", false)];
+        let mixed = vec![
+            entry("https://x.example/", true),
+            entry("https://y.example/", false),
+        ];
         let (out, active) = session_projection(&mixed, Some(0));
         assert_eq!(out.len(), 1);
         assert_eq!(active, Some(0));

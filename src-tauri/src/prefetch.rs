@@ -75,11 +75,9 @@ fn prefetch_loop(app: AppHandle, after: Duration, period: Duration) {
             continue;
         }
         wait = period;
-        let hosts = app.state::<std::sync::Arc<crate::history::HistoryStore>>().top_hosts(
-            HOSTS_TOTAL,
-            WINDOW_DAYS,
-            MIN_VISITS,
-        );
+        let hosts = app
+            .state::<std::sync::Arc<crate::history::HistoryStore>>()
+            .top_hosts(HOSTS_TOTAL, WINDOW_DAYS, MIN_VISITS);
         if hosts.is_empty() {
             continue;
         }

@@ -932,9 +932,11 @@ impl HistoryStore {
         // надгробие синка по ИМЕНИ (этап 5 duopulse-111): идентификаторы групп
         // на машинах различаются, ключ слияния — имя
         let name: String = tx
-            .query_row("SELECT name FROM bookmark_groups WHERE id = ?1", [id], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT name FROM bookmark_groups WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
             .map_err(err_sql)?;
         tx.execute("DELETE FROM bookmark_groups WHERE id = ?1", [id])
             .map_err(err_sql)?;
@@ -1198,8 +1200,11 @@ impl HistoryStore {
                     .get(&(TOMBSTONE_BOOKMARK.to_string(), url.clone()))
                     .is_some_and(|&d| d > added);
                 if dead {
-                    tx.execute("DELETE FROM search WHERE source = 'bookmark' AND ref = ?1", [id])
-                        .map_err(err_sql)?;
+                    tx.execute(
+                        "DELETE FROM search WHERE source = 'bookmark' AND ref = ?1",
+                        [id],
+                    )
+                    .map_err(err_sql)?;
                     tx.execute("DELETE FROM bookmarks WHERE id = ?1", [id])
                         .map_err(err_sql)?;
                     stats.removed += 1;
@@ -1219,7 +1224,11 @@ impl HistoryStore {
                 continue;
             }
             let exists: bool = tx
-                .query_row("SELECT 1 FROM bookmark_groups WHERE name = ?1", [name], |_| Ok(true))
+                .query_row(
+                    "SELECT 1 FROM bookmark_groups WHERE name = ?1",
+                    [name],
+                    |_| Ok(true),
+                )
                 .or_else(|e| match e {
                     rusqlite::Error::QueryReturnedNoRows => Ok(false),
                     other => Err(other),
@@ -2782,7 +2791,8 @@ mod tests {
         let a = HistoryStore::open_in_memory().unwrap();
         let b = HistoryStore::open_in_memory().unwrap();
         let work = a.group_add("Музыка").unwrap();
-        a.bookmark_add_to("https://yt.example/", "YouTube", None).unwrap();
+        a.bookmark_add_to("https://yt.example/", "YouTube", None)
+            .unwrap();
         a.bookmark_add_to("https://m.example/track", "Трек", Some(work.id))
             .unwrap();
         let doc = a.export_sync_doc().unwrap();
@@ -2805,7 +2815,11 @@ mod tests {
         assert_eq!(track.title, "Трек");
         assert!(track.groups.iter().any(|g| g.name == "Музыка"));
         assert_eq!(
-            b.group_list().unwrap().iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
+            b.group_list()
+                .unwrap()
+                .iter()
+                .map(|g| g.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["Избранное", "Музыка"],
             "группа приехала, своя «Избранное» осталась"
         );
@@ -2825,7 +2839,8 @@ mod tests {
     fn tombstone_syncs_deletion_and_prevents_resurrection() {
         let a = HistoryStore::open_in_memory().unwrap();
         let b = HistoryStore::open_in_memory().unwrap();
-        a.bookmark_add_to("https://gone.example/", "Удалюсь", None).unwrap();
+        a.bookmark_add_to("https://gone.example/", "Удалюсь", None)
+            .unwrap();
         b.merge_sync_doc(&a.export_sync_doc().unwrap()).unwrap();
         assert!(b.is_bookmarked("https://gone.example/"));
 
@@ -2862,21 +2877,21 @@ mod tests {
         let b = HistoryStore::open_in_memory().unwrap();
         // машина A: добавила (t=100) → удалила (t=1000) → добавила снова
         // (t=9000, свежее надгробия). Время управляем руками ДО синка.
-        a.bookmark_add_to("https://back.example/", "Вернусь", None).unwrap();
+        a.bookmark_add_to("https://back.example/", "Вернусь", None)
+            .unwrap();
         {
             let conn = a.conn.lock().expect("history: лок не отравлен");
-            conn.execute(
-                "UPDATE bookmarks SET added_at = 100, updated_at = 100",
-                [],
-            )
-            .unwrap();
+            conn.execute("UPDATE bookmarks SET added_at = 100, updated_at = 100", [])
+                .unwrap();
         }
         a.bookmark_remove("https://back.example/").unwrap();
         {
             let conn = a.conn.lock().expect("history: лок не отравлен");
-            conn.execute("UPDATE sync_tombstones SET deleted_at = 1000", []).unwrap();
+            conn.execute("UPDATE sync_tombstones SET deleted_at = 1000", [])
+                .unwrap();
         }
-        a.bookmark_add_to("https://back.example/", "Вернулся", None).unwrap();
+        a.bookmark_add_to("https://back.example/", "Вернулся", None)
+            .unwrap();
         {
             let conn = a.conn.lock().expect("history: лок не отравлен");
             conn.execute(
@@ -2908,13 +2923,15 @@ mod tests {
     fn rename_syncs_by_updated_at() {
         let a = HistoryStore::open_in_memory().unwrap();
         let b = HistoryStore::open_in_memory().unwrap();
-        a.bookmark_add_to("https://r.example/", "Старое имя", None).unwrap();
+        a.bookmark_add_to("https://r.example/", "Старое имя", None)
+            .unwrap();
         b.merge_sync_doc(&a.export_sync_doc().unwrap()).unwrap();
 
         // A переименовала — B берёт новое имя (переименование строго свежее:
         // updated_at сравнивается по миллисекундам)
         std::thread::sleep(std::time::Duration::from_millis(2));
-        a.bookmark_update("https://r.example/", "Новое имя").unwrap();
+        a.bookmark_update("https://r.example/", "Новое имя")
+            .unwrap();
         let st = b.merge_sync_doc(&a.export_sync_doc().unwrap()).unwrap();
         assert_eq!(st.applied, 1);
         assert_eq!(
@@ -2969,21 +2986,26 @@ mod tests {
 
         a.group_remove(work.id).unwrap();
         let doc = a.export_sync_doc().unwrap();
-        assert!(
-            doc.tombstones
-                .iter()
-                .any(|t| t.kind == TOMBSTONE_GROUP && t.key == "Работа")
-        );
+        assert!(doc
+            .tombstones
+            .iter()
+            .any(|t| t.kind == TOMBSTONE_GROUP && t.key == "Работа"));
         let st = b.merge_sync_doc(&doc).unwrap();
         assert_eq!(st.removed, 1);
         assert_eq!(
-            b.group_list().unwrap().iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
+            b.group_list()
+                .unwrap()
+                .iter()
+                .map(|g| g.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["Избранное"],
             "группа удалена надгробием"
         );
         assert!(b.is_bookmarked("https://task.example/"), "закладка жива");
         assert_eq!(
-            b.bookmark_list("", GroupFilter::Ungrouped, 0, 100).unwrap().1,
+            b.bookmark_list("", GroupFilter::Ungrouped, 0, 100)
+                .unwrap()
+                .1,
             1,
             "членство снято — закладка «без группы»"
         );
@@ -2995,16 +3017,21 @@ mod tests {
     #[test]
     fn local_crud_unaffected_and_selfheal_prunes_stale_tombstone() {
         let s = HistoryStore::open_in_memory().unwrap();
-        s.bookmark_add_to("https://plain.example/", "Обычная", None).unwrap();
+        s.bookmark_add_to("https://plain.example/", "Обычная", None)
+            .unwrap();
         s.bookmark_remove("https://plain.example/").unwrap();
-        s.bookmark_add_to("https://plain.example/", "Снова", None).unwrap();
+        s.bookmark_add_to("https://plain.example/", "Снова", None)
+            .unwrap();
         assert!(s.is_bookmarked("https://plain.example/"));
         assert_eq!(s.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1, 1);
         assert!(!s.search("снова", 8).unwrap().is_empty());
         // надгробие пережито повторным добавлением — слияние своего документа
         // его снимает
         let doc = s.export_sync_doc().unwrap();
-        assert!(!doc.tombstones.is_empty(), "до самолечения надгробие на месте");
+        assert!(
+            !doc.tombstones.is_empty(),
+            "до самолечения надгробие на месте"
+        );
         s.merge_sync_doc(&doc).unwrap();
         assert!(s.export_sync_doc().unwrap().tombstones.is_empty());
     }

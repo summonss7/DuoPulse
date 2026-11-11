@@ -164,9 +164,9 @@ fn unseal(key: &[u8; 32], blob: &[u8]) -> Result<String, String> {
     }
     let (iv, ct) = blob.split_at(12);
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| format!("ключ AES: {e}"))?;
-    let pt = cipher
-        .decrypt(Nonce::from_slice(iv), ct)
-        .map_err(|_| "расшифровать (AES-256-GCM): неверный ключ или данные повреждены".to_string())?;
+    let pt = cipher.decrypt(Nonce::from_slice(iv), ct).map_err(|_| {
+        "расшифровать (AES-256-GCM): неверный ключ или данные повреждены".to_string()
+    })?;
     String::from_utf8(pt).map_err(|e| format!("расшифрованное не utf-8: {e}"))
 }
 
@@ -194,9 +194,9 @@ fn load_or_create_key(profile_dir: &Path) -> Result<[u8; 32], String> {
             "не удалось расшифровать passwords.key (DPAPI): файл создан другим \
              пользователем Windows или повреждён",
         )?;
-        let bytes = decode_hex(&hex).filter(|b| b.len() == 32).ok_or(
-            "passwords.key повреждён (ожидался hex 32 байт)",
-        )?;
+        let bytes = decode_hex(&hex)
+            .filter(|b| b.len() == 32)
+            .ok_or("passwords.key повреждён (ожидался hex 32 байт)")?;
         let mut key = [0u8; 32];
         key.copy_from_slice(&bytes);
         return Ok(key);
@@ -219,7 +219,11 @@ pub fn origin_of(url: &str) -> Result<String, String> {
     };
     match parsed.scheme() {
         "http" | "https" => {}
-        other => return Err(format!("поддерживаются только http/https, получено {other}")),
+        other => {
+            return Err(format!(
+                "поддерживаются только http/https, получено {other}"
+            ))
+        }
     }
     let host = parsed
         .host_str()
@@ -273,8 +277,8 @@ impl PasswordStore {
     pub fn open(profile_dir: &Path) -> Result<Self, String> {
         let key = load_or_create_key(profile_dir)?;
         let path = profile_dir.join("passwords.db");
-        let conn = Connection::open(&path)
-            .map_err(|e| format!("открыть {}: {e}", path.display()))?;
+        let conn =
+            Connection::open(&path).map_err(|e| format!("открыть {}: {e}", path.display()))?;
         let store = Self {
             conn: Mutex::new(conn),
             key,
@@ -287,8 +291,8 @@ impl PasswordStore {
     /// БД — во временном каталоге, ключ DPAPI не трогаем).
     #[cfg(test)]
     pub(crate) fn open_with_key(path: &Path, key: [u8; 32]) -> Result<Self, String> {
-        let conn = Connection::open(path)
-            .map_err(|e| format!("открыть {}: {e}", path.display()))?;
+        let conn =
+            Connection::open(path).map_err(|e| format!("открыть {}: {e}", path.display()))?;
         let store = Self {
             conn: Mutex::new(conn),
             key,
@@ -345,11 +349,8 @@ impl PasswordStore {
         for row in self.rows()? {
             let username = unseal(&self.key, &row.user_enc)?;
             if !q.is_empty() {
-                let hay = format!(
-                    "{}\n{}\n{}\n{}",
-                    row.origin, username, row.title, row.url
-                )
-                .to_lowercase();
+                let hay = format!("{}\n{}\n{}\n{}", row.origin, username, row.title, row.url)
+                    .to_lowercase();
                 if !hay.contains(&q) {
                     continue;
                 }
@@ -448,7 +449,13 @@ impl PasswordStore {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map(Some)
-            .or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(e) })
+            .or_else(|e| {
+                if e == rusqlite::Error::QueryReturnedNoRows {
+                    Ok(None)
+                } else {
+                    Err(e)
+                }
+            })
             .map_err(|e| format!("найти логин {id}: {e}"))?;
         let Some((origin, old_url, old_title)) = row else {
             return Err(format!("логин {id} не найден"));
@@ -514,8 +521,10 @@ impl PasswordStore {
     /// сохранённые записи и автозаполнение не влияет.
     pub fn is_denied(&self, origin: &str) -> bool {
         let conn = self.conn.lock().unwrap();
-        conn.query_row("SELECT 1 FROM never_save WHERE origin=?", [origin], |_| Ok(()))
-            .is_ok()
+        conn.query_row("SELECT 1 FROM never_save WHERE origin=?", [origin], |_| {
+            Ok(())
+        })
+        .is_ok()
     }
 
     /// Добавить сайт в denylist (идемпотентно).
@@ -794,7 +803,8 @@ mod tests {
     #[test]
     fn db_has_no_plaintext_secrets() {
         let s = store();
-        s.add("https://example.com/", None, "artem", "supersecret").unwrap();
+        s.add("https://example.com/", None, "artem", "supersecret")
+            .unwrap();
         // сырой файл: логина-username и пароля в открытом виде быть не должно
         // (проверяем через страницу БД — в памяти смотрим текстом)
         let conn = s.conn.lock().unwrap();
@@ -812,7 +822,12 @@ mod tests {
         let s = store();
         let first = s.add("https://example.com/", None, "artem", "old").unwrap();
         let second = s
-            .add("https://example.com/signin", Some("Example"), "artem", "new")
+            .add(
+                "https://example.com/signin",
+                Some("Example"),
+                "artem",
+                "new",
+            )
             .unwrap();
         assert!(second.updated);
         assert_eq!(first.id, second.id);
@@ -828,7 +843,8 @@ mod tests {
     fn query_filter_case_insensitive() {
         let s = store();
         s.add("https://YouTube.com/", None, "artem", "x").unwrap();
-        s.add("https://example.com/", None, "YouTuber", "y").unwrap();
+        s.add("https://example.com/", None, "YouTuber", "y")
+            .unwrap();
         assert_eq!(s.list("youtube", 100).unwrap().total, 2);
         assert_eq!(s.list("ARTEM", 100).unwrap().total, 1);
         assert_eq!(s.list("zzz", 100).unwrap().total, 0);
@@ -840,12 +856,23 @@ mod tests {
     fn update_changes_fields() {
         let s = store();
         let saved = s.add("https://example.com/", None, "artem", "old").unwrap();
-        s.update(saved.id, None, Some("Example"), None, Some("new")).unwrap();
+        s.update(saved.id, None, Some("Example"), None, Some("new"))
+            .unwrap();
         let e = &s.list("", 10).unwrap().items[0];
-        assert_eq!((e.username.as_str(), e.title.as_str()), ("artem", "Example"));
+        assert_eq!(
+            (e.username.as_str(), e.title.as_str()),
+            ("artem", "Example")
+        );
         assert_eq!(s.reveal(saved.id).unwrap(), "new");
         // смена адреса пересчитывает origin
-        s.update(saved.id, Some("https://other.org/x"), None, Some("artem2"), None).unwrap();
+        s.update(
+            saved.id,
+            Some("https://other.org/x"),
+            None,
+            Some("artem2"),
+            None,
+        )
+        .unwrap();
         let e = &s.list("", 10).unwrap().items[0];
         assert_eq!(e.origin, "https://other.org");
         assert_eq!(e.username, "artem2");
@@ -864,10 +891,19 @@ mod tests {
 
     #[test]
     fn origin_rules() {
-        assert_eq!(origin_of("https://example.com/a?b=1").unwrap(), "https://example.com");
+        assert_eq!(
+            origin_of("https://example.com/a?b=1").unwrap(),
+            "https://example.com"
+        );
         assert_eq!(origin_of("example.com").unwrap(), "https://example.com");
-        assert_eq!(origin_of("http://example.com:8080/x").unwrap(), "http://example.com:8080");
-        assert_eq!(origin_of("https://example.com:443/").unwrap(), "https://example.com");
+        assert_eq!(
+            origin_of("http://example.com:8080/x").unwrap(),
+            "http://example.com:8080"
+        );
+        assert_eq!(
+            origin_of("https://example.com:443/").unwrap(),
+            "https://example.com"
+        );
         assert!(origin_of("ftp://example.com/").is_err());
         assert!(origin_of("не адрес").is_err());
     }
@@ -919,8 +955,16 @@ mod tests {
         assert!(!s.is_denied("https://other.org"));
         // сохранённые до deny записи остаются и читаются автозаполнением
         s.add("https://example.com/", None, "artem", "x").unwrap();
-        assert_eq!(s.accounts_for("https://example.com").unwrap(), vec!["artem"]);
-        assert_eq!(s.credential("https://example.com", "artem").unwrap().as_deref(), Some("x"));
+        assert_eq!(
+            s.accounts_for("https://example.com").unwrap(),
+            vec!["artem"]
+        );
+        assert_eq!(
+            s.credential("https://example.com", "artem")
+                .unwrap()
+                .as_deref(),
+            Some("x")
+        );
     }
 
     #[test]
@@ -934,8 +978,16 @@ mod tests {
         assert_eq!(accounts, vec!["alya", "artem"]);
         // чужой сайт и чужой логин — пусто
         assert!(s.accounts_for("https://none.io").unwrap().is_empty());
-        assert!(s.credential("https://example.com", "ghost").unwrap().is_none());
+        assert!(s
+            .credential("https://example.com", "ghost")
+            .unwrap()
+            .is_none());
         assert!(s.credential("https://other.org", "alya").unwrap().is_none());
-        assert_eq!(s.credential("https://other.org", "artem").unwrap().as_deref(), Some("p3"));
+        assert_eq!(
+            s.credential("https://other.org", "artem")
+                .unwrap()
+                .as_deref(),
+            Some("p3")
+        );
     }
 }

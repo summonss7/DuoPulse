@@ -241,7 +241,10 @@ fn gtx_parse_maps_lines() {
     assert_eq!(src, "en");
     // src нет/не строка — детект пуст, перевод на месте
     let no_src = r#"{"sentences":[{"trans":"Привет."}]}"#;
-    assert_eq!(parse_gtx_dj(no_src).expect("разобралось"), ("Привет.".into(), "".into()));
+    assert_eq!(
+        parse_gtx_dj(no_src).expect("разобралось"),
+        ("Привет.".into(), "".into())
+    );
     assert!(parse_gtx_dj("<html>Sorry</html>").is_none());
 }
 
@@ -316,7 +319,12 @@ pub(crate) mod net {
     /// Один GET gtx (текст в query) → тело ответа 200. Хосты пробуем по
     /// порядку (GTX_HOSTS — рейт-лимиты рёбер независимые), на отказе каждого —
     /// пауза и повтор (до 2 попыток на хост, 6 с).
-    fn gtx_fetch(agent: &ureq::Agent, from: &str, to: &str, joined: &str) -> Result<String, String> {
+    fn gtx_fetch(
+        agent: &ureq::Agent,
+        from: &str,
+        to: &str,
+        joined: &str,
+    ) -> Result<String, String> {
         let mut query = format!("client=gtx&dj=1&sl={from}&tl={to}&dt=t&q=");
         // q кодируем вручную: ureq-кодировщик не экранирует \n (0x0A) — сервер
         // принимает сырой символ в query, но экранированный вид надёжнее.

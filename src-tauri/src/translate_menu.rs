@@ -84,7 +84,9 @@ pub(crate) unsafe fn install_translate_menu(
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_20;
     use windows_core::Interface;
     let Ok(core20) = core.cast::<ICoreWebView2_20>() else {
-        eprintln!("[translate] ContextMenuRequested не поддержан средой — меню перевода недоступно");
+        eprintln!(
+            "[translate] ContextMenuRequested не поддержан средой — меню перевода недоступно"
+        );
         return;
     };
     let core = core.clone();
@@ -214,7 +216,10 @@ pub(crate) fn translate_selection_for_page(
     tauri::async_runtime::spawn_blocking(move || {
         let transport = crate::translate::UreqTransport::new();
         let reply = match translate_selection(&transport, &text, &target) {
-            Ok(SelectionTranslation { detected, text: translated }) => serde_json::json!({
+            Ok(SelectionTranslation {
+                detected,
+                text: translated,
+            }) => serde_json::json!({
                 "duopulse": "translate-selection-result",
                 "reqId": req_id,
                 "ok": true,

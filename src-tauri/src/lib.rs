@@ -95,8 +95,7 @@ fn mobile_run() {
                     .map_err(|e| format!("открыть {}: {e}", dir.display()))?,
             );
             let passwords = Arc::new(
-                passwords::PasswordStore::open(&dir)
-                    .map_err(|e| format!("открыть пароли: {e}"))?,
+                passwords::PasswordStore::open(&dir).map_err(|e| format!("открыть пароли: {e}"))?,
             );
             let account = Arc::new(aila::AilaAccount::new(&dir));
             // восстановленный вход — первый синк сразу (как main.rs этапа 4):

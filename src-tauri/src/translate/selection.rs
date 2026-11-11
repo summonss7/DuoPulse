@@ -111,7 +111,10 @@ pub fn parse_gtx(body: &str) -> Result<SelectionTranslation, TranslateError> {
         .ok_or_else(|| TranslateError::BadResponse("gtx: нет массива сегментов".into()))?;
     let mut text = String::new();
     for seg in segments {
-        let piece = seg.as_array().and_then(|s| s.first()).and_then(|p| p.as_str());
+        let piece = seg
+            .as_array()
+            .and_then(|s| s.first())
+            .and_then(|p| p.as_str());
         if let Some(p) = piece {
             text.push_str(p);
         }
@@ -167,7 +170,10 @@ mod tests {
         assert!(parse_gtx("not json").is_err());
         assert!(parse_gtx("[]").is_err());
         assert!(parse_gtx("[[[]],null,\"en\"]").is_err()); // сегментов без текста
-        assert!(parse_gtx("[[[]],null,\"en\"]").unwrap_err().message().contains("перевод"));
+        assert!(parse_gtx("[[[]],null,\"en\"]")
+            .unwrap_err()
+            .message()
+            .contains("перевод"));
     }
 
     #[test]

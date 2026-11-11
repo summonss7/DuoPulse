@@ -111,7 +111,11 @@ impl PasswordPrompts {
 
     /// Текущий кандидат без пароля (панель pwsave при загрузке; null — бара нет).
     pub fn view(&self) -> Option<PasswordsCandidateView> {
-        self.current.lock().unwrap().as_ref().map(PasswordsCandidateView::from)
+        self.current
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(PasswordsCandidateView::from)
     }
 
     /// Вынуть кандидата (решение или сброс).
@@ -173,28 +177,62 @@ mod tests {
         let p = prompts();
         // новый логин — бар «Сохранить»
         let v = p
-            .offer(&s, "tab-1", "https://example.com/login", "Example", "artem", "p1")
+            .offer(
+                &s,
+                "tab-1",
+                "https://example.com/login",
+                "Example",
+                "artem",
+                "p1",
+            )
             .unwrap()
             .expect("новый логин заслуживает бар");
-        assert_eq!((v.origin.as_str(), v.username.as_str(), v.updated), ("https://example.com", "artem", false));
+        assert_eq!(
+            (v.origin.as_str(), v.username.as_str(), v.updated),
+            ("https://example.com", "artem", false)
+        );
         // сменил пароль — бар «Обновить» (после save записи; тот же пароль — тишина)
         p.resolve(&s, "save").unwrap();
         let v2 = p
-            .offer(&s, "tab-1", "https://example.com/login", "Example", "artem", "p2")
+            .offer(
+                &s,
+                "tab-1",
+                "https://example.com/login",
+                "Example",
+                "artem",
+                "p2",
+            )
             .unwrap()
             .expect("смена пароля заслуживает бар");
         assert!(v2.updated);
         p.resolve(&s, "save").unwrap();
-        assert_eq!(s.credential("https://example.com", "artem").unwrap().as_deref(), Some("p2"));
-        // повторный сабмит с тем же паролем — бара нет
-        assert!(
-            p.offer(&s, "tab-1", "https://example.com/login", "Example", "artem", "p2")
+        assert_eq!(
+            s.credential("https://example.com", "artem")
                 .unwrap()
-                .is_none()
+                .as_deref(),
+            Some("p2")
         );
+        // повторный сабмит с тем же паролем — бара нет
+        assert!(p
+            .offer(
+                &s,
+                "tab-1",
+                "https://example.com/login",
+                "Example",
+                "artem",
+                "p2"
+            )
+            .unwrap()
+            .is_none());
         // пустые поля — бара нет
-        assert!(p.offer(&s, "t", "https://example.com/", "", "", "x").unwrap().is_none());
-        assert!(p.offer(&s, "t", "https://example.com/", "u", "", "").unwrap().is_none());
+        assert!(p
+            .offer(&s, "t", "https://example.com/", "", "", "x")
+            .unwrap()
+            .is_none());
+        assert!(p
+            .offer(&s, "t", "https://example.com/", "u", "", "")
+            .unwrap()
+            .is_none());
         // не-адрес вкладки — честная ошибка (журнал main.rs)
         assert!(p.offer(&s, "t", "не адрес", "", "u", "p").is_err());
     }
@@ -206,16 +244,19 @@ mod tests {
         // пустой стенд: решать нечего — false, не ошибка
         assert!(!p.resolve(&s, "dismiss").unwrap());
         // never — сайт в denylist, следующих кандидатов с него нет
-        p.offer(&s, "tab-1", "https://example.com/", "", "artem", "p1").unwrap().unwrap();
+        p.offer(&s, "tab-1", "https://example.com/", "", "artem", "p1")
+            .unwrap()
+            .unwrap();
         assert!(p.resolve(&s, "never").unwrap());
         assert!(s.is_denied("https://example.com"));
-        assert!(
-            p.offer(&s, "tab-1", "https://example.com/", "", "artem", "p2")
-                .unwrap()
-                .is_none()
-        );
+        assert!(p
+            .offer(&s, "tab-1", "https://example.com/", "", "artem", "p2")
+            .unwrap()
+            .is_none());
         // неизвестное действие — ошибка, кандидат уже вынут (бар закрылся)
-        p.offer(&s, "tab-1", "https://other.org/", "", "u", "p").unwrap().unwrap();
+        p.offer(&s, "tab-1", "https://other.org/", "", "u", "p")
+            .unwrap()
+            .unwrap();
         assert!(p.resolve(&s, "nonsense").is_err());
         assert!(p.view().is_none());
     }
@@ -224,7 +265,9 @@ mod tests {
     fn tabs_change_drops_stale_candidate() {
         let s = store();
         let p = prompts();
-        p.offer(&s, "tab-1", "https://example.com/", "", "artem", "p1").unwrap().unwrap();
+        p.offer(&s, "tab-1", "https://example.com/", "", "artem", "p1")
+            .unwrap()
+            .unwrap();
         p.on_tabs_changed(Some("tab-1")); // та же активная — живёт
         assert!(p.view().is_some());
         p.on_tabs_changed(Some("tab-2")); // ушли с вкладки — гасим
@@ -232,7 +275,9 @@ mod tests {
         // решать после сброса нечего
         assert!(!p.resolve(&s, "save").unwrap());
         // новых сабмитов на месте активной вкладки не теряем
-        p.offer(&s, "tab-2", "https://example.com/", "", "artem", "p1").unwrap().unwrap();
+        p.offer(&s, "tab-2", "https://example.com/", "", "artem", "p1")
+            .unwrap()
+            .unwrap();
         p.on_tabs_changed(Some("tab-2"));
         assert!(p.view().is_some());
     }
