@@ -463,6 +463,10 @@ export interface DownloadBeginParams {
    */
   rangeStartSec?: number | null;
   /**
+   * Субтитры без тайм-кодов (subs): чистый текст репликами, файл .txt.
+   */
+  subsPlain?: boolean;
+  /**
    * id дорожки из списка адаптера (subs): «yt:en», «yt:en+ru», «ru».
    */
   trackId?: string;

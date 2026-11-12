@@ -857,6 +857,11 @@
               "null"
             ]
           },
+          "subsPlain": {
+            "default": false,
+            "description": "Субтитры без тайм-кодов (subs): чистый текст репликами, файл .txt.",
+            "type": "boolean"
+          },
           "trackId": {
             "default": "",
             "description": "id дорожки из списка адаптера (subs): «yt:en», «yt:en+ru», «ru».",

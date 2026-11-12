@@ -213,6 +213,7 @@ function renderMode(): void {
   $("dlQualityField").hidden = state.mode !== "video";
   $("dlAudioField").hidden = state.mode !== "audio";
   $("dlLangField").hidden = state.mode !== "subs" || (state.base.length === 0 && state.translations.length === 0);
+  $("dlPlainField").hidden = $("dlLangField").hidden;
   $("dlNoTracks").hidden = state.mode !== "subs" || (state.base.length + state.translations.length) > 0;
   $("dlRange").hidden = state.mode === "subs";
 }
@@ -227,6 +228,7 @@ function startDownload(): void {
       trackId: state.mode === "subs" ? (($("dlLang") as HTMLSelectElement).value ?? "") : "",
       quality: state.mode === "video" ? (($("dlQuality") as HTMLSelectElement).value || "best") : "",
       audioMp3: state.mode === "audio" && ($("dlAudioFormat") as HTMLSelectElement).value === "mp3",
+      subsPlain: state.mode === "subs" && ($("dlPlain") as HTMLInputElement).checked,
       rangeStartSec: null,
       rangeEndSec: null,
       dir: null,

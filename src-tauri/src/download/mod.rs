@@ -49,6 +49,9 @@ pub struct DownloadBeginParams {
     /// Формат аудио: mp3 (конвертация, нужен ffmpeg) либо m4a без перекодировки.
     #[serde(default)]
     pub audio_mp3: bool,
+    /// Субтитры без тайм-кодов (subs): чистый текст репликами, файл .txt.
+    #[serde(default)]
+    pub subs_plain: bool,
     /// Диапазон куска, сек (video/audio): начало.
     pub range_start_sec: Option<f64>,
     /// Конец диапазона (None до конца видео).
@@ -384,7 +387,9 @@ pub async fn download_begin(
                 .map(|t| t.url)
                 .unwrap_or_default();
             let app2 = app.clone();
-            std::thread::spawn(move || run_subs_job(app2, id, rx, dir, tab_url, params.track_id));
+            std::thread::spawn(move || {
+                run_subs_job(app2, id, rx, dir, tab_url, params.track_id, params.subs_plain)
+            });
         }
         _ => {
             let url = params.url.trim().to_string();
@@ -803,6 +808,59 @@ fn newest_file(dir: &str) -> Option<String> {
 
 // --- поток задания: субтитры -----------------------------------------------------
 
+/// Чистый текст субтитров (карточка duopulse-130): реплики без тайм-кодов,
+/// подряд идущие повторы (рассинхон автодорожек) схлопываются, пустые —
+/// пропускаются; реплики разделяются пустой строкой.
+fn write_plain_txt(cues: &[crate::subtitles::Cue]) -> String {
+    let mut out = String::new();
+    let mut prev: Option<&str> = None;
+    for c in cues {
+        let text = c.text.trim();
+        if text.is_empty() || Some(text) == prev {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(text);
+        prev = Some(text);
+    }
+    out.push('\n');
+    out
+}
+
+/// .srt (снятый yt-dlp) → чистый текст: прочитать файл, выкинуть счётчики и
+/// строки тайм-кодов («00:00:01,000 --> …»), текст — правилами write_plain_txt.
+fn srt_to_plain_txt(path: &str) -> std::io::Result<String> {
+    let raw = std::fs::read_to_string(path)?;
+    let mut cues = Vec::new();
+    let mut cur: Vec<String> = Vec::new();
+    for line in raw.lines() {
+        let l = line.trim_end_matches('\u{feff}').trim();
+        if l.is_empty() {
+            if !cur.is_empty() {
+                cues.push(crate::subtitles::Cue {
+                    start_ms: 0,
+                    end_ms: 0,
+                    text: cur.join("\n"),
+                });
+                cur.clear();
+            }
+            continue;
+        }
+        let is_counter = l.chars().all(|c| c.is_ascii_digit());
+        let is_time = l.contains("-->");
+        if !is_counter && !is_time {
+            cur.push(l.to_string());
+        }
+    }
+    if !cur.is_empty() {
+        cues.push(crate::subtitles::Cue { start_ms: 0, end_ms: 0, text: cur.join("\n") });
+    }
+    Ok(write_plain_txt(&cues))
+}
+
+
 /// Ожидание ответа content-слоя и запись .srt. Таймаут 5 минут — перевод
 /// дорожки с ретраями 429 может идти долго (tlang-конвейер адаптера). Ошибка/
 /// таймаут контент-пути на YouTube-адресе — фолбэк yt-dlp --write-subs.
@@ -814,6 +872,7 @@ fn run_subs_job(
     dir: std::path::PathBuf,
     tab_url: String,
     track_id: String,
+    plain: bool,
 ) {
     let service = app.state::<DownloadService>();
     let finish = |ok: bool, canceled: bool, path: Option<String>, error: Option<String>| {
@@ -868,6 +927,17 @@ fn run_subs_job(
                 let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("субтитры");
                 let lang = v.get("lang").and_then(|x| x.as_str()).unwrap_or("");
                 let stem = sanitize_filename(&format!("{title}.{lang}"));
+                if plain {
+                    // без тайм-кодов: чистый текст репликами (карточка duopulse-130)
+                    let path = free_path(&dir, &stem, "txt");
+                    let txt = write_plain_txt(&cues);
+                    return match std::fs::write(&path, txt) {
+                        Ok(()) => finish(true, false, Some(path.display().to_string()), None),
+                        Err(e) => {
+                            finish(false, false, None, Some(format!("запись {}: {e}", path.display())))
+                        }
+                    };
+                }
                 let path = free_path(&dir, &stem, "srt");
                 let srt = crate::subtitles::srt::write_srt(&cues);
                 return match std::fs::write(&path, srt) {
@@ -986,6 +1056,27 @@ fn run_subs_job(
                     .and_then(|id| newest_file_with_marker(&dir.display().to_string(), &format!("[{id}]")));
             }
             match path {
+                // plain-режим (duopulse-130): снятые yt-dlp .srt переписываем
+                // в чистый текст — реплики без тайм-кодов и счётчиков
+                Some(p) if plain => match srt_to_plain_txt(&p) {
+                    Ok(txt) => {
+                        let mut txt_path = std::path::PathBuf::from(&p);
+                        txt_path.set_extension("txt");
+                        match std::fs::write(&txt_path, txt) {
+                            Ok(()) => {
+                                let _ = std::fs::remove_file(&p);
+                                finish(true, false, Some(txt_path.display().to_string()), None)
+                            }
+                            Err(e) => finish(
+                                false,
+                                false,
+                                None,
+                                Some(format!("запись {}: {e}", txt_path.display())),
+                            ),
+                        }
+                    }
+                    Err(e) => finish(false, false, None, Some(format!("чтение {p}: {e}"))),
+                },
                 Some(p) => finish(true, false, Some(p), None),
                 None => finish(false, false, None, Some("yt-dlp не отдал путь файла субтитров".into())),
             }
@@ -1032,6 +1123,31 @@ mod tests {
     fn deliver_subs_reply_unknown_job_is_false() {
         let svc = DownloadService::default();
         assert!(!svc.deliver_subs_reply(999, serde_json::json!({})));
+    }
+
+    #[test]
+    fn plain_txt_dedupes_and_skips_empty() {
+        let cue = |t: &str| crate::subtitles::Cue {
+            start_ms: 0,
+            end_ms: 0,
+            text: t.into(),
+        };
+        let txt = write_plain_txt(&[cue("Привет"), cue("Привет"), cue(""), cue("Мир")]);
+        assert_eq!(txt, "Привет\n\nМир\n");
+    }
+
+    #[test]
+    fn srt_to_plain_strips_timecodes() {
+        let dir = std::env::temp_dir();
+        let p = dir.join(format!("duopulse-dl-plain-{}.srt", std::process::id()));
+        std::fs::write(
+            &p,
+            "1\n00:00:01,000 --> 00:00:02,000\nПривет\n\n2\n00:00:02,000 --> 00:00:03,000\nМир\n",
+        )
+        .unwrap();
+        let txt = srt_to_plain_txt(&p.display().to_string()).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(txt, "Привет\n\nМир\n");
     }
 
     #[test]

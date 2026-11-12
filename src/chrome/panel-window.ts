@@ -133,6 +133,12 @@ export function anchorPanel(
   }
   const { w, h } = measureHost(kind);
   const r = el.getBoundingClientRect();
-  const x = align === "right" ? r.right - w : r.left;
-  return { x: Math.round(x), y, w, h };
+  // кламп в видимую область UI-webview (Core тоже клампит, но тогда панель
+  // обрезается снизу и появляется внутренний скролл — duopulse-130)
+  const maxH = Math.max(160, window.innerHeight - y - 8);
+  const maxW = Math.max(240, window.innerWidth - 8);
+  const cw = Math.min(w, maxW);
+  const ch = Math.min(h, maxH);
+  const x = align === "right" ? r.right - cw : r.left;
+  return { x: Math.round(Math.max(0, x)), y, w: cw, h: ch };
 }

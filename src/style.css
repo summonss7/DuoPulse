@@ -2985,7 +2985,10 @@ html[data-panel="pwsave"] .pw-save-bar {
   position: absolute;
   top: 100%;
   z-index: 130;
-  width: 372px;
+  width: 440px;
+  /* запас высоты под рост после открытия (список заданий, «готово»/ошибка):
+     окно панели нересайзится (спайк 090) — недостающее ушло бы в скролл */
+  min-height: 430px;
   padding: 14px;
   border-radius: var(--radius-panel);
   background: var(--bg-elevated);
@@ -3051,6 +3054,11 @@ html[data-panel="pwsave"] .pw-save-bar {
 }
 .dl-select {
   min-width: 180px;
+}
+/* галочка «без тайм-кодов»: чекбокс + подпись слева, не по краям */
+.dl-plain {
+  justify-content: flex-start;
+  cursor: pointer;
 }
 .dl-no-tracks {
   color: var(--text-muted);
