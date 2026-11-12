@@ -27,7 +27,7 @@ import { MobileDuo, type DuoStatus } from "./duo";
 import { MobileBookmarks } from "./bookmarks";
 import { installMobileAccount } from "./account";
 import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
-import { createMusicDownloader, musicStatusText } from "./download";
+import { createMusicDownloader } from "./download";
 import {
   createSelectionPorts,
   installMobileSelectionTranslate,
@@ -53,7 +53,7 @@ root.innerHTML = `
         <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>
       </button>
       <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo">duo</button>
-      <button id="mMusic" class="m-music-btn" hidden title="Скачать музыку (m4a)">⬇</button>
+      <button id="mMusic" class="m-music-btn" hidden title="Скачать: аудио, видео или субтитры">⬇</button>
       <button id="mMenu" class="m-icon" title="Настройки" aria-label="Настройки" aria-haspopup="menu" aria-expanded="false">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
       </button>
@@ -330,14 +330,15 @@ duoBtn.addEventListener("click", () => {
   })();
 });
 
-// ── Загрузка музыки (duopulse-121): «⬇» на экране видео — лучший
-// аудио-формат того же innertube-ответа (обычно m4a ~129 kbps) нативно
-// скачивается в медиатеку «Music/DuoPulse» (yt-dlp на Android нет).
+// ── Загрузки с YouTube (duopulse-121 → 122): «⬇» на экране видео открывает
+// лист выбора — аудио (m4a/opus), видео (mp4, склейка со звуком) и субтитры
+// (srt); медиа качает fetch внутри youtube-iframe (dl-fetcher.js), файл
+// собирает Rust и сохраняет в медиатеку (подробности — src/mobile/download.ts).
 const music = createMusicDownloader({
   getVideoId: () => duo.currentVideoId,
-  render: (s) => {
-    musicBtn.disabled = s.kind === "downloading";
-    const text = musicStatusText(s);
+  host: content,
+  getFrame: () => (tab.hidden || tab.src === "about:blank" ? null : tab),
+  render: (text) => {
     if (text) note(text);
   },
 });

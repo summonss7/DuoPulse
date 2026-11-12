@@ -5543,3 +5543,52 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   - Релизы 0.1.23 в одном сеансе: NSIS → GitHub Pages + Aila (оба канала) +
     хаб «Скачать» + C:\DuoPulse; APK (подписанный) → канал Aila автоматически.
 - Коммит: см. git log (feat(pdf): duopulse-119).
+
+## 2026-11-12, 05:27 — duopulse-122: мобильные загрузки YouTube — выбор аудио/видео/субтитров, лечение 403
+- Начало работы: 2026-11-12, 02:17
+- Окончание работы: 2026-11-12, 05:27
+- Что сделано:
+  - Карточка duopulse-122 (пожелание Артёма: «скачаю музыку — 403; нужно выбирать
+    что качать — музыку/видео/субтитры — и качество»). Реализация предыдущего
+    сеанса доведена до конца (тесты отставали от протокола) и дополнена
+    найденным в живых пробах лечением 403.
+  - Лист выбора на «⬇» (экран видео): аудио m4a/opus с битрейтом и размером,
+    видео 144p…1080p MP4 (раздельные дорожки — со склейкой звука), субтитры
+    (дорожки видео, .srt); прогресс, отмена закрытием листа, повторы
+    диапазонов до 3 раз.
+  - Транспорт байтов — fetch внутри youtube-iframe: document-start скрипт
+    assets/duopulse/dl-fetcher.js (registerFetcher → WebViewCompat, только
+    youtube-origin), закрытые диапазоны по 4 МиБ (cmd range/cancel + diag),
+    байты base64-чанками invoke'ами в Rust (duo_download_begin/append/
+    finish/finish_mux/abort), видео+звук склеивает Kotlin MediaMuxer без
+    перекодирования; сохранение в медиатеки Music/Movies/Download-DuoPulse
+    (API ≥29 MediaStore, ниже — каталог приложения).
+  - Лечение 403: пробы на эмуляторе показали, что googlevideo-url innertube
+    ANDROID отдают лишь первый ~1 МиБ (дальше 403 любым диапазоном), WEB
+    требует PO-токен, адаптивные дорожки плеера ушли в SABR. Рецепт снят с
+    yt-dlp 2026.10.26 (клиенты tv/visionos): duo_mobile_formats переведён на
+    innertube-клиент VISIONOS — прямые url без n-параметра, обслуживаются
+    целиком; сессию посетителя (куки + visitorData) Rust собирает одним GET
+    watch-страницы (без неё LOGIN_REQUIRED), кэш dl:<id> общий с субтитрами;
+    при отказе клиента — фолбэк на ANDROID-ответ (лист жив, медиа скажет 403).
+  - Размеры дорожек: contentLength из JSON или clen из url (VISIONOS/ANDROID
+    кладут только в подписанный url) — лист показывает МБ.
+  - Тесты: download.test.ts переписан под протокол v2 (range/data, EOF по
+    короткому ответу, ретрай того же offset, 403 без ретрая); Rust —
+    parse_watch_session (куки/visitorData/мусор), fmt_size (clen), фрагмент
+    живого VISIONOS-ответа; eprintln-диагностика фолбэка.
+- Как проверено:
+  - vitest 451 (43 файла) ✓; cargo test 369 bin + 22 lib ✓; typecheck ✓;
+    версии package.json = tauri.conf.json = Cargo.toml = 0.1.24.
+  - Эмулятор duopulse36, debug-APK + CDP (9226), видео из пожелания
+    (lLmLnMNx038): лист 5 аудио + 6 видео с размерами + субтитры FR; M4A
+    скачан в Music/DuoPulse ровно 4 624 883 байт; субтитры fr.srt 12 530 байт
+    в Download/DuoPulse; видео 240p+звук в Movies/DuoPulse, ffprobe: h264+aac
+    285.7s (совпадает с исходником) — склейка MediaMuxer корректна.
+  - Release-APK 0.1.24 (R8, подписан) — смоук живыми тапами: лист с размерами,
+    «Сохранено … Music/DuoPulse», файл в MediaStore байт-в-байт (CDP в release
+    выключен — проверка скриншотами и content query).
+  - Релизы 0.1.24 в одном сеансе: APK → канал Aila автоматически
+    (manifest v2: setup + APK), NSIS → GitHub Pages + Aila (оба канала) +
+    хаб «Скачать» + C:\DuoPulse; устаревший 0.1.23-setup из хаба убран.
+- Коммит: см. git log (feat(mobile): duopulse-122).
