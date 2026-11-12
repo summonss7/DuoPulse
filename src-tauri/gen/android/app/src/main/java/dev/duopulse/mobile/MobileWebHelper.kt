@@ -13,6 +13,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 /*
  * Нативный web-оверлей (duopulse-126): поиск и обычные сайты открываются в
@@ -115,9 +117,16 @@ object MobileWebHelper {
     val dp = { v: Int -> (v * act.resources.displayMetrics.density).toInt() }
     val ov = FrameLayout(act)
     ov.setBackgroundColor(Color.WHITE)
-    // edge-to-edge: иначе тулбар уходит под статус-бар и тапы по нему ест
-    // системная панель (грабли duopulse-android-stage-gotchas)
-    ov.fitsSystemWindows = true
+    // edge-to-edge (duopulse-133): enableEdgeToEdge в MainActivity гасит
+    // fitsSystemWindows у decor — оверлей рисуется под статус-баром и тот
+    // перекрывал тулбар с адресом. Применяем инсеты сами: паддинг системными
+    // панелями + вырезом дисплея
+    ViewCompat.setOnApplyWindowInsetsListener(ov) { v, insets ->
+      val bars = insets.getInsets(
+        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+      v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+      WindowInsetsCompat.CONSUMED
+    }
 
     val col = LinearLayout(act)
     col.orientation = LinearLayout.VERTICAL
