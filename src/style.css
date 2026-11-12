@@ -673,6 +673,75 @@ body {
   display: none;
 }
 
+/* --- Бар «Появилась новая версия» (карточка duopulse-127): строка поверх
+     таб-бара на всю ширину окна — заметнее точки на «⋮» (duopulse-067);
+     высота хрома фиксирована (Core раскладывает webview ниже), поэтому бар
+     — оверлей, а не строка grid --- */
+.update-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200; /* поверх панелей хрома — обновление важнее прочего UI */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--accent-neon);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: var(--lh-ui);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.update-bar[hidden] {
+  display: none;
+}
+.update-bar-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--accent-neon);
+}
+.update-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.update-bar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.update-bar-actions button {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.update-bar-actions button:hover {
+  background: var(--hover-neutral);
+}
+/* главная кнопка — неон-кромка, не заливка (гайд 06 §8) */
+.update-bar-actions #updateBarInstall {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+  font-weight: 700;
+}
+.update-bar-actions #updateBarInstall:hover {
+  background: color-mix(in srgb, var(--accent-neon) 10%, transparent);
+  box-shadow: var(--focus-ring-soft);
+}
+.update-bar-actions button[hidden] {
+  display: none;
+}
+
 /* --- Панель VPN (задача 6.5, docs/02 §6.2; панель 12px, контролы 8px) --- */
 .vpn-panel {
   position: absolute;

@@ -7,6 +7,16 @@
   </head>
   <body>
     <div id="app">
+      <!-- Бар «Появилась новая версия» (карточка duopulse-127): строка поверх
+           таб-бара, когда проверка нашла обновление; наполняет src/chrome/update-bar.ts -->
+      <div id="updateBar" class="update-bar" hidden role="dialog" aria-label="Доступна новая версия">
+        <span class="update-bar-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/><path d="M2.8 11.5v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2"/></svg></span>
+        <div class="update-bar-text" id="updateBarText"></div>
+        <div class="update-bar-actions">
+          <button type="button" id="updateBarInstall" class="primary">Установить</button>
+          <button type="button" id="updateBarCancel" class="ghost">Отмена</button>
+        </div>
+      </div>
       <div id="tabbar">
         <div id="tabs" role="tablist" aria-label="Вкладки браузера"></div>
         <button id="newtab" title="Новая вкладка"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>

@@ -8,6 +8,7 @@ import { initOmnibox, setActiveUrl, setIncognito } from "./chrome/omnibox";
 import { initStar, setActivePage } from "./chrome/star";
 import { closePanel, currentPanel } from "./chrome/panel-window";
 import { initPwSaveBar } from "./chrome/pw-save";
+import { initUpdateBar } from "./chrome/update-bar";
 import "./chrome/mainmenu";
 import "./proxy-menu";
 import "./vpn-panel/vpn-panel";
@@ -40,6 +41,9 @@ initStar();
 // Бар «Сохранить пароль?» (этап 2 duopulse-108): панель pwsave по событию
 // passwords:save_prompt, закрытие при переключении вкладки.
 initPwSaveBar();
+// Бар «Появилась новая версия» (карточка duopulse-127): строка поверх
+// таб-бара, пока найденное обновление не установлено/отклонено.
+initUpdateBar();
 // Кнопка «duo» + панель настроек набора субтитров (задача 3.7, docs/03 §8).
 initDuo();
 // Секция «Перевод» duo-панели: провайдеры DeepL/Google/LibreTranslate (4.1).

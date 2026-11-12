@@ -5662,3 +5662,14 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   - Релизы 0.1.28: десктоп (npm run release, оба канала + хаб + C:\DuoPulse) и мобильный (android-build.sh release, канал Aila).
 - Как проверено: typecheck (tsc) чисто; vitest 468 тестов зелёные; cargo test --lib 23 зелёные (host, MinGW в PATH); живьём на эмуляторе duopulse36 (debug-APK, CDP webview_devtools_remote_2703): поиск «YouTube» → выдача Google в приложении, фокус в MainActivity (Chrome не запускался); youtube.com/watch в оверлее — полный формат YouTube; кнопка «▶ duo» → видео открылось во встроенном плеере (omnibox = watch-URL), оверлей корректно разрушен; системный «назад» закрывает оверлей; release-APK (живые тапы input tap): поиск из omnibox открывает оверлей в приложении — R8-keep сработал.
 - Коммит: см. git log (duopulse-126, релиз 0.1.28).
+
+## 12.11.2026 20:24 — duopulse-127: бар «Появилась новая версия» в Windows-версии
+- Начало работы: 12.11.2026 19:39
+- Окончание работы: 12.11.2026 20:24
+- Что сделано:
+  - index.html + src/chrome/update-bar.ts: бар поверх таб-бара на всю ширину окна («Появилась новая версия X.Y.Z», кнопки «Установить» / «Отмена»); источники — событие updater:check_done и updater.status на старте хрома (pending прошлой проверки — бар виден сразу, не дожидаясь автопроверки ~20 с); «Установить» вызывает updater.install (установщик пассивно ставит и перезапускает), «Отмена» запоминает версию в sessionStorage и не возвращает бар до перезапуска — точка на «⋮» (duopulse-067) остаётся.
+  - style.css: стили бара (z-index 200 поверх панелей, неон-кромка «Установить», правило [hidden]{display:none}); подключение в chrome.ts; юнит-тесты update-bar.test.ts (7).
+  - README: раздел «Автообновление» дополнен описанием бара.
+  - Релиз 0.1.29 (tauri.conf.json → package.json/Cargo.toml синхронизировал release.mjs): NSIS-установщик в builds/duopulse_0.1.29_release, оба канала обновлений (GitHub Pages + Aila), хаб «Скачать», локальная копия C:\DuoPulse.
+- Как проверено: vitest 475/475 (+7 новых), typecheck чисто; живой прогон tauri dev + CDP — бар показан поверх таб-бара (топ-оверлей, полная ширина, кнопки видимы), «Отмена» скрывает; фид https://aila.skillcoin.pp.ua/updates/duopulse/latest.json отдаёт 0.1.29.
+- Коммит: см. ниже (feat(mobile)→feat: duopulse-127 бар обновления, релиз 0.1.29)
