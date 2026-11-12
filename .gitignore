@@ -52,3 +52,6 @@ e2e/subtitles/altd-timeline.log
 
 # Кэш ASR-движка и модели whisper (e2e/asr/prepare.mjs, карточка duopulse-091)
 e2e/asr/.cache/
+promt.txt
+promt_done.txt
+CARDS/
