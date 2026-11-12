@@ -40,10 +40,10 @@ export interface MobilePdfDeps {
   note: (text: string) => void;
   /** контейнер .m-content — сюда монтируется просмотрщик */
   host: HTMLElement;
-  /** стартовый экран: прячем на время просмотра */
-  start: HTMLElement;
-  /** iframe «вкладки»: прячем на время просмотра */
-  tab: HTMLIFrameElement;
+  /** спрятать контент под просмотрщиком: стартовый экран и вкладки-плееры */
+  hideContent: () => void;
+  /** вернуть контент после закрытия: активная вкладка или стартовый экран */
+  restoreContent: () => void;
   /** адрес открытого файла — в omnibox (как watch-URL видео, duopulse-105) */
   showInOmnibox: (text: string) => void;
   /** кнопки «duo»/«⬇» — только у YouTube-видео */
@@ -120,8 +120,7 @@ export function createMobilePdf(deps: MobilePdfDeps) {
     doc = null;
     if (open) {
       open = false;
-      deps.start.hidden = false;
-      deps.tab.hidden = true;
+      deps.restoreContent();
       deps.setVideoButtons(false);
       deps.showInOmnibox("");
     }
@@ -135,8 +134,7 @@ export function createMobilePdf(deps: MobilePdfDeps) {
     page = 1;
     pages = 0;
     zoom = 1;
-    deps.start.hidden = true;
-    deps.tab.hidden = true;
+    deps.hideContent();
     deps.setVideoButtons(false);
     deps.showInOmnibox(name);
     try {

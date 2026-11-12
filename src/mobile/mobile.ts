@@ -1,8 +1,10 @@
 // DuoPulse — мобильная ветка UI (этап 1 карточки duopulse-081, вариант Б из
 // duopulse-053; этап 2 — duopulse-082): стартовый экран «мобильная ветка»,
-// ОДНА вкладка — WebView страницы в iframe под omnibox. Мульти-webview с
-// десктопа (таб-бар + дочерние webview вкладок) на Android не работает —
-// child-webview API Tauri 2 десктоп-only; iframe — минимальный скелет,
+// YouTube-видео в iframe под omnibox. Мульти-webview с десктопа (таб-бар +
+// дочерние webview вкладок) на Android не работает — child-webview API
+// Tauri 2 десктоп-only; ВКЛАДКИ (duopulse-123) — несколько iframe
+// src/mobile/tabs.ts: активная видна, фоновые на паузе, сессия в
+// localStorage переживает перезапуск приложения.
 // Duo-субтитры и перевод — этап 2 (duopulse-082): кнопка «duo» + панель
 // настроек + плашка над плеером (src/mobile/duo/). Меню настроек «⋮» в
 // шапке (поисковик, обновления, версия) — duopulse-102. Шапка двухрядная:
@@ -25,6 +27,7 @@ import {
 } from "./platform";
 import { MobileDuo, type DuoStatus } from "./duo";
 import { MobileBookmarks } from "./bookmarks";
+import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
 import { installMobileAccount } from "./account";
 import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
 import { createMusicDownloader } from "./download";
@@ -80,8 +83,6 @@ root.innerHTML = `
         Google). Прочие адреса и поиск открываются в браузере телефона.</p>
       <button class="m-quick" data-url="https://www.youtube.com/watch?v=iG9CE55wbtY">Открыть пример — TED с субтитрами</button>
     </section>
-    <iframe id="mTab" class="m-tab" title="Страница" hidden
-      allow="autoplay; fullscreen; encrypted-media; picture-in-picture" referrerpolicy="no-referrer-when-downgrade"></iframe>
     <div id="mMenuWrap" class="m-menu-wrap" hidden>
       <div class="m-menu-backdrop"></div>
       <div class="m-menu" role="menu" aria-label="Настройки">
@@ -111,7 +112,6 @@ const privateBtn = root.querySelector<HTMLButtonElement>("#mPrivate")!;
 const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
 const musicBtn = root.querySelector<HTMLButtonElement>("#mMusic")!;
 const start = root.querySelector<HTMLElement>("#mStart")!;
-const tab = root.querySelector<HTMLIFrameElement>("#mTab")!;
 const status = root.querySelector<HTMLElement>("#mStatus")!;
 const content = root.querySelector<HTMLElement>(".m-content")!;
 
@@ -170,14 +170,12 @@ function setIncognito(on: boolean): void {
   } catch {
     /* приватный режим без localStorage — флаг живёт до перезапуска */
   }
-  if (!on) {
-    // приватный плеер закрываем: страница остаётся видимой до чистки кук
-    tab.hidden = true;
-    tab.src = "about:blank";
-    start.hidden = false;
-    duoBtn.hidden = true;
-    musicBtn.hidden = true;
-    videoOpen = false;
+  if (on) {
+    tabs.clearPersisted(); // сессию вкладок не оставляем (096: без следов)
+  } else {
+    // выход из инкогнито: вкладки закрываем (onTabActive(null) вернёт старт),
+    // куки/хранилища чистятся ниже
+    tabs.closeAll();
     duo.close();
     duoPanel?.remove();
     duoPanel = null;
@@ -274,9 +272,44 @@ const bookmarks = new MobileBookmarks({
     const id = duo.currentVideoId;
     return id ? { url: `https://www.youtube.com/watch?v=${id}`, title: duo.currentTitle } : null;
   },
-  open: (url) => void navigate(url),
+  // тап по закладке — новая вкладка (как в Chrome), а не замена текущей
+  open: (url) => void navigate(url, true),
   note,
 });
+
+// ── Вкладки (duopulse-123): каждая — своё видео в своём iframe; активная
+// видна, фоновые на паузе; сессия в localStorage переживает перезапуск
+// (восстановление — в конце файла, когда все модули готовы).
+const tabs = new MobileTabs({
+  content,
+  bar: root.querySelector<HTMLElement>(".m-bar-top")!,
+  note,
+  isPrivate: () => incognito,
+  onActive: (t) => onTabActive(t),
+});
+
+/** Активная вкладка сменилась (открытие/переключение/восстановление): единая
+ *  точка доводки хрома — duo-сессия, omnibox, кнопки, звёздочка, стартовый
+ *  экран. null — вкладок нет (все закрыты / «новая вкладка» / старт). */
+function onTabActive(t: MobileTab | null): void {
+  videoOpen = t !== null;
+  start.hidden = t !== null;
+  duoBtn.hidden = t === null;
+  musicBtn.hidden = t === null;
+  duoPanel?.remove();
+  duoPanel = null;
+  if (!t) {
+    duo.close();
+    omnibox.value = "";
+    void bookmarks.syncVideo();
+    return;
+  }
+  // канонический watch-URL (как у закладки), не /embed (duopulse-105)
+  omnibox.value = `https://www.youtube.com/watch?v=${t.videoId}`;
+  void duo.open(t.videoId).then(() => tabs.setTitle(t.videoId, duo.currentTitle));
+  void bookmarks.syncVideo();
+  note("Плеер YouTube. Нажмите «duo» для субтитров и перевода.");
+}
 
 // ── Аккаунт Aila (этап 6 duopulse-112): блок в меню «⋮», листы входа и
 // паролей; синк паролей/закладок — общее ядро с десктопом (aila.rs). После
@@ -296,7 +329,7 @@ const account = installMobileAccount(
 // ── duo: субтитры и перевод (этап 2) ───────────────────────────────────
 let duoPanel: import("./duo/panel").DuoPanel | null = null;
 let videoOpen = false;
-const duo = new MobileDuo(content, tab, (s: DuoStatus) => {
+const duo = new MobileDuo(content, () => tabs.activeFrame, (s: DuoStatus) => {
   duoPanel?.setStatus(s);
   // Панель закрыта — статус duo виден в общей строке (панель открыта — только в ней).
   if (!duoPanel) {
@@ -337,7 +370,7 @@ duoBtn.addEventListener("click", () => {
 const music = createMusicDownloader({
   getVideoId: () => duo.currentVideoId,
   host: content,
-  getFrame: () => (tab.hidden || tab.src === "about:blank" ? null : tab),
+  getFrame: () => tabs.activeFrame,
   render: (text) => {
     if (text) note(text);
   },
@@ -367,8 +400,14 @@ const selectionTranslate = installMobileSelectionTranslate(
 const pdfView = createMobilePdf({
   note,
   host: content,
-  start,
-  tab,
+  hideContent: () => {
+    start.hidden = true;
+    tabs.setVisible(false);
+  },
+  restoreContent: () => {
+    tabs.setVisible(true);
+    start.hidden = tabs.active !== null;
+  },
   showInOmnibox: (text) => {
     omnibox.value = text;
   },
@@ -430,28 +469,17 @@ async function openExternal(url: string): Promise<void> {
   }
 }
 
-/** Загрузить адрес в единственную вкладку (iframe) или системный браузер. */
-async function navigate(input: string): Promise<void> {
+/** Загрузить адрес: YouTube-видео — во вкладку (новую из закладок/линков
+ *  стартового экрана, заменой текущей — из omnibox, как вкладка Chrome);
+ *  поиск и прочие адреса — системный браузер. */
+async function navigate(input: string, newTab = false): Promise<void> {
   const res = resolveMobileInput(input, engine);
   // YouTube-видео — встраиваемый /embed-плеер (единственный официальный
   // путь в iframe); поиск и прочие адреса — системный браузер.
   const videoId = res.kind === "url" ? videoIdOfEmbed(res.url) : null;
   if (videoId) {
     pdfView.close();
-    tab.src = res.url;
-    tab.hidden = false;
-    start.hidden = true;
-    duoPanel?.remove();
-    duoPanel = null;
-    videoOpen = true;
-    duoBtn.hidden = false;
-    musicBtn.hidden = false;
-    // адрес открытого видео — в строке: канонический watch-URL (как у
-    // закладки), а не /embed, из которого неясно, где видео (duopulse-105)
-    omnibox.value = `https://www.youtube.com/watch?v=${videoId}`;
-    void duo.open(videoId);
-    void bookmarks.syncVideo();
-    note("Плеер YouTube. Нажмите «duo» для субтитров и перевода.");
+    tabs.open(videoId, "", newTab); // доводку хрома делает onTabActive
     return;
   }
   await openExternal(res.url);
@@ -470,15 +498,9 @@ omnibox.addEventListener("keydown", (e) => {
 home.addEventListener("click", () => {
   setMenu(false);
   pdfView.close();
-  tab.hidden = true;
-  tab.src = "about:blank";
-  start.hidden = false;
-  duoBtn.hidden = true;
-  musicBtn.hidden = true;
-  duo.close();
-  duoPanel?.remove();
-  duoPanel = null;
-  void bookmarks.syncVideo();
+  // «домой» = новая вкладка: открытые видео остаются в фоне (переключатель
+  // вкладок в шапке), до duopulse-123 «домой» убивал единственное видео
+  tabs.newTab();
   note("");
   omnibox.value = "";
   omnibox.focus();
@@ -498,3 +520,15 @@ void getVersion()
     root.querySelector("#mVersionMenu")!.textContent = `DuoPulse ${v} · мобильная ветка`;
   })
   .catch(() => {});
+
+// ── Восстановление сессии (duopulse-123): после перезапуска приложения
+// возвращаем вкладки прошлого запуска — активная грузится сразу (без
+// autoplay — автозвук после рестарта был бы неожиданным), фоновые лениво
+// при первом переключении. В инкогнито сессия не писалась — restore ничего
+// не найдёт, чистый старт.
+try {
+  const saved = parseSavedTabs(localStorage.getItem(TABS_KEY));
+  if (saved) tabs.restore(saved);
+} catch {
+  /* нет localStorage — чистый старт */
+}

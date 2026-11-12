@@ -1314,3 +1314,97 @@ body.m-bm-dragging {
   background: #fff;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
 }
+
+/* ── Вкладки (duopulse-123): кнопка-переключатель в шапке с бейджем
+   количества и лист вкладок (общий нижний шит m-sheet-*). Каждая вкладка —
+   iframe .m-tab (стиль выше, был у единственного плеера). */
+.m-tabs-btn {
+  position: relative;
+}
+
+.m-tabs-badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-neon);
+  color: var(--bg-base);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.m-tabs-sheet {
+  max-height: 70%;
+  overflow: hidden;
+}
+
+.m-tabs-head {
+  padding: 10px 14px 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.m-tabs-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.m-tabs-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: 10px;
+}
+
+.m-tabs-row.m-on {
+  background: var(--hover-neutral);
+}
+
+.m-tabs-main {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-tabs-main:active {
+  background: var(--hover-neutral);
+}
+
+.m-tabs-del {
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+
+.m-tabs-del:active {
+  color: var(--text-primary);
+  background: var(--hover-neutral);
+}
+
+.m-tabs-new {
+  color: var(--accent-neon);
+}
+
+.m-tabs-close-all {
+  color: var(--text-secondary);
+}

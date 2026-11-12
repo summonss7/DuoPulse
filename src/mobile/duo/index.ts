@@ -42,7 +42,8 @@ export class MobileDuo {
 
   constructor(
     private readonly contentEl: HTMLElement,
-    private readonly iframe: HTMLIFrameElement,
+    /** Плеер какой вкладки сейчас активен (вкладок много — duopulse-123). */
+    private readonly getFrame: () => HTMLIFrameElement | null,
     private readonly onStatus: (s: DuoStatus) => void,
     private readonly doInvoke: DuoInvoke = invoke,
   ) {
@@ -121,9 +122,11 @@ export class MobileDuo {
     if (full) void 0;
   }
 
-  /** Новые часы под текущий iframe (подписка плеера + детектор замерзания). */
+  /** Новые часы под активный iframe (подписка плеера + детектор замерзания). */
   private wireClock(): void {
-    this.clock = new YtClock(this.iframe, window, { onFrozen: () => this.heal() });
+    const frame = this.getFrame();
+    if (!frame) return;
+    this.clock = new YtClock(frame, window, { onFrozen: () => this.heal() });
     this.engine.attach(this.clock);
     void this.clock.attach().catch(() => this.onStatus({ text: "duo: плеер недоступен для синхронизации", busy: false }));
   }
@@ -150,12 +153,15 @@ export class MobileDuo {
       this.clock?.detach();
       this.clock = null;
       try {
-        const u = new URL(this.iframe.src);
+        const frame = this.getFrame();
+        if (!frame) return;
+        const u = new URL(frame.src);
         u.searchParams.set("autoplay", "1");
         u.searchParams.set("start", String(at));
-        this.iframe.src = u.toString(); // присвоение src = перезагрузка iframe
+        frame.src = u.toString(); // присвоение src = перезагрузка iframe
       } catch {
-        this.iframe.src = this.iframe.src; // fallback: то же значение тоже перезагружает
+        const frame = this.getFrame();
+        if (frame) frame.src = frame.src; // fallback: то же значение тоже перезагружает
       }
       this.wireClock();
       // проверка автостарта: играет ли/идёт ли время (мёртвый канал = 0)

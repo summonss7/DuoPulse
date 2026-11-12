@@ -48,9 +48,10 @@ export function normalizeEngine(v: string | null): MobileEngineId {
 /** Похоже на домен/IP (без схемы): «example.com», «example.com/path», «1.2.3.4». */
 const BARE_DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+([/?#:].*)?$/i;
 
-/** YouTube-плеер, который можно встроить в iframe: обычные /watch и youtu.be
- *  страница YouTube отдает с X-Frame-Options и в iframe не открывается,
- *  /embed/ID — можно (единственный официальный встраиваемый путь).
+/** YouTube-плеер, который можно встроить в iframe: обычные /watch, /shorts,
+ *  /live, music.youtube.com и youtu.be — страница YouTube отдаёт с
+ *  X-Frame-Options и в iframe не открывается, /embed/ID — можно (единственный
+ *  официальный встраиваемый путь).
  *  enablejsapi=1 — IFrame Player API для duo-часов (duopulse-082: опрос
  *  getCurrentTime кросс-доменного плеера постсообщениями). */
 export function youtubeEmbedUrl(url: string): string | null {
@@ -58,10 +59,12 @@ export function youtubeEmbedUrl(url: string): string | null {
     const u = new URL(url);
     const host = u.hostname.replace(/^www\./, "");
     let id: string | null = null;
-    if (host === "youtube.com" || host === "m.youtube.com") {
+    // music.youtube.com — тот же watch?v= (duopulse-123: ссылки музыки раньше
+    // уводили в системный браузер); shorts/live — обычные видео, embed играет
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
       const v = u.searchParams.get("v");
       if (u.pathname === "/watch" && v) id = v;
-      const m = u.pathname.match(/^\/embed\/([\w-]+)/);
+      const m = u.pathname.match(/^\/(?:embed|shorts|live)\/([\w-]+)/);
       if (m) id = m[1];
     }
     if (host === "youtu.be") {

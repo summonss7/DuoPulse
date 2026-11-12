@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.24"
+version = "0.1.25"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"

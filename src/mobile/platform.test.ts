@@ -43,6 +43,23 @@ describe("youtubeEmbedUrl", () => {
       "https://www.youtube.com/embed/abc?enablejsapi=1",
     );
   });
+  // duopulse-123: shorts/live/music раньше не признавались плеером и уводили
+  // в системный браузер («нажатие закладки переходит в хром»)
+  it("shorts → embed с enablejsapi", () => {
+    expect(youtubeEmbedUrl("https://www.youtube.com/shorts/dQw4w9WgXcQ")).toBe(
+      "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1",
+    );
+  });
+  it("live → embed с enablejsapi", () => {
+    expect(youtubeEmbedUrl("https://m.youtube.com/live/abc123_-X")).toBe(
+      "https://www.youtube.com/embed/abc123_-X?enablejsapi=1",
+    );
+  });
+  it("music.youtube.com/watch?v= → embed с enablejsapi", () => {
+    expect(youtubeEmbedUrl("https://music.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(
+      "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1",
+    );
+  });
   it("videoIdOfEmbed — id из embed-URL для duo-сессии", () => {
     expect(videoIdOfEmbed("https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1")).toBe("dQw4w9WgXcQ");
     expect(videoIdOfEmbed("https://example.com/embed/short")).toBeNull();
