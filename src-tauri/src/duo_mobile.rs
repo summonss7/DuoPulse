@@ -142,6 +142,48 @@ pub fn check_fetch_url(raw: &str) -> Result<url::Url, String> {
     Ok(parsed)
 }
 
+/// URL дорожки с fmt=json3 (duopulse-125): baseUrl ANDROID-клиента подписан
+/// с fmt=srv3, у автодорожек каждый &lt;p&gt; там — целое пословное окно
+/// (куча слов одним cue); json3 + parse_json3_rolling показывает пословно
+/// одной строкой (фикс duopulse-113). Подпись fmt не покрывает — тот же
+/// приём, что fmt=vtt в duo_download_subtitle.
+pub fn cue_url_json3(raw: &str) -> String {
+    if raw.contains("fmt=") {
+        url::Url::parse(raw)
+            .ok()
+            .and_then(|mut u| {
+                let pairs: Vec<(String, String)> = u
+                    .query_pairs()
+                    .map(|(k, v)| {
+                        (k.to_string(), if k == "fmt" { "json3".to_string() } else { v.to_string() })
+                    })
+                    .collect();
+                u.query_pairs_mut().clear().extend_pairs(pairs);
+                Some(u.to_string())
+            })
+            .unwrap_or_else(|| raw.to_string())
+    } else if raw.contains('?') {
+        format!("{raw}&fmt=json3")
+    } else {
+        format!("{raw}?fmt=json3")
+    }
+}
+
+#[test]
+fn cue_url_json3_rewrites_fmt() {
+    // srv3 (реальный вид baseUrl ANDROID-клиента) → json3, подпись не тронута
+    let base = "https://www.youtube.com/api/timedtext?v=Q&signature=S&lang=en&fmt=srv3";
+    assert_eq!(
+        cue_url_json3(base),
+        "https://www.youtube.com/api/timedtext?v=Q&signature=S&lang=en&fmt=json3"
+    );
+    // без fmt — дописываем; с Query без fmt; совсем без запроса
+    assert_eq!(cue_url_json3("https://x/y?lang=en"), "https://x/y?lang=en&fmt=json3");
+    assert_eq!(cue_url_json3("https://x/y"), "https://x/y?fmt=json3");
+    // битый URL — как есть (ниже команда уйдёт на исходный URL)
+    assert_eq!(cue_url_json3("не url?fmt=srv3"), "не url?fmt=srv3");
+}
+
 #[test]
 fn fetch_url_guard() {
     assert!(check_fetch_url("https://www.youtube.com/api/timedtext?v=abc&lang=en").is_ok());
@@ -489,9 +531,9 @@ pub(crate) mod net {
     #[tauri::command]
     pub fn duo_fetch_cues(url: String) -> Result<DuoCuesResult, String> {
         check_fetch_url(&url)?;
-        let fetch = || -> Result<Result<(u16, String), u16>, String> {
+        let fetch = |get_url: &str| -> Result<Result<(u16, String), u16>, String> {
             match agent()
-                .get(&url)
+                .get(get_url)
                 .set("User-Agent", USER_AGENT)
                 .set("Accept-Language", "en-US,en")
                 .call()
@@ -510,11 +552,18 @@ pub(crate) mod net {
                 Err(e) => Err(format!("timedtext сеть: {e}")),
             }
         };
-        let (status, text) = match fetch() {
+        // duopulse-125: сначала fmt=json3 (пословный показ автодорожек одной
+        // строкой, parse_json3_rolling); не-200/сеть — фолбэк на исходный URL
+        // (ручные дорожки и srv1/srv3 работают как раньше).
+        let mut attempt = fetch(&cue_url_json3(&url));
+        if !matches!(&attempt, Ok(Ok((status, _))) if *status == 200) {
+            attempt = fetch(&url);
+        }
+        let (status, text) = match attempt {
             Ok(Ok(pair)) => pair,
             Ok(Err(code)) => {
                 return Ok(DuoCuesResult {
-                    status: code,
+                    status: code, // ретрай-статус фронтенда (429/5xx)
                     cues: Vec::new(),
                     warnings: Vec::new(),
                 })
