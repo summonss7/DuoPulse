@@ -318,6 +318,8 @@ pub struct SettingsAll {
     pub asr: crate::asr::config::AsrSettings,
     /// Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров.
     pub downloads: crate::settings::DownloadConfig,
+    /// Диагностика (карточка duopulse-129): бейдж M0 на страницах видео.
+    pub diagnostics: crate::settings::DiagnosticsConfig,
 }
 
 /// settings.apply: частичный патч разделов (неназванные не меняются).
@@ -336,6 +338,8 @@ pub struct SettingsPatch {
     pub updater: Option<crate::settings::UpdaterConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub downloads: Option<crate::settings::DownloadConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<crate::settings::DiagnosticsConfig>,
 }
 
 /// settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на
@@ -2042,6 +2046,7 @@ fn settings_get_all(
         translate: crate::translate::settings_view(&dir),
         asr: crate::asr::config::settings_view(&dir),
         downloads: crate::settings::load_downloads(&dir),
+        diagnostics: crate::settings::load_diagnostics(&dir),
     })
 }
 
@@ -2065,6 +2070,9 @@ fn settings_apply(params: SettingsPatch) -> Result<(), String> {
     }
     if let Some(downloads) = params.downloads {
         crate::settings::save_downloads(&dir, &downloads)?;
+    }
+    if let Some(diagnostics) = params.diagnostics {
+        crate::settings::save_diagnostics(&dir, &diagnostics)?;
     }
     Ok(())
 }

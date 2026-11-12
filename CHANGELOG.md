@@ -5692,3 +5692,10 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   «Скачать», C:\DuoPulse).
 - Коммит: dc8cbed feat: duopulse-128 — состояние duo (вкл/выкл субтитров) запоминается
   глобально…; релизы обновлений — 99fb4c5 (duopulse-updates).
+
+## 12.11.2026 23:56 — duopulse-129: галочка для диагностического бейджа M0 (по умолчанию выключен)
+- Начало работы: 12.11.2026 20:38
+- Окончание работы: 12.11.2026 23:56
+- Что сделано: диагностическое окошко слева внизу на страницах видео (бейдж M0) больше не показывается всегда — в duopulse://settings появился раздел «Диагностика» с галочкой «Показывать бейдж M0 на видео» (по умолчанию выключена). Реализация: раздел настроек diagnostics.m0Badge (Rust: DiagnosticsConfig в settings/mod.rs, bridge settings_all/apply + контракт и gen-типы; TS: галочка в settings.ts); content/m0-spike.js спрашивает у Core WebMessage «m0-badge» на каждый новый документ и запускает бейдж/метку/пробу перехвата только при включённой галочке (смена настройки действует после перезагрузки страницы; вне WebView2 — тихо). README обновлён; версия 0.1.31.
+- Как проверено: backup.bat; npm run typecheck; npm test — 477 ok; cargo test — 393 ok (юнит-тест дефолта/roundtrip diagnostics_m0_badge_default_off_roundtrip); npm run release — 0.1.31 собран и опубликован в оба канала (GitHub Pages, Aila-хаб) + обновлена локальная копия C:\DuoPulse.
+- Коммит: см. ниже (feat: duopulse-129).

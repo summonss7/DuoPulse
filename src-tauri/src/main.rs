@@ -844,6 +844,17 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 // документом. Origin — по URL вкладки Core, содержимому
                 // сообщения не верим: чужие пароли наружу не утекают.
                 handle_passwords_fill(&app, &tab_id, &parsed, sender.as_ref());
+            } else if parsed["duopulse"] == "m0-badge" {
+                // Галочка «Диагностика» (карточка duopulse-129): бейдж M0
+                // (content/m0-spike.js) показывается только при включённой
+                // настройке; читаем файл на каждый новый документ — смена
+                // галочки действует после перезагрузки страницы.
+                let reply = serde_json::json!({
+                    "duopulse": "m0-badge-enabled",
+                    "enabled": crate::settings::load_diagnostics(&crate::proxy::profile_dir())
+                        .m0_badge,
+                });
+                post_to_page(sender.as_ref(), &reply);
             } else if parsed["duopulse"] == "cosmetic" {
                 if let Some(url) = parsed["url"].as_str() {
                     let res = app

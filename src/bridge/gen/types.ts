@@ -121,6 +121,7 @@ export interface DuoPulseBridgeContract {
   PerfTabSwitchInfo: PerfTabSwitchInfo;
   PerfTabs: PerfTabs;
   SettingsPatch: SettingsPatch;
+  DiagnosticsConfig: DiagnosticsConfig;
   DownloadConfig: DownloadConfig;
   PrivacyConfig: PrivacyConfig;
   SearchConfig: SearchConfig;
@@ -928,11 +929,21 @@ export interface PerfTabs {
  * settings.apply: частичный патч разделов (неназванные не меняются). Прокси-пароль и ключи API — только существующими командами (settings.set proxy / translate.set_settings: секреты идут в DPAPI, не в патче).
  */
 export interface SettingsPatch {
+  diagnostics?: DiagnosticsConfig | null;
   downloads?: DownloadConfig | null;
   privacy?: PrivacyConfig | null;
   search?: SearchConfig | null;
   subtitles?: SubtitlesConfig | null;
   updater?: UpdaterConfig | null;
+}
+/**
+ * Раздел "diagnostics" settings.json (карточка duopulse-129): видимость диагностического бейджа M0 (content/m0-spike.js — слева внизу: инжекция, сетевой перехват, fps/дропы кадров). По умолчанию ВЫКЛЮЧЕН — раньше бейдж показывался всегда («окошко слева внизу при просмотре видео» — пожелание Артёма). Раздел после v3 — serde-умолчания, миграция не нужна.
+ */
+export interface DiagnosticsConfig {
+  /**
+   * Показывать диагностический бейдж M0 на страницах видео.
+   */
+  m0Badge?: boolean;
 }
 /**
  * Раздел "downloads" settings.json. Появился после v3 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).
@@ -1098,6 +1109,10 @@ export interface SettingsAll {
    * Распознавание речи (карточка duopulse-060): движок/модель/ключ.
    */
   asr: AsrSettings;
+  /**
+   * Диагностика (карточка duopulse-129): бейдж M0 на страницах видео.
+   */
+  diagnostics: DiagnosticsConfig;
   /**
    * Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров.
    */

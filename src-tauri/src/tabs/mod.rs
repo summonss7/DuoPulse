@@ -1349,7 +1349,9 @@ fn build_tab_webview(
     };
     builder
         // Критерий M0: скрипт выполняется в каждом новом документе
-        // (WebView2: AddScriptToExecuteOnDocumentCreatedAsync).
+        // (WebView2: AddScriptToExecuteOnDocumentCreatedAsync). Видимость
+        // бейджа решает сам скрипт — спрашивает Core по WebMessage
+        // (галочка «Диагностика», карточка duopulse-129).
         .initialization_script(crate::CONTENT_INIT_SCRIPT_M0)
         // Горячие клавиши таб-бара в контенте (задача 1.2) — до скриптов
         // страницы, чтобы перехват нельзя было снять.

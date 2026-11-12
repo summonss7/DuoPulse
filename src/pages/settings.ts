@@ -934,6 +934,28 @@ export function initSettingsPage(): void {
   dlDirRow.append(dlDirBtn, dlDirText, dlDirStatus);
   downloads.body.append(dlDirRow);
 
+  // --- 6b. Диагностика (карточка duopulse-129): бейдж M0 на страницах видео.
+  const diag = section(
+    "Диагностика",
+    "Отладочный бейдж в левом нижнем углу страниц с видео (инъекция, сетевой перехват, fps/дропы кадров). По умолчанию выключен.",
+  );
+  const m0Badge = document.createElement("input");
+  m0Badge.type = "checkbox";
+  const m0BadgeLabel = el("label", "set-check");
+  m0BadgeLabel.append(m0Badge, Object.assign(el("span"), { textContent: " Показывать бейдж M0 на видео" }));
+  const diagStatus = el("div", "set-status");
+  m0Badge.addEventListener("change", () => {
+    void bridge.settings
+      .apply({ diagnostics: { m0Badge: m0Badge.checked } })
+      .then(() => {
+        diagStatus.textContent = m0Badge.checked
+          ? "Бейдж включён — появится после перехода на другую страницу."
+          : "Бейдж выключен — исчезнет после перехода на другую страницу.";
+      })
+      .catch((e) => (diagStatus.textContent = String(e)));
+  });
+  diag.body.append(m0BadgeLabel, diagStatus);
+
   // --- 7. Аккаунт Aila: синк паролей между устройствами (этап 4 duopulse-110)
   const aila = section(
     "Аккаунт Aila",
@@ -1324,6 +1346,7 @@ export function initSettingsPage(): void {
       strokeCheck.checked = st.textStroke ?? true;
       markLookChip();
       clearHist.checked = all.privacy.clearHistoryOnExit ?? false;
+      m0Badge.checked = all.diagnostics.m0Badge ?? false;
       dlDirText.textContent = all.downloads.dir ?? "Системная папка «Загрузки»";
       const up = all.updater;
       updChannel.value = up.channel ?? "stable";

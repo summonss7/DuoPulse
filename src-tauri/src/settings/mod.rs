@@ -502,6 +502,36 @@ pub fn save_updater(dir: &Path, cfg: &UpdaterConfig) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Диагностика (карточка duopulse-129): бейдж M0 на страницах видео
+// ---------------------------------------------------------------------------
+
+/// Раздел "diagnostics" settings.json (карточка duopulse-129): видимость
+/// диагностического бейджа M0 (content/m0-spike.js — слева внизу: инжекция,
+/// сетевой перехват, fps/дропы кадров). По умолчанию ВЫКЛЮЧЕН — раньше бейдж
+/// показывался всегда («окошко слева внизу при просмотре видео» — пожелание
+/// Артёма). Раздел после v3 — serde-умолчания, миграция не нужна.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiagnosticsConfig {
+    /// Показывать диагностический бейдж M0 на страницах видео.
+    pub m0_badge: bool,
+}
+
+impl Default for DiagnosticsConfig {
+    fn default() -> Self {
+        Self { m0_badge: false }
+    }
+}
+
+pub fn load_diagnostics(dir: &Path) -> DiagnosticsConfig {
+    load_section(dir, "diagnostics")
+}
+
+pub fn save_diagnostics(dir: &Path, cfg: &DiagnosticsConfig) -> Result<(), String> {
+    save_section(dir, "diagnostics", cfg)
+}
+
+// ---------------------------------------------------------------------------
 // Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров
 // ---------------------------------------------------------------------------
 
@@ -536,6 +566,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// duopulse-129: бейдж M0 по умолчанию выключен; сохранение/чтение
+    /// раздела roundtrip, прочие ключи файла не трогает.
+    #[test]
+    fn diagnostics_m0_badge_default_off_roundtrip() {
+        let dir = tmp_dir("diag");
+        assert_eq!(load_diagnostics(&dir).m0_badge, false, "дефолт — выключен");
+        save_diagnostics(&dir, &DiagnosticsConfig { m0_badge: true }).unwrap();
+        assert_eq!(load_diagnostics(&dir).m0_badge, true);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

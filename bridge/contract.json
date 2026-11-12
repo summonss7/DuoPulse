@@ -2294,6 +2294,17 @@
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
+          "DiagnosticsConfig": {
+            "description": "Раздел \"diagnostics\" settings.json (карточка duopulse-129): видимость диагностического бейджа M0 (content/m0-spike.js — слева внизу: инжекция, сетевой перехват, fps/дропы кадров). По умолчанию ВЫКЛЮЧЕН — раньше бейдж показывался всегда («окошко слева внизу при просмотре видео» — пожелание Артёма). Раздел после v3 — serde-умолчания, миграция не нужна.",
+            "properties": {
+              "m0Badge": {
+                "default": false,
+                "description": "Показывать диагностический бейдж M0 на страницах видео.",
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
           "DownloadConfig": {
             "description": "Раздел \"downloads\" settings.json. Появился после v3 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).",
             "properties": {
@@ -2492,6 +2503,16 @@
         },
         "description": "settings.apply: частичный патч разделов (неназванные не меняются). Прокси-пароль и ключи API — только существующими командами (settings.set proxy / translate.set_settings: секреты идут в DPAPI, не в патче).",
         "properties": {
+          "diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/DiagnosticsConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "downloads": {
             "anyOf": [
               {
@@ -2804,6 +2825,17 @@
               "pro"
             ],
             "type": "string"
+          },
+          "DiagnosticsConfig": {
+            "description": "Раздел \"diagnostics\" settings.json (карточка duopulse-129): видимость диагностического бейджа M0 (content/m0-spike.js — слева внизу: инжекция, сетевой перехват, fps/дропы кадров). По умолчанию ВЫКЛЮЧЕН — раньше бейдж показывался всегда («окошко слева внизу при просмотре видео» — пожелание Артёма). Раздел после v3 — serde-умолчания, миграция не нужна.",
+            "properties": {
+              "m0Badge": {
+                "default": false,
+                "description": "Показывать диагностический бейдж M0 на страницах видео.",
+                "type": "boolean"
+              }
+            },
+            "type": "object"
           },
           "DownloadConfig": {
             "description": "Раздел \"downloads\" settings.json. Появился после v3 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).",
@@ -3134,6 +3166,14 @@
             ],
             "description": "Распознавание речи (карточка duopulse-060): движок/модель/ключ."
           },
+          "diagnostics": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/DiagnosticsConfig"
+              }
+            ],
+            "description": "Диагностика (карточка duopulse-129): бейдж M0 на страницах видео."
+          },
           "downloads": {
             "allOf": [
               {
@@ -3192,6 +3232,7 @@
           "adblockEnabled",
           "appearance",
           "asr",
+          "diagnostics",
           "downloads",
           "engines",
           "privacy",
