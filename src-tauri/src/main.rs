@@ -668,6 +668,17 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 // три) и панель обновляются; via — источник изменения.
                 let state = parse_set_state(&parsed);
                 let via = parsed["via"].as_str().unwrap_or("?").to_string();
+                // duopulse-128: последнее пользовательское вкл/выкл duo — в
+                // настройки (новые окна/видео стартуют в том же состоянии).
+                // Только «пользовательские» via: смена видео/уход видео и
+                // патчи стиля/сдвига флага не меняют, иначе каждое свежее
+                // видео гасило бы память.
+                if matches!(
+                    via.as_str(),
+                    "alt-d" | "panel" | "select" | "remove" | "translate" | "asr" | "load_file" | "drop"
+                ) {
+                    settings::save_last_duo_enabled(&proxy::profile_dir(), state.enabled);
+                }
                 eprintln!(
                     "[subtitles] set-state: {} — {} дорожек (via {via}, tab {tab_id})",
                     if state.enabled { "вкл" } else { "выкл" },

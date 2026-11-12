@@ -1,7 +1,7 @@
 // Тесты чтения дефолтов субтитров из window.__DUOPULSE_DEFAULTS__ (задача 5.1):
 // чистые функции на объекте-холдере, без DOM.
 import { describe, expect, it } from "vitest";
-import { baseStyle, preferredLangs, type DefaultsHolder } from "./defaults";
+import { baseStyle, lastDuoEnabled, preferredLangs, type DefaultsHolder } from "./defaults";
 import { DEFAULT_SUBTITLE_STYLE } from "./overlay/style";
 
 const win = (value: unknown): DefaultsHolder => ({ __DUOPULSE_DEFAULTS__: value });
@@ -82,5 +82,20 @@ describe("baseStyle (задача 5.1)", () => {
   it("без дефолтов — прежние значения content-слоя", () => {
     expect(baseStyle(win(undefined))).toEqual(DEFAULT_SUBTITLE_STYLE);
     expect(baseStyle(win({}))).toEqual(DEFAULT_SUBTITLE_STYLE);
+  });
+});
+
+// duopulse-128: последнее вкл/выкл duo — новые окна стартуют в нём.
+describe("lastDuoEnabled (duopulse-128)", () => {
+  it("boolean читается как есть", () => {
+    expect(lastDuoEnabled(win({ subtitles: { lastEnabled: true } }))).toBe(true);
+    expect(lastDuoEnabled(win({ subtitles: { lastEnabled: false } }))).toBe(false);
+  });
+
+  it("отсутствует/мусор — null (прежнее поведение)", () => {
+    expect(lastDuoEnabled(win(undefined))).toBeNull();
+    expect(lastDuoEnabled(win({}))).toBeNull();
+    expect(lastDuoEnabled(win({ subtitles: {} }))).toBeNull();
+    expect(lastDuoEnabled(win({ subtitles: { lastEnabled: "on" } }))).toBeNull();
   });
 });

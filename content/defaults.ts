@@ -11,6 +11,7 @@ interface DuoPulseDefaults {
   subtitles?: {
     defaultTranslationLang?: unknown;
     style?: unknown;
+    lastEnabled?: unknown;
   };
 }
 
@@ -45,6 +46,14 @@ export function preferredLangs(holder: DefaultsHolder = window as unknown as Def
     if (isLangCode(code)) return [code, ...PREFERRED_TRANSLATION_LANGS];
   }
   return PREFERRED_TRANSLATION_LANGS;
+}
+
+/** Последнее пользовательское вкл/выкл duo (карточка duopulse-128): новые
+ * окна/видео стартуют в том же состоянии. null — пользователь ещё не
+ * переключал — прежнее поведение (выключено до Alt+D/кнопки). */
+export function lastDuoEnabled(holder: DefaultsHolder = window as unknown as DefaultsHolder): boolean | null {
+  const last = rawDefaults(holder)?.subtitles?.lastEnabled;
+  return typeof last === "boolean" ? last : null;
 }
 
 /** Базовый стиль плашки новых вкладок: дефолты content-слоя + патч настроек

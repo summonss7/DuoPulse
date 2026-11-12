@@ -338,6 +338,24 @@ pub fn save_subtitles(dir: &Path, cfg: &SubtitlesConfig) -> Result<(), String> {
     save_section(dir, "subtitles", cfg)
 }
 
+/// Последнее пользовательское состояние показа duo (карточка duopulse-128):
+/// вкл/выкл, выбранные Alt+D/кнопкой/панелью. Отдельный ключ корня (не раздел
+/// "subtitles"), чтобы settings.apply и синк профиля его не перетирали.
+/// None — пользователь ещё не переключал: новые окна живут по-старому
+/// (показ выключен до первого включения).
+pub fn last_duo_enabled(dir: &Path) -> Option<bool> {
+    load_root(dir)
+        .get("subtitlesLastEnabled")
+        .and_then(|v| v.as_bool())
+}
+
+/// Запомнить последнее пользовательское состояние показа duo (set-state с
+/// «пользовательским» via — см. обработчик в main.rs). Ошибки записи молча
+/// игнорируем: забылось — новые окна просто стартуют выключенными.
+pub fn save_last_duo_enabled(dir: &Path, on: bool) {
+    let _ = write_key(dir, "subtitlesLastEnabled", &serde_json::json!(on));
+}
+
 /// Initialization-script для контентных вкладок: дефолты субтитров до скриптов
 /// страницы (content-бандл читает window.__DUOPULSE_DEFAULTS__). JSON —
 /// валидный JS-объектный литерал; чтение файла — на каждую вкладку, чтобы
@@ -347,6 +365,9 @@ pub fn content_defaults_script(dir: &Path) -> String {
     let value = serde_json::json!({
         "subtitles": {
             "defaultTranslationLang": subs.default_translation_lang,
+            // duopulse-128: последнее вкл/выкл duo — новые окна стартуют
+            // в том же состоянии (null = пользователь ещё не переключал).
+            "lastEnabled": last_duo_enabled(dir),
             "style": {
                 "fontScalePct": subs.style.font_scale_pct,
                 "fontFamily": subs.style.font_family,
@@ -728,6 +749,15 @@ mod tests {
         let json = &js[";(window.__DUOPULSE_DEFAULTS__=".len()..js.len() - 2];
         let parsed: serde_json::Value = serde_json::from_str(json).expect("JSON-литерал валиден");
         assert_eq!(parsed["subtitles"]["defaultTranslationLang"], "uk");
+        // duopulse-128: без переключений lastEnabled нет (null — прежнее
+        // поведение новых окон); после сохранения — в литерале и чтении.
+        assert!(parsed["subtitles"]["lastEnabled"].is_null());
+        save_last_duo_enabled(&dir, true);
+        assert_eq!(last_duo_enabled(&dir), Some(true));
+        assert!(content_defaults_script(&dir).contains("\"lastEnabled\":true"));
+        save_last_duo_enabled(&dir, false);
+        assert_eq!(last_duo_enabled(&dir), Some(false));
+        assert!(content_defaults_script(&dir).contains("\"lastEnabled\":false"));
         assert_eq!(parsed["subtitles"]["style"]["fontScalePct"], 120);
         assert_eq!(parsed["subtitles"]["style"]["fontFamily"], "JetBrains Mono");
         assert_eq!(parsed["subtitles"]["style"]["originalColor"], "#ffdd33");

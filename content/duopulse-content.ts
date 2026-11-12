@@ -82,7 +82,7 @@ import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import { installSelectionTranslate } from "./translate-select";
 import { installPasswordFill } from "./passwords-fill";
 import { installSubsDownload } from "./download-subs";
-import { preferredLangs } from "./defaults";
+import { lastDuoEnabled, preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
 
@@ -476,6 +476,14 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
         // без длительности) в память промахивается — уточнённый детект
         // следом восстановит показ запомненного видео.
         enabled = mem ? mem.enabled : false;
+        if (mem === null && lastDuoEnabled() === true && adapter.matches(video.url)) {
+          // duopulse-128: пользователь в последний раз держал duo включённым —
+          // новое видео (в т.ч. в новом окне) стартует включённым: дефолт-набор
+          // соберём по приходу списка дорожек (ждущее включение, паттерн
+          // duopulse-079). lastEnabled=false/null — прежнее поведение выше.
+          enabled = true;
+          pendingEnable = "video-auto";
+        }
         applyTracks(enabled ? lastSetTracks() : []);
         engine.attach(video.el);
         reportSetState("video");
