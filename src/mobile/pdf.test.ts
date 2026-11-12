@@ -8,6 +8,7 @@ import {
   ZOOM_MIN,
   assembleBytes,
   clampZoom,
+  isBusyError,
   turnPage,
 } from "./pdf";
 
@@ -41,5 +42,16 @@ describe("clampZoom", () => {
     expect(clampZoom(0)).toBe(ZOOM_MIN);
     expect(clampZoom(99)).toBe(ZOOM_MAX);
     expect(clampZoom(1.25)).toBe(1.25);
+  });
+});
+
+describe("isBusyError", () => {
+  it("узнаёт «busy» от mobile_pdf_take и не путает с прочими ошибками", () => {
+    // duopulse-124: копирование ещё идёт — повторяем, а не сдаёмся
+    expect(isBusyError("busy: копирование PDF ещё идёт")).toBe(true);
+    expect(isBusyError("Error: busy")).toBe(false);
+    expect(isBusyError("busy")).toBe(false);
+    expect(isBusyError("копирование PDF: поток недоступен")).toBe(false);
+    expect(isBusyError(new Error("busy: копирование PDF ещё идёт"))).toBe(true);
   });
 });

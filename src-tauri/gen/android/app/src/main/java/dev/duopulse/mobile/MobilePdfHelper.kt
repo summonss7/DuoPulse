@@ -17,6 +17,11 @@ import java.io.File
  */
 object MobilePdfHelper {
   @Volatile private var pending: String = ""
+  // duopulse-124: копирование идёт в фоновом потоке, а mobile_pdf_take фронтенд
+  // зовёт сразу (холодный старт/onNewIntent) — без флага take читал пустое
+  // pending ДО окончания копирования и файл терялся («открылось, но пусто»).
+  // Теперь take отвечает «busy», пока поток не положил результат.
+  @Volatile private var copying: Boolean = false
 
   /** Вызывается из MainActivity (onCreate/onNewIntent), копирование — в фоне.
    *  VIEW — «Открыть с помощью» (URI в intent.data); SEND/SEND_MULTIPLE —
@@ -36,18 +41,22 @@ object MobilePdfHelper {
       else -> null
     }
     if (data == null) return
+    copying = true
     Thread {
       pending = try {
         copy(context, data)
       } catch (e: Exception) {
         "error: ${e.message}"
       }
+      copying = false
     }.start()
   }
 
-  /** pending для Rust: «path\tимя» | «error: …» | «». Читается однократно. */
+  /** pending для Rust: «path\tимя» | «error: …» | «busy» | «». Читается
+   *  однократно; «busy» — копирование ещё идёт, фронтенд повторит take. */
   @JvmStatic
   fun take(): String {
+    if (copying && pending.isEmpty()) return "busy"
     val v = pending
     pending = ""
     return v

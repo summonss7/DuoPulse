@@ -117,6 +117,11 @@ mod jni_impl {
             if s.is_empty() {
                 return Ok(None);
             }
+            if s == "busy" {
+                // duopulse-124: копирование ещё идёт (фоновый поток хелпера) —
+                // фронтенд повторит take по этому маркеру, файл не теряется
+                return Err("busy: копирование PDF ещё идёт".into());
+            }
             if let Some(err) = s.strip_prefix("error:") {
                 return Err(format!("копирование PDF:{}", err.trim_start()));
             }

@@ -5602,3 +5602,23 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   3) «Закладки уводят в хром» — youtubeEmbedUrl (platform.ts) теперь распознаёт /shorts/, /live/ и music.youtube.com (прежде только /watch и youtu.be — такие ссылки падали в системный браузер), тесты в platform.test.ts.
 - Как проверено: typecheck ok; vitest 467/467 (44 файла, +16 новых); debug APK 0.1.25 живьём на эмуляторе через CDP: две вкладки, переключение (ленивая загрузка фоновой), закрытие ✕, бейдж; force-stop + рестарт приложения — обе вкладки восстановлены, активная с адресом в omnibox; shorts-ссылка открывается встроенным плеером в приложении. Релиз 0.1.25: APK → канал Aila (android-build.sh), NSIS → GitHub+Aila+хаб+C:\DuoPulse (npm run release).
 - Коммит: 3e536c6 feat(mobile): duopulse-123 — вкладки, восстановление сессии и встроенные закладки (push в main; релиз-фиды — duopulse-updates bc2d1a0).
+
+## 12.11.2026 16:20 — duopulse-124: мобильный PDF «открылось, но пусто» — гонка копирования (0.1.26)
+- Начало работы: 12.11.2026 14:52
+- Окончание работы: 12.11.2026 16:20
+- Что сделано: исправлена причина, почему на телефоне PDF «открывался, но ничего не показывало».
+  MobilePdfHelper копирует content-URI в cache/pdf фоновым потоком, а фронтенд звал mobile_pdf_take
+  один раз сразу при старте/onNewIntent — на реальном устройстве копирование ещё не закончено,
+  take возвращал пусто, а готовый pending уже никто не читал: файл терялся (на эмуляторе в
+  duopulse-119 тайминг успевал, поэтому прошёл). Фикс: Kotlin-хелпер держит флаг copying и take()
+  отвечает «busy», пока поток не положил результат; Rust mobile_pdf_take прокидывает маркер как
+  Err(«busy: …»); фронтенд poll() (src/mobile/pdf.ts) повторяет take с паузой 250 мс до ~10 с
+  по isBusyError (чистая функция, тест pdf.test.ts). Попутно найден тест-артефакт: am start без
+  флага 0x10000001 не даёт гранта на content-URI (реальные файловые менеджеры грантят сами).
+  Версия 0.1.26.
+- Как проверено: typecheck ok; vitest 468/468 (44 файла, +1 isBusyError); cargo 369+22; живой
+  прогон debug-APK 0.1.26 на эмуляторе duopulse36: холодный старт am start VIEW content-URI с
+  грантом → __duopulseMobilePdf {open:true, name, pages:3}, скриншот — тулбар и рендер «Page 1»;
+  onNewIntent при живом приложении — тоже открывает. Релиз 0.1.26 обеими платформами в одном
+  сеансе: APK → канал Aila (android-build.sh), NSIS → GitHub+Aila+хаб+C:\DuoPulse (npm run release).
+- Коммит: см. git log (fix(mobile): duopulse-124).

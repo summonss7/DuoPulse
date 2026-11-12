@@ -16,6 +16,11 @@ export const ZOOM_MIN = 0.5;
 export const ZOOM_MAX = 4;
 export const ZOOM_STEP = 0.25;
 
+/** Ожидание «busy» от mobile_pdf_take (копирование в фоне): пауза/повторы,
+ *  суммарно до ~10 с — с запасом на большие файлы и медленное хранилище. */
+export const BUSY_RETRY_MS = 250;
+export const BUSY_RETRIES = 40;
+
 /** Зум в границах [ZOOM_MIN, ZOOM_MAX]. */
 export function clampZoom(z: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
@@ -32,6 +37,14 @@ export function assembleBytes(chunks: readonly string[]): Uint8Array {
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
+}
+
+/** Ошибка mobile_pdf_take «копирование ещё идёт» (duopulse-124): копия
+ *  готовится фоновым потоком хелпера, а take фронтенд зовёт сразу —
+ *  такой ответ надо повторить, а не съесть как неудачу. */
+export function isBusyError(e: unknown): boolean {
+  // invoke бракует строкой ошибки, но возможна и обёртка Error — ищем маркер
+  return String(e).includes("busy:");
 }
 
 /** Параметры контроллера от мобильного UI (mobile.ts). */
@@ -95,17 +108,26 @@ export function createMobilePdf(deps: MobilePdfDeps) {
 
   const snapshot = (): PdfSnapshot => ({ open, name, pages, page, zoom, error });
 
-  /** Притянуть pending-файл из системы («Открыть с помощью»). */
+  /** Притянуть pending-файл из системы («Открыть с помощью»). Пока хелпер
+   *  копирует файл в фоне, take отвечает «busy» (duopulse-124) — ждём и
+   *  повторяем, иначе файл терялся («открылось, но пусто»). */
   async function poll(): Promise<void> {
-    let pending: PdfPendingFile | null = null;
-    try {
-      pending = await invoke<PdfPendingFile | null>("mobile_pdf_take");
-    } catch (e) {
-      // ошибка копирования хелпером — показать, не открывать
-      deps.note(`PDF: ${e}`);
+    for (let attempt = 0; ; attempt++) {
+      let pending: PdfPendingFile | null = null;
+      try {
+        pending = await invoke<PdfPendingFile | null>("mobile_pdf_take");
+      } catch (e) {
+        if (isBusyError(e) && attempt < BUSY_RETRIES) {
+          await new Promise((r) => setTimeout(r, BUSY_RETRY_MS));
+          continue;
+        }
+        // ошибка копирования хелпером — показать, не открывать
+        deps.note(`PDF: ${e}`);
+        return;
+      }
+      if (pending) await openFile(pending);
       return;
     }
-    if (pending) await openFile(pending);
   }
 
   /** Выгрузить документ и показать прежний экран (кнопка «домой»/закрыть). */
