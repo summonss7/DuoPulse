@@ -5651,3 +5651,14 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Что сделано: по пожеланию Артёма (aila-398) внутренние документы убраны из публичного репо GitHub: promt.txt и CARDS/ (125 карточек диспетчера) сняты с отслеживания (git rm --cached, файлы остаются только локально), добавлены в .gitignore; README помечает их как локальные. Локальные копии не тронуты.
 - Как проверено: git ls-files — 0 совпадений promt/CARDS; API GitHub contents — 404 по обоим путям; локально promt.txt и CARDS/ на месте.
 - Коммит: снятие с отслеживания + .gitignore + README (см. git log, «убрать из публичного репо…»), + пуш.
+
+## 2026-11-12 17:10 — duopulse-126: мобильная ветка — поиск и сайты в приложении, не в Chrome
+
+- Начало работы: 2026-11-12 16:22
+- Окончание работы: 2026-11-12 17:10
+- Что сделано:
+  - Диагноз: на Android ввод в omnibox без YouTube-видео (поиск «YouTube», youtube.com без /watch) осознанно уходил в системный браузер (mobile_open_url → Intent ACTION_VIEW → Chrome) — страницы с X-Frame-Options в iframe не встраиваются (duopulse-085).
+  - Фикс: нативный web-оверлей в приложении — Kotlin-хелпер MobileWebHelper.kt (WebView поверх UI Tauri: тулбар «назад / адрес / „▶ duo“ / закрыть», edge-to-edge-паддинг, системный «назад» = история WebView; MainActivity держит current/tauriWebView), Rust-команды mobile_web_open/mobile_web_close (src-tauri/src/mobile_web.rs, валидатор схемы переиспользован), navigate() в mobile.ts ведёт поиск/прочие адреса в оверлей (фолбэк — системный браузер), глобал window.__duopulseOpenVideo — кнопка «▶ duo» на странице YouTube-видео открывает его во встроенном плеере, «домой» и инкогнито закрывают оверлей, proguard-keep для хелпера.
+  - Релизы 0.1.28: десктоп (npm run release, оба канала + хаб + C:\DuoPulse) и мобильный (android-build.sh release, канал Aila).
+- Как проверено: typecheck (tsc) чисто; vitest 468 тестов зелёные; cargo test --lib 23 зелёные (host, MinGW в PATH); живьём на эмуляторе duopulse36 (debug-APK, CDP webview_devtools_remote_2703): поиск «YouTube» → выдача Google в приложении, фокус в MainActivity (Chrome не запускался); youtube.com/watch в оверлее — полный формат YouTube; кнопка «▶ duo» → видео открылось во встроенном плеере (omnibox = watch-URL), оверлей корректно разрушен; системный «назад» закрывает оверлей; release-APK (живые тапы input tap): поиск из omnibox открывает оверлей в приложении — R8-keep сработал.
+- Коммит: см. git log (duopulse-126, релиз 0.1.28).

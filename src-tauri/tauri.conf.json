@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DuoPulse",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "identifier": "dev.duopulse.spike",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -18,12 +18,18 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "createUpdaterArtifacts": true,
     "fileAssociations": [
       {
-        "ext": ["pdf"],
+        "ext": [
+          "pdf"
+        ],
         "name": "DuoPulse PDF",
         "description": "PDF-документ",
         "mimeType": "application/pdf",
@@ -32,7 +38,10 @@
     ],
     "windows": {
       "nsis": {
-        "languages": ["Russian", "English"],
+        "languages": [
+          "Russian",
+          "English"
+        ],
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico"
       }

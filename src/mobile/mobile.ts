@@ -80,7 +80,8 @@ root.innerHTML = `
       <p class="m-version" id="mVersion"></p>
       <p class="m-hint">Ссылки YouTube с видео открываются встроенным плеером —
         кнопка «duo» включает субтитры и перевод (готовые дорожки видео или
-        Google). Прочие адреса и поиск открываются в браузере телефона.</p>
+        Google). Поиск и прочие сайты открываются в приложении; на странице
+        YouTube-видео появится кнопка «▶ duo» — открыть видео с субтитрами.</p>
       <button class="m-quick" data-url="https://www.youtube.com/watch?v=iG9CE55wbtY">Открыть пример — TED с субтитрами</button>
     </section>
     <div id="mMenuWrap" class="m-menu-wrap" hidden>
@@ -158,6 +159,8 @@ try {
 
 function setIncognito(on: boolean): void {
   incognito = on;
+  // web-оверлей — на системном профиле WebView: в инкогнито его закрываем
+  void invoke<string>("mobile_web_close").catch(() => {});
   privateBtn.classList.toggle("on", on);
   privateBtn.setAttribute("aria-pressed", String(on));
   privateBtn.title = on
@@ -458,8 +461,9 @@ engineSel.addEventListener("change", () => {
 });
 
 /** Открыть адрес системным браузером (mobile.open_url → Intent ACTION_VIEW):
- * в iframe страницы с X-Frame-Options (google.com, выдача поисковиков) не
- * встраиваются — прежде такой ввод «ничего не открывал» (duopulse-085). */
+ * фолбэк web-оверлея — оверлей недоступен (старая сборка без команды,
+ * ошибка хелпера) лучше внешним браузером, чем «ничего не открылось»
+ * (duopulse-085). */
 async function openExternal(url: string): Promise<void> {
   try {
     const r = await invoke<string>("mobile_open_url", { url });
@@ -469,21 +473,49 @@ async function openExternal(url: string): Promise<void> {
   }
 }
 
+/** Открыть адрес в приложении (duopulse-126): YouTube-видео — вкладка
+ *  /embed-плеера, поиск и прочие сайты — нативный web-оверлей поверх UI
+ *  (MobileWebHelper: тулбар назад/адрес/«▶ duo»/закрыть). Прежде всё
+ *  не-видео уходило в системный браузер (Chrome) — страницы с
+ *  X-Frame-Options в iframe не встраиваются; оверлей снимает ограничение. */
+async function openInApp(url: string): Promise<void> {
+  try {
+    const r = await invoke<string>("mobile_web_open", { url });
+    if (r === "opened") {
+      note(`Открыл в приложении: ${url}`);
+      return;
+    }
+    note(r);
+  } catch {
+    // команды нет (десктоп-сборка UI) или хелпер отказал — системный браузер
+    await openExternal(url);
+  }
+}
+
 /** Загрузить адрес: YouTube-видео — во вкладку (новую из закладок/линков
  *  стартового экрана, заменой текущей — из omnibox, как вкладка Chrome);
- *  поиск и прочие адреса — системный браузер. */
+ *  поиск и прочие адреса — web-оверлей в приложении (duopulse-126). */
 async function navigate(input: string, newTab = false): Promise<void> {
   const res = resolveMobileInput(input, engine);
   // YouTube-видео — встраиваемый /embed-плеер (единственный официальный
-  // путь в iframe); поиск и прочие адреса — системный браузер.
+  // путь в iframe); поиск и прочие адреса — web-оверлей.
   const videoId = res.kind === "url" ? videoIdOfEmbed(res.url) : null;
   if (videoId) {
     pdfView.close();
     tabs.open(videoId, "", newTab); // доводку хрома делает onTabActive
     return;
   }
-  await openExternal(res.url);
+  await openInApp(res.url);
 }
+
+/** Вход для кнопки «▶ duo» web-оверлея (duopulse-126): Kotlin-хелпер
+ *  закрывает оверлей и дергает этот глобал в UI-webview Tauri — видео
+ *  открывается во встроенном плеере, как из omnibox (новая вкладка). */
+(window as { __duopulseOpenVideo?: (id: string) => void }).__duopulseOpenVideo = (id: string) => {
+  if (!/^[\w-]{6,20}$/.test(id)) return; // id из evaluateJavascript — проверяем
+  pdfView.close();
+  tabs.open(id, "", true);
+};
 
 function goFromOmnibox(): void {
   const value = omnibox.value;
@@ -498,6 +530,8 @@ omnibox.addEventListener("keydown", (e) => {
 home.addEventListener("click", () => {
   setMenu(false);
   pdfView.close();
+  // web-оверлей тоже закрываем: «домой» — стартовый экран, не страница
+  void invoke<string>("mobile_web_close").catch(() => {});
   // «домой» = новая вкладка: открытые видео остаются в фоне (переключатель
   // вкладок в шапке), до duopulse-123 «домой» убивал единственное видео
   tabs.newTab();

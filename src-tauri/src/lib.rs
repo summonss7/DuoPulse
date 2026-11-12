@@ -35,6 +35,10 @@
 pub mod duo_mobile;
 pub mod mobile_jni;
 pub mod mobile_open;
+// Нативный web-оверлей (duopulse-126): поиск и прочие сайты — в приложении,
+// не в системном браузере; Kotlin-хелпер MobileWebHelper + команды
+// mobile_web_open/mobile_web_close.
+pub mod mobile_web;
 pub mod mobile_private;
 pub mod mobile_updater;
 // Загрузка музыки с YouTube мобильной веткой (duopulse-121): чистые функции
@@ -126,6 +130,8 @@ fn mobile_run() {
             mobile_updater::updater_download,
             mobile_updater::updater_install,
             mobile_open::mobile_open_url,
+            mobile_web::mobile_web_open,
+            mobile_web::mobile_web_close,
             mobile_private::mobile_private_cleanup,
             mobile_download::cmd::duo_mobile_formats,
             mobile_download::cmd::duo_download_begin,

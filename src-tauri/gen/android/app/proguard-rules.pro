@@ -41,3 +41,7 @@
 # (MobilePdfHelper.take) — та же грабля, что 083/102/121: без Java-ссылок
 # R8 вырезает метод в release.
 -keep class dev.duopulse.mobile.MobilePdfHelper { *; }
+# duopulse-126: JNI-хелпер нативного web-оверлея (MobileWebHelper.open/
+# close) — та же грабля, что 083/102/119/121: без Java-ссылок R8 вырезает
+# методы в release.
+-keep class dev.duopulse.mobile.MobileWebHelper { *; }
