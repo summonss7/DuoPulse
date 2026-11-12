@@ -5672,4 +5672,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   - README: раздел «Автообновление» дополнен описанием бара.
   - Релиз 0.1.29 (tauri.conf.json → package.json/Cargo.toml синхронизировал release.mjs): NSIS-установщик в builds/duopulse_0.1.29_release, оба канала обновлений (GitHub Pages + Aila), хаб «Скачать», локальная копия C:\DuoPulse.
 - Как проверено: vitest 475/475 (+7 новых), typecheck чисто; живой прогон tauri dev + CDP — бар показан поверх таб-бара (топ-оверлей, полная ширина, кнопки видимы), «Отмена» скрывает; фид https://aila.skillcoin.pp.ua/updates/duopulse/latest.json отдаёт 0.1.29.
-- Коммит: см. ниже (feat(mobile)→feat: duopulse-127 бар обновления, релиз 0.1.29)
+- Коммит: c5378b9 feat: duopulse-127 — бар «Появилась новая версия» поверх таб-бара в Windows-версии; релиз 0.1.29
