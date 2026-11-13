@@ -5918,3 +5918,33 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   повтором после EBUSY — duopulse.exe был запущен).
 - Новая карточка: CARDS/144 (полный адблок adblock-rs на Android).
 - Коммит: 9046458
+
+## 2026-11-13, 18:35 — duopulse-141: мобильный PDF — ошибка «mobile now has access to контент» при открытии без grant-разрешения (0.1.41)
+- Начало работы: 2026-11-13, 17:25
+- Окончание работы: 2026-11-13, 18:35
+- Что сделано (жалоба «открыл на телефоне pdf-файл через программу — ошибка
+  "mobile now has access to контент"»):
+  - диагностика на эмуляторе (debug 0.1.40, PDF-код не менялся с 0.1.26):
+    VIEW-интент с grant открывает PDF, БЕЗ grant — точное совпадение с жалобой
+    в logcat: SecurityException «dev.duopulse.mobile has no access to
+    content://…» (текст исключения Java показывался в строке статуса как есть);
+    источник — файловый менеджер/система прислали контентный URI без
+    FLAG_GRANT_READ_URI_PERMISSION (восстановленный интент, «всегда открывать»
+    и т.п.); прочитать такой файл приложение не может — виной не DuoPulse;
+  - MobilePdfHelper: SecurityException → маркер «noperm» (вместо сырого
+    текста), запрос DISPLAY_NAME обёрнут в try/catch — отказ запроса имени
+    больше не роняет копию (откат на последний сегмент URI);
+  - Rust mobile_pdf_take: «noperm» → Err-маркер (как busy);
+  - фронтенд pdf.ts: isNoPermError (тест pdf.test.ts) → переведённая подсказка
+    «PDF не открыт: нет доступа к файлу. Откройте файл ещё раз из проводника.»
+    (ключ добавлен в dict-en/uk/ro/ar/sk);
+  - README: строка «Просмотр PDF-файлов» дополнена поведением без grant.
+- Как проверено: npm run typecheck чист; vitest 46 файлов / 483 теста ОК;
+  cargo test --lib mobile_pdf 2 ок; эмулятор (debug 0.1.41): VIEW без grant —
+  подсказка в строке статуса (CDP mStatus), с grant — PDF открыт (1 стр.,
+  __duopulseMobilePdf), тёплый старт (onNewIntent) — открывает заново.
+- Релиз 0.1.41 (версии синхронны): android-build.sh release — APK 11.1 МБ в
+  builds/ и в канале Aila (APK-ассет в манифесте на месте); десктоп npm run
+  release — stable+canary GitHub (duopulse-updates 23a69e2), фид Pages, хаб
+  «Скачать» Aila, локальная копия C:\DuoPulse обновлена.
+- Коммит: 5a37361
