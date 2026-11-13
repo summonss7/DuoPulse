@@ -300,6 +300,52 @@ try {
   const savedId = saved?.items?.[0]?.id;
   check("бар закрыт после решения", await noSaveBar());
 
+  // 1b. живучесть бара (duopulse-142): клик по странице бар не убивает,
+  //     переключение вкладок закрывает, возврат на вкладку — перепоказывает
+  await tab.send("Page.navigate", { url: `${siteA}/login` });
+  await sleep(1000);
+  await submitLogin(tab, "artem", "surv1ve!");
+  bar = null;
+  for (let i = 0; i < 40 && !bar; i++) {
+    bar = await saveBar();
+    if (!bar) await sleep(250);
+  }
+  check("повторный сабмит (новый пароль) снова показывает бар", !!bar, bar?.text ?? "бар не появился");
+  if (bar) {
+    // клик по странице (mousedown — канал dp-close-panel) бар не закрывает
+    await evalIn(tab, `document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles:true})); 'md'`);
+    await sleep(700);
+    const survived = await saveBar();
+    check("mousedown по странице не закрывает бар (duopulse-142)", !!survived, "бар погиб от клика по контенту");
+    // уходим на другую вкладку — панель закрывается (кандидат жив в Core)
+    const tabsBefore = await viaChrome(`window.__duopulse.tabs.list()`);
+    const tabA = tabsBefore?.tabs?.find((t) => t.url.includes(`127.0.0.1:${HTTP_PORT}`));
+    await viaChrome(`window.__duopulse.tabs.open({url:'${siteB}/login'})`);
+    await sleep(1000);
+    check("уход с вкладки кандидата закрывает панель", await noSaveBar());
+    // возврат на вкладку кандидата — бар возвращается (сверка по tabs.updated)
+    await viaChrome(`window.__duopulse.tabs.activate({id:'${tabA?.id}'})`);
+    let back = null;
+    for (let i = 0; i < 40 && !back; i++) {
+      back = await saveBar();
+      if (!back) await sleep(250);
+    }
+    check("возврат на вкладку перепоказывает бар (duopulse-142)", !!back, "бар не вернулся");
+    if (back) {
+      await clickBar(back, "pwSaveClose");
+      await sleep(600);
+    }
+    check("закрывающий крестик бара гасит кандидата (dismiss)", await noSaveBar());
+    // подчистить вкладку B — проверка 5 ниже ждёт СВОЮ свежую вкладку B активной
+    const tabsCleanup = await viaChrome(`window.__duopulse.tabs.list()`);
+    for (const t of tabsCleanup?.tabs ?? []) {
+      if (t.url.includes(`127.0.0.1:${HTTP_PORT_B}`)) {
+        await viaChrome(`window.__duopulse.tabs.close({id:'${t.id}'})`);
+        await sleep(400);
+      }
+    }
+  }
+
   // 2. повторный заход → клик по полю логина → автозаполнение
   await tab.send("Page.navigate", { url: `${siteA}/login` });
   await sleep(1200);

@@ -929,16 +929,12 @@ impl TabManager {
         let snapshot = self.snapshot();
         self.persist_session();
         emit::<TabsUpdated>(app, &snapshot).ok();
-        // Кандидат бара «Сохранить пароль?» чужой активной вкладке не живёт
-        // (этап 2 duopulse-108): сабмит был в другой вкладке/вкладка закрыта.
+        // Кандидат бара «Сохранить пароль?» гасится, когда его вкладка
+        // закрыта; переключение вкладок бар переживает (duopulse-142),
+        // UI перепоказывает панель по tabs.updated.
+        let live_ids: Vec<&str> = snapshot.tabs.iter().map(|t| t.id.as_str()).collect();
         app.state::<crate::passwords::PasswordPrompts>()
-            .on_tabs_changed(
-                snapshot
-                    .tabs
-                    .iter()
-                    .find(|t| t.active)
-                    .map(|t| t.id.as_str()),
-            );
+            .on_tabs_changed(&live_ids);
         snapshot
     }
 

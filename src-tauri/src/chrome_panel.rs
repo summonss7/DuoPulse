@@ -42,6 +42,11 @@ static PANEL_GEN: AtomicU64 = AtomicU64::new(0);
 /// созданием и вешает add_child — висячий tabs.open, subtitles-стенд 090).
 static PANEL_PENDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// Какая панель сейчас открыта (kind из ui_panel_open). Бар «Сохранить
+/// пароль?» — не дропдаун: клик по странице не должен его убивать (как
+/// бабл Chrome, duopulse-142), dp-close-panel его щадит.
+static OPEN_KIND: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 /// Закрыть панель: скрыть webview и оповестить UI («кнопки-тумблеры»
 /// сбрасывают состояние по событию «chrome-panel-closed»); разрушение —
 /// ОТЛОЖЕННО (250 мс, в очереди главного потока — без блокировки вызывающего).
@@ -53,6 +58,7 @@ static PANEL_PENDING: std::sync::atomic::AtomicUsize = std::sync::atomic::Atomic
 /// сам — close_if_open).
 pub fn close(app: &AppHandle) {
     let gen = PANEL_GEN.fetch_add(1, Ordering::SeqCst);
+    *OPEN_KIND.lock().unwrap() = None;
     if let Some(wv) = app.get_webview(PANEL_WEBVIEW) {
         let _ = wv.hide();
         let app2 = app.clone();
@@ -131,6 +137,7 @@ pub async fn ui_panel_open(
             LogicalSize::new(w, h.max(1.0)),
         )
         .map_err(|e| format!("панель-webview: {e}"))?;
+    *OPEN_KIND.lock().unwrap() = Some(kind.clone());
     if !focus.unwrap_or(true) {
         // duopulse-097: окно подсказок без фокуса — создание webview только что
         // перехватило его у omnibox; вернём UI-webview, WebView2 восстановит
@@ -177,8 +184,16 @@ pub fn close_on_main_geometry_change(app: &AppHandle) {
 
 /// Клик по контенту страницы (сообщение dp-close-panel из content-скрипта):
 /// выпадающая панель закрывается кликом мимо, как нативный дропдаун.
+/// Бар «Сохранить пароль?» — не дропдаун: клики по странице его не трогают
+/// (бабл живёт, пока хозяин не решит; duopulse-142).
 pub fn on_content_close_message(app: &AppHandle) {
-    close_if_open(app);
+    let spare = matches!(
+        OPEN_KIND.lock().unwrap().as_deref(),
+        Some("pwsave")
+    );
+    if !spare {
+        close_if_open(app);
+    }
 }
 
 #[cfg(test)]

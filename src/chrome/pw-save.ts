@@ -66,25 +66,48 @@ function renderBar(c: PasswordsCandidateView): void {
   close.onclick = () => decide("dismiss");
 }
 
-/** Вкладка последнего кандидата (закрытие бара при уходе с неё). */
-let lastPromptTab: string | null = null;
-
-/** Хром-режим (chrome.ts): открыть панель по событию Core, закрыть при
- *  переключении вкладки. focus=false — фокус остаётся у страницы, набор
- *  в ней не умирает (ловушка duopulse-097). */
+/** Хром-режим (chrome.ts): бар открывается по событию Core и держится
+ *  сверкой состояния (duopulse-142): клик по странице бар больше не убивает
+ *  (Core щадит pwsave в dp-close-panel), переключение вкладок кандидат
+ *  переживает — вернулись на вкладку кандидата, панель открывается снова.
+ *  Сверка идемпотентна и по tabs.updated, и по ресайзу окна (панель-child-
+ *  webview не переживает ресайз — Core её закрывает, сверка возвращает).
+ *  focus=false — фокус остаётся у страницы, набор в ней не умирает
+ *  (ловушка duopulse-097). */
 export function initPwSaveBar(): void {
-  void listen<PasswordsCandidateView>(bridge.events.passwordsSavePrompt, (ev) => {
-    lastPromptTab = ev.payload.tabId;
+  const openBar = (): void => {
     const { w, h } = measurePanelHost("pwsave");
     openPanel("pwsave", 8, chromeHeight(), w, h, false);
+  };
+  const reconcile = (activeId: string | null): void => {
+    void bridge
+      .passwords
+      .candidate()
+      .then((c) => {
+        if (c && c.tabId === activeId) {
+          if (currentPanel() !== "pwsave") openBar();
+        } else if (currentPanel() === "pwsave") {
+          closePanel();
+        }
+      })
+      .catch(err);
+  };
+  void listen<PasswordsCandidateView>(bridge.events.passwordsSavePrompt, (ev) => {
+    reconcile(ev.payload.tabId);
   });
   void listen<TabsListResult>(bridge.events.tabsUpdated, (ev) => {
-    if (currentPanel() !== "pwsave" || lastPromptTab === null) return;
-    const active = ev.payload.tabs.find((t) => t.active)?.id ?? null;
-    if (active !== lastPromptTab) {
-      lastPromptTab = null;
-      closePanel();
-    }
+    reconcile(ev.payload.tabs.find((t) => t.active)?.id ?? null);
+  });
+  let resizeTimer: number | undefined;
+  window.addEventListener("resize", () => {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      // активную вкладку бар знает Core-кандидатом: сверка по tabs.list
+      void bridge.tabs
+        .list()
+        .then((tabs) => reconcile(tabs.tabs.find((t) => t.active)?.id ?? null))
+        .catch(err);
+    }, 250);
   });
 }
 

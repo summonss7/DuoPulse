@@ -143,12 +143,13 @@ impl PasswordPrompts {
         Ok(true)
     }
 
-    /// Список вкладок изменился (tabs/mod.rs finish): кандидат чужой
-    /// активной вкладки гасится — бар не переживает переключение вкладки
-    /// (как бабл Chrome), пароль не задерживается в памяти без дела.
-    pub fn on_tabs_changed(&self, active_id: Option<&str>) {
+    /// Список вкладок изменился (tabs/mod.rs finish): кандидат гасится, когда
+    /// его вкладка закрылась. Переключение вкладок бар переживает (как бабл
+    /// Chrome — он живёт в окне, а не во вкладке): UI перепоказывает панель
+    /// по tabs.updated, когда вкладка кандидата снова активна (duopulse-142).
+    pub fn on_tabs_changed(&self, live_ids: &[&str]) {
         let stale = match self.current.lock().unwrap().as_ref() {
-            Some(c) => Some(c.tab_id.clone()) != active_id.map(str::to_string),
+            Some(c) => !live_ids.contains(&c.tab_id.as_str()),
             None => false,
         };
         if stale {
@@ -268,9 +269,14 @@ mod tests {
         p.offer(&s, "tab-1", "https://example.com/", "", "artem", "p1")
             .unwrap()
             .unwrap();
-        p.on_tabs_changed(Some("tab-1")); // та же активная — живёт
+        p.on_tabs_changed(&["tab-1"]); // та же вкладка — живёт
         assert!(p.view().is_some());
-        p.on_tabs_changed(Some("tab-2")); // ушли с вкладки — гасим
+        // переключение на другую вкладку бар переживает (duopulse-142):
+        // кандидат жив, пока вкладка существует
+        p.on_tabs_changed(&["tab-2", "tab-1"]);
+        assert!(p.view().is_some());
+        // вкладка кандидата закрыта — гасим
+        p.on_tabs_changed(&["tab-2"]);
         assert!(p.view().is_none());
         // решать после сброса нечего
         assert!(!p.resolve(&s, "save").unwrap());
@@ -278,7 +284,7 @@ mod tests {
         p.offer(&s, "tab-2", "https://example.com/", "", "artem", "p1")
             .unwrap()
             .unwrap();
-        p.on_tabs_changed(Some("tab-2"));
+        p.on_tabs_changed(&["tab-2"]);
         assert!(p.view().is_some());
     }
 }
