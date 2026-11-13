@@ -5757,4 +5757,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   в портрете, выход «назад», поворот в ландшафт, fullscreen в ландшафте, выход);
   пиксельная верификация скриншотов (fullscreen: весь экран — видео, панели спрятаны;
   без — тулбар оверлея виден); vitest 477/477; android-build.sh release без ошибок.
-- Коммит: см. ниже (feat: duopulse-134)
+- Коммит: 14ae04e feat: duopulse-134 — HTML-fullscreen YouTube на Android (MobileFullscreen.kt: onShowCustomView для web-оверлея и UI-webview, иммерсивный режим, выход «назад»); e2e-стенд e2e/youtube/mobile-fullscreen.mjs; релиз 0.1.34
