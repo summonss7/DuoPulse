@@ -84,6 +84,11 @@ todo | in_progress | review | done | blocked.
   duopulse.exe+msedgewebview2 (МБ/процессы), свободную память системы и
   round-trip UI→Core (зависание = таймаут). Отчёт — e2e/tabs/mem-hang-last-run.json
   (gitignore, рантайм-артефакт).
+- `e2e/youtube/mobile-fullscreen.mjs` — мобильный стенд HTML-fullscreen YouTube
+  (карточка 134): порт 9223, сам зовёт adb (тапы в ФИЗИЧЕСКИХ пикселях CSS×dpr —
+  контролы m.youtube показывает только реальный тач; поворот user_rotation;
+  «назад» keyevent 4); CDP цеплять к конкретной цели оверлея — мёртвые цели
+  прошлых сессий висят в /json вечно. Скриншоты — %TEMP%/duopulse-134-*.png.
 
 Новые временные файлы в корне не накапливать: одноразовое — `%TEMP%`, постоянное — `e2e/`.
 <!-- /E2E-ИНСТРУМЕНТЫ -->

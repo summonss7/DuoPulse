@@ -25,6 +25,7 @@ class MainActivity : TauriActivity() {
 
   override fun onDestroy() {
     if (current === this) {
+      MobileFullscreen.dismiss()
       MobileWebHelper.destroy()
       current = null
       tauriWebView = null
@@ -35,6 +36,10 @@ class MainActivity : TauriActivity() {
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
     tauriWebView = webView
+    // duopulse-134: HTML-fullscreen (кнопка «на весь экран»): сгенерированный
+    // RustWebChromeClient гасит fullscreen-view; подменяем наследником с поддержкой
+    webView.webChromeClient =
+      MobileFullscreen.tauriChromeClient(this, (webView as RustWebView).id, webView)
     // duopulse-122: document-start скрипт youtube-фреймов — загрузчик качает
     // медиа fetch'ем внутри youtube-документа (см. MobileDownloadHelper)
     MobileDownloadHelper.registerFetcher(webView)

@@ -92,6 +92,7 @@ object MobileWebHelper {
   }
 
   private fun teardown(act: MainActivity?, ov: FrameLayout) {
+    MobileFullscreen.dismiss()
     backCallback.isEnabled = false
     backCallback.remove()
     val wv = webView
@@ -211,6 +212,10 @@ object MobileWebHelper {
         syncChrome(url)
       }
     }
+    // duopulse-134: кнопка «на весь экран» YouTube — без WebChromeClient
+    // fullscreen не работает вовсе
+    wv.webChromeClient = MobileFullscreen.chromeClient(act, wv)
+
     wv.layoutParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
     col.addView(wv)

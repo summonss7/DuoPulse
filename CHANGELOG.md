@@ -5736,3 +5736,25 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
     скриншот подтверждён визуально. До фикса тулбар начинался с ~16px (под статус-баром).
   - npm test: 45 файлов, 477/477 passed.
 - Коммит: feat: duopulse-133 — инсеты edge-to-edge для web-оверлея Android (статус-бар перекрывал адресную строку); релиз 0.1.33
+
+## 13.11.2026 02:15 — duopulse-134: HTML-fullscreen YouTube на Android (кнопка «на весь экран» из поиска)
+- Начало работы: 13.11.2026 00:29
+- Окончание работы: 13.11.2026 02:15
+- Что сделано:
+  - причина: у WebView web-оверлея поиска (MobileWebHelper, duopulse-126) вообще не было
+    WebChromeClient — onShowCustomView некому было обрабатывать; в UI-webview Tauri
+    сгенерированный RustWebChromeClient.onShowCustomView сразу гасил fullscreen-view;
+  - новый MobileFullscreen.kt: fullscreen-view добавляется в android.R.id.content поверх
+    хрома, иммерсивный режим (панели спрятаны, свайп показывает), экран не гаснет,
+    системный «назад» выходит из fullscreen, ориентация не блокируется (вертикальные —
+    портрет, горизонтальные — поворот);
+  - подключено в MobileWebHelper (web-оверлей) и MainActivity (обёртка над
+    RustWebChromeClient для UI-webview: делегирует разрешения/алерты/файл-пикеры);
+  - постоянный e2e-стенд e2e/youtube/mobile-fullscreen.mjs (adb-тапы в физических
+    пикселях, повороты, «назад»); описание — в AGENTS.md (e2e-инструменты);
+  - версия 0.1.34, release-APK опубликован в канал обновлений Aila.
+- Как проверено: e2e на эмуляторе duopulse36 (debug APK) — 7/7 PASS (fullscreen кнопкой
+  в портрете, выход «назад», поворот в ландшафт, fullscreen в ландшафте, выход);
+  пиксельная верификация скриншотов (fullscreen: весь экран — видео, панели спрятаны;
+  без — тулбар оверлея виден); vitest 477/477; android-build.sh release без ошибок.
+- Коммит: см. ниже (feat: duopulse-134)
