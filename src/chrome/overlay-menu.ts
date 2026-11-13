@@ -10,12 +10,12 @@ import { listen } from "@tauri-apps/api/event";
 
 /** Действие из меню: menu — вид меню, остальные поля — по виду. */
 export interface MenuAction {
-  menu: "tab" | "star" | "duo";
+  menu: "tab" | "star" | "duo" | "bmfolder";
   [k: string]: unknown;
 }
 
 /** Открыть нативное меню у точки (x/y — координаты UI-webview). */
-export function openOverlayMenu(kind: "tab" | "star" | "duo", x: number, y: number, payload: unknown): void {
+export function openOverlayMenu(kind: "tab" | "star" | "duo" | "bmfolder", x: number, y: number, payload: unknown): void {
   void invoke("ui_menu_open", { kind, x, y, payload }).catch((e) =>
     console.error("overlay-menu:", e)
   );

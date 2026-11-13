@@ -135,6 +135,16 @@ pub struct TabsCloseParams {
     pub id: String,
 }
 
+/// tabs.set_chrome_height: фактическая высота полосы хрома (#app, логич.
+/// пиксели) — строка закладок (карточка duopulse-143) добавляет высоту;
+/// Core кладёт webview вкладок под ней. UI сообщает после загрузки и при
+/// показе/скрытии строки; кламп 84..148.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TabsSetChromeHeightParams {
+    pub height: f64,
+}
+
 /// tabs.activate: сделать вкладку активной (клик по вкладке таб-бара).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TabsActivateParams {
@@ -1097,6 +1107,9 @@ pub fn contract_json() -> serde_json::Value {
                            "result": schema!(TabsListResult) },
             "tabs.open": { "handler": "tabs_open", "params": schema!(TabsOpenParams),
                            "result": schema!(TabsListResult) },
+            "tabs.set_chrome_height": { "handler": "tabs_set_chrome_height",
+                                        "params": schema!(TabsSetChromeHeightParams),
+                                        "result": null },
             "tabs.close": { "handler": "tabs_close", "params": schema!(TabsCloseParams),
                             "result": schema!(TabsListResult) },
             "tabs.reopen": { "handler": "tabs_reopen", "params": null,
@@ -1487,6 +1500,18 @@ async fn tabs_open(
     params: TabsOpenParams,
 ) -> Result<TabsListResult, String> {
     manager.open(&app, params.url, None, params.incognito)
+}
+
+/// tabs.set_chrome_height: подложить webview вкладок под фактическую высоту
+/// хрома (строка закладок, duopulse-143); менялась — перекомпоновка.
+#[tauri::command]
+fn tabs_set_chrome_height(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: TabsSetChromeHeightParams,
+) -> Result<(), String> {
+    manager.set_chrome_height(&app, params.height);
+    Ok(())
 }
 
 #[tauri::command]
@@ -3303,6 +3328,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         app_build_info,
         tabs_list,
         tabs_open,
+        tabs_set_chrome_height,
         tabs_close,
         tabs_reopen,
         tabs_activate,

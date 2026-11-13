@@ -78,6 +78,7 @@ import type {
   SubtitlesTranslateTrackParams,
   TabSubtitles,
   TabsActivateParams,
+  TabsSetChromeHeightParams,
   TabsCloseParams,
   TabsListResult,
   TabsOpenParams,
@@ -112,6 +113,10 @@ export const bridge = {
     list: () => invoke<TabsListResult>("tabs_list"),
     /** tabs.open: новая вкладка (без url — стартовая), становится активной. */
     open: (params: TabsOpenParams) => invoke<TabsListResult>("tabs_open", { params }),
+    /** tabs.set_chrome_height: фактическая высота полосы хрома (#app) — под
+     *  ней Core кладёт webview вкладок (строка закладок, duopulse-143). */
+    setChromeHeight: (params: TabsSetChromeHeightParams) =>
+      invoke<void>("tabs_set_chrome_height", { params }),
     /** tabs.close: закрыть вкладку; активной станет соседняя. */
     close: (params: TabsCloseParams) => invoke<TabsListResult>("tabs_close", { params }),
     /** tabs.reopen: вернуть последнюю закрытую (Ctrl+Shift+T). */

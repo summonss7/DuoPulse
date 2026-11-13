@@ -4336,6 +4336,25 @@
         "type": "object"
       }
     },
+    "tabs.set_chrome_height": {
+      "handler": "tabs_set_chrome_height",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "tabs.set_chrome_height: фактическая высота полосы хрома (#app, логич. пиксели) — строка закладок (карточка duopulse-143) добавляет высоту; Core кладёт webview вкладок под ней. UI сообщает после загрузки и при показе/скрытии строки; кламп 84..148.",
+        "properties": {
+          "height": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "height"
+        ],
+        "title": "TabsSetChromeHeightParams",
+        "type": "object"
+      },
+      "result": null
+    },
     "tabs.sleep": {
       "handler": "tabs_sleep",
       "params": {

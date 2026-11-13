@@ -18,6 +18,7 @@ import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, TabInfo } from "../bridge";
 import { t } from "../i18n";
 import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
+import { refreshBmBar } from "./bmbar";
 
 const err = (e: unknown): void => console.error("star:", e);
 const btn = document.getElementById("starBtn") as HTMLButtonElement;
@@ -58,6 +59,7 @@ async function addTo(groupId: number | null): Promise<void> {
   try {
     await bridge.history.bookmarkAdd({ url, title, groupId });
     await refreshState();
+    void refreshBmBar(); // строка закладок (duopulse-143): чип появился сразу
   } catch (e) {
     err(e);
   }
@@ -82,6 +84,7 @@ async function toggle(): Promise<void> {
     if (starred) {
       await bridge.history.bookmarkRemove({ url });
       await refreshState();
+      void refreshBmBar(); // строка закладок: чип исчез сразу
     } else {
       await openMenu();
     }
@@ -132,7 +135,7 @@ export function initStar(): void {
       const call = starred
         ? bridge.history.bookmarkRemove({ url })
         : bridge.history.bookmarkAdd({ url, title, groupId: null });
-      void call.then(refreshState).catch(err);
+      void call.then(refreshState).then(refreshBmBar).catch(err);
     },
     true
   );

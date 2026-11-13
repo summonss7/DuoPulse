@@ -7,6 +7,7 @@ import { applyStaticI18n } from "./i18n";
 import { initTabBar, onTabsChanged } from "./chrome/tabbar";
 import { initOmnibox, setActiveUrl, setIncognito } from "./chrome/omnibox";
 import { initStar, setActivePage } from "./chrome/star";
+import { initBmBar, refreshBmBar } from "./chrome/bmbar";
 import { closePanel, currentPanel } from "./chrome/panel-window";
 import { initPwSaveBar } from "./chrome/pw-save";
 import { initUpdateBar } from "./chrome/update-bar";
@@ -41,6 +42,9 @@ initTabBar();
 initOmnibox();
 // Звёздочка избранного (карточка duopulse-057): закладка активной страницы.
 initStar();
+// Строка закладок под навбаром (карточка duopulse-143): чипы основных
+// закладок и папки-группы с нативным меню по наведению.
+initBmBar();
 // Бар «Сохранить пароль?» (этап 2 duopulse-108): панель pwsave по событию
 // passwords:save_prompt, закрытие при переключении вкладки.
 initPwSaveBar();
@@ -56,6 +60,10 @@ initDownloadButton();
 
 // URL активной вкладки — в адресную строку (кроме моментов ввода); сюда же —
 // звёздочка (SPA-навигация и Ctrl+D из контента тоже приходят tabs.updated).
+// Строка закладок (duopulse-143) обновляется тем же событием с дебаунсом:
+// правки на странице управления и синк Aila подхватываются первым
+// переключением вкладки.
+let bmRefreshTimer: number | null = null;
 onTabsChanged((tabs) => {
   const active = tabs.find((t) => t.active);
   setActiveUrl(active?.url ?? "");
@@ -63,6 +71,11 @@ onTabsChanged((tabs) => {
   // инкогнито-вкладка активна (карточка 096): подсказки omnibox не тянут
   // историю/закладки профиля
   setIncognito(Boolean(active?.incognito));
+  if (bmRefreshTimer !== null) window.clearTimeout(bmRefreshTimer);
+  bmRefreshTimer = window.setTimeout(() => {
+    bmRefreshTimer = null;
+    void refreshBmBar();
+  }, 400);
 });
 
 // Кнопки навигации (nav.* контракта действуют на активную вкладку).

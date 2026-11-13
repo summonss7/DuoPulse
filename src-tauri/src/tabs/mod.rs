@@ -60,8 +60,11 @@ use tauri::{
 use crate::bridge::{emit, TabInfo, TabsListResult, TabsUpdated};
 use crate::tabs::session::{Session, SessionTab};
 
-/// Высота полосы хрома в логических пикселях: таб-бар + навбар.
-/// Синхронизирована с #app (grid-template-rows) в src/style.css.
+/// Высота полосы хрома по умолчанию в логических пикселях: таб-бар + навбар.
+/// Синхронизирована с #app (grid-template-rows) в src/style.css. Строка
+/// закладок (карточка duopulse-143) добавляет высоту: UI сообщает фактическую
+/// высоту #app командой tabs.set_chrome_height, Core кладёт webview вкладок
+/// под ней (ChromeHeight в TabsState; до первого отчёта — эта константа).
 pub(crate) const CHROME_HEIGHT: f64 = 84.0;
 
 /// Глубина стека закрытых вкладок для tabs.reopen (Ctrl+Shift+T).
@@ -99,12 +102,16 @@ fn window_logical_size(window: &Window<tauri::Wry>) -> LogicalSize<f64> {
         .to_logical::<f64>(scale)
 }
 
-/// Размер дочернего webview вкладки под полосой хрома.
-fn content_rect(window: &Window<tauri::Wry>) -> (LogicalPosition<f64>, LogicalSize<f64>) {
+/// Размер дочернего webview вкладки под полосой хрома (chrome_h — текущая
+/// высота #app, карточка duopulse-143).
+fn content_rect(
+    window: &Window<tauri::Wry>,
+    chrome_h: f64,
+) -> (LogicalPosition<f64>, LogicalSize<f64>) {
     let full = window_logical_size(window);
     (
-        LogicalPosition::new(0.0, CHROME_HEIGHT),
-        LogicalSize::new(full.width, (full.height - CHROME_HEIGHT).max(0.0)),
+        LogicalPosition::new(0.0, chrome_h),
+        LogicalSize::new(full.width, (full.height - chrome_h).max(0.0)),
     )
 }
 
@@ -128,6 +135,21 @@ struct TabsState {
     /// на весь экран — webview этой вкладки растянут на всё окно (поверх
     /// полосы хрома), окно — borderless-fullscreen. None — обычный режим.
     fullscreen_tab: Option<String>,
+    /// Фактическая высота полосы хрома из tabs.set_chrome_height (карточка
+    /// duopulse-143): строка закладок добавляет высоту. 0.0 — UI ещё не
+    /// сообщил, действует CHROME_HEIGHT.
+    chrome_height: f64,
+}
+
+impl TabsState {
+    /// Высота хрома для размещения вкладок: отчёт UI или константа по умолчанию.
+    fn effective_chrome_height(&self) -> f64 {
+        if self.chrome_height > 0.0 {
+            self.chrome_height
+        } else {
+            CHROME_HEIGHT
+        }
+    }
 }
 
 struct TabEntry {
@@ -708,6 +730,32 @@ impl TabManager {
         st.tabs.iter().any(|t| t.loading)
     }
 
+    /// Текущая высота полосы хрома для размещения вкладок (карточка
+    /// duopulse-143): отчёт UI (строка закладок добавляет высоту) или
+    /// константа по умолчанию до первого отчёта.
+    fn chrome_height(&self) -> f64 {
+        self.state
+            .lock()
+            .expect("tabs: лок не отравлен")
+            .effective_chrome_height()
+    }
+
+    /// tabs.set_chrome_height: UI сообщил фактическую высоту #app — под неё
+    /// кладутся webview вкладок. Кламп от вандальства, перекомпоновка при
+    /// изменении (при старте вкладки уже стоят на 84 — сдвигаются сюда).
+    pub fn set_chrome_height(&self, app: &AppHandle, h: f64) {
+        let changed = {
+            let mut st = self.state.lock().expect("tabs: лок не отравлен");
+            let h = h.clamp(CHROME_HEIGHT, CHROME_HEIGHT + 64.0).round();
+            let changed = st.chrome_height != h;
+            st.chrome_height = h;
+            changed
+        };
+        if changed {
+            self.relayout(app);
+        }
+    }
+
     /// Подгонка всех webview вкладок под размер окна (событие Resized):
     /// скрытые тоже — чтобы переключение не показало старую геометрию.
     /// Вкладка в HTML-fullscreen (карточка 062) растягивается на всё окно
@@ -716,7 +764,7 @@ impl TabManager {
         let Some(window) = app.get_window("main") else {
             return;
         };
-        let (pos, size) = content_rect(&window);
+        let (pos, size) = content_rect(&window, self.chrome_height());
         let full = window_logical_size(&window);
         let (fullscreen_tab, ids): (Option<String>, Vec<String>) = {
             let st = self.state.lock().expect("tabs: лок не отравлен");
@@ -895,7 +943,7 @@ impl TabManager {
         // спайк 086) — панель закрываем заранее (duopulse-090).
         crate::chrome_panel::close_if_open(app);
         let webview = {
-            let (pos, size) = content_rect(&window);
+            let (pos, size) = content_rect(&window, self.chrome_height());
             window
                 .add_child(builder, pos, size)
                 .map_err(|e| format!("создание webview вкладки: {e}"))?
@@ -1191,7 +1239,7 @@ impl TabManager {
         );
         let builder = build_tab_webview(app, &new_id, WebviewUrl::App("index.html".into()), false)
             .initialization_script(script);
-        let (pos, size) = content_rect(&window);
+        let (pos, size) = content_rect(&window, self.chrome_height());
         let webview = window
             .add_child(builder, pos, size)
             .map_err(|e| format!("создание webview страницы ошибки: {e}"))?;

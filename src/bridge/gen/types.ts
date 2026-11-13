@@ -169,6 +169,7 @@ export interface DuoPulseBridgeContract {
   TabInfo: TabInfo;
   TabsCloseParams: TabsCloseParams;
   TabsOpenParams: TabsOpenParams;
+  TabsSetChromeHeightParams: TabsSetChromeHeightParams;
   TabsSleepParams: TabsSleepParams;
   TabsWakeParams: TabsWakeParams;
   TranslateClearCacheResult: TranslateClearCacheResult;
@@ -1494,6 +1495,12 @@ export interface TabsCloseParams {
 export interface TabsOpenParams {
   incognito?: boolean;
   url?: string | null;
+}
+/**
+ * tabs.set_chrome_height: фактическая высота полосы хрома (#app, логич. пиксели) — строка закладок (карточка duopulse-143) добавляет высоту; Core кладёт webview вкладок под ней. UI сообщает после загрузки и при показе/скрытии строки; кламп 84..148.
+ */
+export interface TabsSetChromeHeightParams {
+  height: number;
 }
 /**
  * tabs.sleep: усыпить вкладку вручную (задача 2.3; авто-усыпление долгих простоёв — фоновая нить Core). Активная вкладка и вкладка с играющим звуком/видео не усыпляются — ошибка.

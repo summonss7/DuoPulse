@@ -446,6 +446,7 @@ export const dict: Record<string, string> = {
   "Очистить историю": "Șterge istoricul",
   "Ошибка": "Eroare",
   "Панель загрузки": "Panou de descărcare",
+  "Панель закладок": "Bara de marcaje",
   "Панель VPN": "Panou VPN",
   "Пароли — DuoPulse": "Parole — DuoPulse",
   "Перевод ({provider})… {done}/{total}": "Se traduce ({provider})… {done}/{total}",

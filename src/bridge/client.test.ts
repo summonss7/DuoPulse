@@ -26,6 +26,7 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   "bridge.version": { path: ["bridge", "version"] },
   "tabs.list": { path: ["tabs", "list"] },
   "tabs.open": { path: ["tabs", "open"], params: {} },
+  "tabs.set_chrome_height": { path: ["tabs", "setChromeHeight"], params: { height: 112 } },
   "tabs.close": { path: ["tabs", "close"], params: { id: "tab-1" } },
   "tabs.reopen": { path: ["tabs", "reopen"] },
   "tabs.activate": { path: ["tabs", "activate"], params: { id: "tab-1" } },

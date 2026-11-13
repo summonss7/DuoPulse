@@ -20,7 +20,7 @@
 //! пересылается событием «menu-action» в UI — транспорт совпадает с
 //! прежним оверлеем, фронтенд (tabbar.ts/star.ts) не зависит от бэкенда.
 //! Идентификаторы пунктов: «tab:<act>» и «star:g:<id группы>» /
-//! «star:newgroup».
+//! «star:newgroup», «bmfolder:<url>» (папка строки закладок, duopulse-143).
 
 use serde_json::Value;
 use tauri::menu::{CheckMenuItem, ContextMenu, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -51,6 +51,37 @@ fn item<R: tauri::Runtime>(
     accel: Option<&str>,
 ) -> Result<MenuItem<R>, String> {
     MenuItem::with_id(app, id, text, enabled, accel).map_err(|e| format!("пункт меню: {e}"))
+}
+
+/// Меню папки строки закладок (карточка duopulse-143): закладки группы в её
+/// порядке сортировки (manual/title/added — как на странице управления),
+/// до 500; пустая — один неактивный пункт. Идентификатор пункта — url
+/// закладки, выбор уходит в UI событием menu-action.
+fn build_bmfolder_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, String> {
+    let group_id = payload
+        .get("groupId")
+        .and_then(Value::as_i64)
+        .ok_or("папка закладок не указана")?;
+    let history = app.state::<std::sync::Arc<crate::history::HistoryStore>>();
+    let (bookmarks, _) = history.bookmark_list(
+        "",
+        crate::history::GroupFilter::Group(group_id),
+        0,
+        500,
+    )?;
+    let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
+    if bookmarks.is_empty() {
+        menu.append(&item(app, "bmfolder:none", "Папка пуста", false, None)?)
+            .map_err(|e| format!("меню: {e}"))?;
+        return Ok(menu);
+    }
+    for b in &bookmarks {
+        let label = b.title.trim();
+        let label = if label.is_empty() { b.url.as_str() } else { label };
+        menu.append(&item(app, &format!("bmfolder:{}", b.url), label, true, None)?)
+            .map_err(|e| format!("меню: {e}"))?;
+    }
+    Ok(menu)
 }
 
 /// Меню вкладки: вкладочные действия, недоступные — из payload.disabled.
@@ -423,6 +454,7 @@ pub async fn ui_menu_open(
         "tab" => build_tab_menu(&app, &payload)?,
         "star" => build_star_menu(&app, &payload)?,
         "duo" => build_duo_menu(&app, &payload)?,
+        "bmfolder" => build_bmfolder_menu(&app, &payload)?,
         other => return Err(format!("неизвестное меню: {other}")),
     };
     let window = app.get_window("main").ok_or("окно main не найдено")?;
@@ -450,6 +482,13 @@ pub fn emit_action(app: &AppHandle, id: &str) {
         serde_json::json!({ "menu": "star", "groupId": g.parse::<i64>().unwrap_or(-1) })
     } else if id == "star:newgroup" {
         serde_json::json!({ "menu": "star", "newGroup": true })
+    } else if let Some(url) = id.strip_prefix("bmfolder:") {
+        // папка строки закладок (duopulse-143): пункт — url закладки
+        // («none» — заглушка пустой папки, не действие)
+        if url == "none" || url.is_empty() {
+            return;
+        }
+        serde_json::json!({ "menu": "bmfolder", "url": url })
     } else if let Some(rest) = id.strip_prefix("duo:") {
         let (act, param) = rest.split_once(':').unwrap_or((rest, ""));
         match act {

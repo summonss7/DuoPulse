@@ -3,8 +3,9 @@
    src/theme/fonts.css; здесь только компоновка экранов. Правила: неон — только
    акценты (≤5% площади), hover нейтральный тёплый без свечения, свечение =
    «включено» (активная вкладка/фокус), тени заменены «плашками» поверх светлее.
-   Полоса хрома = 84px (таб-бар 40 + навбар 44) — синхронизировано с
-   CHROME_HEIGHT в src-tauri/src/tabs/mod.rs. */
+   Полоса хрома = 84px (таб-бар 40 + навбар 44; строка закладок duopulse-143
+   добавляет --bmbar-h, фактическую высоту Core сообщает bmbar.ts) —
+   синхронизировано с CHROME_HEIGHT в src-tauri/src/tabs/mod.rs. */
 * {
   box-sizing: border-box;
 }
@@ -26,10 +27,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 :root {
-  /* метрики хрома (не дизайн-токены): синхронизированы с CHROME_HEIGHT */
+  /* метрики хрома (не дизайн-токены): синхронизированы с CHROME_HEIGHT.
+     --chrome-h — базовая высота (строка закладок duopulse-143 добавляет
+     --bmbar-h: bmbar.ts актуализирует переменную фактической высотой #app). */
   --chrome-h: 84px;
   --tabbar-h: 40px;
   --navbar-h: 44px;
+  --bmbar-h: 28px;
 }
 #app {
   position: relative;
@@ -39,10 +43,14 @@ body {
      (карточка duopulse-076); теперь строки режутся по ширине окна:
      omnibox сжимается, #tabs скроллится. */
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--tabbar-h) var(--navbar-h);
-  height: var(--chrome-h);
+  grid-template-rows: var(--tabbar-h) var(--navbar-h) auto;
+  height: auto;
+  min-height: var(--chrome-h);
   background: var(--bg-base);
-  border-bottom: 1px solid var(--line);
+  /* нижняя линия хрома — inset-тенью: border-bottom лёг бы в auto-высоту
+     (строка закладок duopulse-143) и давал #app 85/113 вместо 84/112 —
+     ровные высоты сообщаем Core (tabs.set_chrome_height) */
+  box-shadow: inset 0 -1px 0 var(--line);
   -webkit-user-select: none;
   user-select: none;
 }
@@ -383,6 +391,77 @@ body {
   fill: var(--accent-neon);
 }
 
+/* --- Строка закладок (карточка duopulse-143): отдельной строкой под
+       навбаром, как в Chrome. Высота строки --bmbar-h растит #app — UI
+       сообщает фактическую высоту Core (tabs.set_chrome_height), webview
+       вкладок кладётся ниже. Пустое избранное — строка скрыта, высота 84. */
+.bmbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--bmbar-h);
+  padding: 0 8px;
+  background: var(--bg-surface);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* широкий список скроллится колесом, без полосы */
+}
+.bmbar[hidden] {
+  display: none; /* grid-строка 'auto' схлопывается, #app остаётся 84px */
+}
+.bm-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 170px;
+  height: 22px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bm-item:hover {
+  background: var(--hover-neutral);
+  color: var(--text-primary);
+}
+.bm-item:active {
+  color: var(--accent-neon); /* нажатие — краткий неон-акцент, как icon-btn */
+}
+.bm-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-soft);
+}
+.bm-item .bm-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bm-item .bm-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+.bm-item svg {
+  display: block;
+  flex: none;
+  color: var(--text-muted); /* папка — пиктограммой, как у чипов буква-бейдж */
+}
+.bm-item:hover svg {
+  color: var(--text-primary);
+}
+
 /* --- Подсказки omnibox (панель 12px, elevated, §5) --- */
 .suggest {
   position: absolute;
@@ -698,6 +777,7 @@ body {
 .update-bar[hidden] {
   display: none;
 }
+
 .update-bar-icon {
   flex: none;
   display: inline-flex;
@@ -2777,7 +2857,8 @@ html[data-panel] #app {
   display: block;
 }
 html[data-panel] #tabbar,
-html[data-panel] #navbar {
+html[data-panel] #navbar,
+html[data-panel] #bmbar {
   display: none;
 }
 html[data-panel] #app > div {
@@ -2921,6 +3002,12 @@ html[data-panel] #suggest {
   color: var(--text-primary);
   font-size: 13px;
   line-height: var(--lh-ui);
+}
+/* [hidden] против display:flex (ловушка карточек 090/142): в хроме хост
+   всегда скрыт (бар живёт в child-webview «pwsave»), без правила он молча
+   растит #app фантомной grid-строкой (проявилось высотой auto, duopulse-143) */
+.pw-save-bar[hidden] {
+  display: none;
 }
 .pw-save-icon {
   flex: none;
