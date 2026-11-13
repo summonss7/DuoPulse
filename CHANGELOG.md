@@ -5870,4 +5870,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   сбоя), фид Pages, канал Aila (манифест содержит exe+APK), локальная копия
   C:\DuoPulse обновлена через --deploy-local.
 - ROADMAP: запись этапа 4 i18n.
-- Коммит: (см. ниже)
+- Коммит: ef6bb84
