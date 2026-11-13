@@ -11,6 +11,7 @@
 // обновить закладки и статус.
 
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 
 /** Снимок aila.status (mobile_account.rs, camelCase). */
 export interface AilaStatus {
@@ -43,7 +44,7 @@ export interface PasswordItem {
 
 /** Время последнего синка для строки статуса (ЧЧ:ММ; «ещё не было»). */
 export function syncTimeLabel(lastSyncAt: number | null): string {
-  if (!lastSyncAt) return "ещё не было";
+  if (!lastSyncAt) return t("ещё не было");
   const d = new Date(lastSyncAt);
   const pad = (n: number): string => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -52,12 +53,12 @@ export function syncTimeLabel(lastSyncAt: number | null): string {
 /** Строка статуса блока аккаунта в меню (чистая — тестируется). */
 export function accountStatusText(s: AilaStatus): string {
   if (!s.loggedIn) {
-    return "Без аккаунта Aila — пароли и закладки только на этом устройстве";
+    return t("Без аккаунта Aila — пароли и закладки только на этом устройстве");
   }
   const who = s.displayName || s.username;
   const when = syncTimeLabel(s.lastSyncAt);
-  const err = s.lastError ? ` · ошибка: ${s.lastError}` : "";
-  return `${who} · синк ${when}${err}`;
+  const err = s.lastError ? t(" · ошибка: {error}", { error: s.lastError }) : "";
+  return t("{who} · синк {when}{error}", { who, when, error: err });
 }
 
 /** Кнопки блока аккаунта по состоянию (чистая — тестируется): logged-out —
@@ -71,13 +72,13 @@ export function syncResultText(r: SyncStats): string {
   const [pwPulled, pwApplied, pwConflicts, pwPushed] = r.passwords;
   const [bmPulled, bmApplied, bmPushed] = r.bookmarks;
   const parts = [
-    `пароли: ${pwApplied} применено` +
-      (pwConflicts ? `, конфликтов ${pwConflicts}` : "") +
-      (pwPushed ? ", отправлено" : ""),
-    `закладки: ${bmApplied} применено` + (bmPushed ? ", отправлено" : ""),
+    t("пароли: {n} применено", { n: pwApplied }) +
+      (pwConflicts ? t(", конфликтов {n}", { n: pwConflicts }) : "") +
+      (pwPushed ? t(", отправлено") : ""),
+    t("закладки: {n} применено", { n: bmApplied }) + (bmPushed ? t(", отправлено") : ""),
   ];
-  const pulled = `в облаке: пароли ${pwPulled}, закладки ${bmPulled}`;
-  return `Синк завершён — ${parts.join("; ")}; ${pulled}`;
+  const pulled = t("в облаке: пароли {pw}, закладки {bm}", { pw: pwPulled, bm: bmPulled });
+  return t("Синк завершён — {parts}; {pulled}", { parts: parts.join("; "), pulled });
 }
 
 /** Транспорт invoke (тесты подменяют). */
@@ -111,7 +112,7 @@ export class MobileAccount {
     const block = document.createElement("div");
     block.className = "m-acc";
     block.innerHTML = `
-      <div class="m-acc-head">Аккаунт Aila</div>
+      <div class="m-acc-head">${t("Аккаунт Aila")}</div>
       <p class="m-acc-status" data-acc="status">…</p>
       <div class="m-acc-row"></div>
     `;
@@ -150,22 +151,22 @@ export class MobileAccount {
       b.type = "button";
       b.dataset.acc = kind;
       if (kind === "login") {
-        b.textContent = "Войти в Aila";
+        b.textContent = t("Войти в Aila");
         b.addEventListener("click", () => {
           this.host.closeMenu();
           this.openLoginSheet();
         });
       } else if (kind === "passwords") {
-        b.textContent = "Пароли";
+        b.textContent = t("Пароли");
         b.addEventListener("click", () => {
           this.host.closeMenu();
           void this.openPasswordsSheet();
         });
       } else if (kind === "sync") {
-        b.textContent = "Синхронизировать";
+        b.textContent = t("Синхронизировать");
         b.addEventListener("click", () => void this.syncNow(b));
       } else {
-        b.textContent = "Выйти";
+        b.textContent = t("Выйти");
         b.addEventListener("click", () => void this.logout());
       }
       row.append(b);
@@ -175,23 +176,23 @@ export class MobileAccount {
   /** Ручной синк (кнопка): круг обоих хранилищ, итог — в статус. */
   private async syncNow(btn: HTMLButtonElement): Promise<void> {
     btn.disabled = true;
-    btn.textContent = "Синк…";
+    btn.textContent = t("Синк…");
     try {
       const r = await this.api.invoke<SyncStats>("aila_sync_now");
       this.host.note(syncResultText(r));
       this.host.onSynced();
       await this.refresh();
     } catch (e) {
-      this.host.note(`Синк не удался: ${e}`);
+      this.host.note(t("Синк не удался: {error}", { error: String(e) }));
     } finally {
       btn.disabled = false;
-      btn.textContent = "Синхронизировать";
+      btn.textContent = t("Синхронизировать");
     }
   }
 
   private async logout(): Promise<void> {
     await this.api.invoke("aila_logout");
-    this.host.note("Выход выполнен — данные остались на устройстве");
+    this.host.note(t("Выход выполнен — данные остались на устройстве"));
     await this.refresh();
   }
 
@@ -203,20 +204,18 @@ export class MobileAccount {
     wrap.className = "m-acc-wrap";
     wrap.innerHTML = `
       <div class="m-tr-backdrop"></div>
-      <div class="m-acc-sheet" role="dialog" aria-label="Вход в Aila">
+      <div class="m-acc-sheet" role="dialog" aria-label="${t("Вход в Aila")}">
         <div class="m-tr-head">
-          <b>Вход в аккаунт Aila</b>
-          <button type="button" class="m-tr-close" aria-label="Закрыть">✕</button>
+          <b>${t("Вход в аккаунт Aila")}</b>
+          <button type="button" class="m-tr-close" aria-label="${t("Закрыть")}">✕</button>
         </div>
         <input class="m-acc-input" type="text" autocomplete="username"
-          placeholder="имя в Aila" autocapitalize="none" spellcheck="false" />
+          placeholder="${t("имя в Aila")}" autocapitalize="none" spellcheck="false" />
         <input class="m-acc-input" type="password" autocomplete="current-password"
-          placeholder="пароль Aila" />
-        <button type="button" class="m-acc-go">Войти</button>
+          placeholder="${t("пароль Aila")}" />
+        <button type="button" class="m-acc-go">${t("Войти")}</button>
         <p class="m-acc-err" hidden></p>
-        <p class="m-acc-hint">Вход синхронизирует пароли и закладки с другими
-          устройствами; сервер получает только производный ключ, сам пароль
-          не покидает телефон.</p>
+        <p class="m-acc-hint">${t("Вход синхронизирует пароли и закладки с другими устройствами; сервер получает только производный ключ, сам пароль не покидает телефон.")}</p>
       </div>`;
     const [user, pass] = wrap.querySelectorAll<HTMLInputElement>(".m-acc-input")!;
     const go = wrap.querySelector<HTMLButtonElement>(".m-acc-go")!;
@@ -233,24 +232,24 @@ export class MobileAccount {
       const password = pass.value;
       if (!username || !password) {
         err.hidden = false;
-        err.textContent = "Заполните имя и пароль";
+        err.textContent = t("Заполните имя и пароль");
         return;
       }
       go.disabled = true;
-      go.textContent = "Входим…";
+      go.textContent = t("Входим…");
       err.hidden = true;
       void (async () => {
         try {
           await this.api.invoke("aila_login", { username, password });
           close();
-          this.host.note("Вход выполнен — синхронизирую пароли и закладки…");
+          this.host.note(t("Вход выполнен — синхронизирую пароли и закладки…"));
           await this.refresh();
           this.host.onSynced();
         } catch (e) {
           err.hidden = false;
           err.textContent = `${e}`;
           go.disabled = false;
-          go.textContent = "Войти";
+          go.textContent = t("Войти");
         }
       })();
     };
@@ -273,16 +272,15 @@ export class MobileAccount {
     wrap.className = "m-acc-wrap";
     wrap.innerHTML = `
       <div class="m-tr-backdrop"></div>
-      <div class="m-acc-sheet m-acc-pw" role="dialog" aria-label="Пароли">
+      <div class="m-acc-sheet m-acc-pw" role="dialog" aria-label="${t("Пароли")}">
         <div class="m-tr-head">
-          <b>Пароли</b>
-          <button type="button" class="m-tr-close" aria-label="Закрыть">✕</button>
+          <b>${t("Пароли")}</b>
+          <button type="button" class="m-tr-close" aria-label="${t("Закрыть")}">✕</button>
         </div>
         <input class="m-acc-input m-acc-search" type="search"
-          placeholder="поиск по сайту или логину" autocomplete="off" />
+          placeholder="${t("поиск по сайту или логину")}" autocomplete="off" />
         <div class="m-acc-list" role="list"></div>
-        <p class="m-acc-hint">Пароли синхронизируются с аккаунтом Aila;
-          копируйте и вставляйте как в Chrome.</p>
+        <p class="m-acc-hint">${t("Пароли синхронизируются с аккаунтом Aila; копируйте и вставляйте как в Chrome.")}</p>
       </div>`;
     const list = wrap.querySelector<HTMLElement>(".m-acc-list")!;
     const search = wrap.querySelector<HTMLInputElement>(".m-acc-search")!;
@@ -298,7 +296,7 @@ export class MobileAccount {
       if (!items.length) {
         const empty = document.createElement("p");
         empty.className = "m-acc-empty";
-        empty.textContent = "Паролей пока нет — сохраните их на компьютере и синхронизируйте";
+        empty.textContent = t("Паролей пока нет — сохраните их на компьютере и синхронизируйте");
         list.append(empty);
         return;
       }
@@ -314,8 +312,8 @@ export class MobileAccount {
             <span class="m-acc-item-pass" hidden></span>
           </div>
           <div class="m-acc-item-btns">
-            <button type="button" class="m-acc-btn" data-act="show" title="Показать пароль" aria-label="Показать пароль">показать</button>
-            <button type="button" class="m-acc-btn" data-act="copy" title="Скопировать пароль" aria-label="Скопировать пароль">копировать</button>
+            <button type="button" class="m-acc-btn" data-act="show" title="${t("Показать пароль")}" aria-label="${t("Показать пароль")}">${t("показать")}</button>
+            <button type="button" class="m-acc-btn" data-act="copy" title="${t("Скопировать пароль")}" aria-label="${t("Скопировать пароль")}">${t("копировать")}</button>
           </div>`;
         row.querySelector<HTMLElement>(".m-acc-item-title")!.textContent = name;
         row.querySelector<HTMLElement>(".m-acc-item-sub")!.textContent = it.username;
@@ -334,7 +332,7 @@ export class MobileAccount {
         list.innerHTML = "";
         const p = document.createElement("p");
         p.className = "m-acc-empty";
-        p.textContent = `Не удалось прочитать пароли: ${e}`;
+        p.textContent = t("Не удалось прочитать пароли: {error}", { error: String(e) });
         list.append(p);
       }
     };
@@ -352,21 +350,21 @@ export class MobileAccount {
           if (act === "copy") {
             const password = await this.api.invoke<string>("mobile_passwords_reveal", { id });
             await this.api.invoke("mobile_clipboard_copy", { text: password });
-            this.host.note("Пароль скопирован в буфер");
+            this.host.note(t("Пароль скопирован в буфер"));
             return;
           }
           if (passEl.hidden) {
             const password = await this.api.invoke<string>("mobile_passwords_reveal", { id });
             passEl.textContent = password;
             passEl.hidden = false;
-            btn.textContent = "скрыть";
+            btn.textContent = t("скрыть");
           } else {
             passEl.textContent = "";
             passEl.hidden = true;
-            btn.textContent = "показать";
+            btn.textContent = t("показать");
           }
         } catch (err) {
-          this.host.note(`Пароль: ${err}`);
+          this.host.note(t("Пароль: {error}", { error: String(err) }));
         }
       })();
     });

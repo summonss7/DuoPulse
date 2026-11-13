@@ -243,7 +243,7 @@ body {
   background: none;
   color: var(--text-primary);
   font-size: var(--text-sm);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .tab-menu button:hover:not(:disabled),
@@ -298,7 +298,7 @@ body {
   font-size: var(--text-md);
   letter-spacing: 0.4px;
   color: var(--text-primary);
-  margin-right: 4px;
+  margin-inline-end: 4px;
 }
 .logo span {
   color: var(--accent-neon); /* «Pulse» — неон, §4; без свечения — §8 */
@@ -829,7 +829,7 @@ body {
   text-transform: uppercase;
 }
 .vpn-section-title .vpn-hint {
-  margin-left: 6px;
+  margin-inline-start: 6px;
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
@@ -1152,7 +1152,7 @@ body.internal-page {
   font-weight: 500;
 }
 .mgr-search {
-  margin-left: auto;
+  margin-inline-start: auto;
   width: min(420px, 40vw);
   height: 32px;
   border-radius: var(--radius-control);
@@ -1201,7 +1201,7 @@ body.internal-page {
 .mgr-actions {
   position: relative;
   display: flex;
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .mgr-actions[hidden] {
   display: none;
@@ -1238,7 +1238,7 @@ body.internal-page {
 .mgr-menu button {
   padding: 7px 10px;
   border-radius: var(--radius-control);
-  text-align: left;
+  text-align: start;
   color: var(--text-primary);
 }
 .mgr-menu button:hover {
@@ -1534,7 +1534,7 @@ body.internal-page {
 .star-menu button {
   padding: 8px 10px;
   border-radius: var(--radius-control);
-  text-align: left;
+  text-align: start;
   color: var(--text-primary);
   font-size: 13px;
   white-space: nowrap;
@@ -1729,10 +1729,10 @@ body.internal-page {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  text-align: left;
+  text-align: start;
 }
 .incg-list li {
-  padding-left: 18px;
+  padding-inline-start: 18px;
   position: relative;
   color: var(--text-muted);
   font-size: var(--text-sm);
@@ -1740,7 +1740,7 @@ body.internal-page {
 .incg-list li::before {
   content: "";
   position: absolute;
-  left: 2px;
+  inset-inline-start: 2px;
   top: 0.55em;
   width: 7px;
   height: 7px;
@@ -2314,7 +2314,7 @@ body.internal-page {
   min-width: 52px;
   font-family: var(--font-mono);
   font-size: 12px;
-  text-align: right;
+  text-align: end;
 }
 .duo-offset button {
   flex: none;
@@ -2600,7 +2600,7 @@ input[type="range"] {
 }
 .set-range-val {
   min-width: 42px;
-  text-align: right;
+  text-align: end;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-primary);

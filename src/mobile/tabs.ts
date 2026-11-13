@@ -19,8 +19,11 @@
 // Чистые функции (parse/план закрытия) покрыты тестами (tabs.test.ts);
 // DOM-логика — MobileTabs, живой прогон на эмуляторе (как e2e/bookmarks).
 
+import { t } from "../i18n";
+
 /** Ключ сессии вкладок в localStorage. */
 export const TABS_KEY = "duopulse.mobile.tabs";
+
 
 /** Потолок вкладок: каждая — живой YouTube-плеер, на телефоне память не
  *  резиновая; свыше — открытие заменяет активную вкладку. */
@@ -151,8 +154,8 @@ export class MobileTabs {
     this.btn = document.createElement("button");
     this.btn.id = "mTabsBtn";
     this.btn.className = "m-icon m-tabs-btn";
-    this.btn.title = "Вкладки";
-    this.btn.setAttribute("aria-label", "Вкладки");
+    this.btn.title = t("Вкладки");
+    this.btn.setAttribute("aria-label", t("Вкладки"));
     this.btn.innerHTML =
       '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 7h12"/></svg><span class="m-tabs-badge" hidden></span>';
     this.badge = this.btn.querySelector(".m-tabs-badge")!;
@@ -164,11 +167,11 @@ export class MobileTabs {
     this.wrap.hidden = true;
     this.wrap.innerHTML = `
       <div class="m-sheet-backdrop"></div>
-      <div class="m-sheet m-tabs-sheet" role="menu" aria-label="Вкладки">
-        <b class="m-tabs-head">Вкладки</b>
+      <div class="m-sheet m-tabs-sheet" role="menu" aria-label="${t("Вкладки")}">
+        <b class="m-tabs-head">${t("Вкладки")}</b>
         <div class="m-tabs-list"></div>
-        <button type="button" class="m-sheet-item m-tabs-new">+ Новая вкладка</button>
-        <button type="button" class="m-sheet-item m-tabs-close-all">Закрыть все</button>
+        <button type="button" class="m-sheet-item m-tabs-new">${t("+ Новая вкладка")}</button>
+        <button type="button" class="m-sheet-item m-tabs-close-all">${t("Закрыть все")}</button>
       </div>
     `;
     host.content.append(this.wrap);
@@ -223,7 +226,7 @@ export class MobileTabs {
       this.meta.set(id, { videoId, title });
       this.loadFrame(id);
       this.activate(id);
-      this.host.note(`Максимум ${MAX_TABS} вкладок — видео открыто в последней`);
+      this.host.note(t("Максимум {n} вкладок — видео открыто в последней", { n: MAX_TABS }));
       return;
     }
     const id = ++this.seq;
@@ -322,14 +325,14 @@ export class MobileTabs {
   /** Восстановить сессию после перезапуска (parseSavedTabs уже проверил):
    *  фоновые — ленивые, активная грузится сразу. Пусто — ничего. */
   restore(saved: SavedTabs): void {
-    for (const t of saved.tabs) {
+    for (const tab of saved.tabs) {
       const id = ++this.seq;
-      this.meta.set(id, { videoId: t.videoId, title: t.title });
+      this.meta.set(id, { videoId: tab.videoId, title: tab.title });
       this.frames.set(id, this.makeFrame());
       this.order.push(id);
     }
     this.activate(saved.tabs.length ? this.order[Math.min(saved.active, this.order.length - 1)] : this.order[0]);
-    if (this.order.length) this.host.note(`Восстановлено вкладок: ${this.order.length}`);
+    if (this.order.length) this.host.note(t("Восстановлено вкладок: {n}", { n: this.order.length }));
   }
 
   /** Показать/спрятать контент вкладок (просмотрщик PDF поверх). */
@@ -343,7 +346,7 @@ export class MobileTabs {
   private makeFrame(): HTMLIFrameElement {
     const f = document.createElement("iframe");
     f.className = "m-tab";
-    f.title = "Страница";
+    f.title = t("Страница");
     f.hidden = true;
     f.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
     f.referrerPolicy = "no-referrer-when-downgrade";
@@ -383,7 +386,7 @@ export class MobileTabs {
   private renderBadge(): void {
     this.badge.textContent = String(this.order.length || "");
     this.badge.hidden = this.order.length === 0;
-    this.btn.title = this.order.length ? `Вкладки (${this.order.length})` : "Вкладки";
+    this.btn.title = this.order.length ? t("Вкладки ({n})", { n: this.order.length }) : t("Вкладки");
   }
 
   private setSwitcher(open: boolean): void {
@@ -401,7 +404,7 @@ export class MobileTabs {
       const main = document.createElement("button");
       main.type = "button";
       main.className = "m-tabs-main";
-      main.textContent = m.title || `видео ${m.videoId}`;
+      main.textContent = m.title || t("видео {id}", { id: m.videoId });
       main.addEventListener("click", () => {
         this.setSwitcher(false);
         this.switchTo(id);
@@ -409,8 +412,8 @@ export class MobileTabs {
       const del = document.createElement("button");
       del.type = "button";
       del.className = "m-tabs-del";
-      del.title = "Закрыть вкладку";
-      del.setAttribute("aria-label", "Закрыть вкладку");
+      del.title = t("Закрыть вкладку");
+      del.setAttribute("aria-label", t("Закрыть вкладку"));
       del.textContent = "✕";
       del.addEventListener("click", () => this.close(id));
       row.append(main, del);
@@ -419,7 +422,7 @@ export class MobileTabs {
     if (!rows.length) {
       const empty = document.createElement("p");
       empty.className = "m-bm-empty";
-      empty.textContent = "Вкладок нет — откройте видео или нажмите «+ Новая вкладка»";
+      empty.textContent = t("Вкладок нет — откройте видео или нажмите «+ Новая вкладка»");
       rows.push(empty);
     }
     this.listEl.replaceChildren(...rows);

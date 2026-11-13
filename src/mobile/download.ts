@@ -11,6 +11,7 @@
 // (invoke/postMessage) подменяется в тестах.
 
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 
 /** Формат дорожки (ответ duo_mobile_formats). */
 export interface MediaFormatRow {
@@ -57,7 +58,7 @@ export function idleMusicState(): MusicUiState {
 /** МБ с одним знаком: 4 083 640 → «4.0 МБ». */
 export function mb(bytes: number): string {
   const v = bytes / (1024 * 1024);
-  return `${v >= 10 || bytes === 0 ? Math.round(v) : v.toFixed(1)} МБ`;
+  return t("{v} МБ", { v: v >= 10 || bytes === 0 ? String(Math.round(v)) : v.toFixed(1) });
 }
 
 /** Бит/с → «129 kbps» (0 → «—»). */
@@ -73,29 +74,29 @@ export function audioLabel(f: MediaFormatRow): string {
 
 /** Строка пункта «видео»: «720p · 59 МБ · +звук» (muxed — «готовый»). */
 export function videoLabel(f: MediaFormatRow): string {
-  const quality = f.quality || "видео";
-  const note = f.muxed ? "готовый" : "+звук";
+  const quality = f.quality || t("видео");
+  const note = f.muxed ? t("готовый") : t("+звук");
   const fps = f.fps > 30 ? ` ${f.fps}fps` : "";
   return `${quality}${fps}${f.size ? ` · ${mb(f.size)}` : ""} · ${note}`;
 }
 
 /** Строка пункта «субтитры»: имя дорожки, авто-распознавание помечаем. */
 export function subLabel(s: SubTrackRow): string {
-  const name = s.name || s.lang || "дорожка";
-  return s.asr ? `${name} (авто)` : name;
+  const name = s.name || s.lang || t("дорожка");
+  return s.asr ? t("{name} (авто)", { name }) : name;
 }
 
 /** Строка статуса по состоянию (строка внизу листа + note() экрана). */
 export function musicStatusText(s: MusicUiState): string {
-  if (s.kind === "loading") return "⬇ Запрашиваю форматы…";
+  if (s.kind === "loading") return t("⬇ Запрашиваю форматы…");
   if (s.kind === "downloading" && s.downloading) {
     const d = s.downloading;
     const pct = d.total ? Math.min(100, Math.round((d.downloaded / d.total) * 100)) : 0;
-    const size = d.total ? ` (${mb(d.downloaded)} из ${mb(d.total)})` : "";
-    return `⬇ ${d.label}: качаю ${pct}%${size}`;
+    const size = d.total ? t(" ({a} из {b})", { a: mb(d.downloaded), b: mb(d.total) }) : "";
+    return t("⬇ {label}: качаю {pct}%{size}", { label: d.label, pct: String(pct), size });
   }
-  if (s.kind === "done") return `⬇ Сохранено: ${s.message}`;
-  if (s.kind === "error") return `⬇ ${s.message}`;
+  if (s.kind === "done") return t("⬇ Сохранено: {message}", { message: s.message });
+  if (s.kind === "error") return t("⬇ {message}", { message: s.message });
   return "";
 }
 
@@ -128,7 +129,7 @@ export function iframeTransport(getFrame: () => HTMLIFrameElement | null): DlTra
   return {
     post(msg) {
       const frame = getFrame();
-      if (!frame?.contentWindow) throw new Error("плеер YouTube не открыт");
+      if (!frame?.contentWindow) throw new Error(t("плеер YouTube не открыт"));
       frame.contentWindow.postMessage(msg, "https://www.youtube.com");
     },
     subscribe(handler) {
@@ -157,7 +158,7 @@ async function pingFetcher(transport: DlTransport, timeoutMs: number): Promise<v
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       unsubscribe();
-      reject(new Error("YouTube не отвечает — обновите страницу видео и попробуйте снова"));
+      reject(new Error(t("YouTube не отвечает — обновите страницу видео и попробуйте снова")));
     }, timeoutMs);
     const unsubscribe = transport.subscribe((m) => {
       if (m.type !== "pong") return;
@@ -228,7 +229,7 @@ export async function fetchViaTransport(
           return;
         }
         if (m.type === "error") {
-          lastError = m.message ?? "ошибка сети";
+          lastError = m.message ?? t("ошибка сети");
           cleanup();
           resolve("fail");
           return;
@@ -255,7 +256,7 @@ export async function fetchViaTransport(
     if (++retries > 3) break;
   }
   if (total > 0 && offset >= total) return;
-  throw new Error(lastError || (guard?.cancelled ? "загрузка отменена" : "загрузка не удалась"));
+  throw new Error(lastError || (guard?.cancelled ? t("загрузка отменена") : t("загрузка не удалась")));
 }
 
 // ── контроллер листа ──────────────────────────────────────────────────────
@@ -308,11 +309,11 @@ export function createMusicDownloader(opts: MusicPorts): MusicDownloader {
     el.hidden = true;
     el.innerHTML = `
       <div class="m-sheet-backdrop"></div>
-      <div class="m-sheet m-dl" role="dialog" aria-label="Скачать">
+      <div class="m-sheet m-dl" role="dialog" aria-label="${t("Скачать")}">
         <div class="m-dl-head">
-          <b>Скачать</b>
+          <b>${t("Скачать")}</b>
           <span class="m-dl-title"></span>
-          <button class="m-dl-close" title="Закрыть" aria-label="Закрыть">✕</button>
+          <button class="m-dl-close" title="${t("Закрыть")}" aria-label="${t("Закрыть")}">✕</button>
         </div>
         <div class="m-dl-body"></div>
       </div>`;
@@ -333,7 +334,7 @@ export function createMusicDownloader(opts: MusicPorts): MusicDownloader {
       }
       void doInvoke("duo_download_abort", { id: activeId }).catch(() => {});
       activeId = null;
-      apply({ ...idleMusicState(), kind: "error", message: "загрузка отменена" });
+      apply({ ...idleMusicState(), kind: "error", message: t("загрузка отменена") });
     }
     wrap.hidden = true;
   }
@@ -356,7 +357,7 @@ export function createMusicDownloader(opts: MusicPorts): MusicDownloader {
     if (s.kind === "loading") {
       const p = document.createElement("p");
       p.className = "m-dl-note";
-      p.textContent = "Запрашиваю форматы…";
+      p.textContent = t("Запрашиваю форматы…");
       body.appendChild(p);
       return;
     }
@@ -370,7 +371,7 @@ export function createMusicDownloader(opts: MusicPorts): MusicDownloader {
     if (s.kind === "done" || s.kind === "error") {
       const p = document.createElement("p");
       p.className = `m-dl-note ${s.kind === "error" ? "m-dl-err" : ""}`;
-      p.textContent = s.kind === "done" ? `Сохранено: ${s.message}` : s.message;
+      p.textContent = s.kind === "done" ? t("Сохранено: {message}", { message: s.message }) : s.message;
       body.appendChild(p);
     }
     if (!list) return;
@@ -382,16 +383,16 @@ export function createMusicDownloader(opts: MusicPorts): MusicDownloader {
       for (const r of rows) body.appendChild(r);
     };
     section(
-      "♪ Аудио",
+      t("♪ Аудио"),
       list.audio.map((f) => row(audioLabel(f), () => void downloadAudio(f), busy)),
     );
     section(
-      "▶ Видео",
+      t("▶ Видео"),
       list.video.map((f) => row(videoLabel(f), () => void downloadVideo(f), busy)),
     );
     section(
-      "Субтитры (srt)",
-      list.subs.map((t) => row(subLabel(t), () => void downloadSub(t), busy)),
+      t("Субтитры (srt)"),
+      list.subs.map((tr) => row(subLabel(tr), () => void downloadSub(tr), busy)),
     );
   }
 
@@ -500,19 +501,19 @@ export function createMusicDownloader(opts: MusicPorts): MusicDownloader {
 
   function errText(e: unknown): string {
     const raw = e instanceof Error ? e.message : String(e);
-    if (/HTTP 403/.test(raw)) return "YouTube не отдал файл (HTTP 403) — попробуйте ещё раз";
+    if (/HTTP 403/.test(raw)) return t("YouTube не отдал файл (HTTP 403) — попробуйте ещё раз");
     return raw;
   }
 
   /** Отмена пользователем уже показала свою строку — статус не перетираем. */
   function wasCancelled(): boolean {
-    return state.message === "загрузка отменена" && state.kind === "error";
+    return state.message === t("загрузка отменена") && state.kind === "error";
   }
 
   async function openSheet(): Promise<void> {
     const videoId = opts.getVideoId();
     if (!videoId) {
-      apply({ kind: "error", message: "откройте видео YouTube", downloading: null });
+      apply({ kind: "error", message: t("откройте видео YouTube"), downloading: null });
       return;
     }
     buildSheet();

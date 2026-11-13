@@ -25,6 +25,7 @@ import {
   type SelectionLangs,
   type SelectionResultItem,
 } from "../../content/translate-select";
+import { t } from "../i18n";
 
 /** Транспорт invoke (в юнит-тестах подменяется фейком — паттерн duo/session). */
 export type SelectionInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -86,7 +87,7 @@ export function createSelectionPorts(
         detected?: unknown;
       };
       if (typeof r?.translation !== "string" || !r.translation) {
-        throw new Error("пустой ответ конвейера");
+        throw new Error(t("пустой ответ конвейера"));
       }
       return {
         translation: r.translation,
@@ -288,8 +289,8 @@ export class MobileSelectionTranslate {
     const chip = this.doc.createElement("button");
     chip.type = "button";
     chip.className = "m-tr-chip";
-    chip.textContent = "Перевести";
-    chip.setAttribute("aria-label", "Перевести выделение");
+    chip.textContent = t("Перевести");
+    chip.setAttribute("aria-label", t("Перевести выделение"));
     // pointerdown, не click: тап по кнопке уводит фокус и ручки выделения
     // схлопываются ДО click — preventDefault держит и фокус, и событие
     chip.addEventListener("pointerdown", (e) => {
@@ -333,7 +334,7 @@ export class MobileSelectionTranslate {
     // устаревший ответ (языки сменили/бабл закрыли) — мимо
     if (!this.bubble.visible || token !== this.runToken) return;
     if (items.length === 1 && !items[0].ok) {
-      this.bubble.setError(items[0].error ?? "нет ответа");
+      this.bubble.setError(items[0].error ?? t("нет ответа"));
     } else {
       this.bubble.setResult(text, items, langs);
     }
@@ -379,15 +380,15 @@ export class MobileSelectionTranslate {
     wrap.className = "m-tr-wrap";
     wrap.innerHTML = `
       <div class="m-tr-backdrop"></div>
-      <div class="m-tr-sheet" role="dialog" aria-label="Перевод текста">
+      <div class="m-tr-sheet" role="dialog" aria-label="${t("Перевод текста")}">
         <div class="m-tr-head">
-          <b>Перевод текста</b>
-          <button type="button" class="m-tr-close" aria-label="Закрыть">✕</button>
+          <b>${t("Перевод текста")}</b>
+          <button type="button" class="m-tr-close" aria-label="${t("Закрыть")}">✕</button>
         </div>
-        <textarea class="m-tr-input" rows="3" placeholder="Вставьте или введите текст"></textarea>
+        <textarea class="m-tr-input" rows="3" dir="auto" placeholder="${t("Вставьте или введите текст")}"></textarea>
         <div class="m-tr-row">
-          <select class="m-tr-lang" aria-label="Язык перевода"></select>
-          <button type="button" class="m-tr-go">Перевести</button>
+          <select class="m-tr-lang" aria-label="${t("Язык перевода")}"></select>
+          <button type="button" class="m-tr-go">${t("Перевести")}</button>
         </div>
         <div class="m-tr-meta" hidden></div>
         <div class="m-tr-result" hidden></div>
@@ -413,7 +414,7 @@ export class MobileSelectionTranslate {
       if (!text) {
         result.hidden = false;
         result.className = "m-tr-result m-tr-err";
-        result.textContent = "Введите текст для перевода";
+        result.textContent = t("Введите текст для перевода");
         meta.hidden = true;
         return;
       }
@@ -422,7 +423,7 @@ export class MobileSelectionTranslate {
       this.langs = { ...this.langs, targets: [target] };
       this.state = { ...this.state, sheet: true, target, targets: [target], pending: true };
       go.disabled = true;
-      go.textContent = "Переводим…";
+      go.textContent = t("Переводим…");
       result.hidden = true;
       meta.hidden = true;
       void (async () => {
@@ -439,11 +440,11 @@ export class MobileSelectionTranslate {
           const message = e instanceof Error ? e.message : String(e);
           result.hidden = false;
           result.className = "m-tr-result m-tr-err";
-          result.textContent = `Не получилось: ${message}`;
+          result.textContent = t("Не получилось: {message}", { message });
           this.state = { ...this.state, lastError: message, pending: false };
         } finally {
           go.disabled = false;
-          go.textContent = "Перевести";
+          go.textContent = t("Перевести");
         }
       })();
     };

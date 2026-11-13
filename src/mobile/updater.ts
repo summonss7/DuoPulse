@@ -12,6 +12,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { t } from "../i18n";
 
 /** Ассет манифеста канала (зеркало Rust UpdateAsset, camelCase). */
 export interface MobileUpdateAsset {
@@ -74,14 +75,14 @@ export function uiFromCheck(r: MobileUpdateCheck, manual: boolean): UpdaterUi {
     default:
       // network-error | bad-manifest
       return manual
-        ? { kind: "error", message: r.error ?? "не удалось проверить обновления", retry: "check" }
+        ? { kind: "error", message: r.error ?? t("не удалось проверить обновления"), retry: "check" }
         : { kind: "idle" };
   }
 }
 
 /** Мегабайты для строки прогресса (без дробей — плашка узкая). */
 export function mb(bytes: number): string {
-  return `${Math.max(1, Math.round(bytes / (1024 * 1024)))} МБ`;
+  return t("{v} МБ", { v: String(Math.max(1, Math.round(bytes / (1024 * 1024)))) });
 }
 
 export interface MobileUpdater {

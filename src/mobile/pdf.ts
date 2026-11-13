@@ -10,6 +10,7 @@
 // (pdf.test.ts); DOM/команды — createMobilePdf (контроллер для mobile.ts:
 // poll на старте/фокусе, close из «домой»).
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 
 /** Границы и шаг зума просмотрщика (доли от вписывания в ширину). */
 export const ZOOM_MIN = 0.5;
@@ -171,10 +172,10 @@ export function createMobilePdf(deps: MobilePdfDeps) {
       pages = doc.numPages;
       buildOverlay();
       await renderPage();
-      deps.note(`PDF «${name}»: страниц ${pages}.`);
+      deps.note(t("PDF «{name}»: страниц {pages}.", { name, pages }));
     } catch (e) {
       error = String(e);
-      deps.note(`PDF не открылся: ${e}`);
+      deps.note(t("PDF не открылся: {error}", { error: String(e) }));
       close();
     }
   }
@@ -197,13 +198,13 @@ export function createMobilePdf(deps: MobilePdfDeps) {
     overlay.className = "m-pdf";
     overlay.innerHTML = `
       <div class="m-pdf-bar">
-        <button class="m-pdf-close" title="Закрыть" aria-label="Закрыть">✕</button>
+        <button class="m-pdf-close" title="${t("Закрыть")}" aria-label="${t("Закрыть")}">✕</button>
         <span class="m-pdf-name"></span>
         <span class="m-pdf-page"></span>
-        <button class="m-pdf-prev" title="Предыдущая страница" aria-label="Предыдущая страница">‹</button>
-        <button class="m-pdf-next" title="Следующая страница" aria-label="Следующая страница">›</button>
-        <button class="m-pdf-zoom-out" title="Мельче" aria-label="Мельче">−</button>
-        <button class="m-pdf-zoom-in" title="Крупнее" aria-label="Крупнее">+</button>
+        <button class="m-pdf-prev" title="${t("Предыдущая страница")}" aria-label="${t("Предыдущая страница")}">‹</button>
+        <button class="m-pdf-next" title="${t("Следующая страница")}" aria-label="${t("Следующая страница")}">›</button>
+        <button class="m-pdf-zoom-out" title="${t("Мельче")}" aria-label="${t("Мельче")}">−</button>
+        <button class="m-pdf-zoom-in" title="${t("Крупнее")}" aria-label="${t("Крупнее")}">+</button>
         <span class="m-pdf-zoom"></span>
       </div>
       <div class="m-pdf-scroll"><canvas class="m-pdf-canvas"></canvas></div>

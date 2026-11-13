@@ -10,6 +10,7 @@
 // готовые дорожки видео + Google gtx поверх cue оригинала.
 
 import type { Cue } from "../../../content/types";
+import { t } from "../../i18n";
 import {
   buildTranslationUrl,
   extractCaptionList,
@@ -114,11 +115,11 @@ export async function loadCuesByUrl(invoke: DuoInvoke, url: string, signal?: { a
   let res = await attempt();
   if ((res.status === 429 || res.status >= 500) && !signal?.aborted) {
     await new Promise((r) => setTimeout(r, 6000));
-    if (signal?.aborted) throw new Error("загрузка отменена");
+    if (signal?.aborted) throw new Error(t("загрузка отменена"));
     res = await attempt();
   }
-  if (res.status !== 200) throw new Error(`YouTube отдал HTTP ${res.status}`);
-  if (!res.cues.length) throw new Error("дорожка без реплик");
+  if (res.status !== 200) throw new Error(t("YouTube отдал HTTP {status}", { status: res.status }));
+  if (!res.cues.length) throw new Error(t("дорожка без реплик"));
   return res.cues;
 }
 
@@ -147,10 +148,10 @@ export async function translateCueTable(
   const out: string[] = new Array(texts.length);
   let done = 0;
   for (const b of batches) {
-    if (signal?.aborted) throw new Error("перевод отменён");
+    if (signal?.aborted) throw new Error(t("перевод отменён"));
     const chunk = texts.slice(b.from, b.to);
     const r = (await invoke("duo_translate_texts", { texts: chunk, from, to })) as string[];
-    if (!Array.isArray(r) || r.length !== chunk.length) throw new Error("перевод вернул не все строки");
+    if (!Array.isArray(r) || r.length !== chunk.length) throw new Error(t("перевод вернул не все строки"));
     for (let i = 0; i < r.length; i++) out[b.from + i] = r[i];
     done += chunk.length;
     onProgress?.(done, texts.length);

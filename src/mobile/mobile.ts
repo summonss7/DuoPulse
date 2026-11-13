@@ -15,8 +15,13 @@
 // Команды bridge десктопа (tabs.*/nav.*/history.*) на мобильной обёртке не
 // зарегистрированы (lib.rs — тонкий билдер + Duo-движок), ветка их не зовёт;
 // разбор ввода — локальный resolveMobileInput (src/mobile/platform.ts).
+//
+// i18n (duopulse-138, этап 4): статика шаблона — data-i18n-атрибуты +
+// applyStaticI18n, динамика — t() из src/i18n; язык выбирается селектором
+// в меню «⋮» (setUiLang → mobile_ui_lang_set, Core мобильной ветки).
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
+import { applyStaticI18n, setUiLang, t, UI_LANGS, uiLang } from "../i18n";
 import "./mobile.css";
 import {
   MOBILE_SEARCH_ENGINES,
@@ -48,16 +53,16 @@ document.body.appendChild(root);
 root.innerHTML = `
   <header class="m-bar">
     <div class="m-bar-top">
-      <button id="mHome" class="m-icon" title="На стартовый экран" aria-label="На стартовый экран">
+      <button id="mHome" class="m-icon" title="На стартовый экран" data-i18n-title="На стартовый экран" aria-label="На стартовый экран" data-i18n-aria-label="На стартовый экран">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7 8 2.5 13.5 7v6a.5.5 0 0 1-.5.5h-3.5v-4h-3v4H3a.5.5 0 0 1-.5-.5z"/></svg>
       </button>
       <span class="m-logo" aria-hidden="true">duo<b>Pulse</b></span>
-      <button id="mPrivate" class="m-private-btn" title="Инкогнито" aria-label="Инкогнито" aria-pressed="false">
-        <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>
+      <button id="mPrivate" class="m-private-btn" title="Инкогнито" aria-label="Инкогнито" data-i18n-aria-label="Инкогнито" aria-pressed="false">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>
       </button>
-      <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo">duo</button>
-      <button id="mMusic" class="m-music-btn" hidden title="Скачать: аудио, видео или субтитры">⬇</button>
-      <button id="mMenu" class="m-icon" title="Настройки" aria-label="Настройки" aria-haspopup="menu" aria-expanded="false">
+      <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo" data-i18n-title="Субтитры duo">duo</button>
+      <button id="mMusic" class="m-music-btn" hidden title="Скачать: аудио, видео или субтитры" data-i18n-title="Скачать: аудио, видео или субтитры">⬇</button>
+      <button id="mMenu" class="m-icon" title="Настройки" data-i18n-title="Настройки" aria-label="Настройки" data-i18n-aria-label="Настройки" aria-haspopup="menu" aria-expanded="false">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
       </button>
     </div>
@@ -65,9 +70,9 @@ root.innerHTML = `
          адрес, выделяется/копируется долгим тапом, звёздочка закладки —
          рядом с адресом, а не среди кнопок первой строки -->
     <div class="m-urlrow" id="mUrlrow">
-      <input id="mOmnibox" type="text" placeholder="Адрес или поиск" spellcheck="false"
-        autocomplete="off" enterkeyhint="go" />
-      <button id="mGo" class="m-go" title="Перейти" aria-label="Перейти">
+      <input id="mOmnibox" type="text" placeholder="Адрес или поиск" data-i18n-placeholder="Адрес или поиск" spellcheck="false"
+        autocomplete="off" enterkeyhint="go" dir="auto" /><!-- dir=auto: адрес — LTR и в арабском UI (RTL-аудит duopulse-138) -->
+      <button id="mGo" class="m-go" title="Перейти" data-i18n-title="Перейти" aria-label="Перейти" data-i18n-aria-label="Перейти">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9M9 4.5 12.5 8 9 11.5"/></svg>
       </button>
     </div>
@@ -76,33 +81,36 @@ root.innerHTML = `
   <main class="m-content">
     <section id="mStart" class="m-start">
       <div class="m-mark" aria-hidden="true">duo<b>Pulse</b></div>
-      <p class="m-branch">мобильная ветка · субтитры и перевод</p>
+      <p class="m-branch" data-i18n="мобильная ветка · субтитры и перевод">мобильная ветка · субтитры и перевод</p>
       <p class="m-version" id="mVersion"></p>
-      <p class="m-hint">Ссылки YouTube с видео открываются встроенным плеером —
+      <p class="m-hint" data-i18n="Ссылки YouTube с видео открываются встроенным плеером — кнопка «duo» включает субтитры и перевод (готовые дорожки видео или Google). Поиск и прочие сайты открываются в приложении; на странице YouTube-видео появится кнопка «▶ duo» — открыть видео с субтитрами.">Ссылки YouTube с видео открываются встроенным плеером —
         кнопка «duo» включает субтитры и перевод (готовые дорожки видео или
         Google). Поиск и прочие сайты открываются в приложении; на странице
         YouTube-видео появится кнопка «▶ duo» — открыть видео с субтитрами.</p>
-      <button class="m-quick" data-url="https://www.youtube.com/watch?v=iG9CE55wbtY">Открыть пример — TED с субтитрами</button>
+      <button class="m-quick" data-url="https://www.youtube.com/watch?v=iG9CE55wbtY" data-i18n="Открыть пример — TED с субтитрами">Открыть пример — TED с субтитрами</button>
     </section>
     <div id="mMenuWrap" class="m-menu-wrap" hidden>
       <div class="m-menu-backdrop"></div>
-      <div class="m-menu" role="menu" aria-label="Настройки">
+      <div class="m-menu" role="menu" aria-label="Настройки" data-i18n-aria-label="Настройки">
         <div class="m-menu-head">
-          <b>Настройки</b>
-          <button id="mMenuClose" class="m-menu-close" title="Закрыть" aria-label="Закрыть">
+          <b data-i18n="Настройки">Настройки</b>
+          <button id="mMenuClose" class="m-menu-close" title="Закрыть" data-i18n-title="Закрыть" aria-label="Закрыть" data-i18n-aria-label="Закрыть">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
           </button>
         </div>
-        <label class="m-engine">Поиск: <select id="mEngine"></select></label>
+        <label class="m-engine"><span data-i18n="Поиск:">Поиск:</span> <select id="mEngine"></select></label>
+        <label class="m-engine"><span data-i18n="Язык:">Язык:</span> <select id="mLang"></select></label>
         <div id="mAila"></div>
-        <button id="mTranslate" class="m-check-update">Перевести текст…</button>
-        <button id="mCheckUpdate" class="m-check-update">Проверить обновления</button>
+        <button id="mTranslate" class="m-check-update" data-i18n="Перевести текст…">Перевести текст…</button>
+        <button id="mCheckUpdate" class="m-check-update" data-i18n="Проверить обновления">Проверить обновления</button>
         <p class="m-menu-version" id="mVersionMenu"></p>
       </div>
     </div>
   </main>
   <footer class="m-status" id="mStatus" hidden></footer>
 `;
+// Статика шаблона — на язык страницы (динамика ниже — t() по ходу дела)
+applyStaticI18n(root);
 
 const omnibox = root.querySelector<HTMLInputElement>("#mOmnibox")!;
 const go = root.querySelector<HTMLButtonElement>("#mGo")!;
@@ -120,6 +128,13 @@ const content = root.querySelector<HTMLElement>(".m-content")!;
 function note(text: string): void {
   status.textContent = text;
   status.hidden = !text;
+}
+
+/** Изолировать LTR-вставку (URL) в RTL-строке статуса: без FSI/PDI
+ *  (U+2066/U+2069) bidi переупорядочивает «://» и «=» в арабском
+ *  переводе — URL «разъезжается» (duopulse-138, RTL-аудит). */
+function isoLtr(s: string): string {
+  return `\u2066${s}\u2069`;
 }
 
 // ── Меню настроек (duopulse-102): «⋮» в шапке открывает лист — поисковик,
@@ -164,8 +179,8 @@ function setIncognito(on: boolean): void {
   privateBtn.classList.toggle("on", on);
   privateBtn.setAttribute("aria-pressed", String(on));
   privateBtn.title = on
-    ? "Инкогнито включён — нажмите, чтобы выключить и удалить данные сайтов"
-    : "Инкогнито";
+    ? t("Инкогнито включён — нажмите, чтобы выключить и удалить данные сайтов")
+    : t("Инкогнито");
   document.body.classList.toggle("m-private", on);
   try {
     if (on) localStorage.setItem(DIRTY_KEY, "1");
@@ -189,11 +204,11 @@ function setIncognito(on: boolean): void {
     .then(() =>
       note(
         on
-          ? "Инкогнито включён: история не ведётся, куки и данные сайтов удалятся при выключении."
-          : "Инкогнито выключен: куки и данные сайтов удалены.",
+          ? t("Инкогнито включён: история не ведётся, куки и данные сайтов удалятся при выключении.")
+          : t("Инкогнито выключен: куки и данные сайтов удалены."),
       ),
     )
-    .catch((e) => note(`Инкогнито: очистка не удалась (${e})`));
+    .catch((e) => note(t("Инкогнито: очистка не удалась ({error})", { error: e })));
 }
 
 privateBtn.addEventListener("click", () => setIncognito(!incognito));
@@ -207,12 +222,12 @@ function renderUpdate(ui: UpdaterUi): void {
   updateBanner.hidden = ui.kind === "idle";
   if (ui.kind === "idle") return;
   if (ui.kind === "checking") {
-    updateBanner.textContent = "Проверяю обновления…";
+    updateBanner.textContent = t("Проверяю обновления…");
     return;
   }
   if (ui.kind === "available") {
     const head = document.createElement("b");
-    head.textContent = `⬆ Доступна версия ${ui.version}`;
+    head.textContent = t("⬆ Доступна версия {version}", { version: ui.version });
     updateBanner.appendChild(head);
     if (ui.notes) {
       const notes = document.createElement("span");
@@ -222,41 +237,44 @@ function renderUpdate(ui: UpdaterUi): void {
     }
     const btn = document.createElement("button");
     btn.className = "m-update-btn";
-    btn.textContent = "Обновить";
+    btn.textContent = t("Обновить");
     btn.addEventListener("click", () => void updater.install());
     updateBanner.appendChild(btn);
     return;
   }
   if (ui.kind === "downloading") {
     const pct = ui.total ? Math.min(100, Math.round((ui.downloaded / ui.total) * 100)) : 0;
-    updateBanner.textContent = `Скачиваю ${ui.version}: ${pct}%` + (ui.total ? ` (${mb(ui.downloaded)} из ${mb(ui.total)})` : "");
+    updateBanner.textContent =
+      t("Скачиваю {version}: {pct}%", { version: ui.version, pct: String(pct) }) +
+      (ui.total ? t(" ({a} из {b})", { a: mb(ui.downloaded), b: mb(ui.total) }) : "");
     return;
   }
   if (ui.kind === "installing") {
-    updateBanner.textContent =
-      "Открыт системный установщик — подтвердите установку, приложение обновится само. Если Play Protect предупреждает — «Подробнее» → «Всё равно установить»: приложение не из Play Store, идёт с нашего канала обновлений.";
+    updateBanner.textContent = t(
+      "Открыт системный установщик — подтвердите установку, приложение обновится само. Если Play Protect предупреждает — «Подробнее» → «Всё равно установить»: приложение не из Play Store, идёт с нашего канала обновлений.",
+    );
     return;
   }
   if (ui.kind === "needs-permission") {
-    updateBanner.textContent = "Разрешите установку из этого источника в открывшихся настройках.";
+    updateBanner.textContent = t("Разрешите установку из этого источника в открывшихся настройках.");
     const btn = document.createElement("button");
     btn.className = "m-update-btn";
-    btn.textContent = "Обновить";
+    btn.textContent = t("Обновить");
     btn.addEventListener("click", () => void updater.install());
     updateBanner.appendChild(btn);
     return;
   }
   if (ui.kind === "latest") {
-    updateBanner.textContent = `✓ У вас последняя версия (${ui.version})`;
+    updateBanner.textContent = t("✓ У вас последняя версия ({version})", { version: ui.version });
     return;
   }
   // error: причина + «Повторить», если есть чем повторять (duopulse-101 —
   // обрыв скачивания лечится повтором с докачкой, а не перезапуском приложения)
-  updateBanner.textContent = `Обновления: ${ui.message}`;
+  updateBanner.textContent = t("Обновления: {message}", { message: ui.message });
   if (ui.retry) {
     const btn = document.createElement("button");
     btn.className = "m-update-btn";
-    btn.textContent = "Повторить";
+    btn.textContent = t("Повторить");
     btn.addEventListener("click", () => void (ui.retry === "install" ? updater.install() : updater.check(true)));
     updateBanner.appendChild(btn);
   }
@@ -294,24 +312,24 @@ const tabs = new MobileTabs({
 /** Активная вкладка сменилась (открытие/переключение/восстановление): единая
  *  точка доводки хрома — duo-сессия, omnibox, кнопки, звёздочка, стартовый
  *  экран. null — вкладок нет (все закрыты / «новая вкладка» / старт). */
-function onTabActive(t: MobileTab | null): void {
-  videoOpen = t !== null;
-  start.hidden = t !== null;
-  duoBtn.hidden = t === null;
-  musicBtn.hidden = t === null;
+function onTabActive(tab: MobileTab | null): void {
+  videoOpen = tab !== null;
+  start.hidden = tab !== null;
+  duoBtn.hidden = tab === null;
+  musicBtn.hidden = tab === null;
   duoPanel?.remove();
   duoPanel = null;
-  if (!t) {
+  if (!tab) {
     duo.close();
     omnibox.value = "";
     void bookmarks.syncVideo();
     return;
   }
   // канонический watch-URL (как у закладки), не /embed (duopulse-105)
-  omnibox.value = `https://www.youtube.com/watch?v=${t.videoId}`;
-  void duo.open(t.videoId).then(() => tabs.setTitle(t.videoId, duo.currentTitle));
+  omnibox.value = `https://www.youtube.com/watch?v=${tab.videoId}`;
+  void duo.open(tab.videoId).then(() => tabs.setTitle(tab.videoId, duo.currentTitle));
   void bookmarks.syncVideo();
-  note("Плеер YouTube. Нажмите «duo» для субтитров и перевода.");
+  note(t("Плеер YouTube. Нажмите «duo» для субтитров и перевода."));
 }
 
 // ── Аккаунт Aila (этап 6 duopulse-112): блок в меню «⋮», листы входа и
@@ -336,7 +354,7 @@ const duo = new MobileDuo(content, () => tabs.activeFrame, (s: DuoStatus) => {
   duoPanel?.setStatus(s);
   // Панель закрыта — статус duo виден в общей строке (панель открыта — только в ней).
   if (!duoPanel) {
-    note(s.text ?? (videoOpen ? "Плеер YouTube. Нажмите «duo» для субтитров и перевода." : ""));
+    note(s.text ?? (videoOpen ? t("Плеер YouTube. Нажмите «duo» для субтитров и перевода.") : ""));
   }
 });
 duoBtn.addEventListener("click", () => {
@@ -460,6 +478,24 @@ engineSel.addEventListener("change", () => {
   }
 });
 
+// ── Язык интерфейса (duopulse-138, этап 4 i18n): селектор в меню «⋮», тот
+// же набор, что на странице настроек десктопа (UI_LANGS). Выбор — setUiLang:
+// пишет язык в Core (mobile_ui_lang_set — раздел "ui" мобильного settings.json)
+// и перезагружает страницу; в инкогнито выбор тоже честный — язык не след
+// активности (в отличие от движка), чистится только кэш localStorage.
+const langSel = root.querySelector<HTMLSelectElement>("#mLang")!;
+for (const l of UI_LANGS) {
+  const opt = document.createElement("option");
+  opt.value = l.id;
+  opt.textContent = l.label;
+  opt.selected = l.id === uiLang;
+  langSel.append(opt);
+}
+langSel.addEventListener("change", () => {
+  const next = UI_LANGS.find((l) => l.id === langSel.value)?.id;
+  if (next && next !== uiLang) void setUiLang(next);
+});
+
 /** Открыть адрес системным браузером (mobile.open_url → Intent ACTION_VIEW):
  * фолбэк web-оверлея — оверлей недоступен (старая сборка без команды,
  * ошибка хелпера) лучше внешним браузером, чем «ничего не открылось»
@@ -467,9 +503,9 @@ engineSel.addEventListener("change", () => {
 async function openExternal(url: string): Promise<void> {
   try {
     const r = await invoke<string>("mobile_open_url", { url });
-    note(r === "opened" ? `Открыл в браузере: ${url}` : r);
+    note(r === "opened" ? t("Открыл в браузере: {url}", { url: isoLtr(url) }) : r);
   } catch (e) {
-    note(`Не удалось открыть: ${e}`);
+    note(t("Не удалось открыть: {error}", { error: String(e) }));
   }
 }
 
@@ -482,7 +518,7 @@ async function openInApp(url: string): Promise<void> {
   try {
     const r = await invoke<string>("mobile_web_open", { url });
     if (r === "opened") {
-      note(`Открыл в приложении: ${url}`);
+      note(t("Открыл в приложении: {url}", { url: isoLtr(url) }));
       return;
     }
     note(r);
@@ -550,8 +586,8 @@ for (const b of root.querySelectorAll<HTMLButtonElement>(".m-quick")) {
 // любой webview с core:default): стартовый экран и меню настроек.
 void getVersion()
   .then((v) => {
-    root.querySelector("#mVersion")!.textContent = `версия ${v}`;
-    root.querySelector("#mVersionMenu")!.textContent = `DuoPulse ${v} · мобильная ветка`;
+    root.querySelector("#mVersion")!.textContent = t("версия {version}", { version: v });
+    root.querySelector("#mVersionMenu")!.textContent = t("DuoPulse {version} · мобильная ветка", { version: v });
   })
   .catch(() => {});
 

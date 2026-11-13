@@ -4,6 +4,7 @@
 // контролы, селекты нативные. Панель не знает о загрузке — изменения уходят
 // колбэком контроллеру, статус приходит в setStatus.
 
+import { t } from "../../i18n";
 import { GTX_TARGET_LANGS, parseTranslationChoice, type DuoMobileSettings } from "./state";
 import type { MobileTrackList } from "./session";
 import type { DuoStatus } from "./index";
@@ -16,7 +17,7 @@ export interface DuoPanelCallbacks {
 /** Отображаемое имя дорожки: имя платформы или язык+тип. */
 export function trackLabel(id: string, lang: string, kind: string, name: string): string {
   if (name) return name;
-  return kind === "asr" ? `${lang} (авто)` : lang;
+  return kind === "asr" ? t("{lang} (авто)", { lang }) : lang;
 }
 
 export class DuoPanel {
@@ -42,43 +43,42 @@ export class DuoPanel {
     this.root.className = "m-duo-panel";
     this.root.innerHTML = `
       <div class="m-duo-head">
-        <span class="m-duo-title">duo · субтитры</span>
-        <button class="m-duo-toggle" title="Показ субтитров">вкл</button>
-        <button class="m-duo-close" aria-label="Закрыть">✕</button>
+        <span class="m-duo-title">${t("duo · субтитры")}</span>
+        <button class="m-duo-toggle" title="${t("Показ субтитров")}">${t("вкл")}</button>
+        <button class="m-duo-close" aria-label="${t("Закрыть")}">✕</button>
       </div>
       <label class="m-duo-set m-duo-field">
-        <span>Оригинал</span>
+        <span>${t("Оригинал")}</span>
         <select class="m-duo-original"></select>
       </label>
       <label class="m-duo-set m-duo-field">
-        <span>Перевод</span>
+        <span>${t("Перевод")}</span>
         <select class="m-duo-trans"></select>
       </label>
       <div class="m-duo-set">
-        <span>Кегль</span>
+        <span>${t("Кегль")}</span>
         <div class="m-duo-stepper">
-          <button class="m-duo-scale-minus" aria-label="Мелче">−</button>
+          <button class="m-duo-scale-minus" aria-label="${t("Мелче")}">−</button>
           <b class="m-duo-scale-val"></b>
-          <button class="m-duo-scale-plus" aria-label="Крупнее">+</button>
+          <button class="m-duo-scale-plus" aria-label="${t("Крупнее")}">+</button>
         </div>
       </div>
       <div class="m-duo-set">
-        <span>Позиция</span>
+        <span>${t("Позиция")}</span>
         <div class="m-duo-seg">
-          <button class="m-duo-pos-bottom">низ</button><button class="m-duo-pos-top">верх</button>
+          <button class="m-duo-pos-bottom">${t("низ")}</button><button class="m-duo-pos-top">${t("верх")}</button>
         </div>
       </div>
       <div class="m-duo-set">
-        <span>Сдвиг</span>
+        <span>${t("Сдвиг")}</span>
         <div class="m-duo-stepper">
-          <button class="m-duo-offset-minus" aria-label="Раньше">−0,5 с</button>
+          <button class="m-duo-offset-minus" aria-label="${t("Раньше")}">${t("−0,5 с")}</button>
           <b class="m-duo-offset-val"></b>
-          <button class="m-duo-offset-plus" aria-label="Позже">+0,5 с</button>
+          <button class="m-duo-offset-plus" aria-label="${t("Позже")}">${t("+0,5 с")}</button>
         </div>
       </div>
       <div class="m-duo-status" hidden></div>
-      <p class="m-duo-note">Перевод Google работает без ключей; готовые дорожки —
-        переводы самого видео. Провайдеры (DeepL/Google API/Libre) — десктоп.</p>
+      <p class="m-duo-note">${t("Перевод Google работает без ключей; готовые дорожки — переводы самого видео. Провайдеры (DeepL/Google API/Libre) — десктоп.")}</p>
     `;
     this.toggleBtn = this.root.querySelector<HTMLButtonElement>(".m-duo-toggle")!;
     this.originalSel = this.root.querySelector<HTMLSelectElement>(".m-duo-original")!;
@@ -122,25 +122,30 @@ export class DuoPanel {
     this.originalSel.innerHTML = "";
     if (!list || list.base.length === 0) {
       this.originalSel.disabled = true;
-      this.originalSel.add(new Option("нет дорожек", ""));
+      this.originalSel.add(new Option(t("нет дорожек"), ""));
     } else {
       this.originalSel.disabled = false;
-      for (const t of list.base) {
-        this.originalSel.add(new Option(trackLabel(t.id, t.lang, t.kind, t.name) + (t.original ? " · оригинал" : ""), t.id));
+      for (const tr of list.base) {
+        this.originalSel.add(
+          new Option(
+            trackLabel(tr.id, tr.lang, tr.kind, tr.name) + (tr.original ? t(" · оригинал") : ""),
+            tr.id,
+          ),
+        );
       }
     }
     this.transSel.innerHTML = "";
-    this.transSel.add(new Option("нет", ""));
+    this.transSel.add(new Option(t("нет"), ""));
     if (list) {
       const gtx = document.createElement("optgroup");
-      gtx.label = "Перевод Google";
+      gtx.label = t("Перевод Google");
       for (const l of GTX_TARGET_LANGS) gtx.appendChild(new Option(l.name, `gtx:${l.code}`));
       this.transSel.append(gtx);
-      const ready = list.base.filter((t) => t.id !== this.settings().originalId);
+      const ready = list.base.filter((tr) => tr.id !== this.settings().originalId);
       if (ready.length) {
         const own = document.createElement("optgroup");
-        own.label = "Готовые дорожки видео";
-        for (const t of ready) own.appendChild(new Option(trackLabel(t.id, t.lang, t.kind, t.name), `track:${t.id}`));
+        own.label = t("Готовые дорожки видео");
+        for (const tr of ready) own.appendChild(new Option(trackLabel(tr.id, tr.lang, tr.kind, tr.name), `track:${tr.id}`));
         this.transSel.append(own);
       }
     }
@@ -152,7 +157,7 @@ export class DuoPanel {
     const s = this.settings();
     if (s.originalId !== this.builtForOriginal) this.rebuildSelects(this.lastList);
     this.suppressChange = true;
-    this.toggleBtn.textContent = s.enabled ? "вкл" : "выкл";
+    this.toggleBtn.textContent = s.enabled ? t("вкл") : t("выкл");
     this.toggleBtn.classList.toggle("m-on", s.enabled);
     if (s.originalId && Array.from(this.originalSel.options).some((o) => o.value === s.originalId)) {
       this.originalSel.value = s.originalId;
@@ -171,7 +176,9 @@ export class DuoPanel {
   setStatus(st: DuoStatus): void {
     this.statusEl.hidden = !st.text;
     this.statusEl.textContent = st.text ?? "";
-    this.statusEl.classList.toggle("m-err", st.busy === false && !!st.text && !st.text.startsWith("duo: перев"));
+    // ошибка — явный флаг статуса (duopulse-138): переведённый текст
+    // префиксом «duo: перев» уже не опишешь
+    this.statusEl.classList.toggle("m-err", st.error === true && !!st.text);
   }
 
   remove(): void {
@@ -188,7 +195,7 @@ export function stepScale(current: number, direction: number): number {
 export function fmtOffset(ms: number): string {
   const sign = ms > 0 ? "+" : ms < 0 ? "−" : "";
   const s = Math.abs(ms) / 1000;
-  return `${sign}${s.toFixed(1)} с`;
+  return t("{v} с", { v: `${sign}${s.toFixed(1)}` });
 }
 
 export { parseTranslationChoice };

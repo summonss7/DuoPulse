@@ -5,6 +5,7 @@
 // (поколение seq — Races между загрузками не смешивают результаты).
 
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../../i18n";
 import type { Track } from "../../../content/types";
 import { SubtitlesEngine } from "../../../content/engine/subtitles-engine";
 import { DuoOverlay } from "./overlay";
@@ -26,6 +27,9 @@ export interface DuoStatus {
   text: string | null;
   /** Идёт загрузка (прогресс/спиннер панели). */
   busy: boolean;
+  /** Ошибка, а не прогресс (панель красит строку; до duopulse-138 ловили
+   *  префикс «duo: перев» — переведённый текст префиксом не опишешь). */
+  error?: boolean;
 }
 
 export class MobileDuo {
@@ -83,7 +87,7 @@ export class MobileDuo {
     this.close(false);
     this.videoId = videoId;
     const seq = ++this.seq;
-    this.onStatus({ text: "duo: читаю дорожки…", busy: true });
+    this.onStatus({ text: t("duo: читаю дорожки…"), busy: true });
     try {
       const response = await this.doInvoke("duo_yt_player", { videoId });
       if (seq !== this.seq) return;
@@ -91,7 +95,7 @@ export class MobileDuo {
       const list = parsePlayerResponse(videoId, response);
       if (!list) {
         this.list = null;
-        this.onStatus({ text: "duo: у видео нет субтитров", busy: false });
+        this.onStatus({ text: t("duo: у видео нет субтитров"), busy: false, error: true });
         return;
       }
       this.list = list;
@@ -104,7 +108,7 @@ export class MobileDuo {
       await this.applySet(seq);
     } catch (e) {
       if (seq !== this.seq) return;
-      this.onStatus({ text: `duo: ${messageOf(e)}`, busy: false });
+      this.onStatus({ text: t("duo: {message}", { message: messageOf(e) }), busy: false, error: true });
     }
   }
 
@@ -128,7 +132,7 @@ export class MobileDuo {
     if (!frame) return;
     this.clock = new YtClock(frame, window, { onFrozen: () => this.heal() });
     this.engine.attach(this.clock);
-    void this.clock.attach().catch(() => this.onStatus({ text: "duo: плеер недоступен для синхронизации", busy: false }));
+    void this.clock.attach().catch(() => this.onStatus({ text: t("duo: плеер недоступен для синхронизации"), busy: false, error: true }));
   }
 
   /** Плеер YouTube замерз после сворачивания (см. шапку clock.ts): лечим
@@ -193,14 +197,14 @@ export class MobileDuo {
     if (!list || !this.settings.enabled || !this.settings.originalId) {
       this.engine.setTracks([]);
       if (list && this.settings.enabled && !this.settings.originalId) {
-        this.onStatus({ text: "duo: нет дорожки оригинала", busy: false });
+        this.onStatus({ text: t("duo: нет дорожки оригинала"), busy: false, error: true });
       }
       return;
     }
-    const original = list.base.find((t) => t.id === this.settings.originalId);
+    const original = list.base.find((tr) => tr.id === this.settings.originalId);
     const baseUrl = original ? list.urls.get(original.id) : undefined;
     if (!original || !baseUrl) {
-      this.onStatus({ text: "duo: дорожка оригинала недоступна", busy: false });
+      this.onStatus({ text: t("duo: дорожка оригинала недоступна"), busy: false, error: true });
       return;
     }
     const duo = this;
@@ -209,7 +213,7 @@ export class MobileDuo {
         return seq !== duo.seq;
       },
     };
-    this.onStatus({ text: "duo: грузю субтитры…", busy: true });
+    this.onStatus({ text: t("duo: грузю субтитры…"), busy: true });
     try {
       const cues = await loadCuesByUrl(this.doInvoke, baseUrl, signal);
       if (signal.aborted) return;
@@ -221,14 +225,21 @@ export class MobileDuo {
       this.engine.setTracks(tracks);
       const choice = parseTranslationChoice(this.settings.translation);
       if (choice.kind === "gtx" && choice.lang !== original.lang) {
-        this.onStatus({ text: `duo: перевожу (${original.lang} → ${choice.lang})…`, busy: true });
+        this.onStatus({
+          text: t("duo: перевожу ({from} → {to})…", { from: original.lang, to: choice.lang }),
+          busy: true,
+        });
         try {
           const translated = await translateCueTable(
             this.doInvoke,
             cues,
             original.lang,
             choice.lang,
-            (done, total) => this.onStatus({ text: `duo: перевод ${Math.round((done / total) * 100)}%`, busy: true }),
+            (done, total) =>
+              this.onStatus({
+                text: t("duo: перевод {pct}%", { pct: String(Math.round((done / total) * 100)) }),
+                busy: true,
+              }),
             signal,
           );
           if (signal.aborted) return;
@@ -244,10 +255,13 @@ export class MobileDuo {
           this.onStatus({ text: null, busy: false });
         } catch (e) {
           if (signal.aborted) return;
-          this.onStatus({ text: `duo: перевод недоступен (${messageOf(e)}) — показываю оригинал`, busy: false });
+          this.onStatus({
+            text: t("duo: перевод недоступен ({reason}) — показываю оригинал", { reason: messageOf(e) }),
+            busy: false,
+          });
         }
       } else if (choice.kind === "track") {
-        const trackInfo = list.base.find((t) => t.id === choice.baseId && t.id !== original.id);
+        const trackInfo = list.base.find((tr) => tr.id === choice.baseId && tr.id !== original.id);
         const trackUrl = trackInfo ? list.urls.get(trackInfo.id) : undefined;
         if (trackInfo && trackUrl) {
           const transCues = await loadCuesByUrl(this.doInvoke, trackUrl, signal);
@@ -270,7 +284,7 @@ export class MobileDuo {
     } catch (e) {
       if (signal.aborted) return;
       this.engine.setTracks([]);
-      this.onStatus({ text: `duo: ${messageOf(e)}`, busy: false });
+      this.onStatus({ text: t("duo: {message}", { message: messageOf(e) }), busy: false, error: true });
     }
   }
 

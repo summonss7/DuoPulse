@@ -5839,3 +5839,35 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   release — stable+canary GitHub (duopulse-updates 1230934), фид Pages, хаб
   Aila, локальная копия C:\DuoPulse обновлена.
 - Коммит: 3db7fb8 feat: duopulse-137 — i18n этап 3 (панели + внутренние страницы, +323 ключа); релиз 0.1.38
+
+## 2026-11-13 — duopulse-138: i18n этап 4 — мобильный UI + RTL-аудит арабского (0.1.39)
+- Начало: 13.11.2026 05:38, окончание: 13.11.2026 10:25.
+- Что изменено:
+  - Переведён весь мобильный UI (src/mobile/*: старт-экран, шапка/омнибокс,
+    меню «⋮» (поисковик, язык, аккаунт Aila, обновления), закладки, вкладки,
+    загрузки, PDF, перевод выделения, duo-панель/часы/сессия, инкогнито)
+    через t()/data-i18n; словари dict-en/uk/ro/ar/sk +168 ключа (+1 «Избранное»).
+  - Язык мобильной ветки — раздел "ui" мобильного settings.json (те же
+    load/save, что на десктопе): src-tauri/src/mobile_settings.rs (команда
+    mobile_ui_lang_set + init-скрипт webview через append_invoke_
+    initialization_script — у окон из конфига своего init-скрипта нет);
+    setUiLang на мобильной ветке пишет invoke-командой (settings.apply там
+    не зарегистрирована). Профиль-модуль settings ограничен не-мобильными
+    таргетами (тянет bridge/asr — в мобильной либе их нет).
+  - RTL-аудит арабского (dir=rtl теперь на всём UI, не только настройках):
+    CSS src/mobile/mobile.css и src/style.css переведён на логические
+    свойства (inset-inline-end, margin-inline-*, text-align: start/end);
+    URL в статус-строке изолируется FSI/PDI (isoLtr — без него bidi
+    «разъезжает» :// и =); дефолтная группа закладок «Избранное» (имя из
+    БД) для isDefault-чипа показывается переводом.
+- Как проверено: npm run typecheck чист; vitest 46 файлов / 482 теста ОК;
+  RTL-прогон на эмуляторе (debug-APK): старт-экран/закладки/вкладки/меню —
+  зеркалирование корректное, развалов нет, язык ar переживает перезапуск
+  приложения (источник — Core); фикс чипа подтверждён на пересобранном APK.
+- Релиз 0.1.39 (версии синхронны): android-build.sh debug+release — APK в
+  builds/, release опубликован в канал Aila; десктоп npm run release —
+  stable+canary GitHub (duopulse-updates 886c16a, push повторён после сетевого
+  сбоя), фид Pages, канал Aila (манифест содержит exe+APK), локальная копия
+  C:\DuoPulse обновлена через --deploy-local.
+- ROADMAP: запись этапа 4 i18n.
+- Коммит: (см. ниже)

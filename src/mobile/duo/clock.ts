@@ -18,6 +18,7 @@
 // (дорожки движка и настройки duo-сессии не пересобираются).
 
 import type { VideoLike } from "../../../content/engine/subtitles-engine";
+import { t } from "../../i18n";
 
 /** Минимальный плеер IFrame API (типы @types/youtube не тянем). */
 interface YtPlayer {
@@ -53,20 +54,20 @@ function loadYtApi(win: YtWindow): Promise<YtNamespace> {
   const w = win as { __duoYtApiPromise?: Promise<YtNamespace> };
   if (w.__duoYtApiPromise) return w.__duoYtApiPromise;
   w.__duoYtApiPromise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("IFrame API не загрузился")), 15_000);
+    const timer = setTimeout(() => reject(new Error(t("IFrame API не загрузился"))), 15_000);
     const prev = win.onYouTubeIframeAPIReady;
     win.onYouTubeIframeAPIReady = () => {
       prev?.();
       clearTimeout(timer);
       if (win.YT?.Player) resolve(win.YT);
-      else reject(new Error("YT.Player не появился"));
+      else reject(new Error(t("YT.Player не появился")));
     };
     const s = win.document.createElement("script");
     s.src = API_SRC;
     s.async = true;
     s.onerror = () => {
       clearTimeout(timer);
-      reject(new Error("скрипт IFrame API недоступен (сеть?)"));
+      reject(new Error(t("скрипт IFrame API недоступен (сеть?)")));
     };
     win.document.head.appendChild(s);
   });

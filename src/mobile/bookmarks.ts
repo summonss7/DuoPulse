@@ -9,6 +9,7 @@
 
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
+import { t } from "../i18n";
 
 /** Что выбрал пользователь в ряду чипов: «Все» или конкретная группа. */
 export type GroupSel = "all" | number;
@@ -98,8 +99,8 @@ export class MobileBookmarks {
     this.star.id = "mStar";
     this.star.className = "m-icon";
     this.star.hidden = true;
-    this.star.title = "В избранное";
-    this.star.setAttribute("aria-label", "В избранное");
+    this.star.title = t("В избранное");
+    this.star.setAttribute("aria-label", t("В избранное"));
     this.star.innerHTML =
       '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.8 3.9L8 11l-3.5 1.9.8-3.9-2.9-2.7 3.9-.5z"/></svg>';
     urlrow.insertBefore(this.star, urlrow.querySelector("#mGo"));
@@ -110,11 +111,11 @@ export class MobileBookmarks {
     this.view.hidden = true;
     this.view.innerHTML = `
       <div class="m-bm-head">
-        <button class="m-bm-back" title="К старту" aria-label="К старту">
+        <button class="m-bm-back" title="${t("К старту")}" aria-label="${t("К старту")}">
           <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>
-          <b>Закладки</b>
+          <b>${t("Закладки")}</b>
         </button>
-        <span class="m-bm-hint">удерживайте закладку и тяните на группу</span>
+        <span class="m-bm-hint">${t("удерживайте закладку и тяните на группу")}</span>
       </div>
       <div class="m-bm-chips" role="tablist"></div>
       <div class="m-bm-list"></div>
@@ -165,7 +166,7 @@ export class MobileBookmarks {
     if (startBtn) {
       const btn = document.createElement("button");
       btn.className = "m-quick m-bm-open";
-      btn.textContent = "Закладки";
+      btn.textContent = t("Закладки");
       btn.addEventListener("click", () => void this.openView());
       startBtn.insertBefore(btn, startBtn.querySelector(".m-hint"));
     }
@@ -229,7 +230,7 @@ export class MobileBookmarks {
         await this.reload();
       }
     } catch (e) {
-      this.host.note(`Закладки: ${e instanceof Error ? e.message : String(e)}`);
+      this.host.note(t("Закладки: {error}", { error: e instanceof Error ? e.message : String(e) }));
     }
   }
 
@@ -249,17 +250,19 @@ export class MobileBookmarks {
       kids.push(b);
       return b;
     };
-    chip("Все", "all", "Все закладки");
+    chip(t("Все"), "all", t("Все закладки"));
     for (const g of this.groups) {
       const c = chip(
-        `${g.name} · ${g.count}`,
+        // Имя группы — данные из БД; дефолтная «Избранное» создаётся Core
+        // с русским именем — показываем перевод (duopulse-138, RTL-аудит).
+        `${(g.isDefault ? t(g.name) : g.name)} · ${g.count}`,
         g.id,
-        g.isDefault ? "Группа по умолчанию (звёздочка без выбора)" : "Группа закладок",
+        g.isDefault ? t("Группа по умолчанию (звёздочка без выбора)") : t("Группа закладок"),
       );
       c.dataset.drop = String(g.id); // цель тяги (dropTargetOf)
       this.armChipLongPress(c, g);
     }
-    const add = chip("+", null, "Новая группа");
+    const add = chip("+", null, t("Новая группа"));
     add.classList.add("m-bm-chip-add");
     add.addEventListener("click", () => this.editGroupName(null));
     this.chips.replaceChildren(...kids);
@@ -307,14 +310,14 @@ export class MobileBookmarks {
       });
       return b;
     };
-    this.sheet.append(mk("Переименовать…", () => this.editGroupName(g)));
+    this.sheet.append(mk(t("Переименовать…"), () => this.editGroupName(g)));
     if (!g.isDefault) {
       this.sheet.append(
-        mk(`Удалить группу «${g.name}» (закладки останутся)`, () => {
+        mk(t("Удалить группу «{name}» (закладки останутся)", { name: g.name }), () => {
           void this.api.history
             .groupRemove({ id: g.id })
             .then(() => this.reload())
-            .catch((e) => this.host.note(`Группа: ${e}`));
+            .catch((e) => this.host.note(t("Группа: {error}", { error: e })));
         }),
       );
     }
@@ -329,7 +332,7 @@ export class MobileBookmarks {
     const input = document.createElement("input");
     input.className = "m-bm-chip-input";
     input.type = "text";
-    input.placeholder = g ? "Новое имя группы" : "Имя группы";
+    input.placeholder = g ? t("Новое имя группы") : t("Имя группы");
     input.value = g?.name ?? "";
     let done = false;
     const cancel = (): void => {
@@ -351,7 +354,7 @@ export class MobileBookmarks {
         const call = g
           ? this.api.history.groupRename({ id: g.id, name })
           : this.api.history.groupAdd({ name });
-        void call.then(() => this.reload()).catch((e) => this.host.note(`Группа: ${e}`));
+        void call.then(() => this.reload()).catch((e) => this.host.note(t("Группа: {error}", { error: e })));
       }
     });
     input.addEventListener("blur", () => {
@@ -375,8 +378,8 @@ export class MobileBookmarks {
       empty.className = "m-bm-empty";
       empty.textContent =
         this.groups.length > 1 || this.sel !== "all"
-          ? "В этой группе пока пусто — добавьте видео звёздочкой в строке адреса"
-          : "Закладок пока нет: откройте видео и нажмите звёздочку в строке адреса";
+          ? t("В этой группе пока пусто — добавьте видео звёздочкой в строке адреса")
+          : t("Закладок пока нет: откройте видео и нажмите звёздочку в строке адреса");
       this.listEl.replaceChildren(empty);
       return;
     }
@@ -388,14 +391,14 @@ export class MobileBookmarks {
       main.type = "button";
       main.className = "m-bm-main";
       main.title = b.url;
-      const t = document.createElement("span");
-      t.className = "m-bm-title";
-      t.textContent = b.title || hostLabel(b.url);
+      const title = document.createElement("span");
+      title.className = "m-bm-title";
+      title.textContent = b.title || hostLabel(b.url);
       const sub = document.createElement("span");
       sub.className = "m-bm-sub";
       const names = (b.groups ?? []).map((r) => r.name).join(" · ");
       sub.textContent = names ? `${hostLabel(b.url)} · ${names}` : hostLabel(b.url);
-      main.append(t, sub);
+      main.append(title, sub);
       main.addEventListener("click", () => {
         this.closeView();
         this.host.open(b.url);
@@ -403,21 +406,21 @@ export class MobileBookmarks {
       const ren = document.createElement("button");
       ren.type = "button";
       ren.className = "m-bm-act";
-      ren.title = "Переименовать";
-      ren.setAttribute("aria-label", "Переименовать закладку");
+      ren.title = t("Переименовать");
+      ren.setAttribute("aria-label", t("Переименовать закладку"));
       ren.textContent = "✎";
       ren.addEventListener("click", () => this.editBookmarkTitle(row, b));
       const del = document.createElement("button");
       del.type = "button";
       del.className = "m-bm-act";
-      del.title = "Удалить закладку";
-      del.setAttribute("aria-label", "Удалить закладку");
+      del.title = t("Удалить закладку");
+      del.setAttribute("aria-label", t("Удалить закладку"));
       del.textContent = "✕";
       del.addEventListener("click", () => {
         void this.api.history
           .bookmarkRemove({ url: b.url })
           .then(() => this.reload())
-          .catch((e) => this.host.note(`Закладка: ${e}`));
+          .catch((e) => this.host.note(t("Закладка: {error}", { error: String(e) })));
       });
       row.append(main, ren, del);
       rows.push(row);
@@ -450,7 +453,7 @@ export class MobileBookmarks {
           void this.api.history
             .bookmarkUpdate({ url: b.url, title })
             .then(() => this.reload())
-            .catch((e) => this.host.note(`Закладка: ${e}`));
+            .catch((e) => this.host.note(t("Закладка: {error}", { error: String(e) })));
         }
       }
     });
@@ -490,7 +493,7 @@ export class MobileBookmarks {
   private renderStar(): void {
     this.star.dataset.on = String(this.starred);
     this.star.setAttribute("aria-pressed", String(this.starred));
-    this.star.title = this.starred ? "Убрать из закладок" : "В закладки — выбор группы";
+    this.star.title = this.starred ? t("Убрать из закладок") : t("В закладки — выбор группы");
   }
 
   private async onStar(): Promise<void> {
@@ -500,9 +503,9 @@ export class MobileBookmarks {
       try {
         await this.api.history.bookmarkRemove({ url: video.url });
         await this.syncVideo();
-        this.host.note("Закладка удалена");
+        this.host.note(t("Закладка удалена"));
       } catch (e) {
-        this.host.note(`Закладка: ${e}`);
+        this.host.note(t("Закладка: {error}", { error: String(e) }));
       }
       return;
     }
@@ -517,7 +520,7 @@ export class MobileBookmarks {
     try {
       groups = (await this.api.history.groupList()).groups;
     } catch (e) {
-      this.host.note(`Закладки: ${e}`);
+      this.host.note(t("Закладки: {error}", { error: String(e) }));
       return;
     }
     const pick = (groupId: number | null): void => {
@@ -525,27 +528,27 @@ export class MobileBookmarks {
       void this.api.history
         .bookmarkAdd({ url, title, groupId })
         .then(() => this.syncVideo())
-        .then(() => this.host.note("Добавлено в закладки"))
-        .catch((e) => this.host.note(`Закладка: ${e}`));
+        .then(() => this.host.note(t("Добавлено в закладки")))
+        .catch((e) => this.host.note(t("Закладка: {error}", { error: String(e) })));
     };
     for (const g of groups) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "m-sheet-item";
-      b.textContent = g.isDefault ? `${g.name} (по умолчанию)` : g.name;
+      b.textContent = g.isDefault ? t("{name} (по умолчанию)", { name: g.name }) : g.name;
       b.addEventListener("click", () => pick(g.id));
       this.sheet.append(b);
     }
     const newG = document.createElement("button");
     newG.type = "button";
     newG.className = "m-sheet-item m-sheet-new";
-    newG.textContent = "Новая группа…";
+    newG.textContent = t("Новая группа…");
     newG.addEventListener("click", () => {
       this.closeSheet();
       const input = document.createElement("input");
       input.className = "m-sheet-input";
       input.type = "text";
-      input.placeholder = "Имя группы";
+      input.placeholder = t("Имя группы");
       let done = false;
       const submit = (): void => {
         if (done) return;
@@ -557,8 +560,8 @@ export class MobileBookmarks {
           .groupAdd({ name })
           .then((g) => this.api.history.bookmarkAdd({ url, title, groupId: g.id }))
           .then(() => this.syncVideo())
-          .then(() => this.host.note(`Добавлено в «${name}»`))
-          .catch((e) => this.host.note(`Закладка: ${e}`));
+          .then(() => this.host.note(t("Добавлено в «{name}»", { name })))
+          .catch((e) => this.host.note(t("Закладка: {error}", { error: String(e) })));
       };
       input.addEventListener("keydown", (ev) => {
         ev.stopPropagation();
@@ -635,7 +638,7 @@ export class MobileBookmarks {
     document.body.classList.add("m-bm-dragging");
     const hint = document.createElement("div");
     hint.className = "m-bm-drag-hint";
-    hint.textContent = "Тяните на группу";
+    hint.textContent = t("Тяните на группу");
     document.body.append(hint);
     this.drag.hint = hint;
     this.moveGhost(this.drag.startX, this.drag.startY);
@@ -734,13 +737,14 @@ export class MobileBookmarks {
       if (plan.addTo !== null) {
         await this.api.history.groupToggleBookmark({ url, groupId: plan.addTo, on: true });
       }
+      const name = this.groups.find((g) => g.id === target)?.name ?? String(target);
       this.host.note(
         plan.removeFrom !== null
-          ? `Переложено в «${this.groups.find((g) => g.id === target)?.name ?? target}»`
-          : `Добавлено в «${this.groups.find((g) => g.id === target)?.name ?? target}»`,
+          ? t("Переложено в «{name}»", { name })
+          : t("Добавлено в «{name}»", { name }),
       );
     } catch (e) {
-      this.host.note(`Перекладывание: ${e}`);
+      this.host.note(t("Перекладывание: {error}", { error: String(e) }));
     }
     await this.reload();
   }

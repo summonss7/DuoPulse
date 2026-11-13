@@ -1,5 +1,7 @@
 // DuoPulse — i18n интерфейса (карточка duopulse-131, этап 1: настройки;
-// duopulse-136, этап 2: язык живёт в Core — раздел "ui" settings.json).
+// duopulse-136, этап 2: язык живёт в Core — раздел "ui" settings.json;
+// duopulse-138, этап 4: мобильная ветка — тот же init-скрипт через
+// append_invoke_initialization_script либы Android, запись — mobile_ui_lang_set).
 // Ключ словаря — русская строка-исходник: t("Сохранить") ищет перевод в
 // словаре текущего языка, перевода нет — возвращает исходник (ru — язык по
 // умолчанию, словаря не требует). Параметры — плейсхолдеры {name}:
@@ -95,7 +97,10 @@ export function applyStaticI18n(root: ParentNode = document): void {
 /** Смена языка (duopulse-136): записать в Core (settings.apply ui.lang) и
  *  перезагрузиться; Core эмитит settings:ui_lang_changed — остальные webview
  *  перезагружает слушатель в src/main.ts. localStorage — живой кэш страницы
- *  (первыми его читают перезагруженные webview до нового init-скрипта). */
+ *  (первыми его читают перезагруженные webview до нового init-скрипта).
+ *  Мобильная ветка (duopulse-138): settings.apply там не зарегистрирована —
+ *  язык пишет своя команда в мобильный settings.json (инкогнито-очистка
+ *  WebView стирает localStorage — Core остаётся единственным источником). */
 export async function setUiLang(lang: UiLang): Promise<void> {
   try {
     localStorage.setItem(STORAGE_KEY, lang);
@@ -103,8 +108,14 @@ export async function setUiLang(lang: UiLang): Promise<void> {
     /* без localStorage язык проживёт только текущую страницу */
   }
   try {
-    const { bridge } = await import("../bridge");
-    await bridge.settings.apply({ ui: { lang } });
+    const { isTauriMobile } = await import("../mobile/platform");
+    if (isTauriMobile()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke<string>("mobile_ui_lang_set", { lang });
+    } else {
+      const { bridge } = await import("../bridge");
+      await bridge.settings.apply({ ui: { lang } });
+    }
   } catch {
     /* Core недоступен (сбой invoke) — язык переживёт только эту страницу */
   }

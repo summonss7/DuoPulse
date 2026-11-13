@@ -35,6 +35,15 @@
 pub mod duo_mobile;
 pub mod mobile_jni;
 pub mod mobile_open;
+// Настройки — только мобильным таргетам (duopulse-138): язык UI живёт в
+// Core того же вида, что на десктопе (раздел "ui" settings.json); модуль
+// чистый (serde/serde_json/schemars), бин main.rs собирает его сам.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod settings;
+// Язык UI мобильной ветки (duopulse-138): команда записи + init-скрипт
+// webview (подробности — в шапке модуля).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod mobile_settings;
 // Нативный web-оверлей (duopulse-126): поиск и прочие сайты — в приложении,
 // не в системном браузере; Kotlin-хелпер MobileWebHelper + команды
 // mobile_web_open/mobile_web_close.
@@ -108,6 +117,11 @@ pub fn run() {
 fn mobile_run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Язык UI (duopulse-138): window.__DUOPULSE_UI_LANG__ до скриптов
+        // страницы — src/i18n читает его синхронно при загрузке модуля.
+        // У окон из конфига init-скрипта нет, этот хук Builder-а уходит во
+        // все webview (main-frame initialization_scripts, tauri-2.12).
+        .append_invoke_initialization_script(mobile_settings::ui_lang_init_script())
         .manage(duo_mobile::DuoManaged::default())
         // Хранилище закладок (duopulse-104): SQLite в filesDir/profile —
         // открыть до старта окна; недоступный каталог/диск роняют запуск с
@@ -150,6 +164,7 @@ fn mobile_run() {
             mobile_web::mobile_web_open,
             mobile_web::mobile_web_close,
             mobile_private::mobile_private_cleanup,
+            mobile_settings::mobile_ui_lang_set,
             mobile_download::cmd::duo_mobile_formats,
             mobile_download::cmd::duo_download_begin,
             mobile_download::cmd::duo_download_append,

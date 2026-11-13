@@ -16,6 +16,10 @@
 //! сериализуются с `#[serde(default)]` — их отсутствие валидно и без
 //! миграции; миграция нужна переименованиям/переносам значений.
 
+// Профиль (экспорт/импорт всего) — только десктоп-бину: тянет bridge/asr/
+// translate/proxy, которых в мобильной либе нет (duopulse-138 включил
+// settings в lib.rs ради раздела "ui" — язык интерфейса).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod profile;
 
 use schemars::JsonSchema;
