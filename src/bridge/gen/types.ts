@@ -128,6 +128,7 @@ export interface DuoPulseBridgeContract {
   SearchEngine: SearchEngine;
   SubtitlesConfig: SubtitlesConfig;
   SubtitlesStyleDefaults: SubtitlesStyleDefaults;
+  UiConfig: UiConfig;
   UpdateChannel: UpdateChannel;
   UpdateSource: UpdateSource;
   UpdaterConfig: UpdaterConfig;
@@ -200,6 +201,7 @@ export interface DuoPulseBridgeContract {
   PasswordsSavePrompt: PasswordsSavePrompt;
   PerfStartupMs: PerfStartupMs;
   PerfTabSwitchMs: PerfTabSwitchMs;
+  UiLangChanged: UiLangChanged;
   SubtitlesAsrProgress: SubtitlesAsrProgress;
   SubtitlesSetApplied: SubtitlesSetApplied;
   SubtitlesTracksReady: SubtitlesTracksReady;
@@ -938,6 +940,7 @@ export interface SettingsPatch {
   privacy?: PrivacyConfig | null;
   search?: SearchConfig | null;
   subtitles?: SubtitlesConfig | null;
+  ui?: UiConfig | null;
   updater?: UpdaterConfig | null;
 }
 /**
@@ -1027,6 +1030,15 @@ export interface SubtitlesStyleDefaults {
    * Цвет строки перевода, hex #rrggbb.
    */
   translationColor?: string;
+}
+/**
+ * Раздел "ui" settings.json. Язык интерфейса (карточка duopulse-136, этап 2 duopulse-131): прежде жил в localStorage origin'а внутренних страниц — хром UI в других webview его не видел; теперь один источник в Core, Core же раздаёт язык init-скриптом каждому webview и эмитит событие смены.
+ */
+export interface UiConfig {
+  /**
+   * Язык интерфейса: ru | en | uk | ro | ar | sk (как src/i18n UI_LANGS).
+   */
+  lang?: string;
 }
 /**
  * Раздел "updater" settings.json (задача 5.2). Появился после v2 — сериализуется с serde-умолчаниями, миграция не нужна (отсутствие валидно).
@@ -1137,6 +1149,10 @@ export interface SettingsAll {
    */
   subtitles: SubtitlesConfig;
   translate: TranslateSettings;
+  /**
+   * Язык интерфейса (duopulse-136): общий для всех webview.
+   */
+  ui: UiConfig;
   /**
    * Автообновление (задача 5.2): канал и автопроверка.
    */
@@ -1834,6 +1850,15 @@ export interface PerfStartupMs {
  */
 export interface PerfTabSwitchMs {
   ms: number;
+}
+/**
+ * settings:ui_lang_changed (duopulse-136): язык интерфейса сменился в settings.apply — каждый UI-webview перезагружается и поднимает новый язык (init-скрипт Core + localStorage-кэш страницы).
+ */
+export interface UiLangChanged {
+  /**
+   * Новый язык (ru | en | uk | ro | ar | sk).
+   */
+  lang: string;
 }
 export interface SubtitlesAsrProgress {
   done: number;

@@ -320,6 +320,8 @@ pub struct SettingsAll {
     pub downloads: crate::settings::DownloadConfig,
     /// Диагностика (карточка duopulse-129): бейдж M0 на страницах видео.
     pub diagnostics: crate::settings::DiagnosticsConfig,
+    /// Язык интерфейса (duopulse-136): общий для всех webview.
+    pub ui: crate::settings::UiConfig,
 }
 
 /// settings.apply: частичный патч разделов (неназванные не меняются).
@@ -340,6 +342,8 @@ pub struct SettingsPatch {
     pub downloads: Option<crate::settings::DownloadConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostics: Option<crate::settings::DiagnosticsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<crate::settings::UiConfig>,
 }
 
 /// settings.export: собрать профиль в файл (задача 5.1, DoD — переезд на
@@ -1029,6 +1033,25 @@ impl BridgeEvent for AdblockSiteExceptionChangedEvent {
     type Payload = AdblockSiteException;
 }
 
+/// settings:ui_lang_changed (duopulse-136): язык интерфейса сменился в
+/// settings.apply — каждый UI-webview перезагружается и поднимает новый
+/// язык (init-скрипт Core + localStorage-кэш страницы).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UiLangChanged {
+    /// Новый язык (ru | en | uk | ro | ar | sk).
+    pub lang: String,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct UiLangChangedEvent;
+
+impl BridgeEvent for UiLangChangedEvent {
+    const NAME: &'static str = "settings:ui_lang_changed";
+    type Payload = UiLangChanged;
+}
+
 /// tabs:updated: снапшот списка вкладок после любого изменения (открытие/
 /// закрытие/переключение/переход/заголовок) — таб-бар перерисовывается им
 /// (задача 1.2).
@@ -1299,6 +1322,7 @@ pub fn contract_json() -> serde_json::Value {
             "subtitles:translate_unavailable": { "payload": schema!(SubtitlesTranslateUnavailable) },
             "subtitles:asr_progress": { "payload": schema!(crate::asr::pipeline::SubtitlesAsrProgress) },
             "updater:check_done": { "payload": schema!(crate::updater::UpdaterCheckResult) },
+            "settings:ui_lang_changed": { "payload": schema!(UiLangChanged) },
             "passwords:save_prompt": { "payload": schema!(PasswordsSavePrompt) },
             "download:progress": { "payload": schema!(crate::download::DownloadProgress) },
             "download:finished": { "payload": schema!(crate::download::DownloadFinished) },
@@ -1411,6 +1435,10 @@ fn event_names_match_registry() {
             (
                 <crate::download::DownloadFinishedEvent as BridgeEvent>::NAME,
                 schema!(crate::download::DownloadFinished),
+            ),
+            (
+                <UiLangChangedEvent as BridgeEvent>::NAME,
+                schema!(UiLangChanged),
             ),
         ]
         .into_iter()
@@ -2047,14 +2075,16 @@ fn settings_get_all(
         asr: crate::asr::config::settings_view(&dir),
         downloads: crate::settings::load_downloads(&dir),
         diagnostics: crate::settings::load_diagnostics(&dir),
+        ui: crate::settings::load_ui(&dir),
     })
 }
 
 /// settings.apply: записать названные разделы настроек (search/subtitles/
-/// privacy; внешний вид v1 фиксирован — поле не в патче). Субтитры
-/// нормализуются (язык, клампы стиля) до записи.
+/// privacy; внешний вид v1 фиксирован — поле не в патче). Субтитры и язык
+/// интерфейса нормализуются до записи; смена языка (duopulse-136) эмитит
+/// settings:ui_lang_changed — все webview перезагружаются на новый язык.
 #[tauri::command]
-fn settings_apply(params: SettingsPatch) -> Result<(), String> {
+fn settings_apply(app: tauri::AppHandle, params: SettingsPatch) -> Result<(), String> {
     let dir = proxy::profile_dir();
     if let Some(search) = params.search {
         crate::settings::save_search(&dir, &search)?;
@@ -2073,6 +2103,11 @@ fn settings_apply(params: SettingsPatch) -> Result<(), String> {
     }
     if let Some(diagnostics) = params.diagnostics {
         crate::settings::save_diagnostics(&dir, &diagnostics)?;
+    }
+    if let Some(ui) = params.ui {
+        let ui = ui.normalized();
+        crate::settings::save_ui(&dir, &ui)?;
+        let _ = emit::<UiLangChangedEvent>(&app, &UiLangChanged { lang: ui.lang });
     }
     Ok(())
 }

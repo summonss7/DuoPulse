@@ -532,6 +532,58 @@ pub fn save_diagnostics(dir: &Path, cfg: &DiagnosticsConfig) -> Result<(), Strin
 }
 
 // ---------------------------------------------------------------------------
+// Язык интерфейса (duopulse-136): общий для всех webview
+// ---------------------------------------------------------------------------
+
+/// Раздел "ui" settings.json. Язык интерфейса (карточка duopulse-136, этап 2
+/// duopulse-131): прежде жил в localStorage origin'а внутренних страниц —
+/// хром UI в других webview его не видел; теперь один источник в Core, Core
+/// же раздаёт язык init-скриптом каждому webview и эмитит событие смены.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct UiConfig {
+    /// Язык интерфейса: ru | en | uk | ro | ar | sk (как src/i18n UI_LANGS).
+    pub lang: String,
+}
+
+/// Допустимые языки интерфейса (канон — UI_LANGS src/i18n/index.ts).
+pub const UI_LANGS: &[&str] = &["ru", "en", "uk", "ro", "ar", "sk"];
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self { lang: "ru".into() }
+    }
+}
+
+impl UiConfig {
+    /// Нормализация перед сохранением: неизвестный/пустой язык — «ru».
+    pub fn normalized(mut self) -> Self {
+        self.lang = self.lang.trim().to_ascii_lowercase();
+        if !UI_LANGS.contains(&self.lang.as_str()) {
+            self.lang = "ru".into();
+        }
+        self
+    }
+}
+
+pub fn load_ui(dir: &Path) -> UiConfig {
+    load_section(dir, "ui")
+}
+
+pub fn save_ui(dir: &Path, cfg: &UiConfig) -> Result<(), String> {
+    save_section(dir, "ui", &cfg.clone().normalized())
+}
+
+/// Initialization-script языка для UI-webview (main, панели, внутренние
+/// страницы): window.__DUOPULSE_UI_LANG__ читает src/i18n синхронно при
+/// загрузке модуля. Значение «испечено» на момент создания webview — смену
+/// языка UI доводит событие settings:ui_lang_changed (перезагрузка страницы).
+pub fn ui_lang_script(dir: &Path) -> String {
+    let lang = load_ui(dir).lang;
+    format!(";window.__DUOPULSE_UI_LANG__={lang:?};")
+}
+
+// ---------------------------------------------------------------------------
 // Загрузки (карточка duopulse-118): каталог видео/аудио/субтитров
 // ---------------------------------------------------------------------------
 
@@ -871,6 +923,26 @@ mod tests {
         // каналы знают сегмент пути фида (подписи селекта — в UI)
         assert_eq!(UpdateChannel::Canary.path(), "canary");
         assert_eq!(UpdateChannel::Stable.path(), "stable");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ui_config_roundtrip_and_defaults() {
+        // duopulse-136: язык интерфейса в Core; отсутствие/битый — ru,
+        // неизвестный язык нормализуется в ru, init-скрипт валиден.
+        let dir = tmp_dir("ui");
+        assert_eq!(load_ui(&dir), UiConfig { lang: "ru".into() });
+        write_key(&dir, "ui", &serde_json::json!("мусор")).unwrap();
+        assert_eq!(load_ui(&dir), UiConfig::default());
+        write_key(&dir, "ui", &serde_json::json!({"lang": "EN"})).unwrap();
+        assert_eq!(load_ui(&dir).lang, "EN", "серде-нормализация только при записи");
+        save_ui(&dir, &UiConfig { lang: "EN".into() }).unwrap();
+        assert_eq!(load_ui(&dir), UiConfig { lang: "en".into() });
+        save_ui(&dir, &UiConfig { lang: "klingon".into() }).unwrap();
+        assert_eq!(load_ui(&dir), UiConfig { lang: "ru".into() });
+        assert_eq!(ui_lang_script(&dir), ";window.__DUOPULSE_UI_LANG__=\"ru\";");
+        save_ui(&dir, &UiConfig { lang: "ar".into() }).unwrap();
+        assert_eq!(ui_lang_script(&dir), ";window.__DUOPULSE_UI_LANG__=\"ar\";");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

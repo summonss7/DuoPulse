@@ -16,6 +16,7 @@
 // запрашивает openOverlayMenu("star", …), клики возвращаются «menu-action».
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, TabInfo } from "../bridge";
+import { t } from "../i18n";
 import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
 
 const err = (e: unknown): void => console.error("star:", e);
@@ -31,8 +32,8 @@ function render(): void {
   btn.dataset.on = String(starred);
   btn.setAttribute("aria-pressed", String(starred));
   btn.title = starred
-    ? "Убрать из избранного (Ctrl+D)"
-    : "Добавить в избранное — выбор группы (Ctrl+D — в «Избранное»)";
+    ? t("Убрать из избранного (Ctrl+D)")
+    : t("Добавить в избранное — выбор группы (Ctrl+D — в «Избранное»)")
 }
 
 /** Свежее состояние закладок из Core (после открытия/смены страницы и тумбла). */

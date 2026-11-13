@@ -99,6 +99,7 @@ const PORTABLE_SETTINGS_KEYS: &[&str] = &[
     "appearance",
     "privacy",
     "updater",
+    "ui",
 ];
 
 /// Прочитать файл профиля (снисходительно к неизвестным полям).
@@ -242,6 +243,12 @@ pub fn apply(
             "updater" => {
                 serde_json::from_value::<super::UpdaterConfig>(value.clone())
                     .map_err(|e| format!("раздел updater в файле не читается: {e}"))?;
+            }
+            "ui" => {
+                // duopulse-136: язык интерфейса едет с профилем; невалидный
+                // язык нормализуется при чтении (load_ui снисходителен).
+                serde_json::from_value::<super::UiConfig>(value.clone())
+                    .map_err(|e| format!("раздел ui в файле не читается: {e}"))?;
             }
             "subtitles" => {
                 serde_json::from_value::<super::SubtitlesConfig>(value.clone())

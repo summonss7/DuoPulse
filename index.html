@@ -9,33 +9,33 @@
     <div id="app">
       <!-- Бар «Появилась новая версия» (карточка duopulse-127): строка поверх
            таб-бара, когда проверка нашла обновление; наполняет src/chrome/update-bar.ts -->
-      <div id="updateBar" class="update-bar" hidden role="dialog" aria-label="Доступна новая версия">
+      <div id="updateBar" class="update-bar" hidden role="dialog" aria-label="Доступна новая версия" data-i18n-aria-label="Доступна новая версия">
         <span class="update-bar-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/><path d="M2.8 11.5v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2"/></svg></span>
         <div class="update-bar-text" id="updateBarText"></div>
         <div class="update-bar-actions">
-          <button type="button" id="updateBarInstall" class="primary">Установить</button>
-          <button type="button" id="updateBarCancel" class="ghost">Отмена</button>
+          <button type="button" id="updateBarInstall" class="primary" data-i18n="Установить">Установить</button>
+          <button type="button" id="updateBarCancel" class="ghost" data-i18n="Отмена">Отмена</button>
         </div>
       </div>
       <div id="tabbar">
-        <div id="tabs" role="tablist" aria-label="Вкладки браузера"></div>
-        <button id="newtab" title="Новая вкладка"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
+        <div id="tabs" role="tablist" aria-label="Вкладки браузера" data-i18n-aria-label="Вкладки браузера"></div>
+        <button id="newtab" title="Новая вкладка" data-i18n-title="Новая вкладка"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
       </div>
       <div id="navbar">
         <div class="logo">Duo<span>Pulse</span></div>
-        <button id="back" class="icon-btn" title="Назад"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5 5 8l4.5 4.5M5 8h8.5"/></svg></button>
-        <button id="fwd" class="icon-btn" title="Вперёд"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5 11 8l-4.5 4.5M11 8H2.5"/></svg></button>
-        <button id="reload" class="icon-btn" title="Обновить"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.7-3.75"/><path d="M13 2.8v2.7h-2.7"/></svg></button>
-        <input id="omnibox" type="text" placeholder="Введите адрес или поисковый запрос" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest" />
-        <div id="suggest" class="suggest" hidden role="listbox" aria-label="Подсказки адресной строки"></div>
-        <button id="duoBtn" class="duo-btn" title="Субтитры DuoPulse — клик: включить и настроить языки, Alt+D: вкл/выкл" hidden>duo<span class="duo-dots" aria-hidden="true"><i></i><i></i><i></i></span></button>
-        <button id="dlBtn" class="icon-btn dl-btn" title="Скачать с этой страницы: видео, музыку, субтитры или фрагмент" hidden aria-haspopup="dialog"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/><path d="M2.8 11.5v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2"/></svg></button>
-        <button id="go" class="go">Перейти</button>
-        <button id="starBtn" class="icon-btn star-btn" title="Добавить в избранное (Ctrl+D)" hidden aria-pressed="false"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l2 4.1 4.5.7-3.3 3.1.8 4.5L8 12.1l-4 2.1.8-4.5L1.5 6.6 6 5.9z"/></svg></button>
-        <button id="libBtn" class="icon-btn" title="История и закладки"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></button>
-        <button id="proxyBtn" class="icon-btn" title="Прокси (VPN-инкремент A)"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l5.2 2v3.5c0 3.2-2.2 5.5-5.2 7-3-1.5-5.2-3.8-5.2-7V3.8z"/></svg></button>
-        <button id="vpnBtn" class="icon-btn vpn-btn" title="VPN — туннель WireGuard (задача 6.5)" aria-haspopup="dialog"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M8 1.8l5.2 2v3.5c0 3.2-2.2 5.5-5.2 7-3-1.5-5.2-3.8-5.2-7V3.8z"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/></svg><i class="vpn-dot" aria-hidden="true"></i></button>
-        <button id="mainBtn" class="icon-btn" title="Меню браузера"><svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><circle cx="8" cy="3.4" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="8" cy="12.6" r="1.3"/></svg><i class="update-dot" id="updateDot" hidden></i></button>
+        <button id="back" class="icon-btn" title="Назад" data-i18n-title="Назад"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5 5 8l4.5 4.5M5 8h8.5"/></svg></button>
+        <button id="fwd" class="icon-btn" title="Вперёд" data-i18n-title="Вперёд"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5 11 8l-4.5 4.5M11 8H2.5"/></svg></button>
+        <button id="reload" class="icon-btn" title="Обновить" data-i18n-title="Обновить"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.7-3.75"/><path d="M13 2.8v2.7h-2.7"/></svg></button>
+        <input id="omnibox" type="text" placeholder="Введите адрес или поисковый запрос" data-i18n-placeholder="Введите адрес или поисковый запрос" spellcheck="false" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="suggest" />
+        <div id="suggest" class="suggest" hidden role="listbox" aria-label="Подсказки адресной строки" data-i18n-aria-label="Подсказки адресной строки"></div>
+        <button id="duoBtn" class="duo-btn" title="Субтитры DuoPulse — клик: включить и настроить языки, Alt+D: вкл/выкл" data-i18n-title="Субтитры DuoPulse — клик: включить и настроить языки, Alt+D: вкл/выкл" hidden>duo<span class="duo-dots" aria-hidden="true"><i></i><i></i><i></i></span></button>
+        <button id="dlBtn" class="icon-btn dl-btn" title="Скачать с этой страницы: видео, музыку, субтитры или фрагмент" data-i18n-title="Скачать с этой страницы: видео, музыку, субтитры или фрагмент" hidden aria-haspopup="dialog"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/><path d="M2.8 11.5v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2"/></svg></button>
+        <button id="go" class="go" data-i18n="Перейти">Перейти</button>
+        <button id="starBtn" class="icon-btn star-btn" title="Добавить в избранное (Ctrl+D)" data-i18n-title="Добавить в избранное (Ctrl+D)" hidden aria-pressed="false"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l2 4.1 4.5.7-3.3 3.1.8 4.5L8 12.1l-4 2.1.8-4.5L1.5 6.6 6 5.9z"/></svg></button>
+        <button id="libBtn" class="icon-btn" title="История и закладки" data-i18n-title="История и закладки"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg></button>
+        <button id="proxyBtn" class="icon-btn" title="Прокси (VPN-инкремент A)" data-i18n-title="Прокси (VPN-инкремент A)"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l5.2 2v3.5c0 3.2-2.2 5.5-5.2 7-3-1.5-5.2-3.8-5.2-7V3.8z"/></svg></button>
+        <button id="vpnBtn" class="icon-btn vpn-btn" title="VPN — туннель WireGuard" data-i18n-title="VPN — туннель WireGuard" aria-haspopup="dialog"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M8 1.8l5.2 2v3.5c0 3.2-2.2 5.5-5.2 7-3-1.5-5.2-3.8-5.2-7V3.8z"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/></svg><i class="vpn-dot" aria-hidden="true"></i></button>
+        <button id="mainBtn" class="icon-btn" title="Меню браузера" data-i18n-title="Меню браузера"><svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><circle cx="8" cy="3.4" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="8" cy="12.6" r="1.3"/></svg><i class="update-dot" id="updateDot" hidden></i></button>
       </div>
       <div id="proxyMenu" class="proxy-menu" hidden>
         <div class="proxy-row proxy-head">
@@ -319,37 +319,37 @@
         </div>
       </div>
       <div id="mainMenu" class="main-menu" hidden>
-        <button type="button" data-act="newtab">Новая вкладка</button>
-        <button type="button" data-act="newIncognito">Новая вкладка инкогнито <span class="kbd">Ctrl+Shift+N</span></button>
-        <button type="button" data-act="reopen">Переоткрыть закрытую <span class="kbd">Ctrl+Shift+T</span></button>
-        <button type="button" data-act="history">История и закладки</button>
-        <button type="button" data-act="passwords">Пароли</button>
-        <button type="button" data-act="diagnostics">Диагностика</button>
-        <button type="button" data-act="settings">Настройки</button>
-        <button type="button" data-act="updates">Проверить обновления…</button>
+        <button type="button" data-act="newtab"><span data-i18n="Новая вкладка">Новая вкладка</span></button>
+        <button type="button" data-act="newIncognito"><span data-i18n="Новая вкладка инкогнито">Новая вкладка инкогнито</span> <span class="kbd">Ctrl+Shift+N</span></button>
+        <button type="button" data-act="reopen"><span data-i18n="Переоткрыть закрытую">Переоткрыть закрытую</span> <span class="kbd">Ctrl+Shift+T</span></button>
+        <button type="button" data-act="history"><span data-i18n="История и закладки">История и закладки</span></button>
+        <button type="button" data-act="passwords"><span data-i18n="Пароли">Пароли</span></button>
+        <button type="button" data-act="diagnostics"><span data-i18n="Диагностика">Диагностика</span></button>
+        <button type="button" data-act="settings"><span data-i18n="Настройки">Настройки</span></button>
+        <button type="button" data-act="updates"><span data-i18n="Проверить обновления…">Проверить обновления…</span></button>
         <div class="menu-sep" role="separator"></div>
         <div class="menu-row">
-          <span class="menu-row-title">Блокировщик</span>
-          <label class="switch" title="Вкл/выкл блокировщик рекламы">
+          <span class="menu-row-title" data-i18n="Блокировщик">Блокировщик</span>
+          <label class="switch" title="Вкл/выкл блокировщик рекламы" data-i18n-title="Вкл/выкл блокировщик рекламы">
             <input type="checkbox" id="adblockEnabled" />
             <span class="slider"></span>
           </label>
         </div>
         <div class="menu-row menu-row-meta" id="adblockMeta">Заблокировано: 0</div>
-        <button type="button" id="adblockSite" hidden>Отключить на этом сайте</button>
-        <button type="button" id="adblockUpdate">Обновить списки</button>
+        <button type="button" id="adblockSite" hidden data-i18n="Отключить на этом сайте">Отключить на этом сайте</button>
+        <button type="button" id="adblockUpdate" data-i18n="Обновить списки">Обновить списки</button>
         <div class="menu-sep" role="separator"></div>
-        <button type="button" data-act="proxy">Прокси&hellip;</button>
+        <button type="button" data-act="proxy"><span data-i18n="Прокси…">Прокси&hellip;</span></button>
       </div>
       <!-- Бар «Сохранить пароль?» (этап 2 duopulse-108): панель pwsave под
            полосой хрома; текст и кнопки наполняет src/chrome/pw-save.ts -->
-      <div id="pwSaveBar" class="pw-save-bar" hidden role="dialog" aria-label="Сохранение пароля">
+      <div id="pwSaveBar" class="pw-save-bar" hidden role="dialog" aria-label="Сохранение пароля" data-i18n-aria-label="Сохранение пароля">
         <span class="pw-save-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5.5" cy="5.5" r="2.8"/><path d="M7.8 7.8 13 13"/><path d="M10.8 10.8l1.5-1.5 1.4 1.4-1.5 1.5z"/></svg></span>
         <div class="pw-save-text" id="pwSaveText"></div>
         <div class="pw-save-actions">
-          <button type="button" id="pwSaveAccept" class="primary">Сохранить</button>
-          <button type="button" id="pwSaveNever" class="ghost">Никогда для этого сайта</button>
-          <button type="button" id="pwSaveClose" class="icon-btn" title="Закрыть"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+          <button type="button" id="pwSaveAccept" class="primary" data-i18n="Сохранить">Сохранить</button>
+          <button type="button" id="pwSaveNever" class="ghost" data-i18n="Никогда для этого сайта">Никогда для этого сайта</button>
+          <button type="button" id="pwSaveClose" class="icon-btn" title="Закрыть" data-i18n-title="Закрыть"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
         </div>
       </div>
     </div>

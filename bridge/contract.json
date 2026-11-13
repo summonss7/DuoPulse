@@ -2460,6 +2460,17 @@
             },
             "type": "object"
           },
+          "UiConfig": {
+            "description": "Раздел \"ui\" settings.json. Язык интерфейса (карточка duopulse-136, этап 2 duopulse-131): прежде жил в localStorage origin'а внутренних страниц — хром UI в других webview его не видел; теперь один источник в Core, Core же раздаёт язык init-скриптом каждому webview и эмитит событие смены.",
+            "properties": {
+              "lang": {
+                "default": "ru",
+                "description": "Язык интерфейса: ru | en | uk | ro | ar | sk (как src/i18n UI_LANGS).",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "UpdateChannel": {
             "description": "Канал обновлений (задача 5.2): stable — релизы, canary — ранние сборки для тестовых машин (DoD 5.2 — обновление канарейки). Канал — сегмент пути фида: <база>/<канал>/{{target}}/{{arch}}/{{current_version}}.",
             "enum": [
@@ -2552,6 +2563,16 @@
             "anyOf": [
               {
                 "$ref": "#/definitions/SubtitlesConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ui": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/UiConfig"
               },
               {
                 "type": "null"
@@ -3108,6 +3129,17 @@
             ],
             "type": "object"
           },
+          "UiConfig": {
+            "description": "Раздел \"ui\" settings.json. Язык интерфейса (карточка duopulse-136, этап 2 duopulse-131): прежде жил в localStorage origin'а внутренних страниц — хром UI в других webview его не видел; теперь один источник в Core, Core же раздаёт язык init-скриптом каждому webview и эмитит событие смены.",
+            "properties": {
+              "lang": {
+                "default": "ru",
+                "description": "Язык интерфейса: ru | en | uk | ro | ar | sk (как src/i18n UI_LANGS).",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "UpdateChannel": {
             "description": "Канал обновлений (задача 5.2): stable — релизы, canary — ранние сборки для тестовых машин (DoD 5.2 — обновление канарейки). Канал — сегмент пути фида: <база>/<канал>/{{target}}/{{arch}}/{{current_version}}.",
             "enum": [
@@ -3224,6 +3256,14 @@
           "translate": {
             "$ref": "#/definitions/TranslateSettings"
           },
+          "ui": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/UiConfig"
+              }
+            ],
+            "description": "Язык интерфейса (duopulse-136): общий для всех webview."
+          },
           "updater": {
             "allOf": [
               {
@@ -3246,6 +3286,7 @@
           "search",
           "subtitles",
           "translate",
+          "ui",
           "updater"
         ],
         "title": "SettingsAll",
@@ -6037,6 +6078,23 @@
           "ms"
         ],
         "title": "PerfTabSwitchMs",
+        "type": "object"
+      }
+    },
+    "settings:ui_lang_changed": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "settings:ui_lang_changed (duopulse-136): язык интерфейса сменился в settings.apply — каждый UI-webview перезагружается и поднимает новый язык (init-скрипт Core + localStorage-кэш страницы).",
+        "properties": {
+          "lang": {
+            "description": "Новый язык (ru | en | uk | ro | ar | sk).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lang"
+        ],
+        "title": "UiLangChanged",
         "type": "object"
       }
     },

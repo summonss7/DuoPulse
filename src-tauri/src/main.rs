@@ -1628,6 +1628,11 @@ fn main() {
             .inner_size(1360.0, 860.0)
             .min_inner_size(800.0, 600.0)
             .resizable(true)
+            // Язык интерфейса (duopulse-136): до скриптов UI — src/i18n читает
+            // window.__DUOPULSE_UI_LANG__ при загрузке модуля.
+            .initialization_script(crate::settings::ui_lang_script(
+                &crate::proxy::profile_dir(),
+            ))
             .additional_browser_args(&proxy_args)
             .build()?;
             startup_mark("window-built");

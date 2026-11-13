@@ -15,6 +15,21 @@ import "./bridge/dev-probe";
 // страницы десктопа на телефоне не живут — своя ветка UI.
 import { isTauriMobile } from "./mobile/platform";
 import { panelKind } from "./chrome/panel-window";
+import { bridge } from "./bridge";
+import { listen } from "@tauri-apps/api/event";
+
+// Смена языка интерфейса (duopulse-136): Core эмитит settings:ui_lang_changed
+// всем webview (хром, панели, внутренние страницы) — кэшируем язык в
+// localStorage (init-скрипт webview остаётся со старым значением) и
+// перезагружаемся на новый язык.
+void listen<{ lang: string }>(bridge.events.settingsUiLangChanged, (ev) => {
+  try {
+    localStorage.setItem("duopulse.uiLang", ev.payload.lang);
+  } catch {
+    /* приватный режим — перезагрузка поднимет init-скрипт Core */
+  }
+  location.reload();
+}).catch(console.error);
 
 // Панельный режим (duopulse-090): popup-окно панели хрома грузит этот же
 // бандл с ?panel=<kind> — хром не инициализируется, показывается только

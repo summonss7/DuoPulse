@@ -14,6 +14,7 @@
 //    активной (Core к тому же гасит самого кандидата — passwords/prompts.rs).
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
+import { t } from "../i18n";
 import type { PasswordsCandidateView, TabsListResult } from "../bridge";
 import {
   chromeHeight,
@@ -54,9 +55,9 @@ function renderBar(c: PasswordsCandidateView): void {
   if (!text || !accept || !never || !close) return;
   const site = c.origin.replace(/^https?:\/\//, "");
   text.textContent = c.updated
-    ? `Обновить сохранённый пароль для «${c.username}» на ${site}?`
-    : `Сохранить пароль для «${c.username}» на ${site}?`;
-  accept.textContent = c.updated ? "Обновить" : "Сохранить";
+    ? t("Обновить сохранённый пароль для «{user}» на {site}?", { user: c.username, site })
+    : t("Сохранить пароль для «{user}» на {site}?", { user: c.username, site });
+  accept.textContent = c.updated ? t("Обновить") : t("Сохранить");
   const decide = (action: "save" | "never" | "dismiss"): void => {
     void bridge.passwords.resolveCandidate({ action }).then(closePanel, err);
   };

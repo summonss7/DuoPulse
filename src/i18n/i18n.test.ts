@@ -1,6 +1,8 @@
 // DuoPulse — тесты i18n (карточка duopulse-131, этап 1): наборы ключей всех
 // словарей совпадают, значения непустые и отличаются от ru-ключа; t() в ru
 // (окружение без localStorage) подставляет параметры и фолбэчит исходник.
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { dict as dictEn } from "./dict-en";
 import { dict as dictUk } from "./dict-uk";
@@ -42,6 +44,17 @@ describe("i18n-словари (duopulse-131)", () => {
         const valPh = (value.match(/\{[a-z]+\}/g) ?? []).sort().join(",");
         expect(valPh, `${lang}: плейсхолдеры «${key}»`).toBe(keyPh);
       }
+    }
+  });
+
+  it("data-i18n атрибуты index.html — ключи словаря без пропусков (duopulse-136)", () => {
+    const html = fs.readFileSync(path.resolve(__dirname, "../../index.html"), "utf8");
+    const srcs = [
+      ...html.matchAll(/data-i18n(?:-title|-placeholder|-aria-label)?="([^"]+)"/g),
+    ].map((m) => m[1]);
+    expect(srcs.length, "в хроме есть переведённые статические строки").toBeGreaterThan(30);
+    for (const src of srcs) {
+      expect(dictEn[src], `нет перевода en для «${src}»`).toBeDefined();
     }
   });
 });

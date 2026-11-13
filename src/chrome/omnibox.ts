@@ -19,6 +19,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { HistoryHit, NavResolveOmniboxResult } from "../bridge";
+import { t } from "../i18n";
 import { anchorPanel, closePanel, openPanel } from "./panel-window";
 
 const input = document.getElementById("omnibox") as HTMLInputElement;
@@ -94,8 +95,8 @@ const err = (e: unknown): void => console.error("omnibox:", e);
 
 function actionRow(q: string, res: NavResolveOmniboxResult): Row {
   return res.isSearch
-    ? { kind: "action-search", main: q, sub: `Поиск в ${searchEngineTitle}`, url: null, icon: "search" }
-    : { kind: "action-url", main: res.url, sub: "Перейти по адресу", url: res.url, icon: "arrow" };
+    ? { kind: "action-search", main: q, sub: t("Поиск в {engine}", { engine: searchEngineTitle }), url: null, icon: "search" }
+    : { kind: "action-url", main: res.url, sub: t("Перейти по адресу"), url: res.url, icon: "arrow" };
 }
 
 function hitRow(h: HistoryHit): Row {

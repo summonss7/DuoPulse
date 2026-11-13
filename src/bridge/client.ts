@@ -425,5 +425,8 @@ export const bridge = {
     /** download.finished (карточка duopulse-118): задание завершилось
      *  (успех с путём файла / отмена / ошибка). */
     downloadFinished: "download:finished",
+    /** settings.ui_lang_changed (duopulse-136): язык интерфейса сменился в
+     *  Core — слушатель src/main.ts кэширует язык и перезагружает страницу. */
+    settingsUiLangChanged: "settings:ui_lang_changed",
   } as const,
 };

@@ -14,6 +14,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { TabInfo, TabsListResult } from "../bridge";
+import { t } from "../i18n";
 import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
 import { tabMenuDisabled } from "./tab-menu";
 
@@ -60,16 +61,16 @@ function render(): void {
       el.setAttribute("role", "tab");
       el.setAttribute("aria-selected", String(tab.active));
       el.title = tab.sleeping
-        ? `${tab.url} — спящая вкладка (активируйте, чтобы разбудить)`
+        ? t("{url} — спящая вкладка (активируйте, чтобы разбудить)", { url: tab.url })
         : tab.incognito
-          ? `${tab.url} — вкладка инкогнито (история не сохраняется)`
+          ? t("{url} — вкладка инкогнито (история не сохраняется)", { url: tab.url })
           : tab.url;
       if (tab.incognito) {
         // инкогнито-вкладка (карточка duopulse-096): значок-шпион + тёмная
         // подложка — приватные вкладки отличимы с одного взгляда
         const spy = document.createElement("span");
         spy.className = "tab-incognito";
-        spy.title = "Инкогнито";
+        spy.title = t("Инкогнито");
         spy.innerHTML =
           '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 5 4h6l1 2.5"/><path d="M3 6.5h10"/><circle cx="5.5" cy="10.5" r="2"/><circle cx="10.5" cy="10.5" r="2"/><path d="M7.5 10.5h1"/></svg>';
         el.append(spy);
@@ -88,7 +89,7 @@ function render(): void {
       const close = document.createElement("button");
       close.className = "tab-close";
       close.type = "button";
-      close.title = "Закрыть вкладку";
+      close.title = t("Закрыть вкладку");
       // линейная иконка 1.5px — как остальные иконки хрома (гайд 06 §5)
       close.innerHTML =
         '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';

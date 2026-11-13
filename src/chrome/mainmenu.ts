@@ -12,6 +12,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { AdblockBlockedCount, AdblockStatusResult, UpdaterCheckResult } from "../bridge/gen/types";
+import { t, uiLocale } from "../i18n";
 import { updateBadgeState, updateBadgeTitle } from "./update-badge";
 import { anchorPanel, closePanel, currentPanel, openPanel, panelKind } from "./panel-window";
 
@@ -112,15 +113,15 @@ let lastStatus: AdblockStatusResult | null = null;
 function renderAdblock(st: AdblockStatusResult): void {
   lastStatus = st;
   adblockToggle.checked = st.enabled;
-  const parts = [`Заблокировано: ${st.blockedTotal}`];
-  if (!st.ready) parts.push(st.enabled ? "списки загружаются…" : "списки не загружены");
+  const parts = [t("Заблокировано: {n}", { n: st.blockedTotal })];
+  if (!st.ready) parts.push(st.enabled ? t("списки загружаются…") : t("списки не загружены"));
   else {
     const bad = st.lists.find((l) => l.error);
     const fresh = st.lists.every((l) => l.updatedAt > 0);
-    if (bad) parts.push(`ошибка списка: ${bad.name}`);
+    if (bad) parts.push(t("ошибка списка: {name}", { name: bad.name }));
     else if (fresh) {
-      const t = new Date(Math.max(...st.lists.map((l) => l.updatedAt)));
-      parts.push(`списки: ${t.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`);
+      const stamp = new Date(Math.max(...st.lists.map((l) => l.updatedAt)));
+      parts.push(t("списки: {time}", { time: stamp.toLocaleTimeString(uiLocale, { hour: "2-digit", minute: "2-digit" }) }));
     }
   }
   adblockMeta.textContent = parts.join(" · ");
@@ -128,7 +129,7 @@ function renderAdblock(st: AdblockStatusResult): void {
   if (adblockSiteHost && st.enabled) {
     const exempted = isExempted(adblockSiteHost, st.siteExceptions);
     adblockSiteBtn.hidden = false;
-    adblockSiteBtn.textContent = exempted ? "Блокировать на этом сайте" : "Отключить на этом сайте";
+    adblockSiteBtn.textContent = exempted ? t("Блокировать на этом сайте") : t("Отключить на этом сайте");
   } else {
     adblockSiteBtn.hidden = true;
   }
@@ -159,7 +160,7 @@ adblockSiteBtn.addEventListener("click", () => {
 });
 
 adblockUpdateBtn.addEventListener("click", () => {
-  adblockMeta.textContent = "Списки: обновление запущено…";
+  adblockMeta.textContent = t("Списки: обновление запущено…");
   void bridge.adblock.updateLists({ force: true }).catch(err);
   // загрузка идёт фоном (Core отвечает сразу) — обновим панель по готовности
   setTimeout(() => void refreshAdblock().catch(err), 1500);
@@ -168,7 +169,7 @@ adblockUpdateBtn.addEventListener("click", () => {
 void listen<AdblockBlockedCount>(bridge.events.adblockBlockedCount, (ev) => {
   // счётчик живой и при закрытом меню — открытие покажет актуальное число
   const idx = adblockMeta.textContent?.indexOf(" · ");
-  const head = `Заблокировано: ${ev.payload.total}`;
+  const head = t("Заблокировано: {n}", { n: ev.payload.total });
   adblockMeta.textContent = idx && idx > 0 ? head + adblockMeta.textContent!.slice(idx) : head;
   if (lastStatus) lastStatus.blockedTotal = ev.payload.total;
 });

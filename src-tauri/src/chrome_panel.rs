@@ -117,6 +117,10 @@ pub async fn ui_panel_open(
     let y = y.clamp(0.0, (win_h - h).max(0.0));
     let url = tauri::WebviewUrl::App(format!("index.html?panel={kind}").into());
     let builder = WebviewBuilder::new(PANEL_WEBVIEW, url)
+        // Язык интерфейса (duopulse-136): до скриптов панели — src/i18n.
+        .initialization_script(crate::settings::ui_lang_script(
+            &crate::proxy::profile_dir(),
+        ))
         // то же окружение WebView2, что у UI-вебконтента (устойчивость к
         // порядку создания — как у вкладок)
         .additional_browser_args(crate::startup_proxy_args());

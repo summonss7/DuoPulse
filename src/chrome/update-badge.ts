@@ -8,6 +8,7 @@
 // тем же переходом очищается, индикатор гаснет; после установки приложение
 // перезапускается — индикатора просто нет.
 import type { UpdaterCheckResult } from "../bridge/gen/types";
+import { t } from "../i18n";
 
 /** Состояние индикатора кнопки «⋮» (применяет mainmenu). */
 export interface UpdateBadgeState {
@@ -25,5 +26,7 @@ export function updateBadgeState(res: UpdaterCheckResult | null): UpdateBadgeSta
 
 /** Подсказка кнопки «⋮»: базовый текст или с версией найденного пакета. */
 export function updateBadgeTitle(state: UpdateBadgeState, base = "Меню браузера"): string {
-  return state.on ? `${base} — доступна версия ${state.version}` : base;
+  return state.on && state.version
+    ? `${base} — ${t("доступна версия {version}", { version: state.version })}`
+    : base;
 }

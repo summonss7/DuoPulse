@@ -1348,6 +1348,11 @@ fn build_tab_webview(
         builder
     };
     builder
+        // Язык интерфейса (duopulse-136): нужен странице ошибки (App-бандл);
+        // на сайтах безвреден — UI-бандл туда не грузится.
+        .initialization_script(crate::settings::ui_lang_script(
+            &crate::proxy::profile_dir(),
+        ))
         // Критерий M0: скрипт выполняется в каждом новом документе
         // (WebView2: AddScriptToExecuteOnDocumentCreatedAsync). Видимость
         // бейджа решает сам скрипт — спрашивает Core по WebMessage
@@ -1414,6 +1419,11 @@ fn build_page_webview(id: &str) -> WebviewBuilder<tauri::Wry> {
     let id_for_load = id.to_string();
     let id_for_title = id.to_string();
     WebviewBuilder::new(id, WebviewUrl::App("index.html".into()))
+        // Язык интерфейса (duopulse-136): до бандла — внутренние страницы
+        // переводятся src/i18n по window.__DUOPULSE_UI_LANG__.
+        .initialization_script(crate::settings::ui_lang_script(
+            &crate::proxy::profile_dir(),
+        ))
         .initialization_script(crate::CONTENT_INIT_SCRIPT_HOTKEYS)
         // Те же аргументы окружения, что у UI-webview и вкладок: WebView2 не
         // даёт смешивать environment с разными аргументами на одну папку

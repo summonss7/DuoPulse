@@ -9,6 +9,7 @@
 // Закрытие: Escape (здесь), клик по хрому вне якоря (chrome.ts), клик по
 // контенту страницы (content/panel-close.js → Core), выбор пункта (модули).
 import { closePanel, panelKind, PANEL_HOST, type PanelKind } from "./chrome/panel-window";
+import { applyStaticI18n } from "./i18n";
 
 /** Загрузка модуля панели с самоспасением. Vite-dev изредка теряет ответ на
  *  один из параллельных запросов модулей свежесозданного webview НАВСЕГДА
@@ -38,6 +39,9 @@ const importPanel = async <T>(
 
 /** Загрузка панельного режима (вызов из main.ts; kind — ?panel=). */
 export function bootPanel(kind: PanelKind): void {
+  // Статика панелей/баров — на языке Core (duopulse-136): панельный webview
+  // грузит тот же index.html с data-i18n-атрибутами.
+  applyStaticI18n();
   document.documentElement.dataset.panel = kind;
   const el = document.getElementById(PANEL_HOST[kind]);
   if (el) el.hidden = false;

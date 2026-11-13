@@ -3,6 +3,7 @@
 // (задача 1.5). Внутренние страницы duopulse:// (задача 1.4) имеют свой
 // вход — src/pages/ + роутер src/main.ts; сюда не импортируются.
 import { bridge } from "./bridge";
+import { applyStaticI18n } from "./i18n";
 import { initTabBar, onTabsChanged } from "./chrome/tabbar";
 import { initOmnibox, setActiveUrl, setIncognito } from "./chrome/omnibox";
 import { initStar, setActivePage } from "./chrome/star";
@@ -32,6 +33,8 @@ window.addEventListener(
   true,
 );
 
+// Статический хром (тулбар/меню/бары) — на языке Core (duopulse-136).
+applyStaticI18n();
 // Таб-бар (задача 1.2): рендер вкладок, хоткеи, контекст-меню.
 initTabBar();
 // Omnibox (задача 1.3): подсказки, Enter/Esc/стрелки, кнопки навигации.

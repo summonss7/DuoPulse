@@ -10,6 +10,7 @@
 // остаётся как ненавязчивый признак; новая версия снова показывает бар.
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
+import { t } from "../i18n";
 import type { UpdaterCheckResult } from "../bridge/gen/types";
 
 /** Ключ sessionStorage: версия, отклонённая кнопкой «Отмена». */
@@ -32,7 +33,9 @@ export function updateBarState(res: UpdaterCheckResult | null, dismissed: string
 /** Текст бара: версия + заметки релиза, если фид их дал. */
 export function updateBarText(state: UpdateBarState, notes?: string | null): string {
   if (!state.show || !state.version) return "";
-  return notes ? `Появилась новая версия ${state.version} — ${notes}` : `Появилась новая версия ${state.version}`;
+  return notes
+    ? t("Появилась новая версия {version} — {notes}", { version: state.version, notes })
+    : t("Появилась новая версия {version}", { version: state.version });
 }
 
 /** Инициализация бара в хроме: события, стартовый статус, кнопки. */
@@ -86,7 +89,7 @@ export function initUpdateBar(): void {
   });
 
   install.addEventListener("click", () => {
-    text.textContent = "Скачиваю пакет и устанавливаю — приложение перезапустится…";
+    text.textContent = t("Скачиваю пакет и устанавливаю — приложение перезапустится…");
     cancel.hidden = true;
     install.hidden = true;
     // Windows: установщик пассивно ставит пакет и сам перезапускает

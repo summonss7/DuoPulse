@@ -5784,3 +5784,32 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   десктоп-релиз 0.1.36 собран и опубликован (stable+canary GitHub, хаб Aila,
   C:\DuoPulse) в том же сеансе. Визуальная RTL-проверка арабского — этап 4.
 - Коммит: 818797d feat: duopulse-131 этап 1 — выбор языка интерфейса в настройках (ru/en/uk/ro/ar/sk); релиз 0.1.36
+
+## 2026-11-13 — duopulse-136: i18n этап 2 — язык интерфейса в Core + перевод хрома UI (0.1.37)
+- Начало: 13.11.2026 03:52, окончание: 13.11.2026 04:10.
+- Что изменено:
+  - Язык интерфейса перенесён из localStorage (origin внутренних страниц) в Core:
+    новый раздел "ui" settings.json (settings/mod.rs: UiConfig{lang}, нормализация
+    ru/en/uk/ro/ar/sk, load/save, init-скрипт window.__DUOPULSE_UI_LANG__ для
+    каждого UI-webview: main-окно, панели chrome_panel, внутренние страницы,
+    страница ошибки) + событие settings:ui_lang_changed при settings.apply
+    (контракт v15, gen:bridge); слушатель в src/main.ts кэширует язык в
+    localStorage и перезагружает страницу — все webview синхронны.
+  - src/i18n: порядок чтения localStorage → init-скрипт Core → ru; setUiLang
+    пишет в Core (settings.apply ui.lang), экспорт языка с профилем (раздел
+    "ui" в PORTABLE_SETTINGS_KEYS, валидация при импорте); новая
+    applyStaticI18n() для статической разметки и uiLocale для дат/времени.
+  - Переведён хром UI: динамика src/chrome/* (omnibox, tabbar, mainmenu,
+    update-bar, update-badge, pw-save, star) через t(); статика тулбара,
+    главного меню, бара обновления и бара паролей — data-i18n-атрибуты в
+    index.html, применяются applyStaticI18n (chrome.ts + panel-boot.ts).
+    Словари en/uk/ro/ar/sk пополнены на 50 ключей каждый. Тултип VPN очищен
+    от дев-жаргона «(задача 6.5)». Панели (прокси/duo/перевод/загрузка/VPN) и
+    нативные muda-меню (chrome_menu.rs) — этап 3 (карточка 137).
+- Как проверено: cargo test — 371+ юнит-тестов ОК (новый
+  ui_config_roundtrip_and_defaults; событие добавлено в реестр
+  event_names_match_registry; один флейк proxy::status_on повтором зелёный);
+  npm run typecheck ОК; vitest 46 файлов / 482 теста ОК (новый тест покрытия
+  data-i18n ключами словаря); npm run build ОК; gen:bridge — контракт v15.
+- Релиз 0.1.37 (tauri.conf.json = package.json = Cargo.toml): десктоп
+  npm run release + мобильный android-build.sh release — в том же сеансе.
