@@ -48,6 +48,14 @@ export function isBusyError(e: unknown): boolean {
   return String(e).includes("busy:");
 }
 
+/** Ошибка mobile_pdf_take «нет доступа» (duopulse-141): файловый менеджер
+ *  прислал PDF контентным URI без разрешения (SecurityException в хелпере,
+ *  «… has no access to content://…» — пользователь видел сырой текст).
+ *  Показываем подсказку, а не стену исключения. */
+export function isNoPermError(e: unknown): boolean {
+  return String(e).includes("noperm:");
+}
+
 /** Параметры контроллера от мобильного UI (mobile.ts). */
 export interface MobilePdfDeps {
   /** строка статуса внизу экрана (note в mobile.ts) */
@@ -121,6 +129,11 @@ export function createMobilePdf(deps: MobilePdfDeps) {
         if (isBusyError(e) && attempt < BUSY_RETRIES) {
           await new Promise((r) => setTimeout(r, BUSY_RETRY_MS));
           continue;
+        }
+        if (isNoPermError(e)) {
+          // duopulse-141: URI без grant — сырой текст исключения не показываем
+          deps.note(t("PDF не открыт: нет доступа к файлу. Откройте файл ещё раз из проводника."));
+          return;
         }
         // ошибка копирования хелпером — показать, не открывать
         deps.note(`PDF: ${e}`);

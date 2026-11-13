@@ -9,6 +9,7 @@ import {
   assembleBytes,
   clampZoom,
   isBusyError,
+  isNoPermError,
   turnPage,
 } from "./pdf";
 
@@ -53,5 +54,15 @@ describe("isBusyError", () => {
     expect(isBusyError("busy")).toBe(false);
     expect(isBusyError("копирование PDF: поток недоступен")).toBe(false);
     expect(isBusyError(new Error("busy: копирование PDF ещё идёт"))).toBe(true);
+  });
+});
+
+describe("isNoPermError", () => {
+  it("узнаёт маркер «noperm» от mobile_pdf_take (URI без grant, duopulse-141)", () => {
+    expect(isNoPermError("noperm: нет доступа к файлу (проводник не выдал разрешение)")).toBe(true);
+    expect(isNoPermError(new Error("noperm: нет доступа к файлу"))).toBe(true);
+    expect(isNoPermError("busy: копирование PDF ещё идёт")).toBe(false);
+    // сырой текст исключения Android не принимается за маркер
+    expect(isNoPermError("SecurityException: has no access to content://…")).toBe(false);
   });
 });

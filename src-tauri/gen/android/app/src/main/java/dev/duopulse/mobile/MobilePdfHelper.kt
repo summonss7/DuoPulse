@@ -45,6 +45,13 @@ object MobilePdfHelper {
     Thread {
       pending = try {
         copy(context, data)
+      } catch (e: SecurityException) {
+        // duopulse-141: контентный URI пришёл без grant (файловый менеджер
+        // не выдал FLAG_GRANT_READ_URI_PERMISSION — восстановление интента
+        // из «недавних», «всегда открывать» и т.п.): сырой текст исключения
+        // («dev.duopulse.mobile has no access to content://…») пользователю
+        // не показать — маркер, Rust/фронтенд заменят подсказкой
+        "noperm"
       } catch (e: Exception) {
         "error: ${e.message}"
       }
@@ -74,14 +81,20 @@ object MobilePdfHelper {
   }
 
   private fun displayName(context: Context, data: Uri): String {
-    context.contentResolver
-      .query(data, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-      ?.use { c ->
-        if (c.moveToFirst()) {
-          val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-          if (i >= 0) c.getString(i)?.let { return sanitize(it) }
+    // duopulse-141: query может быть запрещён, когда сам поток читается
+    // (разные пути разрешений у провайдеров) — отказ запроса имени не
+    // должен ронять копию, откатываемся на последний сегмент URI
+    try {
+      context.contentResolver
+        .query(data, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { c ->
+          if (c.moveToFirst()) {
+            val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (i >= 0) c.getString(i)?.let { return sanitize(it) }
+          }
         }
-      }
+    } catch (_: Exception) {
+    }
     return sanitize(data.lastPathSegment ?: "document.pdf")
   }
 

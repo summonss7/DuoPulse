@@ -610,6 +610,7 @@ export const dict: Record<string, string> = {
   "DuoPulse {version} · мобильная ветка": "DuoPulse {version} · versiunea mobilă",
   "IFrame API не загрузился": "API-ul IFrame nu s-a încărcat",
   "PDF «{name}»: страниц {pages}.": "PDF „{name}”: {pages} pagini.",
+  "PDF не открыт: нет доступа к файлу. Откройте файл ещё раз из проводника.": "PDF nu s-a deschis: nu există acces la fișier. Deschideți fișierul încă o dată din managerul de fișiere.",
   "PDF не открылся: {error}": "PDF nu s-a deschis: {error}",
   "YT.Player не появился": "YT.Player nu a apărut",
   "YouTube не отвечает — обновите страницу видео и попробуйте снова": "YouTube nu răspunde — reîncărcați pagina videoclipului și încercați din nou",

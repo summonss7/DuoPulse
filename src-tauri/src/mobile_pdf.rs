@@ -94,8 +94,9 @@ mod jni_impl {
 
     use super::PdfPending;
 
-    /// pending-строка из MobilePdfHelper.take(): "" — пусто, "error: …" —
-    /// прокина как Err, иначе «path\tимя».
+    /// pending-строка из MobilePdfHelper.take(): "" — пусто, "busy" —
+    /// копирование идёт (duopulse-124), "noperm" — URI без grant
+    /// (duopulse-141), "error: …" — прочая ошибка; иначе «path\tимя».
     pub fn take_pending() -> Result<Option<PdfPending>, String> {
         with_jni(|env, context| {
             let helper = app_class(env, context, "dev.duopulse.mobile.MobilePdfHelper")?;
@@ -121,6 +122,12 @@ mod jni_impl {
                 // duopulse-124: копирование ещё идёт (фоновый поток хелпера) —
                 // фронтенд повторит take по этому маркеру, файл не теряется
                 return Err("busy: копирование PDF ещё идёт".into());
+            }
+            if s == "noperm" {
+                // duopulse-141: хелпер поймал SecurityException — контентный
+                // URI без grant (менеджер не выдал разрешение). Маркер вместо
+                // сырого исключения: фронтенд покажет человеческую подсказку
+                return Err("noperm: нет доступа к файлу (проводник не выдал разрешение)".into());
             }
             if let Some(err) = s.strip_prefix("error:") {
                 return Err(format!("копирование PDF:{}", err.trim_start()));
