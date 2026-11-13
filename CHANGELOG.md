@@ -5871,3 +5871,50 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   C:\DuoPulse обновлена через --deploy-local.
 - ROADMAP: запись этапа 4 i18n.
 - Коммит: ef6bb84
+
+## 2026-11-13, 16:08 — duopulse-139: мобильная ветка, web-оверлей поиска — интерфейс DuoPulse, видео из выдачи во встроенном плеере, лёгкий адблок
+- Начало работы: 2026-11-13, 15:05
+- Окончание работы: 2026-11-13, 16:08
+- Что сделано (жалоба «открываю страницы через поиск — интерфейс DuoPulse
+  исчезает, ощущение Гугла, на видео реклама»):
+  - MobileWebHelper (web-оверлей поиска/сайтов, duopulse-126): тулбар с
+    логотипом duoPulse (тёмный #14171A + акцент #BDFE4F, как шапка мобильной
+    ветки) — каждая страница выдачи читается страницей ВНУТРИ DuoPulse;
+  - ссылки YouTube-видео (watch/shorts/live/youtu.be, host проверяется —
+    «watch?v=» в адресе выдачи Google видео не считается) больше не
+    открываются страницей m.youtube со всей рекламой: видео сразу идёт во
+    встроенный /embed-плеер с duo-субтитрами (evaluateJavascript →
+    __duopulseOpenVideo); оверлей при этом прячется (INVISIBLE + onPause,
+    выдача живёт), системный «назад» возвращает из плеера к выдаче;
+  - SPA-навигации m.youtube (Navigation API, pushState не зовётся) ловит
+    консоль-хук DPURL: инжект в onPageFinished (navigatesuccess + интервал
+    700 мс), onConsoleMessage прокинут в MobileFullscreen.chromeClient —
+    адрес и «▶ duo» в тулбаре живые, SPA-переход на видео тоже прыгает в
+    плеер с откатом истории на выдачу;
+  - лёгкий адблок оверлея: shouldInterceptRequest режет подгрузки
+    рекламных/трекинговых хостов (doubleclick, googlesyndication,
+    googleadservices, adservice.google, google-analytics, googletagmanager,
+    adnxs, criteo, scorecardresearch, outbrain, taboola, moatads,
+    amazon-adsystem), главные навигации не трогаются; полный движок
+    adblock-rs в мобильной ветке — отдельная карточка CARDS/144;
+  - src/mobile/mobile.ts: активное видео под открывшимся оверлеем и при
+    возврате к выдаче («назад» из плеера, глобал __duopulseOverlayShown)
+    ставится на паузу — вкладка остаётся в переключателе;
+  - грабля сборки: Uri.tryParse — API 30+ (minSdk ниже), заменён на
+    Uri.parse с проверкой host; README обновлён (описание оверлея).
+- Как проверено: npm run typecheck чист; vitest 46 файлов / 482 теста ОК;
+  эмулятор (debug-APK 0.1.40, локальная страница с YouTube-ссылками и
+  рекламными img): оверлей с бренд-тулбаром, тап по watch- и youtu.be-ссылке
+  → видео во встроенном плеере (CDP __duopulseMobileTabs: activeVideoId
+  iG9CE55wbtY, вкладка №2), системный «назад» → оверлей с выдачей и видео
+  на паузе (activeVideoId null, вкладка жива), pushState-симуляция —
+  DPURL-хук адрес подхватил; logcat DuoPulseWeb: pagead2.googlesyndication
+  и doubleclick.net режутся.
+- Релиз 0.1.40 (версии package.json/tauri.conf.json/Cargo.toml синхронны):
+  android-build.sh release — APK 11.1 МБ в builds/ и в канале Aila
+  (манифест: DuoPulse-0.1.40-android-release.apk на месте); десктоп npm run
+  release — stable+canary GitHub (duopulse-updates c703c9e), фид Pages, хаб
+  «Скачать» Aila, локальная копия C:\DuoPulse обновлена (--deploy-local
+  повтором после EBUSY — duopulse.exe был запущен).
+- Новая карточка: CARDS/144 (полный адблок adblock-rs на Android).
+- Коммит: см. ниже (дописан после коммита)

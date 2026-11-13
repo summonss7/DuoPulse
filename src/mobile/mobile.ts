@@ -513,8 +513,11 @@ async function openExternal(url: string): Promise<void> {
  *  /embed-плеера, поиск и прочие сайты — нативный web-оверлей поверх UI
  *  (MobileWebHelper: тулбар назад/адрес/«▶ duo»/закрыть). Прежде всё
  *  не-видео уходило в системный браузер (Chrome) — страницы с
- *  X-Frame-Options в iframe не встраиваются; оверлей снимает ограничение. */
+ *  X-Frame-Options в iframe не встраиваются; оверлей снимает ограничение.
+ *  Активное видео под оверлеем — на паузу (звучать за выдачей оно не
+ *  должно, duopulse-139); вкладка остаётся в переключателе. */
 async function openInApp(url: string): Promise<void> {
+  if (tabs.active) tabs.newTab();
   try {
     const r = await invoke<string>("mobile_web_open", { url });
     if (r === "opened") {
@@ -546,11 +549,21 @@ async function navigate(input: string, newTab = false): Promise<void> {
 
 /** Вход для кнопки «▶ duo» web-оверлея (duopulse-126): Kotlin-хелпер
  *  закрывает оверлей и дергает этот глобал в UI-webview Tauri — видео
- *  открывается во встроенном плеере, как из omnibox (новая вкладка). */
+ *  открывается во встроенном плеере, как из omnibox (новая вкладка).
+ *  duopulse-139: и для автоперехода — ссылка YouTube-видео из выдачи
+ *  открывается плеером (без страницы m.youtube с рекламой); оверлей не
+ *  закрывается, а прячется — «назад» из плеера вернёт к выдаче. */
 (window as { __duopulseOpenVideo?: (id: string) => void }).__duopulseOpenVideo = (id: string) => {
   if (!/^[\w-]{6,20}$/.test(id)) return; // id из evaluateJavascript — проверяем
   pdfView.close();
   tabs.open(id, "", true);
+};
+
+/** Оверлей веб-поиска вернулся на экран (Kotlin show() после системного
+ *  «назад» из встроенного плеера, duopulse-139): активное видео под ним —
+ *  на паузу (выдача снова перед пользователем, плеер не звучит в фоне). */
+(window as { __duopulseOverlayShown?: () => void }).__duopulseOverlayShown = () => {
+  if (tabs.active) tabs.newTab();
 };
 
 function goFromOmnibox(): void {

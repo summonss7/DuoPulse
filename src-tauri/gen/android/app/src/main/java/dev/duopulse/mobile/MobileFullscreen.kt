@@ -39,8 +39,15 @@ object MobileFullscreen {
   // дожимаем exitFullscreen'ом, иначе страница считает, что она всё ещё в фулскрине
   private var ownerWebView: WebView? = null
 
-  /** ChromeClient для web-оверлея MobileWebHelper (ничего лишнего, только fullscreen). */
-  fun chromeClient(act: MainActivity, owner: WebView): WebChromeClient =
+  /** ChromeClient для web-оверлея MobileWebHelper (fullscreen + консоль).
+   *  onConsoleMessage — хук DPURL (duopulse-139): страница репортит URL для
+   *  ловли SPA-навигаций m.youtube (Navigation API, shouldOverrideUrlLoading
+   *  их не видит); null — клиент без консоли. */
+  fun chromeClient(
+    act: MainActivity,
+    owner: WebView,
+    onConsoleMessage: ((String) -> Unit)? = null
+  ): WebChromeClient =
     object : WebChromeClient() {
       override fun onShowCustomView(view: View, callback: CustomViewCallback) {
         show(act, owner, view, callback)
@@ -48,6 +55,11 @@ object MobileFullscreen {
 
       override fun onHideCustomView() {
         hide()
+      }
+
+      override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage): Boolean {
+        onConsoleMessage?.invoke(consoleMessage.message() ?: "")
+        return false
       }
     }
 
