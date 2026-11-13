@@ -1,15 +1,21 @@
 package dev.duopulse.mobile
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.webkit.WebResourceRequest
@@ -19,7 +25,10 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupWindow
+import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -28,9 +37,16 @@ import java.io.ByteArrayInputStream
 /*
  * Нативный web-оверлей (duopulse-126; переработка duopulse-139 по жалобе
  * «открываю страницы через поиск — интерфейс DuoPulse исчезает, ощущение
- * работы в Гугле, на видео подгружается реклама»):
- *  - бренд: тулбар с логотипом duoPulse (тёмный + акцент #BDFE4F, как шапка
- *    мобильной ветки) — каждая страница читается как страница ВНУТРИ DuoPulse;
+ * работы в Гугле, на видео подгружается реклама»; доработка duopulse-145
+ * по жалобе «обновился — меню нет, только ссылка сверху, ощущение другой
+ * программы»):
+ *  - бренд: шапка КАК в мобильной ветке (.m-bar, два ряда: кнопки + адрес-
+ *    чип-омнибокс, токены темы из tokens.css: surface #111d2b, base
+ *    #0a0e17, elevated #1d282b, акцент #BDFE4F), полоса прогресса загрузки;
+ *  - меню «⋮» (duopulse-145, стиль .m-menu): Главная DuoPulse (хук
+ *    __duopulseGoHome), обновить, вперёд, открыть в плеере duo, копировать
+ *    ссылку, поделиться, открыть в системном браузере — страница выдачи
+ *    управляется ИЗ DuoPulse, а не «ссылка сверху в другой программе»;
  *  - ссылки YouTube-видео (watch/shorts/live/youtu.be) не открываются
  *    страницей m.youtube со всей рекламой: видео сразу идёт во встроенный
  *    /embed-плеер с duo-субтитрами (evaluateJavascript → окно
@@ -66,6 +82,12 @@ object MobileWebHelper {
   private var webView: WebView? = null
   private var urlText: TextView? = null
   private var duoBtn: Button? = null
+
+  /** Полоса прогресса загрузки под шапкой (duopulse-145). */
+  private var progress: ProgressBar? = null
+
+  /** Открытое меню «⋮» шапки (закрыть при teardown, duopulse-145). */
+  private var menu: PopupWindow? = null
 
   /** Оверлей спрятан за встроенным плеером (видео открыто из выдачи,
    *  duopulse-139): WebView жив, системный «назад» возвращает к выдаче. */
@@ -172,6 +194,100 @@ object MobileWebHelper {
       "window.__duopulseOpenVideo && window.__duopulseOpenVideo('$id')", null)
   }
 
+  /** «Главная DuoPulse» из меню оверлея (duopulse-145): логика «домой» уже
+   *  есть у кнопки «⌂» мобильной ветки — хук __duopulseGoHome в mobile.ts
+   *  закрывает оверлей (mobile_web_close из обработчика), открывает новую
+   *  вкладку и фокусирует omnibox; видео остаются в фоне. */
+  private fun goHome() {
+    MainActivity.tauriWebView?.evaluateJavascript(
+      "window.__duopulseGoHome && window.__duopulseGoHome()", null)
+  }
+
+  /** «Копировать ссылку» из меню: буфер обмена + тост. */
+  private fun copyUrl(act: MainActivity, url: String) {
+    if (url.isEmpty()) return
+    val cm = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText("DuoPulse URL", url))
+    Toast.makeText(act, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
+  }
+
+  /** «Поделиться…» из меню: системный chooser (ACTION_SEND). */
+  private fun share(act: MainActivity, url: String) {
+    if (url.isEmpty()) return
+    val i = Intent(Intent.ACTION_SEND).apply {
+      type = "text/plain"
+      putExtra(Intent.EXTRA_TEXT, url)
+    }
+    act.startActivity(Intent.createChooser(i, "Поделиться ссылкой"))
+  }
+
+  /** «Открыть в браузере» из меню: системный ACTION_VIEW (как фолбэк
+   *  mobile_open_url); браузера нет — честный тост, не падение. */
+  private fun openInBrowser(act: MainActivity, url: String) {
+    if (url.isEmpty()) return
+    try {
+      act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    } catch (e: android.content.ActivityNotFoundException) {
+      Toast.makeText(act, "Браузер не найден", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  /** Меню «⋮» шапки оверлея (duopulse-145): действия над страницей, стиль —
+   *  .m-menu мобильной ветки (тёмный elevated-фон, акцентная рамка,
+   *  скругление 16). Состав живой: «вперёд»/«плеер duo» — только когда есть
+   *  смысл; тап вне — закрыть. */
+  private fun showMenu(act: MainActivity, anchor: View) {
+    val wv = webView ?: return
+    menu?.dismiss()
+    val dp = { v: Int -> (v * act.resources.displayMetrics.density).toInt() }
+
+    val url = wv.url ?: ""
+    val video = youTubeVideoId(url)
+    val items = mutableListOf<Pair<String, () -> Unit>>()
+    items += "⌂  Главная DuoPulse" to { goHome() }
+    items += "⟳  Обновить страницу" to { wv.reload() }
+    if (wv.canGoForward()) items += "›  Вперёд" to { wv.goForward() }
+    if (video != null) items += "▶  Открыть в плеере duo" to { openVideoInPlayer(video) }
+    items += "⧉  Копировать ссылку" to { copyUrl(act, url) }
+    items += "↗  Поделиться…" to { share(act, url) }
+    items += "⌘  Открыть в браузере" to { openInBrowser(act, url) }
+
+    val list = LinearLayout(act)
+    list.orientation = LinearLayout.VERTICAL
+    list.setPadding(dp(6), dp(6), dp(6), dp(6))
+    list.background = GradientDrawable().apply {
+      cornerRadius = dp(16).toFloat()
+      setColor(Color.parseColor("#1d282b")) // --bg-elevated
+      setStroke(dp(1), Color.argb(64, 189, 254, 79)) // рамка .m-menu
+    }
+    // ripple-подсветка пунктов — как у кнопок приложения
+    val ripple = TypedValue().let {
+      act.theme.resolveAttribute(android.R.attr.selectableItemBackground, it, true)
+      it.resourceId
+    }
+    for ((label, action) in items) {
+      val row = TextView(act)
+      row.text = label
+      row.setTextColor(Color.parseColor("#F2F7EE")) // --text-primary
+      row.textSize = 15f
+      row.gravity = Gravity.CENTER_VERTICAL
+      row.setPadding(dp(12), dp(11), dp(12), dp(11))
+      row.setBackgroundResource(ripple)
+      row.setOnClickListener { menu?.dismiss(); action() }
+      list.addView(row, LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+    }
+
+    val popup = PopupWindow(list, LinearLayout.LayoutParams.WRAP_CONTENT,
+      LinearLayout.LayoutParams.WRAP_CONTENT, true)
+    popup.setBackgroundDrawable(ColorDrawable())
+    popup.isOutsideTouchable = true
+    popup.elevation = dp(8).toFloat()
+    popup.setOnDismissListener { menu = null }
+    menu = popup
+    popup.showAsDropDown(anchor, 0, 0, Gravity.TOP or Gravity.END)
+  }
+
   /** Сообщение консоль-хука DPURL (SPA-навигации m.youtube — Navigation API,
    *  shouldOverrideUrlLoading их не видит). Смена URL — обновить хром;
    * переход на YouTube-видео — откатить SPA-навигацию (выдача остаётся под
@@ -190,7 +306,12 @@ object MobileWebHelper {
     }
   }
 
-  @JvmStatic fun close(context: Context): String {
+  /** Закрытие из Rust (mobile_web_close). Поверхность JNI у open/close общая
+   *  — (Context, String) → String (jni_impl в mobile_web.rs): второй параметр
+   *  у close не используется, но обязателен дескриптору. До duopulse-145
+   *  метод звался с одним параметром — NoSuchMethodException, «⌂ домой» не
+   *  закрывал спрятанный оверлей (выдача «воскресала» системным «назад»). */
+  @JvmStatic fun close(context: Context, unused: String): String {
     val act = MainActivity.current ?: return "error: активность не готова"
     act.runOnUiThread { close() }
     return "closed"
@@ -212,12 +333,15 @@ object MobileWebHelper {
 
   private fun teardown(act: MainActivity?, ov: FrameLayout) {
     MobileFullscreen.dismiss()
+    menu?.dismiss()
+    menu = null
     backCallback.isEnabled = false
     backCallback.remove()
     val wv = webView
     webView = null
     urlText = null
     duoBtn = null
+    progress = null
     hidden = false
     lastReportedUrl = null
     // WebView.detach перед destroy (иначе окна/текстуры текут): сначала
@@ -254,20 +378,20 @@ object MobileWebHelper {
     val col = LinearLayout(act)
     col.orientation = LinearLayout.VERTICAL
 
-    // мини-тулбар в стиле DuoPulse: тёмный фон, акцент #BDFE4F (mobile.css);
-    // логотип (duopulse-139) — чтобы страница выдачи читалась страницей
-    // ВНУТРИ DuoPulse, а не «я работаю в Гугле»
-    val bar = LinearLayout(act)
-    bar.orientation = LinearLayout.HORIZONTAL
-    bar.setBackgroundColor(Color.parseColor("#14171A"))
-    bar.setPadding(dp(6), dp(6), dp(6), dp(6))
+    // ── Шапка оверлея — как .m-bar мобильной ветки (duopulse-145): два ряда
+    // (кнопки + адрес-чип-омнибокс) + меню «⋮» + полоса прогресса. Прежний
+    // один тонкий ряд читался «ссылкой сверху чужой программы» (жалоба
+    // duopulse-145). Цвета — токены tokens.css: surface/base/elevated/акцент.
+    val header = LinearLayout(act)
+    header.orientation = LinearLayout.VERTICAL
+    header.setBackgroundColor(Color.parseColor("#111d2b")) // --bg-surface
 
-    fun toolButton(label: String, title: String): Button {
+    fun toolButton(label: String, title: String, tint: String = "#BDFE4F"): Button {
       val b = Button(act)
       b.text = label
       b.contentDescription = title
       b.setBackgroundColor(Color.TRANSPARENT)
-      b.setTextColor(Color.parseColor("#BDFE4F"))
+      b.setTextColor(Color.parseColor(tint))
       b.setPadding(dp(10), 0, dp(10), 0)
       b.minimumWidth = 0
       b.minWidth = 0
@@ -275,6 +399,12 @@ object MobileWebHelper {
       b.minHeight = 0
       return b
     }
+
+    // ряд 1: ‹ назад | логотип (растягивается) | ✕ закрыть | ⋮ меню — как
+    // ряд кнопок .m-bar-top (⌂ + логотип + … + ⋮) мобильной ветки
+    val bar = LinearLayout(act)
+    bar.orientation = LinearLayout.HORIZONTAL
+    bar.setPadding(dp(4), dp(4), dp(4), 0)
 
     val back = toolButton("‹", "Назад")
     back.layoutParams = LinearLayout.LayoutParams(
@@ -289,7 +419,7 @@ object MobileWebHelper {
     // Pulse жирным акцентом)
     val logo = TextView(act)
     val mark = SpannableStringBuilder("duoPulse")
-    mark.setSpan(ForegroundColorSpan(Color.parseColor("#DDE1E6")), 0, 3,
+    mark.setSpan(ForegroundColorSpan(Color.parseColor("#F2F7EE")), 0, 3,
       Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     mark.setSpan(ForegroundColorSpan(Color.parseColor("#BDFE4F")), 3, 8,
       Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -299,41 +429,89 @@ object MobileWebHelper {
     logo.gravity = Gravity.CENTER_VERTICAL
     logo.setPadding(dp(8), 0, 0, 0)
     logo.layoutParams = LinearLayout.LayoutParams(
-      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT)
+      0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
     bar.addView(logo)
 
-    val addr = TextView(act)
-    addr.setTextColor(Color.parseColor("#DDE1E6"))
-    addr.textSize = 13f
-    addr.maxLines = 1
-    addr.ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
-    addr.gravity = Gravity.CENTER_VERTICAL
-    addr.setPadding(dp(8), 0, dp(8), 0)
-    addr.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-    bar.addView(addr)
-    urlText = addr
-
-    val duo = toolButton("▶ duo", "Открыть во встроенном плеере")
-    duo.visibility = View.GONE
-    duo.layoutParams = LinearLayout.LayoutParams(
-      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-    duo.setOnClickListener {
-      val id = youTubeVideoId(webView?.url ?: "") ?: return@setOnClickListener
-      openVideoInPlayer(id)
-    }
-    bar.addView(duo)
-    duoBtn = duo
-
-    val exit = toolButton("✕", "Закрыть")
-    exit.setTextColor(Color.parseColor("#DDE1E6"))
+    val exit = toolButton("✕", "Закрыть", "#F2F7EE")
     exit.layoutParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
     exit.setOnClickListener { close() }
     bar.addView(exit)
 
+    val menuBtn = toolButton("⋮", "Меню", "#F2F7EE")
+    menuBtn.layoutParams = LinearLayout.LayoutParams(
+      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    menuBtn.setOnClickListener { showMenu(act, it) }
+    bar.addView(menuBtn)
+
     bar.layoutParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-    col.addView(bar)
+    header.addView(bar)
+
+    // ряд 2: адрес-чип — как omnibox (.m-bar input: скругление 18, фон
+    // --bg-base, рамка акцента 0.18); «▶ duo» на страницах YouTube-видео
+    val urlRow = LinearLayout(act)
+    urlRow.orientation = LinearLayout.HORIZONTAL
+    urlRow.setPadding(dp(10), dp(8), dp(10), dp(8))
+
+    val addr = TextView(act)
+    addr.setTextColor(Color.parseColor("#F2F7EE")) // --text-primary
+    addr.textSize = 14f
+    addr.maxLines = 1
+    addr.ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+    addr.gravity = Gravity.CENTER_VERTICAL
+    addr.setPadding(dp(12), 0, dp(12), 0)
+    addr.background = GradientDrawable().apply {
+      cornerRadius = dp(18).toFloat()
+      setColor(Color.parseColor("#0a0e17")) // --bg-base
+      setStroke(dp(1), Color.argb(46, 189, 254, 79))
+    }
+    addr.layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f)
+    urlRow.addView(addr)
+    urlText = addr
+
+    val duo = toolButton("▶ duo", "Открыть во встроенном плеере")
+    duo.visibility = View.GONE
+    val duoLp = LinearLayout.LayoutParams(
+      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT)
+    duoLp.marginStart = dp(8)
+    duo.layoutParams = duoLp
+    duo.setOnClickListener {
+      val id = youTubeVideoId(webView?.url ?: "") ?: return@setOnClickListener
+      openVideoInPlayer(id)
+    }
+    urlRow.addView(duo)
+    duoBtn = duo
+
+    urlRow.layoutParams = LinearLayout.LayoutParams(
+      LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    header.addView(urlRow)
+
+    // полоса прогресса загрузки (браузерный индикатор): появляется на старте
+    // страницы, гаснет на 100% — страница «живая», оверлей ведёт себя как
+    // браузер, а не безымянная вьюха
+    val prog = ProgressBar(act, null, android.R.attr.progressBarStyleHorizontal)
+    prog.max = 100
+    prog.progressTintList = android.content.res.ColorStateList.valueOf(
+      Color.parseColor("#BDFE4F"))
+    prog.progressBackgroundTintList = android.content.res.ColorStateList.valueOf(
+      Color.TRANSPARENT)
+    prog.layoutParams = LinearLayout.LayoutParams(
+      LinearLayout.LayoutParams.MATCH_PARENT, dp(3))
+    prog.visibility = View.GONE
+    header.addView(prog)
+    progress = prog
+
+    // border-bottom шапки — как .m-bar (rgba(189,254,79,0.14))
+    val divider = View(act)
+    divider.setBackgroundColor(Color.argb(36, 189, 254, 79))
+    divider.layoutParams = LinearLayout.LayoutParams(
+      LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
+    header.addView(divider)
+
+    header.layoutParams = LinearLayout.LayoutParams(
+      LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    col.addView(header)
 
     val wv = WebView(act)
     wv.settings.javaScriptEnabled = true
@@ -369,14 +547,23 @@ object MobileWebHelper {
         return null
       }
 
+      override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+        // прогресс: страница грузится — полоса видна (100% погасит onProgress)
+        progress?.let { it.progress = 5; it.visibility = View.VISIBLE }
+      }
+
       override fun onPageFinished(view: WebView, url: String) {
         syncChrome(url)
         installUrlWatch(view)
       }
     }
     // duopulse-134: кнопка «на весь экран» YouTube — без WebChromeClient
-    // fullscreen не работает вовсе; консоль — хук DPURL (onConsole)
-    wv.webChromeClient = MobileFullscreen.chromeClient(act, wv) { msg -> onConsole(msg) }
+    // fullscreen не работает вовсе; консоль — хук DPURL (onConsole);
+    // прогресс — полоса шапки (duopulse-145)
+    wv.webChromeClient = MobileFullscreen.chromeClient(act, wv, { msg -> onConsole(msg) }) { p ->
+      progress?.let { it.progress = p }
+      if (p >= 100) progress?.visibility = View.GONE
+    }
 
     wv.layoutParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)

@@ -42,11 +42,13 @@ object MobileFullscreen {
   /** ChromeClient для web-оверлея MobileWebHelper (fullscreen + консоль).
    *  onConsoleMessage — хук DPURL (duopulse-139): страница репортит URL для
    *  ловли SPA-навигаций m.youtube (Navigation API, shouldOverrideUrlLoading
-   *  их не видит); null — клиент без консоли. */
+   *  их не видит); null — клиент без консоли. onProgress — прогресс загрузки
+   *  для полосы шапки оверлея (duopulse-145); null — не нужен. */
   fun chromeClient(
     act: MainActivity,
     owner: WebView,
-    onConsoleMessage: ((String) -> Unit)? = null
+    onConsoleMessage: ((String) -> Unit)? = null,
+    onProgress: ((Int) -> Unit)? = null
   ): WebChromeClient =
     object : WebChromeClient() {
       override fun onShowCustomView(view: View, callback: CustomViewCallback) {
@@ -60,6 +62,10 @@ object MobileFullscreen {
       override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage): Boolean {
         onConsoleMessage?.invoke(consoleMessage.message() ?: "")
         return false
+      }
+
+      override fun onProgressChanged(view: WebView, newProgress: Int) {
+        onProgress?.invoke(newProgress)
       }
     }
 

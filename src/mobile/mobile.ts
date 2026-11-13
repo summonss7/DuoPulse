@@ -511,7 +511,8 @@ async function openExternal(url: string): Promise<void> {
 
 /** Открыть адрес в приложении (duopulse-126): YouTube-видео — вкладка
  *  /embed-плеера, поиск и прочие сайты — нативный web-оверлей поверх UI
- *  (MobileWebHelper: тулбар назад/адрес/«▶ duo»/закрыть). Прежде всё
+ *  (MobileWebHelper: шапка как у мобильной ветки — назад/логотип/адрес-чип/
+ *  «▶ duo»/меню «⋮», duopulse-145). Прежде всё
  *  не-видео уходило в системный браузер (Chrome) — страницы с
  *  X-Frame-Options в iframe не встраиваются; оверлей снимает ограничение.
  *  Активное видео под оверлеем — на паузу (звучать за выдачей оно не
@@ -572,22 +573,31 @@ function goFromOmnibox(): void {
   omnibox.blur();
 }
 
-go.addEventListener("click", goFromOmnibox);
-omnibox.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") goFromOmnibox();
-});
-home.addEventListener("click", () => {
+/** «Домой» — стартовый экран: закрыть web-оверлей и PDF, новая вкладка
+ *  (открытые видео остаются в фоне — переключатель вкладок в шапке, до
+ *  duopulse-123 «домой» убивал единственное видео), чистый omnibox в фокусе.
+ *  Кроме кнопки «⌂» зовётся пунктом «Главная DuoPulse» меню «⋮» web-оверлея
+ *  (хук __duopulseGoHome из MobileWebHelper, duopulse-145). */
+function goHome(): void {
   setMenu(false);
   pdfView.close();
   // web-оверлей тоже закрываем: «домой» — стартовый экран, не страница
   void invoke<string>("mobile_web_close").catch(() => {});
-  // «домой» = новая вкладка: открытые видео остаются в фоне (переключатель
-  // вкладок в шапке), до duopulse-123 «домой» убивал единственное видео
   tabs.newTab();
   note("");
   omnibox.value = "";
   omnibox.focus();
+}
+
+go.addEventListener("click", goFromOmnibox);
+omnibox.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") goFromOmnibox();
 });
+home.addEventListener("click", goHome);
+// Вход для пункта «Главная DuoPulse» меню «⋮» web-оверлея (duopulse-145):
+// Kotlin-хелпер дергает глобал в UI-webview Tauri; оверлей закрывается
+// сам — goHome зовёт mobile_web_close.
+(window as { __duopulseGoHome?: () => void }).__duopulseGoHome = () => goHome();
 for (const b of root.querySelectorAll<HTMLButtonElement>(".m-quick")) {
   b.addEventListener("click", () => {
     omnibox.value = b.dataset.url ?? "";
