@@ -5917,4 +5917,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   «Скачать» Aila, локальная копия C:\DuoPulse обновлена (--deploy-local
   повтором после EBUSY — duopulse.exe был запущен).
 - Новая карточка: CARDS/144 (полный адблок adblock-rs на Android).
-- Коммит: см. ниже (дописан после коммита)
+- Коммит: 9046458
