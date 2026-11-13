@@ -5814,3 +5814,28 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Релиз 0.1.37 (tauri.conf.json = package.json = Cargo.toml): десктоп
   npm run release + мобильный android-build.sh release — в том же сеансе.
 - Коммит: 8d6aad2 feat: duopulse-136 — i18n этап 2 (язык UI в Core + перевод хрома); релизы 0.1.37: десктоп (4c47531 в duopulse-updates) и android (APK в канале Aila)
+
+## 2026-11-13 — duopulse-137: i18n этап 3 — панели и внутренние страницы (0.1.38)
+- Начало: 13.11.2026 04:13, окончание: 13.11.2026 05:36.
+- Что изменено:
+  - Переведён весь оставшийся десктопный UI через t()/data-i18n (продолжение
+    duopulse-131/136): панель дуо-субтитров (src/subtitles-panel/*, статика
+    #duoPanel в index.html), панель VPN (view/vpn-panel, статика #vpnPanel),
+    панель загрузок (options/panel, статика #downloadPanel) и внутренние
+    страницы history (история+закладки), diagnostics, passwords, error,
+    error-view, incognito, newtab. Конкатенации переведены в плейсхолдеры,
+    хардкод «ru-RU» в датах history/diagnostics заменён на uiLocale,
+    fmtOffset duo — toLocaleString(uiLocale).
+  - Словари dict-en/uk/ro/ar/sk пополнены на 323 ключа каждый (общие строки
+    переиспользованы; дубль «{n} с» меж поверхностями разрешён идентично).
+  - ROADMAP: запись этапов 2–3 i18n. Вне рамок (кандидаты в 138+): нативные
+    muda-меню chrome_menu.rs, мобильная панель duo src/mobile/duo, строковые
+    status.detail/job.error из Core (Rust).
+- Как проверено: npm run typecheck чист; vitest 46 файлов / 482 теста зелёные
+  (консистентность наборов ключей 5 словарей, плейсхолдеры, data-i18n-ключи
+  index.html); релиз 0.1.38 собран и опубликован в том же сеансе.
+- Релиз 0.1.38 (tauri.conf.json = package.json = Cargo.toml): android-build.sh
+  release — APK в канале Aila (манифест содержит exe+APK); десктоп npm run
+  release — stable+canary GitHub (duopulse-updates 1230934), фид Pages, хаб
+  Aila, локальная копия C:\DuoPulse обновлена.
+- Коммит: 3db7fb8 feat: duopulse-137 — i18n этап 3 (панели + внутренние страницы, +323 ключа); релиз 0.1.38
