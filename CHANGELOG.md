@@ -5813,3 +5813,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   data-i18n ключами словаря); npm run build ОК; gen:bridge — контракт v15.
 - Релиз 0.1.37 (tauri.conf.json = package.json = Cargo.toml): десктоп
   npm run release + мобильный android-build.sh release — в том же сеансе.
+- Коммит: 8d6aad2 feat: duopulse-136 — i18n этап 2 (язык UI в Core + перевод хрома); релизы 0.1.37: десктоп (4c47531 в duopulse-updates) и android (APK в канале Aila)
