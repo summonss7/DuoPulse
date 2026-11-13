@@ -8,6 +8,7 @@
 // duopulse://error) — заглушка без действий.
 import { bridge } from "../bridge";
 import type { VpnStatusResult } from "../bridge/gen/types";
+import { t } from "../i18n";
 import {
   directAction,
   directActionAvailable,
@@ -28,7 +29,7 @@ interface ErrorContext {
 const ctx = (window as { __DUOPULSE_ERROR__?: ErrorContext }).__DUOPULSE_ERROR__;
 const host = errorHost(ctx?.url);
 
-document.title = "Не удалось открыть сайт";
+document.title = t("Не удалось открыть сайт");
 document.body.classList.add("internal-page");
 document.getElementById("app")?.remove(); // разметка хрома странице не нужна
 
@@ -41,7 +42,7 @@ ico.innerHTML =
   '<svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 18h24a10 10 0 0 1 10 10v2"/><path d="M13 11 6 18l7 7"/><path d="M30 38h12" opacity="0"/><path d="M33 30l9 9m0-9-9 9"/></svg>';
 
 const title = document.createElement("h1");
-title.textContent = "Сайт не открылся";
+title.textContent = t("Сайт не открылся");
 
 root.append(ico, title);
 
@@ -56,14 +57,14 @@ if (ctx) {
   addr.title = ctx.url;
   const reason = document.createElement("p");
   reason.className = "err-reason";
-  reason.textContent = `${ctx.reason} (код ${ctx.code}).`;
+  reason.textContent = t("{reason} (код {code}).", { reason: ctx.reason, code: ctx.code });
   const actions = document.createElement("div");
   actions.className = "err-actions";
 
   const retry = document.createElement("button");
   retry.type = "button";
   retry.className = "primary";
-  retry.textContent = "Повторить";
+  retry.textContent = t("Повторить");
   retry.addEventListener("click", () => {
     void bridge.nav.navigate({ url: ctx.url }).catch(err);
   });
@@ -82,7 +83,8 @@ if (ctx) {
     ): HTMLButtonElement => {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = `«${host}» — ${route === "tunnel" ? "через туннель" : "напрямую"}`;
+      b.textContent =
+        route === "tunnel" ? t("«{host}» — через туннель", { host }) : t("«{host}» — напрямую", { host });
       b.title = title;
       b.addEventListener("click", () => {
         b.disabled = true;
@@ -114,7 +116,7 @@ if (ctx) {
       // порядок — по вероятной причине: статус определяет порядок ниже
       mkSplit(
         "tunnel",
-        "Добавить split-правило для домена и повторить загрузку",
+        t("Добавить split-правило для домена и повторить загрузку"),
         tunnelAction,
       ),
     );
@@ -135,7 +137,7 @@ if (ctx) {
         const first = actions.querySelector("button:not(.primary)");
         const direct = mkSplit(
           "direct",
-          "Маршрутировать домен мимо туннеля (split) и повторить загрузку",
+          t("Маршрутировать домен мимо туннеля (split) и повторить загрузку"),
           directAction,
         );
         if (first) actions.insertBefore(direct, first);
@@ -148,7 +150,7 @@ if (ctx) {
 } else {
   const stub = document.createElement("p");
   stub.className = "err-reason";
-  stub.textContent = "Сведений об ошибке нет.";
+  stub.textContent = t("Сведений об ошибке нет.");
   root.append(stub);
 }
 

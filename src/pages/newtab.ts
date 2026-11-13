@@ -10,6 +10,7 @@
 // вкладке, Ctrl/средняя кнопка — новая, как на странице истории).
 import { bridge } from "../bridge";
 import type { HistoryEntry } from "../bridge";
+import { t } from "../i18n";
 
 const err = (e: unknown): void => console.error("newtab-page:", e);
 
@@ -99,7 +100,7 @@ async function goSearch(input: HTMLInputElement): Promise<void> {
 
 // --- сборка страницы ---------------------------------------------------------
 
-document.title = "Новая вкладка";
+document.title = t("Новая вкладка");
 document.body.classList.add("internal-page");
 document.getElementById("app")?.remove(); // разметка хрома странице не нужна
 
@@ -120,10 +121,10 @@ searchIco.className = "ico";
 searchIco.innerHTML = SEARCH_ICON;
 const input = document.createElement("input");
 input.type = "text";
-input.placeholder = "Введите адрес или поисковый запрос";
+input.placeholder = t("Введите адрес или поисковый запрос");
 input.spellcheck = false;
 input.autocomplete = "off";
-input.setAttribute("aria-label", "Адресная строка");
+input.setAttribute("aria-label", t("Адресная строка"));
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter") void goSearch(input);
 });
@@ -136,9 +137,10 @@ grid.className = "ntp-grid";
 // избранное неочевидны с первого взгляда — одна приглушённая строка.
 const hint = document.createElement("div");
 hint.className = "ntp-hint";
-hint.textContent =
+hint.textContent = t(
   "На видео появится кнопка «duo» — субтитры до 3 строк, выбор языков и вид плашки (Alt+D — вкл/выкл). " +
-  "Звёздочка рядом с адресом добавляет страницу в избранное (Ctrl+D).";
+    "Звёздочка рядом с адресом добавляет страницу в избранное (Ctrl+D).",
+);
 
 root.append(logo, search, hint, grid);
 document.body.append(root);

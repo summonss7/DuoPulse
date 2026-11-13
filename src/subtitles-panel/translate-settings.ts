@@ -6,6 +6,7 @@
 // формы — translate-form.ts (юнит-тесты там); этот модуль — DOM-обвязка.
 import { bridge } from "../bridge";
 import type { TranslateSettings } from "../bridge/gen/types";
+import { t } from "../i18n";
 import { formToConfig, formValues, keyPlaceholder, secretOf, validateForm, type TranslateFormValues } from "./translate-form";
 
 const err = (e: unknown): void => console.error("translate:", e);
@@ -86,13 +87,13 @@ async function save(): Promise<boolean> {
 
 /** Живая проверка провайдера: сначала сохраняет форму (ключ мог измениться). */
 async function test(): Promise<void> {
-  showStatus("Проверяем…");
+  showStatus(t("Проверяем…"));
   if (!(await save())) return;
   testBtn.disabled = true;
   try {
     const r = await bridge.translate.test({ text: null, targetLang: "ru" });
     showStatus(
-      r.ok ? `Провайдер отвечает: «${r.translated ?? ""}»` : r.detail,
+      r.ok ? t("Провайдер отвечает: «{t}»", { t: r.translated ?? "" }) : r.detail,
       r.ok,
     );
   } catch (e) {
@@ -110,7 +111,7 @@ export function initTranslateSettings(): void {
   });
   enabledEl.addEventListener("change", () => showStatus(null));
   saveBtn.addEventListener("click", async () => {
-    if (await save()) showStatus("Сохранено", true);
+    if (await save()) showStatus(t("Сохранено"), true);
   });
   testBtn.addEventListener("click", () => void test());
 
@@ -122,7 +123,7 @@ export function initTranslateSettings(): void {
     try {
       await bridge.translate.setSettings({ value: formToConfig(values), secret: "" });
       await refresh();
-      showStatus("Ключ удалён", true);
+      showStatus(t("Ключ удалён"), true);
     } catch (er) {
       showStatus(String(er));
     }

@@ -1,7 +1,9 @@
 // DuoPulse — чистые помощники панели загрузки (карточка duopulse-118):
 // разбор «мм:сс» диапазона, подписи качеств/форматов и сбор списка языков
 // субтитров из снапшота Core (BaseTrackInfo/TranslationLangInfo).
-
+// Видимые строки — через t() (i18n, карточка duopulse-137): в ru t() возвращает
+// исходник, тесты на ru-тексты не меняются.
+import { t } from "../i18n";
 import type { BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
 
 /** «1:23» → 83; «1:23:45» → 5025; «12» → 12; мусор/отрицательное — null. */
@@ -39,7 +41,7 @@ export function rangeValid(start: string, end: string): boolean {
 }
 
 export const QUALITY_OPTIONS: { value: string; label: string }[] = [
-  { value: "best", label: "лучшее" },
+  { value: "best", label: t("лучшее") },
   { value: "1080", label: "1080p" },
   { value: "720", label: "720p" },
   { value: "480", label: "480p" },
@@ -47,8 +49,8 @@ export const QUALITY_OPTIONS: { value: string; label: string }[] = [
 ];
 
 export const AUDIO_FORMAT_OPTIONS: { value: "m4a" | "mp3"; label: string }[] = [
-  { value: "m4a", label: "m4a (без перекодировки)" },
-  { value: "mp3", label: "mp3 (конвертация)" },
+  { value: "m4a", label: t("m4a (без перекодировки)") },
+  { value: "mp3", label: t("mp3 (конвертация)") },
 ];
 
 /** Опция выбора языка субтитров: value — trackId для download.begin. */
@@ -66,10 +68,10 @@ export function subsLangOptions(
 ): SubsLangOption[] {
   const out: SubsLangOption[] = base.map((b) => ({
     value: b.id,
-    label: `${b.name}${b.kind === "asr" ? " (авто)" : ""}${b.original ? " •" : ""}`,
+    label: `${b.name}${b.kind === "asr" ? t(" (авто)") : ""}${b.original ? " •" : ""}`,
   }));
-  for (const t of translations) {
-    out.push({ value: t.lang, label: `${t.name} (перевод)` });
+  for (const tr of translations) {
+    out.push({ value: tr.lang, label: `${tr.name}${t(" (перевод)")}` });
   }
   return out;
 }
@@ -78,21 +80,21 @@ export function subsLangOptions(
 export function phaseLabel(phase: string): string {
   switch (phase) {
     case "prepare":
-      return "подготовка";
+      return t("подготовка");
     case "tools":
-      return "докачка инструментов (один раз)";
+      return t("докачка инструментов (один раз)");
     case "download":
-      return "загрузка";
+      return t("загрузка");
     case "convert":
-      return "обработка (ffmpeg)";
+      return t("обработка (ffmpeg)");
     case "subs":
-      return "получение дорожки";
+      return t("получение дорожки");
     case "done":
-      return "готово";
+      return t("готово");
     case "canceled":
-      return "отменено";
+      return t("отменено");
     case "error":
-      return "ошибка";
+      return t("ошибка");
     default:
       return phase;
   }
@@ -102,11 +104,11 @@ export function phaseLabel(phase: string): string {
 export function modeLabel(mode: string): string {
   switch (mode) {
     case "video":
-      return "видео";
+      return t("видео");
     case "audio":
-      return "музыка";
+      return t("музыка");
     case "subs":
-      return "субтитры";
+      return t("субтитры");
     default:
       return mode;
   }

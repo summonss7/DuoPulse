@@ -18,6 +18,7 @@
 // вкладке (страница заменяется сайтом), Ctrl/средняя кнопка — новая вкладка.
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark, HistoryEntry } from "../bridge";
+import { t, uiLocale } from "../i18n";
 
 const ICONS = {
   history:
@@ -75,16 +76,16 @@ function dayLabel(ts: number): string {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const diff = Math.round((today.getTime() - day.getTime()) / DAY_MS);
-  if (diff === 0) return "Сегодня";
-  if (diff === 1) return "Вчера";
-  return day.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+  if (diff === 0) return t("Сегодня");
+  if (diff === 1) return t("Вчера");
+  return day.toLocaleDateString(uiLocale, { day: "numeric", month: "long", year: "numeric" });
 }
 
 const timeOf = (ts: number): string =>
-  new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  new Date(ts).toLocaleTimeString(uiLocale, { hour: "2-digit", minute: "2-digit" });
 
 const dateOf = (ts: number): string =>
-  new Date(ts).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+  new Date(ts).toLocaleDateString(uiLocale, { day: "numeric", month: "long", year: "numeric" });
 
 const isBookmarked = (url: string): boolean => bookmarks.some((b) => b.url === url);
 
@@ -196,9 +197,9 @@ function historyRow(e: HistoryEntry): HTMLDivElement {
     e.visitCount > 1 ? `${timeOf(e.lastVisitedAt)} · ×${e.visitCount}` : timeOf(e.lastVisitedAt),
   );
   if (marked) row.classList.add("marked");
-  const star = actBtn("act-star", "star", marked ? "Убрать из закладок" : "В закладки");
+  const star = actBtn("act-star", "star", marked ? t("Убрать из закладок") : t("В закладки"));
   if (marked) star.classList.add("on");
-  const del = actBtn("act-del", "cross", "Удалить из истории");
+  const del = actBtn("act-del", "cross", t("Удалить из истории"));
   row.append(star, del);
   return row;
 }
@@ -211,7 +212,7 @@ function bookmarkRow(b: HistoryBookmark): HTMLDivElement {
   if (b.groups?.length) {
     const badges = document.createElement("span");
     badges.className = "entry-badges";
-    badges.title = "Группы закладки";
+    badges.title = t("Группы закладки");
     for (const g of b.groups) {
       const badge = document.createElement("span");
       badge.className = "badge";
@@ -220,16 +221,16 @@ function bookmarkRow(b: HistoryBookmark): HTMLDivElement {
     }
     row.append(badges);
   }
-  const folder = actBtn("act-groups", "folder", "Группы закладки");
-  const edit = actBtn("act-edit", "edit", "Переименовать");
-  const del = actBtn("act-del", "cross", "Удалить закладку");
+  const folder = actBtn("act-groups", "folder", t("Группы закладки"));
+  const edit = actBtn("act-edit", "edit", t("Переименовать"));
+  const del = actBtn("act-del", "cross", t("Удалить закладку"));
   row.append(folder, edit, del);
   if (groupDragEnabled()) {
     row.draggable = true;
     row.classList.add("draggable");
     row.title = dragEnabled()
-      ? "Перетащите внутри списка — порядок, на чип группы — переложить в неё"
-      : "Перетащите на чип группы, чтобы переложить закладку";
+      ? t("Перетащите внутри списка — порядок, на чип группы — переложить в неё")
+      : t("Перетащите на чип группы, чтобы переложить закладку");
   }
   return row;
 }
@@ -296,26 +297,28 @@ function render(): void {
       empty.className = "mgr-empty";
       empty.textContent =
         groupSel === "ungrouped"
-          ? "Закладок без группы нет"
+          ? t("Закладок без группы нет")
           : query
-            ? "По запросу ничего не найдено"
+            ? t("По запросу ничего не найдено")
             : groupSel === "all"
-              ? "Закладок нет — добавьте ★ из истории или звёздочкой навбара"
-              : "Группа пуста — перекладывайте закладки меню папки";
+              ? t("Закладок нет — добавьте ★ из истории или звёздочкой навбара")
+              : t("Группа пуста — перекладывайте закладки меню папки");
       kids.push(empty);
     }
   }
   if (!kids.length) {
     const empty = document.createElement("div");
     empty.className = "mgr-empty";
-    empty.textContent = query ? "По запросу ничего не найдено" : "История пуста — посещённые страницы появятся здесь";
+    empty.textContent = query
+      ? t("По запросу ничего не найдено")
+      : t("История пуста — посещённые страницы появятся здесь");
     kids.push(empty);
   }
   listEl.replaceChildren(...kids);
   const shown = section === "history" ? entries.length : bookmarks.length;
   moreWrap.hidden = shown >= total;
   totalEl.textContent = query
-    ? `${shown} из ${total}`
+    ? t("{n} из {total}", { n: shown, total })
     : total > 0
       ? String(total)
       : "";
@@ -345,15 +348,21 @@ function renderChips(): void {
     });
     return b;
   };
-  kids.push(chip("all", "Все", "Все закладки, свежие первыми"));
+  kids.push(chip("all", t("Все"), t("Все закладки, свежие первыми")));
   for (const g of groups) {
-    kids.push(chip(g.id, g.name, g.isDefault ? "Группа по умолчанию (Ctrl+D и звёздочка)" : "Группа закладок"));
+    kids.push(
+      chip(
+        g.id,
+        g.name,
+        g.isDefault ? t("Группа по умолчанию (Ctrl+D и звёздочка)") : t("Группа закладок"),
+      ),
+    );
   }
-  kids.push(chip("ungrouped", "Без группы", "Закладки, не состоящие ни в одной группе"));
+  kids.push(chip("ungrouped", t("Без группы"), t("Закладки, не состоящие ни в одной группе")));
   const add = document.createElement("button");
   add.type = "button";
   add.className = "mgr-chip mgr-chip-add";
-  add.title = "Создать группу";
+  add.title = t("Создать группу");
   add.innerHTML = ICONS.plus;
   add.addEventListener("click", () => beginAddGroup());
   kids.push(add);
@@ -369,7 +378,7 @@ function renderGroupbar(): void {
   groupbarEl.replaceChildren();
   const sort = document.createElement("select");
   sort.className = "mgr-sort";
-  sort.title = "Сортировка группы";
+  sort.title = t("Сортировка группы");
   for (const [value, label] of [
     ["manual", "Вручную"],
     ["title", "По имени"],
@@ -377,7 +386,7 @@ function renderGroupbar(): void {
   ] as const) {
     const opt = document.createElement("option");
     opt.value = value;
-    opt.textContent = label;
+    opt.textContent = t(label);
     sort.append(opt);
   }
   sort.value = g.sortBy;
@@ -389,10 +398,10 @@ function renderGroupbar(): void {
   });
   const note = document.createElement("span");
   note.className = "mgr-groupbar-note";
-  note.textContent = g.sortBy === "manual" ? "перетаскивайте строки" : "";
-  const rename = actBtn("act-edit", "edit", "Переименовать группу");
+  note.textContent = g.sortBy === "manual" ? t("перетаскивайте строки") : "";
+  const rename = actBtn("act-edit", "edit", t("Переименовать группу"));
   rename.addEventListener("click", () => beginRenameGroup(g));
-  const del = actBtn("act-del", "cross", g.isDefault ? "Группу по умолчанию удалить нельзя" : "Удалить группу");
+  const del = actBtn("act-del", "cross", g.isDefault ? t("Группу по умолчанию удалить нельзя") : t("Удалить группу"));
   del.disabled = g.isDefault;
   del.addEventListener("click", () => {
     void bridge.history
@@ -412,7 +421,7 @@ function beginAddGroup(): void {
   const input = document.createElement("input");
   input.className = "mgr-chip-input";
   input.type = "text";
-  input.placeholder = "Имя группы";
+  input.placeholder = t("Имя группы");
   input.spellcheck = false;
   input.maxLength = 60;
   chipsEl.append(input);
@@ -490,7 +499,7 @@ function beginRenameGroup(g: BookmarkGroupInfo): void {
 function openGroupsMenu(row: HTMLElement, b: HistoryBookmark): void {
   closeMenus();
   if (!groups.length) {
-    showError("Групп ещё нет — создайте первую кнопкой «+» в ряду групп");
+    showError(t("Групп ещё нет — создайте первую кнопкой «+» в ряду групп"));
     return;
   }
   const menu = document.createElement("div");
@@ -500,7 +509,7 @@ function openGroupsMenu(row: HTMLElement, b: HistoryBookmark): void {
     item.type = "button";
     const on = b.groups?.some((r) => r.id === g.id) ?? false;
     item.textContent = `${on ? "✓ " : ""}${g.name}`;
-    item.title = on ? "Убрать из группы" : "Добавить в группу";
+    item.title = on ? t("Убрать из группы") : t("Добавить в группу");
     item.addEventListener("click", () => {
       void bridge.history
         .groupToggleBookmark({ url: b.url, groupId: g.id, on: !on })
@@ -677,14 +686,14 @@ function buildRangeMenu(): HTMLElement {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "mgr-clear";
-  btn.textContent = "Очистить историю";
+  btn.textContent = t("Очистить историю");
   rangeMenu = document.createElement("div");
   rangeMenu.className = "mgr-menu";
   rangeMenu.hidden = true;
   for (const [label, range] of RANGES) {
     const item = document.createElement("button");
     item.type = "button";
-    item.textContent = label;
+    item.textContent = t(label);
     item.addEventListener("click", () => {
       rangeMenu.hidden = true;
       const now = Date.now();
@@ -706,7 +715,7 @@ function buildRangeMenu(): HTMLElement {
 /** Точка входа webview внутренней страницы (вызывается из src/main.ts —
  * модуль импортируется ради побочного эффекта). */
 export function initManagerPage(): void {
-  document.title = "История и закладки — DuoPulse";
+  document.title = t("История и закладки — DuoPulse");
   document.body.classList.add("internal-page");
   // разметка хрома из index.html странице не нужна
   document.getElementById("app")?.remove();
@@ -724,11 +733,11 @@ export function initManagerPage(): void {
   logo.append(pulse);
   const title = document.createElement("h1");
   title.className = "mgr-title";
-  title.textContent = "История и закладки";
+  title.textContent = t("История и закладки");
   searchEl = document.createElement("input");
   searchEl.type = "text";
   searchEl.className = "mgr-search";
-  searchEl.placeholder = "Поиск по истории и закладкам";
+  searchEl.placeholder = t("Поиск по истории и закладкам");
   searchEl.spellcheck = false;
   searchEl.autocomplete = "off";
   let timer: number | undefined;
@@ -743,7 +752,7 @@ export function initManagerPage(): void {
 
   const tabs = document.createElement("nav");
   tabs.className = "mgr-tabs";
-  tabs.append(sectionBtn("history", "История"), sectionBtn("bookmarks", "Закладки"));
+  tabs.append(sectionBtn("history", t("История")), sectionBtn("bookmarks", t("Закладки")));
   tabs.append(buildRangeMenu());
 
   chipsEl = document.createElement("div");
@@ -760,7 +769,7 @@ export function initManagerPage(): void {
   moreWrap.className = "mgr-more";
   moreBtn = document.createElement("button");
   moreBtn.type = "button";
-  moreBtn.textContent = "Показать ещё";
+  moreBtn.textContent = t("Показать ещё");
   moreBtn.addEventListener("click", () => void loadPage(true));
   totalEl = document.createElement("span");
   totalEl.className = "mgr-total";

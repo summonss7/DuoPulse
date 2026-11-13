@@ -11,6 +11,7 @@
 // через аккаунт Aila — этап 4 (duopulse-110).
 import { bridge } from "../bridge";
 import type { PasswordEntry } from "../bridge";
+import { t } from "../i18n";
 
 const ICONS = {
   key: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5.5" cy="10.5" r="3"/><path d="M7.8 8.2L13 3M11 5l1.5 1.5M9.2 6.8l1.5 1.5"/></svg>',
@@ -136,7 +137,7 @@ function passwordRow(p: PasswordEntry): HTMLDivElement {
   main.append(title, url);
   const user = document.createElement("span");
   user.className = "pw-user";
-  user.title = "Логин";
+  user.title = t("Логин");
   user.textContent = p.username;
   const pass = document.createElement("span");
   pass.className = "pw-pass";
@@ -148,11 +149,11 @@ function passwordRow(p: PasswordEntry): HTMLDivElement {
     pass.textContent = "••••••••";
   }
 
-  const eye = actBtn("act-eye", "eye", "Показать пароль");
+  const eye = actBtn("act-eye", "eye", t("Показать пароль"));
   eye.addEventListener("click", () => void toggleReveal(p.id, eye));
-  const copyUser = actBtn("act-copyuser", "copy", "Скопировать логин");
+  const copyUser = actBtn("act-copyuser", "copy", t("Скопировать логин"));
   copyUser.addEventListener("click", () => void copyText(p.username));
-  const copyPass = actBtn("act-copypass", "copy", "Скопировать пароль");
+  const copyPass = actBtn("act-copypass", "copy", t("Скопировать пароль"));
   copyPass.addEventListener("click", async () => {
     // пароль в списке не живёт — берём reveal (или уже показанный)
     const known = revealed.get(p.id);
@@ -161,11 +162,11 @@ function passwordRow(p: PasswordEntry): HTMLDivElement {
       (await bridge.passwords.reveal({ id: p.id }).then((r) => r.password).catch(fail));
     if (value !== undefined) await copyText(value);
   });
-  const edit = actBtn("act-edit", "edit", "Изменить");
+  const edit = actBtn("act-edit", "edit", t("Изменить"));
   edit.addEventListener("click", () => {
     openForm({ id: p.id, url: p.url || p.origin, title: p.title, username: p.username });
   });
-  const del = actBtn("act-del", "cross", "Удалить пароль");
+  const del = actBtn("act-del", "cross", t("Удалить пароль"));
   del.addEventListener("click", () => void remove(p.id));
   row.append(ico, main, user, pass, eye, copyUser, copyPass, edit, del);
   return row;
@@ -175,12 +176,12 @@ async function toggleReveal(id: number, btn: HTMLButtonElement): Promise<void> {
   if (revealed.has(id)) {
     revealed.delete(id);
     btn.innerHTML = ICONS.eye;
-    btn.title = "Показать пароль";
+    btn.title = t("Показать пароль");
   } else {
     try {
       revealed.set(id, (await bridge.passwords.reveal({ id })).password);
       btn.innerHTML = ICONS.eyeOff;
-      btn.title = "Скрыть пароль";
+      btn.title = t("Скрыть пароль");
     } catch (e) {
       fail(e);
       return;
@@ -209,7 +210,8 @@ function openForm(state: FormState): void {
   formUser.value = state.username;
   formPass.value = "";
   formPassShow.innerHTML = ICONS.eye;
-  formSave.textContent = state.id === null ? "Сохранить" : "Обновить";
+  // «Обновить пароль», не «Обновить»: в словарях «Обновить» — это Reload хрома
+  formSave.textContent = state.id === null ? t("Сохранить") : t("Обновить пароль");
   formUrl.focus();
   formUrl.setSelectionRange(0, 0); // длинные адреса видны с начала, а не с конца
 }
@@ -226,7 +228,7 @@ async function submitForm(): Promise<void> {
   const password = formPass.value;
   const title = formTitle.value.trim();
   if (!url || !username || !password) {
-    fail("Заполните адрес сайта, логин и пароль");
+    fail(t("Заполните адрес сайта, логин и пароль"));
     return;
   }
   try {
@@ -259,12 +261,12 @@ function render(): void {
     const empty = document.createElement("div");
     empty.className = "mgr-empty";
     empty.textContent = query
-      ? "По запросу ничего не найдено"
-      : "Сохранённых паролей нет — добавьте первый кнопкой «Добавить пароль»";
+      ? t("По запросу ничего не найдено")
+      : t("Сохранённых паролей нет — добавьте первый кнопкой «Добавить пароль»");
     kids.push(empty);
   }
   listEl.replaceChildren(...kids);
-  totalEl.textContent = total > 0 ? `${items.length} из ${total}` : "";
+  totalEl.textContent = total > 0 ? t("{n} из {total}", { n: items.length, total }) : "";
 }
 
 function buildForm(): HTMLElement {
@@ -293,34 +295,34 @@ function buildForm(): HTMLElement {
   formPassShow = document.createElement("button");
   formPassShow.type = "button";
   formPassShow.className = "pw-show";
-  formPassShow.title = "Показать пароль";
+  formPassShow.title = t("Показать пароль");
   formPassShow.innerHTML = ICONS.eye;
   formPassShow.addEventListener("click", () => {
     const show = formPass.type === "password";
     formPass.type = show ? "text" : "password";
     formPassShow.innerHTML = show ? ICONS.eyeOff : ICONS.eye;
-    formPassShow.title = show ? "Скрыть пароль" : "Показать пароль";
+    formPassShow.title = show ? t("Скрыть пароль") : t("Показать пароль");
   });
   const passField = document.createElement("div");
   passField.className = "pw-field pw-field-pass";
   const passCap = document.createElement("span");
-  passCap.textContent = "Пароль";
+  passCap.textContent = t("Пароль");
   passField.append(passCap, formPass, formPassShow);
 
   formSave = document.createElement("button");
   formSave.type = "submit";
   formSave.className = "pw-save";
-  formSave.textContent = "Сохранить";
+  formSave.textContent = t("Сохранить");
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.className = "pw-cancel";
-  cancel.textContent = "Отмена";
+  cancel.textContent = t("Отмена");
   cancel.addEventListener("click", closeForm);
 
   formWrap.append(
-    field("Адрес сайта", formUrl, "example.com или https://example.com/login"),
-    field("Название", formTitle, "Пример — вход (необязательно)"),
-    field("Логин", formUser, "почта или имя"),
+    field(t("Адрес сайта"), formUrl, t("example.com или https://example.com/login")),
+    field(t("Название"), formTitle, t("Пример — вход (необязательно)")),
+    field(t("Логин"), formUser, t("почта или имя")),
     passField,
     formSave,
     cancel,
@@ -333,7 +335,7 @@ function buildForm(): HTMLElement {
 }
 
 export function initPasswordsPage(): void {
-  document.title = "Пароли — DuoPulse";
+  document.title = t("Пароли — DuoPulse");
   document.body.classList.add("internal-page");
   document.getElementById("app")?.remove();
 
@@ -350,11 +352,11 @@ export function initPasswordsPage(): void {
   logo.append(pulse);
   const title = document.createElement("h1");
   title.className = "mgr-title";
-  title.textContent = "Пароли";
+  title.textContent = t("Пароли");
   searchEl = document.createElement("input");
   searchEl.type = "text";
   searchEl.className = "mgr-search";
-  searchEl.placeholder = "Поиск по сайту, логину, названию";
+  searchEl.placeholder = t("Поиск по сайту, логину, названию");
   searchEl.spellcheck = false;
   searchEl.autocomplete = "off";
   let timer: number | undefined;
@@ -368,7 +370,7 @@ export function initPasswordsPage(): void {
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.className = "mgr-clear pw-add";
-  addBtn.innerHTML = `${ICONS.plus}<span>Добавить пароль</span>`;
+  addBtn.innerHTML = `${ICONS.plus}<span>${t("Добавить пароль")}</span>`;
   addBtn.addEventListener("click", () =>
     openForm({ id: null, url: "", title: "", username: "" }),
   );

@@ -51,6 +51,7 @@ import {
   openPanel,
   panelKind,
 } from "../chrome/panel-window";
+import { t, uiLocale } from "../i18n";
 import { presetSets, normalizeTrackId } from "./presets";
 import {
   fromChange,
@@ -69,11 +70,13 @@ const err = (e: unknown): void => console.error("duo:", e);
 const btn = document.getElementById("duoBtn") as HTMLButtonElement;
 const panel = document.getElementById("duoPanel") as HTMLDivElement;
 
+// Подписи источников строк набора — ru-ключи t() (карточка duopulse-137);
+// в ru t() возвращает исходник.
 const SOURCE_LABEL: Record<string, string> = {
-  youtube: "платформа",
-  file: "файл",
-  translate: "перевод",
-  test: "тест",
+  youtube: t("платформа"),
+  file: t("файл"),
+  translate: t("перевод"),
+  test: t("тест"),
 };
 
 /** Состояние активной вкладки (снапшот Core + события). */
@@ -120,14 +123,24 @@ const normalizeId = normalizeTrackId;
 
 const fmtOffset = (ms: number): string => {
   const s = ms / 1000;
-  return `${s > 0 ? "+" : s < 0 ? "−" : ""}${Math.abs(s).toFixed(1).replace(".", ",")} с`;
+  const sign = s > 0 ? "+" : s < 0 ? "−" : "";
+  const n = Math.abs(s).toLocaleString(uiLocale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return t("{n} с", { n: `${sign}${n}` });
 };
 
 const setSummary = (): string => {
   const n = state.enabled ? state.tracks.length : 0;
-  if (!state.videoKey) return "Видео на странице не найдено";
+  if (!state.videoKey) return t("Видео на странице не найдено");
   const key = state.videoKey.length > 42 ? state.videoKey.slice(0, 42) + "…" : state.videoKey;
-  const tail = !state.enabled ? "показ выключен" : n === 0 ? "набор пуст" : `${n} ${n === 1 ? "дорожка" : n < 5 ? "дорожки" : "дорожек"}`;
+  const tail = !state.enabled
+    ? t("показ выключен")
+    : n === 0
+      ? t("набор пуст")
+      : n === 1
+        ? t("{n} дорожка", { n })
+        : n < 5
+          ? t("{n} дорожки", { n })
+          : t("{n} дорожек", { n });
   return `${key} · ${tail}`;
 };
 
@@ -184,15 +197,15 @@ function renderLangs(): void {
   toSel.replaceChildren();
   const none = document.createElement("option");
   none.value = "";
-  none.textContent = state.base.length ? "Нет (только оригинал)" : "—";
+  none.textContent = state.base.length ? t("Нет (только оригинал)") : "—";
   toSel.append(none);
   const opts = toOptions(
     state.translations,
     fromTrack ? { lang: fromTrack.lang, translatable: fromTrack.translatable } : null,
   );
   const groups: [("platform" | "cloud"), string][] = [
-    ["platform", "Перевод платформы"],
-    ["cloud", "Облачный перевод"],
+    ["platform", t("Перевод платформы")],
+    ["cloud", t("Облачный перевод")],
   ];
   for (const [key, label] of groups) {
     const items = opts.filter((o) => o.group === key);
@@ -215,7 +228,11 @@ function renderLangs(): void {
     const opt = document.createElement("option");
     opt.value = want;
     opt.textContent =
-      row.to.kind === "cloud" ? `${row.to.lang} — облако` : row.to.kind === "platform" ? row.to.lang : want;
+      row.to.kind === "cloud"
+        ? t("{lang} — облако", { lang: row.to.lang })
+        : row.to.kind === "platform"
+          ? row.to.lang
+          : want;
     toSel.append(opt);
     toSel.value = want;
   }
@@ -246,27 +263,27 @@ function renderSet(): void {
   if (!state.tracks.length) {
     const empty = el("div", "duo-empty");
     empty.textContent = state.base.length
-      ? "Выберите дорожки пресетом или добавьте ниже"
-      : "Дорожки платформы недоступны — можно наложить свой файл";
+      ? t("Выберите дорожки пресетом или добавьте ниже")
+      : t("Дорожки платформы недоступны — можно наложить свой файл");
     box.append(empty);
     return;
   }
-  state.tracks.forEach((t, i) => {
+  state.tracks.forEach((track, i) => {
     const row = el("div", "duo-row");
-    row.dataset.kind = t.source;
+    row.dataset.kind = track.source;
     // Файловая часть — после платформенной (3.6), облачные переводы — тоже
     // фиксированы: их составом управляет конвейер (4.2), не set_tracks.
-    const movable = t.source !== "file" && t.source !== "translate" && t.source !== "asr";
+    const movable = track.source !== "file" && track.source !== "translate" && track.source !== "asr";
     if (movable) {
       const up = el<HTMLButtonElement>("button", "duo-move", "↑");
       up.type = "button";
-      up.title = "Выше";
+      up.title = t("Выше");
       up.disabled = i === 0;
       up.dataset.act = "up";
       up.dataset.idx = String(i);
       const down = el<HTMLButtonElement>("button", "duo-move", "↓");
       down.type = "button";
-      down.title = "Ниже";
+      down.title = t("Ниже");
       const lockedBelow = ["file", "translate"].includes(state.tracks[i + 1]?.source ?? "");
       down.disabled = i === state.tracks.length - 1 || lockedBelow;
       down.dataset.act = "down";
@@ -275,13 +292,13 @@ function renderSet(): void {
     } else {
       row.append(el("span", "duo-move-spacer"));
     }
-    const badge = el("span", "duo-lang", t.lang);
-    const name = el("span", "duo-name", t.name || t.id);
-    name.title = `${t.id} · ${t.role}`;
-    const src = el("span", "duo-src", SOURCE_LABEL[t.source] ?? t.source);
+    const badge = el("span", "duo-lang", track.lang);
+    const name = el("span", "duo-name", track.name || track.id);
+    name.title = `${track.id} · ${track.role}`;
+    const src = el("span", "duo-src", SOURCE_LABEL[track.source] ?? track.source);
     const remove = el<HTMLButtonElement>("button", "duo-x", "×");
     remove.type = "button";
-    remove.title = "Убрать из набора";
+    remove.title = t("Убрать из набора");
     remove.dataset.act = "remove";
     remove.dataset.idx = String(i);
     row.append(badge, name, src, remove);
@@ -293,7 +310,7 @@ function renderAdd(): void {
   const box = document.getElementById("duoAdd") as HTMLElement;
   box.replaceChildren();
   if (state.tracks.length >= 3) {
-    box.append(el("div", "duo-empty", "Набор полон (3 дорожки)"));
+    box.append(el("div", "duo-empty", t("Набор полон (3 дорожки)")));
     return;
   }
   const current = new Set(state.tracks.map((t) => normalizeId(t.id)));
@@ -317,26 +334,26 @@ function renderAdd(): void {
   };
   mk(
     "base",
-    "+ дорожка платформы…",
+    t("+ дорожка платформы…"),
     state.base
       .filter((b) => !current.has(normalizeId(b.id)))
       .map((b) => ({
         id: b.id,
-        name: `${b.name}${b.original ? " · оригинал" : ""}${b.kind === "asr" ? " · авто" : ""}`,
+        name: `${b.name}${b.original ? t(" · оригинал") : ""}${b.kind === "asr" ? t(" · авто") : ""}`,
       })),
   );
   mk(
     "translation",
-    "+ перевод…",
+    t("+ перевод…"),
     state.translations
-      .filter((t) => !current.has(t.lang))
-      .map((t) => ({ id: t.lang, name: `${t.name} (${t.lang})` })),
+      .filter((tr) => !current.has(tr.lang))
+      .map((tr) => ({ id: tr.lang, name: `${tr.name} (${tr.lang})` })),
   );
   // Облачный перевод (задача 4.2): языки, которых нет у платформы и в наборе;
   // источник — первая непереводная строка набора (предпочтение оригиналу).
   mk(
     "cloud",
-    "+ перевод в… (облако)",
+    t("+ перевод в… (облако)"),
     cloudLangOptions(
       state.translations,
       state.tracks.map((t) => t.lang),
@@ -378,11 +395,11 @@ function renderLook(): void {
     chip.dataset.on = String(active?.id === p.id);
     box.append(chip);
   }
-  const custom = el<HTMLButtonElement>("button", "duo-chip", "Свои");
+  const custom = el<HTMLButtonElement>("button", "duo-chip", t("Свои"));
   custom.type = "button";
   custom.dataset.look = "custom";
   custom.dataset.on = String(active === null);
-  custom.title = "Текущие цвета не совпадают с пресетами";
+  custom.title = t("Текущие цвета не совпадают с пресетами");
   box.append(custom);
   (document.getElementById("duoColorOriginal") as HTMLInputElement).value = state.style.originalColor;
   (document.getElementById("duoColorTranslation") as HTMLInputElement).value = state.style.translationColor;
@@ -469,7 +486,7 @@ const runLangAction = (a: LangAction): void => {
     const meta = document.getElementById("duoTranslateMeta") as HTMLElement;
     meta.hidden = false;
     meta.dataset.phase = "translating";
-    meta.textContent = `Перевод запрошен (${a.lang})…`;
+    meta.textContent = t("Перевод запрошен ({lang})…", { lang: a.lang });
     void bridge.subtitles.translateTrack({ targetLang: a.lang }).catch((ex) => err(ex));
   }
 };
@@ -482,9 +499,9 @@ const pickSubtitlesFile = (): void => {
     try {
       const path = await invoke<string | null>("plugin:dialog|open", {
         options: {
-          title: "Свои субтитры (.srt / .vtt)",
+          title: t("Свои субтитры (.srt / .vtt)"),
           multiple: false,
-          filters: [{ name: "Субтитры", extensions: ["srt", "vtt"] }],
+          filters: [{ name: t("Субтитры"), extensions: ["srt", "vtt"] }],
         },
       });
       if (!path) return;
@@ -492,8 +509,8 @@ const pickSubtitlesFile = (): void => {
       const meta = document.getElementById("duoFileMeta") as HTMLElement;
       meta.hidden = false;
       meta.textContent =
-        `${res.name} — ${res.cueCount} реплик` +
-        (res.warnings.length ? ` (предупреждений: ${res.warnings.length})` : "");
+        t("{name} — {n} реплик", { name: res.name, n: res.cueCount }) +
+        (res.warnings.length ? t(" (предупреждений: {n})", { n: res.warnings.length }) : "");
     } catch (e) {
       err(e);
     }
@@ -507,7 +524,7 @@ const requestAsr = (): void => {
   const meta = document.getElementById("duoAsrMeta") as HTMLElement;
   meta.hidden = false;
   meta.dataset.phase = "transcribing";
-  meta.textContent = "Распознавание запущено…";
+  meta.textContent = t("Распознавание запущено…");
   void bridge.subtitles.asrStart().catch((ex) => err(ex));
 };
 
@@ -687,7 +704,7 @@ export function initDuo(): void {
       const meta = document.getElementById("duoTranslateMeta") as HTMLElement;
       meta.hidden = false;
       meta.dataset.phase = "translating";
-      meta.textContent = `Перевод запрошен (${select.value})…`;
+      meta.textContent = t("Перевод запрошен ({lang})…", { lang: select.value });
       void bridge.subtitles
         .translateTrack({ targetLang: select.value })
         .catch((ex) => err(ex));

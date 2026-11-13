@@ -13,6 +13,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { bridge } from "../bridge";
+import { t } from "../i18n";
 import type {
   BaseTrackInfo,
   DownloadFinished,
@@ -126,7 +127,7 @@ function wireControls(): void {
       try {
         const path = await invoke<string | null>("plugin:dialog|open", {
           options: {
-            title: "Каталог загрузок",
+            title: t("Каталог загрузок"),
             directory: true,
             multiple: false,
           },
@@ -235,7 +236,7 @@ function startDownload(): void {
     };
     if (state.mode !== "subs") {
       if (!state.url.startsWith("http")) {
-        showError("Адрес страницы не похож на ссылку — откройте страницу с видео");
+        showError(t("Адрес страницы не похож на ссылку — откройте страницу с видео"));
         return;
       }
       const rangeOn = ($("dlRangeOn") as HTMLInputElement).checked;
@@ -243,14 +244,16 @@ function startDownload(): void {
         const start = ($("dlRangeStart") as HTMLInputElement).value;
         const end = ($("dlRangeEnd") as HTMLInputElement).value;
         if (!rangeValid(start, end)) {
-          showError("Диапазон: укажите начало (и конец позже начала) в формате мм:сс, например 1:23 — 5:40");
+          showError(
+            t("Диапазон: укажите начало (и конец позже начала) в формате мм:сс, например 1:23 — 5:40"),
+          );
           return;
         }
         params.rangeStartSec = parseTimeInput(start);
         params.rangeEndSec = end.trim() ? parseTimeInput(end) : null;
       }
     } else if (!params.trackId) {
-      showError("Выберите язык субтитров (список появляется на YouTube-видео)");
+      showError(t("Выберите язык субтитров (список появляется на YouTube-видео)"));
       return;
     }
     try {
@@ -258,7 +261,7 @@ function startDownload(): void {
       state.activeJobId = res.jobId;
       $("dlProgress").hidden = false;
       $("dlBarFill").style.width = "0%";
-      $("dlProgressText").textContent = "подготовка…";
+      $("dlProgressText").textContent = t("подготовка…");
       $("dlCancel").hidden = false;
       $<HTMLButtonElement>("dlGo").disabled = true;
       void refreshJobs();
@@ -274,7 +277,7 @@ function renderProgress(p: DownloadProgress): void {
   const bits = [phaseLabel(p.phase)];
   if (p.percent > 0 && p.phase !== "convert") bits.push(`${Math.round(p.percent)}%`);
   if (p.speed) bits.push(p.speed);
-  if (p.eta) bits.push(`осталось ${p.eta}`);
+  if (p.eta) bits.push(t("осталось {t}", { t: p.eta }));
   $("dlProgressText").textContent = bits.join(" · ");
   $("dlCancel").hidden = !(p.phase === "tools" || p.phase === "download" || p.phase === "subs");
 }
@@ -286,11 +289,11 @@ function renderFinished(f: DownloadFinished): void {
   if (f.ok && f.path) {
     const done = $("dlDone");
     done.hidden = false;
-    done.textContent = `Готово: ${f.path}`;
+    done.textContent = t("Готово: {p}", { p: f.path });
   } else if (f.canceled) {
-    showError("Загрузка отменена");
+    showError(t("Загрузка отменена"));
   } else {
-    showError(f.error ?? "загрузка не удалась");
+    showError(f.error ?? t("загрузка не удалась"));
   }
 }
 

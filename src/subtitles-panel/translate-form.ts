@@ -9,6 +9,7 @@ import type {
   TranslateConfig,
   TranslateSettings,
 } from "../bridge/gen/types";
+import { t } from "../i18n";
 
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
   deepl: "DeepL",
@@ -46,7 +47,7 @@ export function formValues(s: TranslateSettings): TranslateFormValues {
 
 /** Placeholder поля ключа: сохранён — пусто = не менять (паттерн прокси). */
 export function keyPlaceholder(hasKey: boolean): string {
-  return hasKey ? "сохранён — пусто = не менять" : "ключ";
+  return hasKey ? t("сохранён — пусто = не менять") : t("ключ");
 }
 
 /** Секрет для set_settings: пустое поле — не менять (null), иначе строка. */
@@ -61,7 +62,7 @@ export function validateForm(v: TranslateFormValues): string | null {
   if (!v.enabled) return null;
   if (v.provider !== "libretranslate") return null;
   const url = v.libreUrl.trim();
-  if (!url) return "Адрес LibreTranslate не задан";
-  if (!/^https?:\/\//.test(url)) return "Адрес LibreTranslate должен начинаться с http:// или https://";
+  if (!url) return t("Адрес LibreTranslate не задан");
+  if (!/^https?:\/\//.test(url)) return t("Адрес LibreTranslate должен начинаться с http:// или https://");
   return null;
 }

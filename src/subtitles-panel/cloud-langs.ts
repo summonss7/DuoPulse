@@ -2,7 +2,11 @@
 // чистые функции без DOM — юнит-тесты. Провайдеры понимают эти коды
 // (DeepL/Google/LibreTranslate пересекаются по базовым парам); панель
 // предлагает языки, которых нет среди бесплатных переводов платформы
-// (tlang) и которых ещё нет в наборе.
+// (tlang) и которых ещё нет в наборе. Статусы конвейера — через t()
+// (i18n, карточка duopulse-137): в ru t() возвращает исходник, тесты
+// остаются зелёными.
+
+import { t } from "../i18n";
 
 export interface CloudLangOption {
   code: string;
@@ -86,9 +90,10 @@ export function translateProgressText(p: {
   provider: string;
   error?: string | null;
 }): string {
-  if (p.phase === "translating") return `Перевод (${p.provider})… ${p.done}/${p.total}`;
-  if (p.phase === "done") return `Перевод готов${p.fromCache ? " (из кэша)" : ""}`;
-  if (p.phase === "error") return `Перевод не удался: ${p.error || "ошибка"}`;
+  if (p.phase === "translating")
+    return t("Перевод ({provider})… {done}/{total}", { provider: p.provider, done: p.done, total: p.total });
+  if (p.phase === "done") return p.fromCache ? t("Перевод готов (из кэша)") : t("Перевод готов");
+  if (p.phase === "error") return t("Перевод не удался: {e}", { e: p.error || t("ошибка") });
   return "";
 }
 
@@ -101,7 +106,7 @@ export function translateUnavailableText(p: {
   willRetry: boolean;
 }): string {
   if (p.reason === "offline" || p.willRetry) {
-    return "Перевод недоступен (нет сети) — повторим, когда сеть появится";
+    return t("Перевод недоступен (нет сети) — повторим, когда сеть появится");
   }
-  return `Перевод недоступен: ${p.detail || "нет провайдера"}`;
+  return t("Перевод недоступен: {d}", { d: p.detail || t("нет провайдера") });
 }

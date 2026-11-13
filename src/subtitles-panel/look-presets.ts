@@ -6,7 +6,10 @@
 //
 // Пресеты обязаны читаться на светлом видео (задача): у всех включена
 // обводка и заметная непрозрачность подложки; «фирменный» — вид по гайду
-// 06 §6 (дефолт DEFAULT_SUBTITLE_STYLE).
+// 06 §6 (дефолт DEFAULT_SUBTITLE_STYLE). Метки — через t() (i18n,
+// карточка duopulse-137): в ru исходник, тесты остаются зелёными.
+
+import { t } from "../i18n";
 
 /** Поля стиля, задаваемые пресетом вида (геометрию — размер/позицию/отступ —
  *  пресет не трогает: это отдельные настройки). */
@@ -28,7 +31,7 @@ export interface LookPreset {
 export const LOOK_PRESETS: readonly LookPreset[] = [
   {
     id: "brand",
-    label: "Фирменный",
+    label: t("Фирменный"),
     patch: {
       originalColor: "#ffffff",
       translationColor: "#bdfe4f",
@@ -40,7 +43,7 @@ export const LOOK_PRESETS: readonly LookPreset[] = [
   },
   {
     id: "mono",
-    label: "Ч/б контраст",
+    label: t("Ч/б контраст"),
     patch: {
       originalColor: "#ffffff",
       translationColor: "#e6e6e6",
@@ -52,7 +55,7 @@ export const LOOK_PRESETS: readonly LookPreset[] = [
   },
   {
     id: "tv",
-    label: "Жёлтый TV",
+    label: t("Жёлтый TV"),
     patch: {
       originalColor: "#ffdd33",
       translationColor: "#ffffff",

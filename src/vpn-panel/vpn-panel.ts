@@ -11,6 +11,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
+import { t } from "../i18n";
 import { anchorPanel, closePanel, currentPanel, openPanel, panelKind } from "../chrome/panel-window";
 import type {
   VpnProfileInfo,
@@ -87,7 +88,7 @@ function renderShield(): void {
   btn.title =
     st === "off"
       ? shieldOffTitle(routing, profiles.length > 0)
-      : `VPN — ${shieldLabel(st)} (${routingLabel(routing)})`;
+      : t("VPN — {s} ({r})", { s: shieldLabel(st), r: routingLabel(routing) });
 }
 
 function renderStatus(): void {
@@ -95,7 +96,10 @@ function renderStatus(): void {
   statusEl.dataset.state = st;
   statusStateEl.textContent = shieldLabel(st);
   if (st === "connected" && status?.wg) {
-    statusDetailEl.textContent = `«${status.wg.profileName}» · ${status.wg.endpoint}`;
+    statusDetailEl.textContent = t("«{p}» · {e}", {
+      p: status.wg.profileName,
+      e: status.wg.endpoint,
+    });
   } else if (st === "off") {
     // duopulse-076: без профиля — явная причина и что делать (не «просто напрямую»)
     statusDetailEl.textContent = offDetail(
@@ -114,7 +118,7 @@ function renderProfiles(): void {
   if (profiles.length === 0) {
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = "профилей нет — импортируйте .conf";
+    opt.textContent = t("профилей нет — импортируйте .conf");
     profileEl.append(opt);
     profileEl.disabled = true;
     removeEl.hidden = true;
@@ -128,7 +132,7 @@ function renderProfiles(): void {
   for (const p of profiles) {
     const opt = document.createElement("option");
     opt.value = p.id;
-    opt.textContent = `${p.name} — ${p.endpoint}${p.active ? " · активен" : ""}`;
+    opt.textContent = `${t("{n} — {e}", { n: p.name, e: p.endpoint })}${p.active ? t(" · активен") : ""}`;
     opt.selected = p.id === selectedId;
     profileEl.append(opt);
   }
@@ -164,8 +168,9 @@ function renderRules(): void {
   if (rules.length === 0) {
     const empty = document.createElement("div");
     empty.className = "vpn-empty";
-    empty.textContent =
-      "Правил нет. В split-режиме сайт отсюда идёт через туннель, остальное — напрямую.";
+    empty.textContent = t(
+      "Правил нет. В split-режиме сайт отсюда идёт через туннель, остальное — напрямую.",
+    );
     rulesEl.append(empty);
     return;
   }
@@ -175,7 +180,7 @@ function renderRules(): void {
     const dom = document.createElement("span");
     dom.className = "vpn-mono";
     dom.textContent = r.domain;
-    dom.title = `правило ловит и поддомены (${r.domain} и *.${r.domain})`;
+    dom.title = t("правило ловит и поддомены ({d} и *.{d})", { d: r.domain });
     const seg = document.createElement("div");
     seg.className = "vpn-seg";
     const mk = (route: "tunnel" | "direct", text: string): HTMLButtonElement => {
@@ -186,11 +191,11 @@ function renderRules(): void {
       b.addEventListener("click", () => addRule(r.domain, route));
       return b;
     };
-    seg.append(mk("tunnel", "Туннель"), mk("direct", "Напрямую"));
+    seg.append(mk("tunnel", t("Туннель")), mk("direct", t("Напрямую")));
     const del = document.createElement("button");
     del.type = "button";
     del.className = "link";
-    del.textContent = "удалить";
+    del.textContent = t("удалить");
     del.addEventListener("click", () => {
       void bridge.vpn
         .removeRule({ domain: r.domain })
@@ -269,7 +274,9 @@ enabledEl.addEventListener("change", async () => {
   if (on && !selectedId) {
     enabledEl.checked = false;
     flashDetail(
-      "Сначала импортируйте профиль WireGuard (.conf) — файл выдаёт ваш VPN-провайдер; собственных серверов у DuoPulse нет."
+      t(
+        "Сначала импортируйте профиль WireGuard (.conf) — файл выдаёт ваш VPN-провайдер; собственных серверов у DuoPulse нет."
+      )
     );
     return;
   }
@@ -288,7 +295,7 @@ importEl.addEventListener("click", () => {
     try {
       const path = await invoke<string | null>("plugin:dialog|open", {
         options: {
-          title: "Профиль WireGuard (.conf)",
+          title: t("Профиль WireGuard (.conf)"),
           multiple: false,
           filters: [{ name: "WireGuard", extensions: ["conf"] }],
         },
@@ -299,8 +306,8 @@ importEl.addEventListener("click", () => {
       await refreshAll().catch(err);
       flashDetail(
         tunnelOn()
-          ? `Профиль «${info.name}» импортирован.`
-          : `Профиль «${info.name}» импортирован — включите тумблер.`,
+          ? t("Профиль «{p}» импортирован.", { p: info.name })
+          : t("Профиль «{p}» импортирован — включите тумблер.", { p: info.name }),
       );
     } catch (e) {
       flashDetail(String(e));
@@ -321,7 +328,7 @@ removeEl.addEventListener("click", () => {
       await bridge.vpn.removeProfile({ id });
       selectedId = null;
       await refreshAll().catch(err);
-      flashDetail("Профиль удалён.");
+      flashDetail(t("Профиль удалён."));
     } catch (e) {
       flashDetail(String(e));
     }
@@ -353,10 +360,11 @@ for (const b of modeEl.querySelectorAll<HTMLButtonElement>("button")) {
         status = st;
         if (mode === "off") sessionRoutes.clear();
         await refreshAll().catch(err);
+        const r = routingLabel(mode);
         flashDetail(
           st.mode === "wg" || mode === "off"
-            ? `Режим: ${routingLabel(mode)}.`
-            : `Режим сохранён (${routingLabel(mode)}), но туннель не поднят — включите тумблер.`,
+            ? t("Режим: {r}.", { r })
+            : t("Режим сохранён ({r}), но туннель не поднят — включите тумблер.", { r }),
         );
       })
       .catch((e) => flashDetail(String(e)));
@@ -370,7 +378,11 @@ function addRule(domain: string, route: "tunnel" | "direct"): void {
       rulesRes = res;
       renderRules();
       renderMode();
-      flashDetail(`«${domain}» — ${route === "tunnel" ? "через туннель" : "напрямую"}.`);
+      flashDetail(
+        route === "tunnel"
+          ? t("«{d}» — через туннель.", { d: domain })
+          : t("«{d}» — напрямую.", { d: domain }),
+      );
     })
     .catch((e) => flashDetail(String(e)));
 }
@@ -378,7 +390,7 @@ function addRule(domain: string, route: "tunnel" | "direct"): void {
 function addRuleFromInput(route: "tunnel" | "direct"): void {
   const domain = ruleDomainEl.value.trim().toLowerCase();
   if (!domain) {
-    flashDetail("Введите домен — например, example.com.");
+    flashDetail(t("Введите домен — например, example.com."));
     return;
   }
   addRule(domain, route);

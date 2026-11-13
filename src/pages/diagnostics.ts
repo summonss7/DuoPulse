@@ -12,6 +12,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { PerfSnapshotResult } from "../bridge/gen/types";
+import { t, uiLocale } from "../i18n";
 
 const err = (e: unknown): void => console.error("diagnostics-page:", e);
 
@@ -59,7 +60,7 @@ function stat(label: string, value: string, sub?: string): HTMLElement {
   return card;
 }
 
-const ms = (v: number | null | undefined): string => (v == null ? "—" : `${v} мс`);
+const ms = (v: number | null | undefined): string => (v == null ? "—" : t("{v} мс", { v }));
 
 /** Живой срез → карточки секции «Сеанс». */
 function renderLive(root: HTMLElement, snap: PerfSnapshotResult): void {
@@ -69,36 +70,47 @@ function renderLive(root: HTMLElement, snap: PerfSnapshotResult): void {
   const st = snap.startup;
   kids.push(
     stat(
-      "Старт этого запуска",
+      t("Старт этого запуска"),
       st ? ms(st.ms) : "—",
       st
-        ? `${st.cold ? "холодный (P-01)" : "тёплый (P-02)"} · фазы: ${st.phases
-            .map((p) => `${p.stage} ${p.ms}`)
-            .join(" → ")}`
-        : "готовится…",
+        ? t("{k} · фазы: {p}", {
+            k: st.cold ? t("холодный (P-01)") : t("тёплый (P-02)"),
+            p: st.phases
+              .map((p) => `${p.stage} ${p.ms}`)
+              .join(" → "),
+          })
+        : t("готовится…"),
     ),
   );
   const sw = snap.tabSwitch;
   kids.push(
     stat(
-      "Переключение вкладок",
+      t("Переключение вкладок"),
       ms(sw.lastMs),
-      `среднее ${ms(sw.avgMs)} · максимум ${ms(sw.maxMs)} · ×${sw.count}`,
+      t("среднее {a} · максимум {m} · ×{n}", { a: ms(sw.avgMs), m: ms(sw.maxMs), n: sw.count }),
     ),
   );
-  kids.push(stat("RAM оболочки (duopulse.exe)", `${snap.ramSelfMb} МБ`, "приватная память, P-03"));
+  kids.push(
+    stat(t("RAM оболочки (duopulse.exe)"), t("{n} МБ", { n: snap.ramSelfMb }), t("приватная память, P-03")),
+  );
   const ad = snap.adblock;
   kids.push(
     stat(
-      "Блокировщик (сеанс)",
-      `${ad.blockedTotal} бл.`,
-      `из ${ad.seenTotal} запросов · ${ad.ready ? "списки готовы" : "списки грузятся"}${
-        ad.enabled ? "" : " · выключен"
-      }`,
+      t("Блокировщик (сеанс)"),
+      t("{n} бл.", { n: ad.blockedTotal }),
+      t("из {n} запросов · {s}{off}", {
+        n: ad.seenTotal,
+        s: ad.ready ? t("списки готовы") : t("списки грузятся"),
+        off: ad.enabled ? "" : t(" · выключен"),
+      }),
     ),
   );
   kids.push(
-    stat("Вкладки", String(snap.tabs.total), snap.tabs.sleeping ? `спящих: ${snap.tabs.sleeping}` : "все активны"),
+    stat(
+      t("Вкладки"),
+      String(snap.tabs.total),
+      snap.tabs.sleeping ? t("спящих: {n}", { n: snap.tabs.sleeping }) : t("все активны"),
+    ),
   );
   grid.replaceChildren(...kids);
 }
@@ -167,15 +179,15 @@ function renderHistory(root: HTMLElement, runs: { id: number; createdAt: number;
     row.dataset.metric = m.id;
     const name = document.createElement("div");
     name.className = "diag-row-name";
-    name.textContent = m.name;
+    name.textContent = t(m.name);
     const budget = document.createElement("div");
     budget.className = "diag-row-budget";
-    budget.textContent = m.budget;
+    budget.textContent = t(m.budget);
     const last = values[values.length - 1];
     const lastEl = document.createElement("div");
     lastEl.className = "diag-row-last";
     lastEl.dataset.metric = m.id;
-    lastEl.textContent = `${last} ${m.unit}`;
+    lastEl.textContent = `${last} ${t(m.unit)}`;
     if (m.budgetMax != null && last > m.budgetMax) lastEl.classList.add("over");
     else if (m.budgetMax != null) lastEl.classList.add("ok");
     row.append(name, sparkline(values, m.budgetMax), lastEl, budget);
@@ -188,12 +200,15 @@ function renderHistory(root: HTMLElement, runs: { id: number; createdAt: number;
     el.className = "diag-run";
     const head = document.createElement("span");
     head.className = "diag-run-head";
-    head.textContent = `${new Date(r.createdAt).toLocaleString("ru-RU", {
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    })} · ${r.label || "без метки"}`;
+    head.textContent = t("{d} · {label}", {
+      d: new Date(r.createdAt).toLocaleString(uiLocale, {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      label: r.label || t("без метки"),
+    });
     const vals = document.createElement("span");
     vals.className = "diag-run-vals";
     vals.textContent = METRICS.filter((m) => typeof r.metrics[m.id] === "number")
@@ -225,7 +240,7 @@ async function saveSnapshot(label: string): Promise<void> {
   if (snap.startup) metrics[snap.startup.cold ? "p01_ms" : "p02_ms"] = snap.startup.ms;
   if (snap.ramSelfMb > 0) metrics.p03_mb = snap.ramSelfMb;
   if (!Object.keys(metrics).length) {
-    throw new Error("в срезе не оказалось значений (старт ещё не зафиксирован)");
+    throw new Error(t("в срезе не оказалось значений (старт ещё не зафиксирован)"));
   }
   await bridge.perf.saveRun({ label, metrics });
   await reloadRuns();
@@ -236,7 +251,7 @@ async function saveSnapshot(label: string): Promise<void> {
 /** Точка входа webview внутренней страницы (вызывается из src/main.ts —
  *  модуль импортируется ради побочного эффекта). */
 export function initDiagnosticsPage(): void {
-  document.title = "Диагностика — DuoPulse";
+  document.title = t("Диагностика — DuoPulse");
   document.body.classList.add("internal-page");
   document.getElementById("app")?.remove();
 
@@ -254,12 +269,12 @@ export function initDiagnosticsPage(): void {
   logo.append(pulse);
   const title = document.createElement("h1");
   title.className = "mgr-title";
-  title.textContent = "Диагностика производительности";
+  title.textContent = t("Диагностика производительности");
   head.append(logo, title);
 
   // секция «Сеанс сейчас» + срез
   const liveTitle = document.createElement("h2");
-  liveTitle.textContent = "Сеанс сейчас";
+  liveTitle.textContent = t("Сеанс сейчас");
   const live = document.createElement("div");
   live.className = "diag-live";
 
@@ -268,21 +283,23 @@ export function initDiagnosticsPage(): void {
   const label = document.createElement("input");
   label.id = "diagLabel";
   label.type = "text";
-  label.placeholder = "Метка среза (необязательно)";
+  label.placeholder = t("Метка среза (необязательно)");
   label.spellcheck = false;
   const saveBtn = document.createElement("button");
   saveBtn.id = "diagSave";
   saveBtn.type = "button";
-  saveBtn.textContent = "Снять срез";
+  saveBtn.textContent = t("Снять срез");
   const saveErr = document.createElement("span");
   saveErr.className = "diag-save-err";
   saveBtn.addEventListener("click", () => {
-    const auto = `Срез ${new Date().toLocaleString("ru-RU", {
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    })}`;
+    const auto = t("Срез {d}", {
+      d: new Date().toLocaleString(uiLocale, {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    });
     saveBtn.disabled = true;
     saveErr.textContent = "";
     saveSnapshot(label.value.trim() || auto)
@@ -298,18 +315,19 @@ export function initDiagnosticsPage(): void {
 
   // секция истории
   const histTitle = document.createElement("h2");
-  histTitle.textContent = "Метрики P-01..P-08 — история прогонов";
+  histTitle.textContent = t("Метрики P-01..P-08 — история прогонов");
   const histNote = document.createElement("div");
   histNote.className = "diag-note";
-  histNote.textContent =
+  histNote.textContent = t(
     "Хранятся последние 10 прогонов (docs/04 §3). Живой срез сохраняет P-01/P-02/P-03; " +
-    "полный прогон (все метрики) пишет эталонный стенд e2e/perf.";
+      "полный прогон (все метрики) пишет эталонный стенд e2e/perf.",
+  );
   const rows = document.createElement("div");
   rows.className = "diag-rows";
   const empty = document.createElement("div");
   empty.className = "diag-empty";
   empty.hidden = true;
-  empty.textContent = "Прогонов пока нет — снимите срез или прогоните эталонный стенд e2e/perf.";
+  empty.textContent = t("Прогонов пока нет — снимите срез или прогоните эталонный стенд e2e/perf.");
   const runsList = document.createElement("div");
   runsList.className = "diag-runs";
 

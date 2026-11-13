@@ -17,6 +17,7 @@ import type {
   SubtitlesStyleInfo,
   TranslationLangInfo,
 } from "../bridge/gen/types";
+import { t } from "../i18n";
 import { fromOptions, langRowState, toOptions } from "./langs-row";
 import { CLOUD_LANGS } from "./cloud-langs";
 import { LOOK_PRESETS, matchLookPreset } from "./look-presets";
@@ -58,7 +59,7 @@ export function buildDuoMenuPayload(state: DuoMenuState, defaultTranslationLang:
   const to: DuoMenuPayload["to"] = [
     {
       value: "",
-      name: state.base.length ? "Нет (только оригинал)" : "—",
+      name: state.base.length ? t("Нет (только оригинал)") : "—",
       group: "none",
       current: currentTo === "",
     },
@@ -73,7 +74,9 @@ export function buildDuoMenuPayload(state: DuoMenuState, defaultTranslationLang:
     const cloud = currentTo.startsWith("cloud:");
     to.push({
       value: currentTo,
-      name: cloud ? `${row.to.kind === "cloud" ? row.to.lang : currentTo} — облако` : currentTo,
+      name: cloud
+        ? t("{lang} — облако", { lang: row.to.kind === "cloud" ? row.to.lang : currentTo })
+        : currentTo,
       group: cloud ? "cloud" : "platform",
       current: true,
     });

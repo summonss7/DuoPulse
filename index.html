@@ -90,54 +90,54 @@
       </div>
       <div id="duoPanel" class="duo-panel" hidden>
         <div class="duo-head">
-          <span class="duo-title">Субтитры</span>
-          <label class="switch" title="Вкл/выкл показ набора (Alt+D)">
+          <span class="duo-title" data-i18n="Субтитры">Субтитры</span>
+          <label class="switch" title="Вкл/выкл показ набора (Alt+D)" data-i18n-title="Вкл/выкл показ набора (Alt+D)">
             <input type="checkbox" id="duoEnabled" />
             <span class="slider"></span>
           </label>
         </div>
-        <div class="duo-meta" id="duoMeta">Видео не найдено</div>
-        <div class="duo-section-title">Языки <span class="duo-hint">с какого на какой</span></div>
+        <div class="duo-meta" id="duoMeta" data-i18n="Видео не найдено">Видео не найдено</div>
+        <div class="duo-section-title"><span data-i18n="Языки">Языки</span> <span class="duo-hint" data-i18n="с какого на какой">с какого на какой</span></div>
         <div class="duo-langs" id="duoLangs">
           <label class="duo-field">
-            <span>Язык видео</span>
+            <span data-i18n="Язык видео">Язык видео</span>
             <select id="duoLangFrom" class="duo-select"></select>
           </label>
           <span class="duo-langs-arrow" aria-hidden="true">&rarr;</span>
           <label class="duo-field">
-            <span>Перевод</span>
+            <span data-i18n="Перевод">Перевод</span>
             <select id="duoLangTo" class="duo-select"></select>
           </label>
         </div>
         <div class="duo-langs-note">
-          Перевод по умолчанию для новых видео —
-          <button type="button" id="duoLangSettings" class="link">настройки субтитров</button>
+          <span data-i18n="Перевод по умолчанию для новых видео —">Перевод по умолчанию для новых видео —</span>
+          <button type="button" id="duoLangSettings" class="link" data-i18n="настройки субтитров">настройки субтитров</button>
         </div>
         <div class="duo-presets" id="duoPresets"></div>
-        <div class="duo-section-title">Набор <span class="duo-hint">до 3 строк</span></div>
+        <div class="duo-section-title"><span data-i18n="Набор">Набор</span> <span class="duo-hint" data-i18n="до 3 строк">до 3 строк</span></div>
         <div class="duo-set" id="duoSet"></div>
         <div class="duo-add" id="duoAdd"></div>
         <div class="duo-files">
-          <button type="button" id="duoAsrBtn" class="ghost" title="Сгенерировать субтитры распознаванием речи — для видео без дорожек">Распознать речь (ASR)…</button>
+          <button type="button" id="duoAsrBtn" class="ghost" title="Сгенерировать субтитры распознаванием речи — для видео без дорожек" data-i18n-title="Сгенерировать субтитры распознаванием речи — для видео без дорожек" data-i18n="Распознать речь (ASR)…">Распознать речь (ASR)…</button>
         </div>
         <div class="duo-file-meta" id="duoAsrMeta" hidden></div>
         <div class="duo-file-meta" id="duoTranslateMeta" hidden></div>
-        <div class="duo-section-title">Свои субтитры</div>
+        <div class="duo-section-title" data-i18n="Свои субтитры">Свои субтитры</div>
         <div class="duo-files">
-          <button type="button" id="duoFileBtn" class="ghost">Файл .srt / .vtt…</button>
-          <span class="duo-hint">или перетащите на страницу</span>
+          <button type="button" id="duoFileBtn" class="ghost" data-i18n="Файл .srt / .vtt…">Файл .srt / .vtt…</button>
+          <span class="duo-hint" data-i18n="или перетащите на страницу">или перетащите на страницу</span>
         </div>
         <div class="duo-file-meta" id="duoFileMeta" hidden></div>
         <div class="duo-section-title duo-tr-head">
-          Перевод
-          <label class="switch" title="Разрешить облачный перевод субтитров (кроме переводов платформы)">
+          <span data-i18n="Перевод">Перевод</span>
+          <label class="switch" title="Разрешить облачный перевод субтитров (кроме переводов платформы)" data-i18n-title="Разрешить облачный перевод субтитров (кроме переводов платформы)">
             <input type="checkbox" id="trEnabled" />
             <span class="slider"></span>
           </label>
         </div>
         <div class="duo-tr">
           <label class="duo-field">
-            <span>Провайдер</span>
+            <span data-i18n="Провайдер">Провайдер</span>
             <select id="trProvider">
               <option value="deepl">DeepL</option>
               <option value="google">Google Translate</option>
@@ -145,128 +145,128 @@
             </select>
           </label>
           <label class="duo-field" id="trDeeplPlanField">
-            <span>Тариф DeepL</span>
+            <span data-i18n="Тариф DeepL">Тариф DeepL</span>
             <select id="trDeeplPlan">
               <option value="free">Free (api-free.deepl.com)</option>
               <option value="pro">Pro (api.deepl.com)</option>
             </select>
           </label>
           <label class="duo-field" id="trLibreUrlField">
-            <span>Адрес LibreTranslate</span>
+            <span data-i18n="Адрес LibreTranslate">Адрес LibreTranslate</span>
             <input id="trLibreUrl" type="text" placeholder="http://localhost:5000" spellcheck="false" autocomplete="off" />
           </label>
           <label class="duo-field">
-            <span>Ключ API&nbsp;<button type="button" id="trKeyClear" class="link" hidden>удалить</button></span>
-            <input id="trKey" type="password" placeholder="ключ" autocomplete="new-password" />
+            <span><span data-i18n="Ключ API">Ключ API</span>&nbsp;<button type="button" id="trKeyClear" class="link" hidden data-i18n="удалить">удалить</button></span>
+            <input id="trKey" type="password" placeholder="ключ" data-i18n-placeholder="ключ" autocomplete="new-password" />
           </label>
           <div class="duo-tr-status" id="trStatus" hidden></div>
           <div class="duo-tr-actions">
-            <button type="button" id="trTest" class="ghost" title="Сохраняет форму и делает один живой запрос провайдера">Проверить</button>
-            <button type="button" id="trSave" class="primary">Сохранить</button>
+            <button type="button" id="trTest" class="ghost" title="Сохраняет форму и делает один живой запрос провайдера" data-i18n-title="Сохраняет форму и делает один живой запрос провайдера" data-i18n="Проверить">Проверить</button>
+            <button type="button" id="trSave" class="primary" data-i18n="Сохранить">Сохранить</button>
           </div>
-          <div class="duo-hint">Ключ хранится в DPAPI (не в settings.json). Кнопка «Проверить» сначала сохраняет форму.</div>
+          <div class="duo-hint" data-i18n="Ключ хранится в DPAPI (не в settings.json). Кнопка «Проверить» сначала сохраняет форму.">Ключ хранится в DPAPI (не в settings.json). Кнопка «Проверить» сначала сохраняет форму.</div>
         </div>
-        <div class="duo-section-title">Синхронизация</div>
+        <div class="duo-section-title" data-i18n="Синхронизация">Синхронизация</div>
         <div class="duo-offset">
           <input type="range" id="duoOffset" min="-10000" max="10000" step="100" value="0" />
-          <span class="duo-offset-val" id="duoOffsetVal">0,0 с</span>
-          <button type="button" id="duoOffsetReset" class="link">Сброс</button>
+          <span class="duo-offset-val" id="duoOffsetVal" data-i18n="0,0 с">0,0 с</span>
+          <button type="button" id="duoOffsetReset" class="link" data-i18n="Сброс">Сброс</button>
         </div>
-        <div class="duo-section-title">Вид плашки</div>
+        <div class="duo-section-title" data-i18n="Вид плашки">Вид плашки</div>
         <div class="duo-presets" id="duoLookPresets"></div>
         <div class="duo-style">
           <label class="duo-field">
-            <span>Размер</span>
+            <span data-i18n="Размер">Размер</span>
             <input type="range" id="duoScale" min="75" max="300" step="5" value="100" />
             <span class="duo-scale-val" id="duoScaleVal">100%</span>
           </label>
-          <label class="duo-field" title="Гарнитура строк плашки: фирменные с кириллицей или системная">
-            <span>Гарнитура</span>
+          <label class="duo-field" title="Гарнитура строк плашки: фирменные с кириллицей или системная" data-i18n-title="Гарнитура строк плашки: фирменные с кириллицей или системная">
+            <span data-i18n="Гарнитура">Гарнитура</span>
             <select id="duoFontFamily">
               <option value="Inter">Inter</option>
               <option value="JetBrains Mono">JetBrains Mono</option>
-              <option value="system">Системная</option>
+              <option value="system" data-i18n="Системная">Системная</option>
             </select>
           </label>
           <div class="duo-field">
-            <span>Позиция</span>
+            <span data-i18n="Позиция">Позиция</span>
             <div class="duo-seg" id="duoPosition">
-              <button type="button" data-pos="bottom" class="on">Низ</button>
-              <button type="button" data-pos="top">Верх</button>
+              <button type="button" data-pos="bottom" class="on" data-i18n="Низ">Низ</button>
+              <button type="button" data-pos="top" data-i18n="Верх">Верх</button>
             </div>
           </div>
         </div>
-        <div class="duo-colors" id="duoColors" title="Цвета строк набора и подложки-плашки">
-          <label class="duo-color">Оригинал<input type="color" id="duoColorOriginal" value="#ffffff" /></label>
-          <label class="duo-color">Перевод<input type="color" id="duoColorTranslation" value="#bdfe4f" /></label>
-          <label class="duo-color">Третьи<input type="color" id="duoColorMuted" value="#ffffff" /></label>
-          <label class="duo-color">Плашка<input type="color" id="duoColorPlate" value="#0a0e17" /></label>
-          <label class="duo-color duo-stroke" title="Тёмная обводка текста — читаемость на светлом видео">
-            <input type="checkbox" id="duoStroke" checked /><span>Обводка</span>
+        <div class="duo-colors" id="duoColors" title="Цвета строк набора и подложки-плашки" data-i18n-title="Цвета строк набора и подложки-плашки">
+          <label class="duo-color"><span data-i18n="Оригинал">Оригинал</span><input type="color" id="duoColorOriginal" value="#ffffff" /></label>
+          <label class="duo-color"><span data-i18n="Перевод">Перевод</span><input type="color" id="duoColorTranslation" value="#bdfe4f" /></label>
+          <label class="duo-color"><span data-i18n="Третьи">Третьи</span><input type="color" id="duoColorMuted" value="#ffffff" /></label>
+          <label class="duo-color"><span data-i18n="Плашка">Плашка</span><input type="color" id="duoColorPlate" value="#0a0e17" /></label>
+          <label class="duo-color duo-stroke" title="Тёмная обводка текста — читаемость на светлом видео" data-i18n-title="Тёмная обводка текста — читаемость на светлом видео">
+            <input type="checkbox" id="duoStroke" checked /><span data-i18n="Обводка">Обводка</span>
           </label>
         </div>
       </div>
       <!-- Панель «Скачать» (карточка duopulse-118): видео/музыка/субтитры с
            активной страницы, выбор качества/языка/фрагмента; наполняет
            src/download-panel/panel.ts -->
-      <div id="downloadPanel" class="dl-panel" hidden role="dialog" aria-label="Панель загрузки">
+      <div id="downloadPanel" class="dl-panel" hidden role="dialog" aria-label="Панель загрузки" data-i18n-aria-label="Панель загрузки">
         <div class="dl-head">
-          <span class="dl-title">Скачать</span>
+          <span class="dl-title" data-i18n="Скачать">Скачать</span>
           <span class="dl-url" id="dlUrl" title=""></span>
         </div>
         <div class="dl-modes" id="dlModes" role="tablist">
-          <button type="button" data-mode="video" class="on">Видео</button>
-          <button type="button" data-mode="audio">Музыка</button>
-          <button type="button" data-mode="subs">Субтитры</button>
+          <button type="button" data-mode="video" class="on" data-i18n="Видео">Видео</button>
+          <button type="button" data-mode="audio" data-i18n="Музыка">Музыка</button>
+          <button type="button" data-mode="subs" data-i18n="Субтитры">Субтитры</button>
         </div>
         <label class="dl-field" id="dlQualityField">
-          <span>Качество</span>
+          <span data-i18n="Качество">Качество</span>
           <select id="dlQuality" class="dl-select"></select>
         </label>
         <label class="dl-field" id="dlAudioField">
-          <span>Формат музыки</span>
+          <span data-i18n="Формат музыки">Формат музыки</span>
           <select id="dlAudioFormat" class="dl-select"></select>
         </label>
         <label class="dl-field" id="dlLangField">
-          <span>Язык субтитров</span>
+          <span data-i18n="Язык субтитров">Язык субтитров</span>
           <select id="dlLang" class="dl-select"></select>
         </label>
         <label class="dl-field dl-plain" id="dlPlainField" hidden>
           <input type="checkbox" id="dlPlain" />
-          <span>без тайм-кодов (только текст, .txt)</span>
+          <span data-i18n="без тайм-кодов (только текст, .txt)">без тайм-кодов (только текст, .txt)</span>
         </label>
-        <div class="dl-no-tracks" id="dlNoTracks" hidden>Дорожек субтитров нет (не YouTube-видео или список ещё не получен)</div>
+        <div class="dl-no-tracks" id="dlNoTracks" hidden data-i18n="Дорожек субтитров нет (не YouTube-видео или список ещё не получен)">Дорожек субтитров нет (не YouTube-видео или список ещё не получен)</div>
         <div class="dl-range" id="dlRange">
           <label class="dl-range-on">
             <input type="checkbox" id="dlRangeOn" />
-            <span>Фрагмент</span>
+            <span data-i18n="Фрагмент">Фрагмент</span>
           </label>
           <input id="dlRangeStart" type="text" placeholder="0:00" spellcheck="false" autocomplete="off" />
           <span class="dl-range-sep">&rarr;</span>
-          <input id="dlRangeEnd" type="text" placeholder="до конца" spellcheck="false" autocomplete="off" />
-          <span class="dl-hint">мм:сс</span>
+          <input id="dlRangeEnd" type="text" placeholder="до конца" data-i18n-placeholder="до конца" spellcheck="false" autocomplete="off" />
+          <span class="dl-hint" data-i18n="мм:сс">мм:сс</span>
         </div>
         <div class="dl-dir">
           <span class="dl-dir-path" id="dlDir" title=""></span>
-          <button type="button" id="dlDirBtn" class="link">Изменить&hellip;</button>
+          <button type="button" id="dlDirBtn" class="link" data-i18n="Изменить…">Изменить&hellip;</button>
         </div>
         <div class="dl-progress" id="dlProgress" hidden>
           <div class="dl-bar"><i id="dlBarFill"></i></div>
           <span class="dl-progress-text" id="dlProgressText"></span>
-          <button type="button" id="dlCancel" class="ghost">Отмена</button>
+          <button type="button" id="dlCancel" class="ghost" data-i18n="Отмена">Отмена</button>
         </div>
         <div class="dl-done" id="dlDone" hidden></div>
         <div class="dl-error" id="dlError" hidden></div>
         <div class="dl-actions">
-          <button type="button" id="dlGo" class="primary">Скачать</button>
+          <button type="button" id="dlGo" class="primary" data-i18n="Скачать">Скачать</button>
         </div>
-        <div class="dl-hint" id="dlToolsHint">Видео и музыка качаются через yt-dlp — при первом запуске в профиль докачаются инструменты: yt-dlp (~18&nbsp;МБ), deno (~40&nbsp;МБ, нужен YouTube) и ffmpeg (~95&nbsp;МБ, качество/фрагменты); один раз.</div>
+        <div class="dl-hint" id="dlToolsHint" data-i18n="Видео и музыка качаются через yt-dlp — при первом запуске в профиль докачаются инструменты: yt-dlp (~18 МБ), deno (~40 МБ, нужен YouTube) и ffmpeg (~95 МБ, качество/фрагменты); один раз.">Видео и музыка качаются через yt-dlp — при первом запуске в профиль докачаются инструменты: yt-dlp (~18&nbsp;МБ), deno (~40&nbsp;МБ, нужен YouTube) и ffmpeg (~95&nbsp;МБ, качество/фрагменты); один раз.</div>
         <div class="dl-jobs" id="dlJobs"></div>
       </div>
-      <div id="vpnPanel" class="vpn-panel" hidden role="dialog" aria-label="Панель VPN">
+      <div id="vpnPanel" class="vpn-panel" hidden role="dialog" aria-label="Панель VPN" data-i18n-aria-label="Панель VPN">
         <div class="vpn-row vpn-head">
           <span class="vpn-title">VPN</span>
-          <label class="switch" title="Вкл/выкл туннель WireGuard (нужен импортированный профиль)">
+          <label class="switch" title="Вкл/выкл туннель WireGuard (нужен импортированный профиль)" data-i18n-title="Вкл/выкл туннель WireGuard (нужен импортированный профиль)">
             <input type="checkbox" id="vpnEnabled" />
             <span class="slider"></span>
           </label>
@@ -275,47 +275,47 @@
           <span class="dot"></span><span class="state"></span>
           <span class="detail" id="vpnPanelDetail"></span>
         </div>
-        <div class="vpn-section-title">Сервер</div>
+        <div class="vpn-section-title" data-i18n="Сервер">Сервер</div>
         <div class="vpn-server">
           <select id="vpnProfile" data-vpn="profile"></select>
-          <button type="button" id="vpnImport" class="ghost" data-vpn="import">Импорт .conf…</button>
-          <button type="button" id="vpnProfileRemove" class="link" data-vpn="remove" hidden>удалить</button>
+          <button type="button" id="vpnImport" class="ghost" data-vpn="import" data-i18n="Импорт .conf…">Импорт .conf…</button>
+          <button type="button" id="vpnProfileRemove" class="link" data-vpn="remove" hidden data-i18n="удалить">удалить</button>
         </div>
-        <div class="vpn-section-title">Режим</div>
+        <div class="vpn-section-title" data-i18n="Режим">Режим</div>
         <div class="vpn-seg" id="vpnMode" data-vpn="mode">
-          <button type="button" data-mode="off" title="Весь трафик напрямую, туннель не поднимается">Выключен</button>
-          <button type="button" data-mode="global" title="Весь трафик браузера через туннель">Глобальный</button>
-          <button type="button" data-mode="split" title="Только правила «через туннель» — в туннель, остальное напрямую (целевой)">Split</button>
+          <button type="button" data-mode="off" title="Весь трафик напрямую, туннель не поднимается" data-i18n-title="Весь трафик напрямую, туннель не поднимается" data-i18n="Выключен">Выключен</button>
+          <button type="button" data-mode="global" title="Весь трафик браузера через туннель" data-i18n-title="Весь трафик браузера через туннель" data-i18n="Глобальный">Глобальный</button>
+          <button type="button" data-mode="split" title="Только правила «через туннель» — в туннель, остальное напрямую (целевой)" data-i18n-title="Только правила «через туннель» — в туннель, остальное напрямую (целевой)">Split</button>
         </div>
         <div class="vpn-stats" id="vpnStats" data-vpn="stats" hidden>
           <span class="vpn-mono" data-stat="rx">↓ —</span>
           <span class="vpn-mono" data-stat="tx">↑ —</span>
-          <span class="vpn-mono" data-stat="ping" title="RTT ICMP-эхом до DNS-сервера туннеля">ping —</span>
-          <span class="vpn-mono" data-stat="hs" title="Сколько назад был последний handshake WireGuard">hs —</span>
+          <span class="vpn-mono" data-stat="ping" title="RTT ICMP-эхом до DNS-сервера туннеля" data-i18n-title="RTT ICMP-эхом до DNS-сервера туннеля">ping —</span>
+          <span class="vpn-mono" data-stat="hs" title="Сколько назад был последний handshake WireGuard" data-i18n-title="Сколько назад был последний handshake WireGuard">hs —</span>
         </div>
-        <div class="vpn-section-title">Правила split-tunnel <span class="vpn-hint">домен и его поддомены</span></div>
+        <div class="vpn-section-title"><span data-i18n="Правила split-tunnel">Правила split-tunnel</span> <span class="vpn-hint" data-i18n="домен и его поддомены">домен и его поддомены</span></div>
         <div class="vpn-rules" id="vpnRules" data-vpn="rules"></div>
         <div class="vpn-rule-add">
           <input id="vpnRuleDomain" data-vpn="rule-domain" type="text" placeholder="example.com" spellcheck="false" autocomplete="off" />
-          <button type="button" id="vpnRuleTunnel" class="primary" data-vpn="rule-tunnel" title="Добавить правило: домен — через туннель">Через туннель</button>
-          <button type="button" id="vpnRuleDirect" class="ghost" data-vpn="rule-direct" title="Добавить правило: домен — напрямую">Напрямую</button>
+          <button type="button" id="vpnRuleTunnel" class="primary" data-vpn="rule-tunnel" title="Добавить правило: домен — через туннель" data-i18n-title="Добавить правило: домен — через туннель" data-i18n="Через туннель">Через туннель</button>
+          <button type="button" id="vpnRuleDirect" class="ghost" data-vpn="rule-direct" title="Добавить правило: домен — напрямую" data-i18n-title="Добавить правило: домен — напрямую" data-i18n="Напрямую">Напрямую</button>
         </div>
         <div class="vpn-site" id="vpnSiteRow" data-vpn="site-row" hidden>
           <span class="vpn-mono" id="vpnSiteHost" data-vpn="site-host"></span>
-          <button type="button" id="vpnSiteTunnel" class="link" data-vpn="site-tunnel">этот сайт — через туннель</button>
+          <button type="button" id="vpnSiteTunnel" class="link" data-vpn="site-tunnel" data-i18n="этот сайт — через туннель">этот сайт — через туннель</button>
         </div>
         <div class="vpn-routes" id="vpnRoutes" data-vpn="routes" hidden>
-          <div class="vpn-section-title">Маршруты сеанса</div>
+          <div class="vpn-section-title" data-i18n="Маршруты сеанса">Маршруты сеанса</div>
           <div id="vpnRoutesList" class="vpn-routes-list" data-vpn="routes-list"></div>
         </div>
         <div class="vpn-foot" id="vpnDisclaimer" data-vpn="disclaimer">
-          DuoPulse — только VPN-клиент: серверы принадлежат вам или вашему
+          <span data-i18n="DuoPulse — только VPN-клиент: серверы принадлежат вам или вашему провайдеру VPN; собственных серверов и списков обхода нет. Законность использования VPN зависит от юрисдикции и остаётся вашей ответственностью. В глобальном режиме российские сайты (mail.ru, Яндекс…) могут не открываться — их серверы отклоняют зарубежные IP: добавьте такие домены в split-правило «напрямую».">DuoPulse — только VPN-клиент: серверы принадлежат вам или вашему
           провайдеру VPN; собственных серверов и списков обхода нет. Законность
           использования VPN зависит от юрисдикции и остаётся вашей ответственностью.
           В глобальном режиме российские сайты (mail.ru, Яндекс&hellip;) могут не
           открываться — их серверы отклоняют зарубежные IP: добавьте такие домены
-          в split-правило «напрямую».
-          <button type="button" id="vpnSettingsLink" class="link">Настройки VPN &rarr;</button>
+          в split-правило «напрямую».</span>
+          <button type="button" id="vpnSettingsLink" class="link" data-i18n="Настройки VPN →">Настройки VPN &rarr;</button>
         </div>
       </div>
       <div id="mainMenu" class="main-menu" hidden>

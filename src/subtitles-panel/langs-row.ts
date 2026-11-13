@@ -8,6 +8,7 @@
 // только платформенную часть).
 
 import type { AppliedTrackInfo, BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
+import { t } from "../i18n";
 import { baseLang, cloudLangOptions, withPriorityLangsFirst } from "./cloud-langs";
 import { normalizeTrackId } from "./presets";
 
@@ -43,7 +44,7 @@ export function langRowState(tracks: AppliedTrackInfo[]): LangRowState {
 export function fromOptions(base: BaseTrackInfo[]): { id: string; name: string }[] {
   return withPriorityLangsFirst(base, (b) => b.lang).map((b) => ({
     id: b.id,
-    name: `${b.name}${b.original ? " · оригинал" : ""}${b.kind === "asr" ? " · авто" : ""} (${b.lang})`,
+    name: `${b.name}${b.original ? t(" · оригинал") : ""}${b.kind === "asr" ? t(" · авто") : ""} (${b.lang})`,
   }));
 }
 
@@ -67,7 +68,7 @@ export function toOptions(
     true,
   ).map((l) => ({
     value: `cloud:${l.code}`,
-    name: `${l.name} — облако (${l.code})`,
+    name: t("{name} — облако ({code})", { name: l.name, code: l.code }),
     group: "cloud" as const,
   }));
   return [...platform, ...cloud];

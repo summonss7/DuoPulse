@@ -2,9 +2,11 @@
 // функции без DOM — юнит-тесты. Пресет — список id для subtitles.set_tracks:
 // «Оригинал», «Дуо» (оригинал + предпочитаемый перевод), «Трио» (+ второй
 // перевод) — сценарий docs/01 §5.1. Голый код перевода = база-оригинал
-// (resolveIds адаптера, задача 3.3).
+// (resolveIds адаптера, задача 3.3). Метки — через t() (i18n, карточка
+// duopulse-137): в ru t() возвращает исходник, тесты остаются зелёными.
 
 import type { BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
+import { t } from "../i18n";
 
 /** Предпочитаемые языки перевода по порядку (как content/set-defaults;
  * порядок хозяина — карточка duopulse-094: en → ro → ru → ar). */
@@ -33,13 +35,21 @@ export function presetSets(base: BaseTrackInfo[], translations: TranslationLangI
     }
     return translations.find(ok);
   };
-  const sets: PresetSet[] = [{ key: "solo", label: "Оригинал", ids: [original.id] }];
+  const sets: PresetSet[] = [{ key: "solo", label: t("Оригинал"), ids: [original.id] }];
   const t1 = pick([]);
   if (t1 && original.translatable) {
-    sets.push({ key: "duo", label: `Дуо ${original.lang}+${t1.lang}`, ids: [original.id, t1.lang] });
+    sets.push({
+      key: "duo",
+      label: t("Дуо {a}+{b}", { a: original.lang, b: t1.lang }),
+      ids: [original.id, t1.lang],
+    });
     const t2 = pick([t1.lang]);
     if (t2) {
-      sets.push({ key: "trio", label: `Трио +${t2.lang}`, ids: [original.id, t1.lang, t2.lang] });
+      sets.push({
+        key: "trio",
+        label: t("Трио +{b}", { b: t2.lang }),
+        ids: [original.id, t1.lang, t2.lang],
+      });
     }
   }
   return sets;
