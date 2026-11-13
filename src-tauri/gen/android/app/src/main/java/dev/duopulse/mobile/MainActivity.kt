@@ -27,8 +27,17 @@ class MainActivity : TauriActivity() {
     if (current === this) {
       MobileFullscreen.dismiss()
       MobileWebHelper.destroy()
+      // duopulse-135: wry не вызывает WebView.destroy() — при «назад»-выходе
+      // WebView умирает вместе с activity, и натив Chromium при detach лочит
+      // уже разрушенный мьютекс (FORTIFY abort). Гасим явно, до super/onDestroy:
+      // сначала снять с дерева видов, потом destroy (паттерн из доков WebView).
+      tauriWebView?.let { wv ->
+        tauriWebView = null
+        (wv.parent as? android.view.ViewGroup)?.removeView(wv)
+        wv.stopLoading()
+        wv.destroy()
+      }
       current = null
-      tauriWebView = null
     }
     super.onDestroy()
   }

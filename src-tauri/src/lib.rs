@@ -78,6 +78,23 @@ pub mod history;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod mobile_history;
 
+/// duopulse-135: tao завершает Android-цикл через std::process::exit; exit(3)
+/// гонит atexit-обработчики Chromium (WebView), которые разрушают его глобальный
+/// мьютекс, пока потоки Chromium ещё им пользуются → FORTIFY abort при выходе
+/// «назад» (стек: tao EventLoop::run → process::exit, abort внутри exit).
+/// Подменяем `exit` в своей .so (само-интерпозия: PLT-ссылки из этой же
+/// библиотеки резолвятся в её экспорт раньше libc) на прямой exit_group —
+/// обработчики не запускаются, ядро срезает все потоки. Для Android-выхода из
+/// приложения это и есть ожидаемая семантика.
+#[cfg(target_os = "android")]
+mod exit_shim {
+    #[unsafe(no_mangle)]
+    pub extern "C" fn exit(code: i32) -> ! {
+        unsafe { libc::syscall(libc::SYS_exit_group, code) };
+        unreachable!("exit_group не возвращается")
+    }
+}
+
 /// Точка входа мобильной обёртки; mobile_entry_point генерирует JNI-связку
 /// для Kotlin-активити из gen/android. На десктоп-таргетах не вызывается
 /// (бин main.rs lib не использует — см. шапку).

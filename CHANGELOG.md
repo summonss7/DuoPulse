@@ -5758,3 +5758,11 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   пиксельная верификация скриншотов (fullscreen: весь экран — видео, панели спрятаны;
   без — тулбар оверлея виден); vitest 477/477; android-build.sh release без ошибок.
 - Коммит: 14ae04e feat: duopulse-134 — HTML-fullscreen YouTube на Android (MobileFullscreen.kt: onShowCustomView для web-оверлея и UI-webview, иммерсивный режим, выход «назад»); e2e-стенд e2e/youtube/mobile-fullscreen.mjs; релиз 0.1.34
+
+## 2026-11-13 — duopulse-135: крэш FORTIFY (destroyed mutex) при выходе из Android-приложения кнопкой «назад»
+- Начало: 2026-11-13 00:10, окончание: 2026-11-13 00:32.
+- Причина (по тумбстоуну dropbox): abort возникает внутри std::process::exit — tao `EventLoop::run` завершает Android-цикл через exit(3), atexit-обработчики Chromium разрушают его глобальный мьютекс, пока потоки WebView ещё им пользуются → FORTIFY «pthread_mutex_lock called on a destroyed mutex» ×2 + SIGSEGV main-потока в AwContents.onDetachedFromWindow. Воспроизведено на стоковом 0.1.34 (эмулятор duopulse36, WebView 133.0.6943.137).
+- Фикс: exit-шим в `src-tauri/src/lib.rs` (cfg(target_os = "android")) — `#[no_mangle] exit` → прямой `SYS_exit_group` (само-интерпозия PLT своей .so), atexit не выполняются; `libc` добавлен в mobile-зависимости Cargo.toml. Дополнительно `MainActivity.onDestroy` явно гасит tauri-WebView (removeView + stopLoading + destroy до super.onDestroy) по паттерну доков Android.
+- Проверено: эмулятор duopulse36, debug-APK — 4 цикла «запуск → назад» с пустым crash-буфером logcat (до фикса — FORTIFY+SIGSEGV каждый выход); npm run typecheck чистый; npm run test 477/477. Десктоп-код не менялся.
+- Мобильный релиз 0.1.35 (aarch64) собран в builds/duopulse_0.1.35_android_release/ и опубликован в канал обновлений Aila автоматически (android-build.sh).
+- Коммит: <хеш будет добавлен>.
