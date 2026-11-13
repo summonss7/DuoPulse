@@ -5765,4 +5765,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Фикс: exit-шим в `src-tauri/src/lib.rs` (cfg(target_os = "android")) — `#[no_mangle] exit` → прямой `SYS_exit_group` (само-интерпозия PLT своей .so), atexit не выполняются; `libc` добавлен в mobile-зависимости Cargo.toml. Дополнительно `MainActivity.onDestroy` явно гасит tauri-WebView (removeView + stopLoading + destroy до super.onDestroy) по паттерну доков Android.
 - Проверено: эмулятор duopulse36, debug-APK — 4 цикла «запуск → назад» с пустым crash-буфером logcat (до фикса — FORTIFY+SIGSEGV каждый выход); npm run typecheck чистый; npm run test 477/477. Десктоп-код не менялся.
 - Мобильный релиз 0.1.35 (aarch64) собран в builds/duopulse_0.1.35_android_release/ и опубликован в канал обновлений Aila автоматически (android-build.sh).
-- Коммит: <хеш будет добавлен>.
+- Коммит: 4b73f56.
