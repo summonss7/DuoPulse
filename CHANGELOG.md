@@ -6131,4 +6131,5 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Релизы: 0.1.45 (версии синхронны) — android-build.sh release (APK в
   builds/ + канал Aila) и десктоп npm run release (GitHub-фид, хаб,
   C:\DuoPulse) — тот же сеанс, что и правки (duopulse-120).
-- Коммит: feat(mobile): duopulse-144 — полный адблок в мобильной ветке.
+- Коммит: 9e2a67f feat(mobile): duopulse-144 — полный адблок в мобильной
+  ветке (+ остатки duopulse-140 tubes-списка из оборвавшейся сессии).
