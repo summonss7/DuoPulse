@@ -142,7 +142,9 @@ impl HistoryStore {
                  created_at INTEGER NOT NULL,
                  parent_id INTEGER REFERENCES bookmark_groups(id) ON DELETE CASCADE
              );
-             CREATE INDEX IF NOT EXISTS idx_bg_parent ON bookmark_groups(parent_id);
+             -- idx_bg_parent создаётся ниже, после гарантии колонки parent_id:
+             -- в старых профилях таблица уже есть без неё, индекс в общем
+             -- батче ронял открытие БД (duopulse-152, краш на старте 0.1.47)
              CREATE TABLE IF NOT EXISTS bookmark_group_items(
                  group_id INTEGER NOT NULL REFERENCES bookmark_groups(id) ON DELETE CASCADE,
                  bookmark_id INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
@@ -187,11 +189,13 @@ impl HistoryStore {
                  REFERENCES bookmark_groups(id) ON DELETE CASCADE",
                 [],
             )?;
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_bg_parent ON bookmark_groups(parent_id)",
-                [],
-            )?;
         }
+        // duopulse-152: индекс — после гарантии колонки (старый профиль
+        // получает её ALTER'ом выше); в батче схемы его быть не должно
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bg_parent ON bookmark_groups(parent_id)",
+            [],
+        )?;
         // Миграция плоского списка (карточка duopulse-058): групп ещё не было —
         // создаётся «Избранное» (is_default, туда же падают Ctrl+D и звёздочка
         // без выбора) и все существующие закладки становятся её членами в
@@ -2091,6 +2095,62 @@ fn match_expr(query: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// duopulse-152: профиль до 0.1.47 (bookmark_groups без parent_id) обязан
+    /// открываться — индекс idx_bg_parent в общем батче схемы падал
+    /// «no such column: parent_id» и ронял приложение на старте.
+    #[test]
+    fn opens_pre_151_profile_without_parent_id() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE visits(
+                 id INTEGER PRIMARY KEY, url TEXT NOT NULL,
+                 title TEXT NOT NULL DEFAULT '', visited_at INTEGER NOT NULL);
+             CREATE TABLE bookmarks(
+                 id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE,
+                 title TEXT NOT NULL DEFAULT '', added_at INTEGER NOT NULL);
+             CREATE TABLE bookmark_groups(
+                 id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 sort_by TEXT NOT NULL DEFAULT 'manual',
+                 is_default INTEGER NOT NULL DEFAULT 0,
+                 created_at INTEGER NOT NULL);
+             CREATE TABLE bookmark_group_items(
+                 group_id INTEGER NOT NULL REFERENCES bookmark_groups(id) ON DELETE CASCADE,
+                 bookmark_id INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY(group_id, bookmark_id));
+             CREATE TABLE sync_tombstones(
+                 kind TEXT NOT NULL, key TEXT NOT NULL, deleted_at INTEGER NOT NULL,
+                 PRIMARY KEY(kind, key));",
+        )
+        .unwrap();
+        // живой старый профиль: группа-дефолт и закладка в ней
+        conn.execute(
+            "INSERT INTO bookmark_groups(name, position, sort_by, is_default, created_at)
+             VALUES ('Избранное', 0, 'manual', 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO bookmarks(url, title, added_at) VALUES ('https://a.example', 'A', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO bookmark_group_items(group_id, bookmark_id, position) VALUES (1, 1, 0)",
+            [],
+        )
+        .unwrap();
+        // сам Regression: открытие не паникует и не возвращает ошибку
+        let store = HistoryStore::connect(conn).unwrap();
+        let groups = store.group_list().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].parent_id, None, "миграция даёт корень");
+        // новые подгруппы работают поверх мигрировавшего профиля
+        let child = store.group_add("Работа", Some(groups[0].id)).unwrap();
+        assert_eq!(child.parent_id, Some(groups[0].id));
+    }
 
     /// Сид как в e2e (e2e/omnibox/run.mjs): закладки + история.
     fn seeded() -> HistoryStore {
