@@ -84,6 +84,7 @@ export interface DuoPulseBridgeContract {
   HistoryGroupAddParams: HistoryGroupAddParams;
   BookmarkGroupInfo: BookmarkGroupInfo;
   HistoryGroupListResult: HistoryGroupListResult;
+  HistoryGroupMoveParams: HistoryGroupMoveParams;
   HistoryGroupRemoveParams: HistoryGroupRemoveParams;
   HistoryGroupRenameParams: HistoryGroupRenameParams;
   HistoryGroupSetSortParams: HistoryGroupSetSortParams;
@@ -609,19 +610,28 @@ export interface HistoryDeleteUrlsParams {
   urls: string[];
 }
 /**
- * history.group_add: создать группу (имя уникально).
+ * history.group_add: создать группу (имя уникально); parent — id группы, внутрь которой создаётся подгруппа (duopulse-151; null — корень).
  */
 export interface HistoryGroupAddParams {
   name: string;
+  parentId?: number | null;
 }
 /**
- * Группа закладок для UI: имя, позиция в ряду групп, режим сортировки (manual | title | added), флаг «по умолчанию» и число закладок.
+ * Группа закладок для UI: имя, позиция среди сестёрских групп, режим сортировки (manual | title | added), флаг «по умолчанию», число закладок и вложенность (duopulse-151): родитель (null — корень) и глубина 1–3.
  */
 export interface BookmarkGroupInfo {
   count: number;
+  /**
+   * Глубина вложенности: 1 — корень, 2–3 — подгруппа.
+   */
+  depth: number;
   id: number;
   isDefault: boolean;
   name: string;
+  /**
+   * Родительская группа (null — корневая); дерево групп ≤ 3 уровней.
+   */
+  parentId?: number | null;
   position: number;
   /**
    * manual | title | added.
@@ -633,6 +643,13 @@ export interface BookmarkGroupInfo {
  */
 export interface HistoryGroupListResult {
   groups: BookmarkGroupInfo[];
+}
+/**
+ * history.group_move: переложить группу в другого родителя (duopulse-151): null — сделать корневой, id — подгруппой; глубина дерева ≤ 3, циклы и перенос группы по умолчанию — ошибка.
+ */
+export interface HistoryGroupMoveParams {
+  id: number;
+  parentId?: number | null;
 }
 /**
  * history.group_remove: удалить группу (закладки остаются; группа по умолчанию не удаляется).

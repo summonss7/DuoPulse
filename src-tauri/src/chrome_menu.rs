@@ -57,20 +57,31 @@ fn item<R: tauri::Runtime>(
 /// порядке сортировки (manual/title/added — как на странице управления),
 /// до 500; пустая — один неактивный пункт. Идентификатор пункта — url
 /// закладки, выбор уходит в UI событием menu-action.
+/// duopulse-151: подгруппы — подменю той же сборки (рекурсивно, дерево ≤ 3);
+/// идут перед закладками, как папки в меню Chrome.
 fn build_bmfolder_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, String> {
     let group_id = payload
         .get("groupId")
         .and_then(Value::as_i64)
         .ok_or("папка закладок не указана")?;
     let history = app.state::<std::sync::Arc<crate::history::HistoryStore>>();
+    let mut menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
+    let kids = child_groups(&history, group_id);
+    if !kids.is_empty() {
+        for g in &kids {
+            let sub = build_group_submenu(app, &history, g)?;
+            menu.append(&sub).map_err(|e| format!("меню: {e}"))?;
+        }
+        menu.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
+            .map_err(|e| format!("меню: {e}"))?;
+    }
     let (bookmarks, _) = history.bookmark_list(
         "",
         crate::history::GroupFilter::Group(group_id),
         0,
         500,
     )?;
-    let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
-    if bookmarks.is_empty() {
+    if bookmarks.is_empty() && kids.is_empty() {
         menu.append(&item(app, "bmfolder:none", "Папка пуста", false, None)?)
             .map_err(|e| format!("меню: {e}"))?;
         return Ok(menu);
@@ -82,6 +93,61 @@ fn build_bmfolder_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::W
             .map_err(|e| format!("меню: {e}"))?;
     }
     Ok(menu)
+}
+
+/// Дочерние группы папки (по позициям) — подменю bmfolder.
+fn child_groups(
+    history: &std::sync::Arc<crate::history::HistoryStore>,
+    parent: i64,
+) -> Vec<crate::history::contract::BookmarkGroupInfo> {
+    history
+        .group_list()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|g| g.parent_id == Some(parent))
+        .collect()
+}
+
+/// Подменю подгруппы: её подгруппы (рекурсивно), затем закладки.
+fn build_group_submenu(
+    app: &AppHandle,
+    history: &std::sync::Arc<crate::history::HistoryStore>,
+    group: &crate::history::contract::BookmarkGroupInfo,
+) -> Result<Submenu<tauri::Wry>, String> {
+    let sub = Submenu::with_id(
+        app,
+        format!("bmfolder:g:{}", group.id),
+        &group.name,
+        true,
+    )
+    .map_err(|e| format!("подменю: {e}"))?;
+    let kids = child_groups(history, group.id);
+    if !kids.is_empty() {
+        for g in &kids {
+            let inner = build_group_submenu(app, history, g)?;
+            sub.append(&inner).map_err(|e| format!("подменю: {e}"))?;
+        }
+        sub.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
+            .map_err(|e| format!("меню: {e}"))?;
+    }
+    let (bookmarks, _) = history.bookmark_list(
+        "",
+        crate::history::GroupFilter::Group(group.id),
+        0,
+        500,
+    )?;
+    if bookmarks.is_empty() && kids.is_empty() {
+        sub.append(&item(app, "bmfolder:none", "Пусто", false, None)?)
+            .map_err(|e| format!("подменю: {e}"))?;
+        return Ok(sub);
+    }
+    for b in &bookmarks {
+        let label = b.title.trim();
+        let label = if label.is_empty() { b.url.as_str() } else { label };
+        sub.append(&item(app, &format!("bmfolder:{}", b.url), label, true, None)?)
+            .map_err(|e| format!("подменю: {e}"))?;
+    }
+    Ok(sub)
 }
 
 /// Меню вкладки: вкладочные действия, недоступные — из payload.disabled.
@@ -124,16 +190,19 @@ fn build_star_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>,
         .unwrap_or_default();
     for g in &groups {
         let id = g.get("id").and_then(Value::as_i64).unwrap_or(-1);
-        let name = g
-            .get("name")
+        // label — с путём вложенности («Родитель › Ребёнок», duopulse-151);
+        // остался name — плоский список (старый payload)
+        let label = g
+            .get("label")
             .and_then(Value::as_str)
-            .unwrap_or("?")
-            .to_string();
+            .map(String::from)
+            .or_else(|| g.get("name").and_then(Value::as_str).map(String::from))
+            .unwrap_or_else(|| "?".into());
         let is_default = g.get("isDefault").and_then(Value::as_bool).unwrap_or(false);
         let label = if is_default {
-            format!("{name} · по умолчанию")
+            format!("{label} · по умолчанию")
         } else {
-            name
+            label
         };
         menu.append(&item(app, &format!("star:g:{id}"), &label, true, None)?)
             .map_err(|e| format!("меню: {e}"))?;

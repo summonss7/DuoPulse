@@ -396,7 +396,7 @@ mod tests {
             .unwrap();
         // группы избранного (карточка duopulse-058): вторая группа + перенос
         // закладки в неё (первая остаётся группой по умолчанию)
-        let work = hist_a.group_add("Работа").unwrap();
+        let work = hist_a.group_add("Работа", None).unwrap();
         hist_a
             .group_toggle_bookmark("https://b.example/", work.id, true)
             .unwrap();

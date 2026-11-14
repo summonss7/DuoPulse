@@ -9,8 +9,13 @@
 // Обновление: старт, правки звёздочки (refreshBmBar из star.ts) и смена
 // вкладок (tabs.updated — правки на странице управления и синк Aila
 // подхватываются при первом же переключении).
+// duopulse-151: подгруппы — папки на строке это корневые группы и дети
+// группы по умолчанию; вложенные видны подменю меню папки (рекурсивно,
+// ≤ 3 уровней). Чип закладки можно перетащить на папку — закладка
+// перекладывается в неё (из «Избранного» уходит, как в Chrome).
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
+import { groupTreeOrder } from "./groups-tree";
 import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
 
 const err = (e: unknown): void => console.error("bmbar:", e);
@@ -19,7 +24,8 @@ const err = (e: unknown): void => console.error("bmbar:", e);
 const bar = (): HTMLElement => document.getElementById("bmbar") as HTMLElement;
 
 /** Модель строки: чипы — закладки группы по умолчанию (в её порядке) +
- * безгрупповые; папки — прочие непустые группы по position. */
+ * без группы; папки — группы бар-уровня (корневые и подгруппы «Избранного»)
+ * с закладками или подгруппами. */
 export interface BmBarModel {
   visible: boolean;
   chips: { url: string; title: string }[];
@@ -33,9 +39,14 @@ export function bmBarModel(
   defaultMembers: HistoryBookmark[],
   ungrouped: HistoryBookmark[],
 ): BmBarModel {
-  const folders = groups
-    .filter((g) => !g.isDefault && g.count > 0)
-    .sort((a, b) => a.position - b.position)
+  const defId = groups.find((g) => g.isDefault)?.id ?? null;
+  const folders = groupTreeOrder(groups)
+    .filter(
+      (g) =>
+        !g.isDefault &&
+        (g.parentId == null || g.parentId === defId) &&
+        (g.count > 0 || groups.some((o) => o.parentId === g.id)),
+    )
     .map((g) => ({ id: g.id, name: g.name }));
   const chip = (b: HistoryBookmark) => ({
     url: b.url,
@@ -98,6 +109,9 @@ export async function refreshBmBar(): Promise<void> {
         ? (await bridge.history.bookmarkList({ query: null, groupId: defId, offset: 0, limit: 500 })).bookmarks
         : [];
     const model = bmBarModel(groups, defMembers, ungRes.bookmarks);
+    // для drag&drop чип→папка: перенос из «Избранного» убирает членство
+    defGroupId = defId;
+    defMemberUrls = new Set(defMembers.map((b) => b.url));
     render(model);
     const el = bar();
     el.hidden = !model.visible;
@@ -108,6 +122,13 @@ export async function refreshBmBar(): Promise<void> {
   }
 }
 
+/** Группа по умолчанию и её члены (семантика переноса чипа в папку). */
+let defGroupId: number | null = null;
+let defMemberUrls = new Set<string>();
+
+/** Тянутый чип закладки (url) — для подсветки папок-целей. */
+let dragUrl = "";
+
 /** Рендер модели в строку (кнопки-чипы + кнопки-папки). */
 function render(model: BmBarModel): void {
   bar().replaceChildren();
@@ -116,6 +137,7 @@ function render(model: BmBarModel): void {
     el.type = "button";
     el.className = "bm-item";
     el.dataset.url = b.url;
+    el.draggable = true; // перетаскивание в папку строки (duopulse-151)
     const host = badgeHost(b.url);
     const ico = document.createElement("i");
     ico.className = "bm-ico";
@@ -207,7 +229,67 @@ export function initBmBar(): void {
     if (a.menu !== "bmfolder" || typeof a.url !== "string") return;
     void bridge.nav.navigate({ url: a.url }).catch(err);
   });
+  // drag&drop чип → папка (duopulse-151): закладка перекладывается в группу
+  // папки; если она была в «Избранном» (чип строки) — уходит оттуда, как
+  // перетаскивание по полосе закладок Chrome
+  bar().addEventListener("dragstart", (e) => {
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".bm-item:not(.bm-folder)");
+    const url = item?.dataset.url;
+    if (!url) return;
+    dragUrl = url;
+    item?.classList.add("dragging");
+    e.dataTransfer?.setData("text/plain", url);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+  });
+  bar().addEventListener("dragover", (e) => {
+    if (!dragUrl) return;
+    const folder = (e.target as HTMLElement).closest<HTMLElement>(".bm-folder");
+    if (!folder) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    for (const f of bar().querySelectorAll(".bm-folder.drop-target")) {
+      f.classList.remove("drop-target");
+    }
+    folder.classList.add("drop-target");
+  });
+  bar().addEventListener("drop", (e) => {
+    if (!dragUrl) return;
+    const folder = (e.target as HTMLElement).closest<HTMLElement>(".bm-folder");
+    if (!folder) return;
+    e.preventDefault();
+    const url = dragUrl;
+    dragUrl = "";
+    clearDragMarks();
+    void moveChipToFolder(url, Number(folder.dataset.folder));
+  });
+  bar().addEventListener("dragend", () => {
+    dragUrl = "";
+    clearDragMarks();
+  });
   void refreshBmBar();
+}
+
+/** Снять подсветку переноса (папки-цели, тянущийся чип). */
+function clearDragMarks(): void {
+  for (const f of bar().querySelectorAll(".bm-folder.drop-target")) {
+    f.classList.remove("drop-target");
+  }
+  bar().querySelector(".bm-item.dragging")?.classList.remove("dragging");
+}
+
+/** Переложить закладку в группу папки (drop чипа на папку): членство в
+ *  «Избранном» снимается (перенос, не копия), цель добавляется идемпотентно. */
+async function moveChipToFolder(url: string, groupId: number): Promise<void> {
+  try {
+    if (defGroupId !== null && defGroupId !== groupId && defMemberUrls.has(url)) {
+      await bridge.history.groupToggleBookmark({ url, groupId: defGroupId, on: false });
+    }
+    await bridge.history.groupToggleBookmark({ url, groupId, on: true });
+    await refreshBmBar();
+  } catch (e) {
+    err(e);
+    await refreshBmBar();
+  }
 }
 
 /** Папка под курсором (делегированный hover) и таймер открытия. */

@@ -461,6 +461,15 @@ body {
 .bm-item:hover svg {
   color: var(--text-primary);
 }
+/* duopulse-151: перетаскивание чипа закладки в папку строки */
+.bm-item.dragging {
+  opacity: 0.45;
+}
+.bm-folder.drop-target {
+  background: var(--hover-neutral);
+  box-shadow: inset 0 0 0 1px var(--accent-neon);
+  color: var(--text-primary);
+}
 
 /* --- Подсказки omnibox (панель 12px, elevated, §5) --- */
 .suggest {

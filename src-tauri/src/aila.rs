@@ -839,6 +839,7 @@ mod tests {
                 name: "Избранное".into(),
                 sort_by: "manual".into(),
                 created_at: 1,
+                parent: None,
             }],
             tombstones: vec![SyncTombstone {
                 kind: "bookmark".into(),

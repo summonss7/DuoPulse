@@ -17,6 +17,7 @@
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, TabInfo } from "../bridge";
 import { t } from "../i18n";
+import { groupPath } from "./groups-tree";
 import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
 import { refreshBmBar } from "./bmbar";
 
@@ -67,12 +68,20 @@ async function addTo(groupId: number | null): Promise<void> {
 
 /** Мини-меню групп под звёздочкой (карточка duopulse-058): список групп
  *  (по умолчанию — первой, с пометкой) и «Новая группа…» с инлайн-вводом —
- *  рендер и клики в оверлей-окне (duopulse-086), здесь только запрос. */
+ *  рендер и клики в оверлей-окне (duopulse-086), здесь только запрос.
+ *  duopulse-151: подгруппы — с путём («Родитель › Ребёнок») в label. */
 async function openMenu(): Promise<void> {
   try {
     const { groups } = await bridge.history.groupList();
     const r = btn.getBoundingClientRect();
-    openOverlayMenu("star", r.right, r.bottom + 6, { groups });
+    openOverlayMenu("star", r.right, r.bottom + 6, {
+      groups: groups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        label: groupPath(groups, g.id),
+        isDefault: g.isDefault,
+      })),
+    });
   } catch (e) {
     err(e);
   }

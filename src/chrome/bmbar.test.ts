@@ -1,6 +1,7 @@
 // DuoPulse — модель строки закладок (карточка duopulse-143): чипы —
-// закладки группы по умолчанию и без группы, папки — прочие непустые
-// группы по position; пустое избранное строку скрывает.
+// закладки группы по умолчанию и без группы, папки — группы бар-уровня
+// (корневые и подгруппы «Избранного», duopulse-151) с закладками или
+// подгруппами; пустое избранное строку скрывает.
 import { describe, expect, it } from "vitest";
 import { badgeHost, badgeLetter, badgeHue, bmBarModel } from "./bmbar";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge/gen/types";
@@ -12,6 +13,8 @@ const group = (over: Partial<BookmarkGroupInfo>): BookmarkGroupInfo => ({
   sortBy: "manual",
   isDefault: false,
   count: 0,
+  parentId: null,
+  depth: 1,
   ...over,
 });
 
@@ -62,6 +65,27 @@ describe("bmBarModel — состав строки", () => {
     expect(m.visible).toBe(true);
     expect(m.chips).toEqual([]);
     expect(m.folders).toEqual([{ id: 5, name: "Видео" }]);
+  });
+
+  it("duopulse-151: подгруппа папки не выходит на строку — она в меню родителя", () => {
+    const groups = [
+      group({ id: 7, name: "Избранное", isDefault: true, count: 1 }),
+      group({ id: 3, name: "Музыка", count: 2 }),
+      group({ id: 4, name: "Джаз", parentId: 3, depth: 2, count: 1 }),
+    ];
+    const m = bmBarModel(groups, [bm("https://a/", "A")], []);
+    expect(m.folders).toEqual([{ id: 3, name: "Музыка" }]);
+  });
+
+  it("duopulse-151: подгруппа «Избранного» — папка строки; папка с одними подгруппами видна", () => {
+    const groups = [
+      group({ id: 7, name: "Избранное", isDefault: true, count: 1 }),
+      group({ id: 3, name: "Ещё", parentId: 7, depth: 2, count: 0 }),
+      group({ id: 4, name: "Вложенная", parentId: 3, depth: 3, count: 2 }),
+      group({ id: 5, name: "Пустой корень", count: 0 }),
+    ];
+    const m = bmBarModel(groups, [bm("https://a/", "A")], []);
+    expect(m.folders).toEqual([{ id: 3, name: "Ещё" }]);
   });
 
   it("пустой заголовок чипа — адрес (как на странице управления)", () => {

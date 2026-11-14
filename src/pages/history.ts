@@ -16,8 +16,12 @@
 // группы — перенос: убрать из текущей и добавить в целевую), внутри списка
 // в режиме «вручную» — порядок. Клик по записи открывает адрес в этой
 // вкладке (страница заменяется сайтом), Ctrl/средняя кнопка — новая вкладка.
+// duopulse-151: подгруппы — группы вкладываются до 3 уровней; чипы групп
+// показываются деревом (отступ по глубине), «+ подгруппа» в панели группы,
+// перетаскивание чипа группы на другой чип — вложить, на «Все» — в корень.
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark, HistoryEntry } from "../bridge";
+import { MAX_GROUP_DEPTH, canGroupMoveTo, groupPath, groupTreeOrder } from "../chrome/groups-tree";
 import { t, uiLocale } from "../i18n";
 
 const ICONS = {
@@ -324,7 +328,9 @@ function render(): void {
       : "";
 }
 
-/** Чипы групп секции закладок: «Все» / группы / «Без группы» / «+». */
+/** Чипы групп секции закладок: «Все» / группы деревом (отступ по глубине,
+ *  duopulse-151) / «Без группы» / «+». Чип группы перетаскиваем: на другую
+ *  группу — вложить, на «Все» — сделать корневой. */
 function renderChips(): void {
   chipsEl.hidden = section !== "bookmarks";
   groupbarEl.hidden = currentGroup() === undefined;
@@ -348,15 +354,22 @@ function renderChips(): void {
     });
     return b;
   };
-  kids.push(chip("all", t("Все"), t("Все закладки, свежие первыми")));
-  for (const g of groups) {
-    kids.push(
-      chip(
-        g.id,
-        g.name,
-        g.isDefault ? t("Группа по умолчанию (Ctrl+D и звёздочка)") : t("Группа закладок"),
-      ),
+  kids.push(chip("all", t("Все"), t("Все закладки, свежими первыми")));
+  for (const g of groupTreeOrder(groups)) {
+    const b = chip(
+      g.id,
+      g.depth > 1 ? `${"· ".repeat(g.depth - 1)}${g.name}` : g.name,
+      g.isDefault
+        ? t("Группа по умолчанию (Ctrl+D и звёздочка)")
+        : groupPath(groups, g.id),
     );
+    // группу (кроме корневой группы по умолчанию) можно перетащить
+    if (!g.isDefault) {
+      b.draggable = true;
+      b.classList.add("mgr-chip-group");
+      b.title += `\n${t("Перетащите на другую группу — вложить, на «Все» — в корень")}`;
+    }
+    kids.push(b);
   }
   kids.push(chip("ungrouped", t("Без группы"), t("Закладки, не состоящие ни в одной группе")));
   const add = document.createElement("button");
@@ -401,7 +414,11 @@ function renderGroupbar(): void {
   note.textContent = g.sortBy === "manual" ? t("перетаскивайте строки") : "";
   const rename = actBtn("act-edit", "edit", t("Переименовать группу"));
   rename.addEventListener("click", () => beginRenameGroup(g));
-  const del = actBtn("act-del", "cross", g.isDefault ? t("Группу по умолчанию удалить нельзя") : t("Удалить группу"));
+  // подгруппа внутри выбранной группы (duopulse-151): до 3 уровней
+  const sub = actBtn("act-sub", "plus", g.depth >= MAX_GROUP_DEPTH ? t("Максимум {n} уровня вложенности", { n: MAX_GROUP_DEPTH }) : t("Создать подгруппу"));
+  sub.disabled = g.depth >= MAX_GROUP_DEPTH;
+  sub.addEventListener("click", () => beginAddGroup(g.id));
+  const del = actBtn("act-del", "cross", g.isDefault ? t("Группу по умолчанию удалить нельзя") : t("Удалить группу (с подгруппами)"));
   del.disabled = g.isDefault;
   del.addEventListener("click", () => {
     void bridge.history
@@ -412,16 +429,17 @@ function renderGroupbar(): void {
       })
       .catch(showError);
   });
-  groupbarEl.append(sort, note, rename, del);
+  groupbarEl.append(sort, note, sub, rename, del);
 }
 
-/** «+» → инлайн-инпут имени новой группы (Enter — создать и открыть). */
-function beginAddGroup(): void {
+/** «+» / «+ подгруппа» → инлайн-инпут имени (Enter — создать и открыть).
+ *  parent (duopulse-151) — группа, внутрь которой создаётся подгруппа. */
+function beginAddGroup(parent?: number): void {
   if (chipsEl.querySelector(".mgr-chip-input")) return;
   const input = document.createElement("input");
   input.className = "mgr-chip-input";
   input.type = "text";
-  input.placeholder = t("Имя группы");
+  input.placeholder = parent != null ? t("Имя подгруппы") : t("Имя группы");
   input.spellcheck = false;
   input.maxLength = 60;
   chipsEl.append(input);
@@ -442,7 +460,7 @@ function beginAddGroup(): void {
       finish();
       if (!name) return;
       void bridge.history
-        .groupAdd({ name })
+        .groupAdd({ name, parentId: parent ?? null })
         .then((g) => {
           groupSel = g.id;
           void reload();
@@ -453,10 +471,11 @@ function beginAddGroup(): void {
   input.addEventListener("blur", finish);
 }
 
-/** ✎ группы → инлайн-инпут вместо чипа (Enter — переименовать). */
+/** ✎ группы → инлайн-инпут вместо чипа (Enter — переименовать). Чип ищется
+ *  по sel: у подгрупп текст чипа с отступом («· · Имя», duopulse-151). */
 function beginRenameGroup(g: BookmarkGroupInfo): void {
   const chip = [...chipsEl.querySelectorAll<HTMLButtonElement>(".mgr-chip")].find(
-    (b) => b.textContent === g.name,
+    (b) => b.dataset.sel === String(g.id),
   );
   if (!chip || chipsEl.querySelector(".mgr-chip-input")) return;
   const input = document.createElement("input");
@@ -495,7 +514,8 @@ function beginRenameGroup(g: BookmarkGroupInfo): void {
   });
 }
 
-/** Меню папки закладки: членства в группах (✓ — состоит; клик — переключить). */
+/** Меню папки закладки: членства в группах деревом (✓ — состоит; клик —
+ *  переключить; отступ по глубине — duopulse-151). */
 function openGroupsMenu(row: HTMLElement, b: HistoryBookmark): void {
   closeMenus();
   if (!groups.length) {
@@ -504,12 +524,12 @@ function openGroupsMenu(row: HTMLElement, b: HistoryBookmark): void {
   }
   const menu = document.createElement("div");
   menu.className = "mgr-menu mgr-groups-menu";
-  for (const g of groups) {
+  for (const g of groupTreeOrder(groups)) {
     const item = document.createElement("button");
     item.type = "button";
     const on = b.groups?.some((r) => r.id === g.id) ?? false;
-    item.textContent = `${on ? "✓ " : ""}${g.name}`;
-    item.title = on ? t("Убрать из группы") : t("Добавить в группу");
+    item.textContent = `${on ? "✓ " : ""}${g.depth > 1 ? `${"· ".repeat(g.depth - 1)}` : ""}${g.name}`;
+    item.title = `${groupPath(groups, g.id)} — ${on ? t("Убрать из группы") : t("Добавить в группу")}`;
     item.addEventListener("click", () => {
       void bridge.history
         .groupToggleBookmark({ url: b.url, groupId: g.id, on: !on })
@@ -528,10 +548,14 @@ function closeMenus(): void {
   for (const m of document.querySelectorAll(".mgr-groups-menu")) m.remove();
 }
 
-// --- drag&drop: порядок внутри группы (manual) и перекладывание между группами
+// --- drag&drop: порядок внутри группы (manual), перекладывание между группами
+//     и вложение групп (duopulse-151: чип группы на чип / на «Все»)
 
 /** Перетаскиваемая закладка (url) — одна на список. */
 let dragUrl = "";
+
+/** Перетаскиваемый чип группы (id, duopulse-151) — одна на список. */
+let dragGroupId: number | null = null;
 
 /** Переложить перетащённую закладку в группу-чип (карточка duopulse-099):
  *  из вида конкретной группы — «перекидывание» (убрать из текущей), затем
@@ -856,8 +880,35 @@ export function initManagerPage(): void {
     clearChipMarks();
     listEl.querySelector(".dragging")?.classList.remove("dragging");
   });
-  // чипы групп — цели перекладывания: подсветка на пролёте, drop — перенос
+  // чипы групп — цели перекладывания: подсветка на пролёте, drop — перенос;
+  // чип группы (duopulse-151) — тоже тяга: на другую группу — вложить,
+  // на «Все» — сделать корневой (циклы и глубина > 3 пресекаются)
+  chipsEl.addEventListener("dragstart", (e) => {
+    const chip = (e.target as HTMLElement).closest<HTMLElement>(".mgr-chip-group");
+    if (!chip) return;
+    const sel = chipSelOf(chip);
+    if (typeof sel !== "number") return;
+    dragGroupId = sel;
+    chip.classList.add("dragging");
+    e.dataTransfer?.setData("text/plain", String(sel));
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+  });
+  const groupDropOk = (chip: HTMLElement | null, sel: GroupSel | undefined): boolean =>
+    !!chip &&
+    !chip.classList.contains("mgr-chip-add") &&
+    sel !== undefined &&
+    (sel === "all" || (typeof sel === "number" && canGroupMoveTo(groups, dragGroupId as number, sel)));
   chipsEl.addEventListener("dragover", (e) => {
+    if (dragGroupId != null) {
+      const chip = (e.target as HTMLElement).closest<HTMLElement>(".mgr-chip");
+      const sel = chip ? chipSelOf(chip) : undefined;
+      if (!chip || !groupDropOk(chip, sel)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      clearChipMarks();
+      chip.classList.add("drop-target");
+      return;
+    }
     if (!dragUrl) return;
     const chip = (e.target as HTMLElement).closest<HTMLElement>(".mgr-chip");
     const sel = chip ? chipSelOf(chip) : undefined;
@@ -875,6 +926,23 @@ export function initManagerPage(): void {
     }
   });
   chipsEl.addEventListener("drop", (e) => {
+    if (dragGroupId != null) {
+      const chip = (e.target as HTMLElement).closest<HTMLElement>(".mgr-chip");
+      const sel = chip ? chipSelOf(chip) : undefined;
+      if (!chip || !groupDropOk(chip, sel)) return;
+      e.preventDefault();
+      const id = dragGroupId;
+      dragGroupId = null;
+      // groupDropOk уже отбросил «без группы»: «Все» — корень, иначе id
+      const parent = sel === "all" ? null : typeof sel === "number" ? sel : null;
+      clearChipMarks();
+      chipsEl.querySelector(".dragging")?.classList.remove("dragging");
+      void bridge.history
+        .groupMove({ id, parentId: parent })
+        .then(reload)
+        .catch(showError);
+      return;
+    }
     if (!dragUrl) return;
     const chip = (e.target as HTMLElement).closest<HTMLElement>(".mgr-chip");
     const sel = chip ? chipSelOf(chip) : undefined;
@@ -885,6 +953,11 @@ export function initManagerPage(): void {
     clearChipMarks();
     listEl.querySelector(".dragging")?.classList.remove("dragging");
     void dropOnGroup(url, sel);
+  });
+  chipsEl.addEventListener("dragend", () => {
+    dragGroupId = null;
+    clearChipMarks();
+    chipsEl.querySelector(".dragging")?.classList.remove("dragging");
   });
   listEl.addEventListener("scroll", closeMenus, { passive: true });
 

@@ -211,12 +211,16 @@ pub struct BookmarkGroupRow {
     /// manual | title | added.
     pub sort_by: String,
     pub is_default: bool,
+    /// Родитель в файле (id машины-источника; null — корень; duopulse-151).
+    #[serde(default)]
+    pub parent_id: Option<i64>,
 }
 
 // --- карточка duopulse-058: группы избранного --------------------------------
 
-/// Группа закладок для UI: имя, позиция в ряду групп, режим сортировки
-/// (manual | title | added), флаг «по умолчанию» и число закладок.
+/// Группа закладок для UI: имя, позиция среди сестёрских групп, режим
+/// сортировки (manual | title | added), флаг «по умолчанию», число закладок
+/// и вложенность (duopulse-151): родитель (null — корень) и глубина 1–3.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BookmarkGroupInfo {
@@ -227,6 +231,10 @@ pub struct BookmarkGroupInfo {
     pub sort_by: String,
     pub is_default: bool,
     pub count: u32,
+    /// Родительская группа (null — корневая); дерево групп ≤ 3 уровней.
+    pub parent_id: Option<i64>,
+    /// Глубина вложенности: 1 — корень, 2–3 — подгруппа.
+    pub depth: u32,
 }
 
 /// history.group_list: группы с числом закладок.
@@ -236,11 +244,25 @@ pub struct HistoryGroupListResult {
     pub groups: Vec<BookmarkGroupInfo>,
 }
 
-/// history.group_add: создать группу (имя уникально).
+/// history.group_add: создать группу (имя уникально); parent — id группы,
+/// внутрь которой создаётся подгруппа (duopulse-151; null — корень).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryGroupAddParams {
     pub name: String,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
+}
+
+/// history.group_move: переложить группу в другого родителя (duopulse-151):
+/// null — сделать корневой, id — подгруппой; глубина дерева ≤ 3, циклы и
+/// перенос группы по умолчанию — ошибка.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGroupMoveParams {
+    pub id: i64,
+    #[serde(default)]
+    pub parent_id: Option<i64>,
 }
 
 /// history.group_rename: переименовать группу.

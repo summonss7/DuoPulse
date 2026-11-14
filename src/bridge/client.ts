@@ -33,6 +33,7 @@ import type {
   HistoryDeleteUrlsParams,
   HistoryGroupAddParams,
   HistoryGroupListResult,
+  HistoryGroupMoveParams,
   HistoryGroupRemoveParams,
   HistoryGroupRenameParams,
   HistoryGroupSetSortParams,
@@ -163,8 +164,12 @@ export const bridge = {
     bookmarkList: (params: HistoryBookmarkListParams) => invoke<HistoryBookmarkListResult>("history_bookmark_list", { params }),
     /** history.group_list (duopulse-058): группы избранного с числом закладок. */
     groupList: () => invoke<HistoryGroupListResult>("history_group_list"),
-    /** history.group_add (duopulse-058): создать группу (имя уникально). */
+    /** history.group_add (duopulse-058): создать группу (имя уникально;
+     *  duopulse-151: parentId — подгруппа этого родителя). */
     groupAdd: (params: HistoryGroupAddParams) => invoke<BookmarkGroupInfo>("history_group_add", { params }),
+    /** history.group_move (duopulse-151): переложить группу в другого
+     *  родителя (null — корень); глубина дерева ≤ 3, циклы — ошибка. */
+    groupMove: (params: HistoryGroupMoveParams) => invoke<void>("history_group_move", { params }),
     /** history.group_rename (duopulse-058): переименовать группу. */
     groupRename: (params: HistoryGroupRenameParams) => invoke<void>("history_group_rename", { params }),
     /** history.group_remove (duopulse-058): удалить группу (закладки остаются;

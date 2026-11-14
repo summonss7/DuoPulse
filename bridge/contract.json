@@ -1265,10 +1265,18 @@
       "handler": "history_group_add",
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "history.group_add: создать группу (имя уникально).",
+        "description": "history.group_add: создать группу (имя уникально); parent — id группы, внутрь которой создаётся подгруппа (duopulse-151; null — корень).",
         "properties": {
           "name": {
             "type": "string"
+          },
+          "parentId": {
+            "default": null,
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
@@ -1279,9 +1287,15 @@
       },
       "result": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "Группа закладок для UI: имя, позиция в ряду групп, режим сортировки (manual | title | added), флаг «по умолчанию» и число закладок.",
+        "description": "Группа закладок для UI: имя, позиция среди сестёрских групп, режим сортировки (manual | title | added), флаг «по умолчанию», число закладок и вложенность (duopulse-151): родитель (null — корень) и глубина 1–3.",
         "properties": {
           "count": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "depth": {
+            "description": "Глубина вложенности: 1 — корень, 2–3 — подгруппа.",
             "format": "uint32",
             "minimum": 0.0,
             "type": "integer"
@@ -1296,6 +1310,14 @@
           "name": {
             "type": "string"
           },
+          "parentId": {
+            "description": "Родительская группа (null — корневая); дерево групп ≤ 3 уровней.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "position": {
             "format": "uint32",
             "minimum": 0.0,
@@ -1308,6 +1330,7 @@
         },
         "required": [
           "count",
+          "depth",
           "id",
           "isDefault",
           "name",
@@ -1325,9 +1348,15 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
           "BookmarkGroupInfo": {
-            "description": "Группа закладок для UI: имя, позиция в ряду групп, режим сортировки (manual | title | added), флаг «по умолчанию» и число закладок.",
+            "description": "Группа закладок для UI: имя, позиция среди сестёрских групп, режим сортировки (manual | title | added), флаг «по умолчанию», число закладок и вложенность (duopulse-151): родитель (null — корень) и глубина 1–3.",
             "properties": {
               "count": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "depth": {
+                "description": "Глубина вложенности: 1 — корень, 2–3 — подгруппа.",
                 "format": "uint32",
                 "minimum": 0.0,
                 "type": "integer"
@@ -1342,6 +1371,14 @@
               "name": {
                 "type": "string"
               },
+              "parentId": {
+                "description": "Родительская группа (null — корневая); дерево групп ≤ 3 уровней.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "position": {
                 "format": "uint32",
                 "minimum": 0.0,
@@ -1354,6 +1391,7 @@
             },
             "required": [
               "count",
+              "depth",
               "id",
               "isDefault",
               "name",
@@ -1378,6 +1416,33 @@
         "title": "HistoryGroupListResult",
         "type": "object"
       }
+    },
+    "history.group_move": {
+      "handler": "history_group_move",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.group_move: переложить группу в другого родителя (duopulse-151): null — сделать корневой, id — подгруппой; глубина дерева ≤ 3, циклы и перенос группы по умолчанию — ошибка.",
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parentId": {
+            "default": null,
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "HistoryGroupMoveParams",
+        "type": "object"
+      },
+      "result": null
     },
     "history.group_remove": {
       "handler": "history_group_remove",

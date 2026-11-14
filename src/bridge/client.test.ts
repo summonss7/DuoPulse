@@ -64,6 +64,10 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["history", "groupAdd"],
     params: { name: "Работа" },
   },
+  "history.group_move": {
+    path: ["history", "groupMove"],
+    params: { id: 2, parentId: 1 },
+  },
   "history.group_rename": {
     path: ["history", "groupRename"],
     params: { id: 2, name: "Проекты" },

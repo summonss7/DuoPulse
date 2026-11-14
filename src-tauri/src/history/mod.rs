@@ -139,8 +139,10 @@ impl HistoryStore {
                  position INTEGER NOT NULL DEFAULT 0,
                  sort_by TEXT NOT NULL DEFAULT 'manual',
                  is_default INTEGER NOT NULL DEFAULT 0,
-                 created_at INTEGER NOT NULL
+                 created_at INTEGER NOT NULL,
+                 parent_id INTEGER REFERENCES bookmark_groups(id) ON DELETE CASCADE
              );
+             CREATE INDEX IF NOT EXISTS idx_bg_parent ON bookmark_groups(parent_id);
              CREATE TABLE IF NOT EXISTS bookmark_group_items(
                  group_id INTEGER NOT NULL REFERENCES bookmark_groups(id) ON DELETE CASCADE,
                  bookmark_id INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
@@ -172,6 +174,23 @@ impl HistoryStore {
                 [],
             )?;
             conn.execute("UPDATE bookmarks SET updated_at = added_at", [])?;
+        }
+        // duopulse-151: вложенные подгруппы — parent_id у групп (у старых
+        // профилей колонки нет; ALTER с FK-каскадом разрешён при NULL-дефолте)
+        let bg_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(bookmark_groups)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<_, _>>()?;
+        if !bg_cols.iter().any(|c| c == "parent_id") {
+            conn.execute(
+                "ALTER TABLE bookmark_groups ADD COLUMN parent_id INTEGER \
+                 REFERENCES bookmark_groups(id) ON DELETE CASCADE",
+                [],
+            )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_bg_parent ON bookmark_groups(parent_id)",
+                [],
+            )?;
         }
         // Миграция плоского списка (карточка duopulse-058): групп ещё не было —
         // создаётся «Избранное» (is_default, туда же падают Ctrl+D и звёздочка
@@ -799,18 +818,20 @@ impl HistoryStore {
     }
 
     // --- карточка duopulse-058: группы избранного -----------------------------
+    //     duopulse-151: группы вкладываются друг в друга (parent_id), глубина
+    //     дерева — до MAX_GROUP_DEPTH уровней; группа по умолчанию — всегда корень.
 
-    /// Группы для UI (по позициям) с числом закладок.
+    /// Группы для UI (по позициям) с числом закладок и вложенностью.
     pub fn group_list(&self) -> Result<Vec<BookmarkGroupInfo>, String> {
         let conn = self.conn.lock().expect("history: лок не отравлен");
         let mut stmt = conn
             .prepare(
-                "SELECT g.id, g.name, g.position, g.sort_by, g.is_default,
+                "SELECT g.id, g.name, g.position, g.sort_by, g.is_default, g.parent_id,
                         (SELECT COUNT(*) FROM bookmark_group_items i WHERE i.group_id = g.id)
                  FROM bookmark_groups g ORDER BY g.position, g.id",
             )
             .map_err(err_sql)?;
-        let groups = stmt
+        let mut groups = stmt
             .query_map([], |r| {
                 Ok(BookmarkGroupInfo {
                     id: r.get(0)?,
@@ -818,18 +839,25 @@ impl HistoryStore {
                     position: r.get::<_, i64>(2)? as u32,
                     sort_by: r.get(3)?,
                     is_default: r.get::<_, i64>(4)? != 0,
-                    count: r.get::<_, i64>(5)? as u32,
+                    count: r.get::<_, i64>(6)? as u32,
+                    parent_id: r.get(5)?,
+                    depth: 1,
                 })
             })
             .map_err(err_sql)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(err_sql)?;
+        let parents = parents_map(&conn)?;
+        for g in groups.iter_mut() {
+            g.depth = chain_depth(&parents, g.id);
+        }
         Ok(groups)
     }
 
     /// Создать группу (имя уникально, пустое/дубликат — ошибка); новая —
-    /// последняя, сортировка «вручную».
-    pub fn group_add(&self, name: &str) -> Result<BookmarkGroupInfo, String> {
+    /// последняя, сортировка «вручную». parent (duopulse-151) — группа, внутрь
+    /// которой создаётся подгруппа: её глубина должна быть < 3 уровней.
+    pub fn group_add(&self, name: &str, parent: Option<i64>) -> Result<BookmarkGroupInfo, String> {
         let name = name.trim();
         if name.is_empty() {
             return Err("имя группы пустое".into());
@@ -846,6 +874,17 @@ impl HistoryStore {
         if dup {
             return Err(format!("группа «{name}» уже есть"));
         }
+        let parents = parents_map(&tx)?;
+        if let Some(pid) = parent {
+            if !parents.contains_key(&pid) {
+                return Err(format!("группа {pid} не найдена"));
+            }
+            if chain_depth(&parents, pid) >= MAX_GROUP_DEPTH {
+                return Err(format!(
+                    "глубина вложенности групп — до {MAX_GROUP_DEPTH} уровней"
+                ));
+            }
+        }
         let position: i64 = tx
             .query_row(
                 "SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_groups",
@@ -854,9 +893,9 @@ impl HistoryStore {
             )
             .map_err(err_sql)?;
         tx.execute(
-            "INSERT INTO bookmark_groups(name, position, sort_by, is_default, created_at)
-             VALUES (?1, ?2, 'manual', 0, ?3)",
-            rusqlite::params![name, position, now_ms()],
+            "INSERT INTO bookmark_groups(name, position, sort_by, is_default, created_at, parent_id)
+             VALUES (?1, ?2, 'manual', 0, ?3, ?4)",
+            rusqlite::params![name, position, now_ms(), parent],
         )
         .map_err(err_sql)?;
         let id = tx.last_insert_rowid();
@@ -868,7 +907,67 @@ impl HistoryStore {
             sort_by: "manual".into(),
             is_default: false,
             count: 0,
+            parent_id: parent,
+            depth: parent.map_or(1, |pid| chain_depth(&parents, pid) + 1),
         })
+    }
+
+    /// Переложить группу в другого родителя (duopulse-151): None — корень,
+    /// Some(id) — подгруппа. Запрещено: перенос группы по умолчанию (всегда
+    /// корень), вложение в себя/свою подгруппу, превышение 3 уровней.
+    /// Группа ставится последней среди новых сестёрских.
+    pub fn group_move(&self, id: i64, parent: Option<i64>) -> Result<(), String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let parents = parents_map(&tx)?;
+        if !parents.contains_key(&id) {
+            return Err(format!("группа {id} не найдена"));
+        }
+        let is_default: bool = tx
+            .query_row(
+                "SELECT is_default != 0 FROM bookmark_groups WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .map_err(err_sql)?;
+        if is_default {
+            return Err("группу по умолчанию нельзя перемещать — она всегда корень".into());
+        }
+        if let Some(pid) = parent {
+            if pid == id {
+                return Err("группу нельзя вложить в саму себя".into());
+            }
+            if !parents.contains_key(&pid) {
+                return Err(format!("группа {pid} не найдена"));
+            }
+            if is_descendant(&parents, id, pid) {
+                return Err("группу нельзя вложить в её же подгруппу".into());
+            }
+            let pdepth = chain_depth(&parents, pid);
+            let height = subtree_height(&parents, id);
+            if pdepth + height > MAX_GROUP_DEPTH {
+                return Err(format!(
+                    "глубина вложенности групп — до {MAX_GROUP_DEPTH} уровней"
+                ));
+            }
+        }
+        let position: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_groups",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(err_sql)?;
+        let changed = tx
+            .execute(
+                "UPDATE bookmark_groups SET parent_id = ?1, position = ?2 WHERE id = ?3",
+                rusqlite::params![parent, position, id],
+            )
+            .map_err(err_sql)?;
+        if changed == 0 {
+            return Err(format!("группа {id} не найдена"));
+        }
+        tx.commit().map_err(err_sql)
     }
 
     /// Переименовать группу (имя уникально; несуществующая — ошибка).
@@ -908,7 +1007,9 @@ impl HistoryStore {
 
     /// Удалить группу: закладки остаются (членства снимаются каскадом),
     /// группа по умолчанию не удаляется (Ctrl+D и звёздочка без выбора
-    /// добавляют в неё).
+    /// добавляют в неё). Подгруппы удаляются вместе с родителем (FK-каскад,
+    /// duopulse-151) — надгробия синка пишутся по именам всего поддерева,
+    /// чтобы удаление вложенности уезжало в облако целиком.
     pub fn group_remove(&self, id: i64) -> Result<(), String> {
         let mut conn = self.conn.lock().expect("history: лок не отравлен");
         let tx = conn.transaction().map_err(err_sql)?;
@@ -929,8 +1030,30 @@ impl HistoryStore {
             Some(true) => return Err("группу по умолчанию удалить нельзя — переименуйте её".into()),
             Some(false) => {}
         }
-        // надгробие синка по ИМЕНИ (этап 5 duopulse-111): идентификаторы групп
-        // на машинах различаются, ключ слияния — имя
+        // надгробия синка по ИМЕНАМ поддерева (этап 5 duopulse-111): ключ
+        // слияния — имя; дети уходят каскадом вместе с родителем
+        let parents = parents_map(&tx)?;
+        let names: Vec<String> = {
+            let mut stmt = tx
+                .prepare("SELECT id, name FROM bookmark_groups")
+                .map_err(err_sql)?;
+            let all = stmt
+                .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                .map_err(err_sql)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(err_sql)?;
+            let mut queue = vec![id];
+            let mut subtree = Vec::new();
+            while let Some(cur) = queue.pop() {
+                for (gid, name) in &all {
+                    if parents.get(gid) == Some(&Some(cur)) {
+                        queue.push(*gid);
+                        subtree.push(name.clone());
+                    }
+                }
+            }
+            subtree
+        };
         let name: String = tx
             .query_row(
                 "SELECT name FROM bookmark_groups WHERE id = ?1",
@@ -940,12 +1063,14 @@ impl HistoryStore {
             .map_err(err_sql)?;
         tx.execute("DELETE FROM bookmark_groups WHERE id = ?1", [id])
             .map_err(err_sql)?;
-        tx.execute(
-            "INSERT OR REPLACE INTO sync_tombstones(kind, key, deleted_at)
-             VALUES ('group', ?1, ?2)",
-            rusqlite::params![name, now_ms()],
-        )
-        .map_err(err_sql)?;
+        for n in std::iter::once(name).chain(names) {
+            tx.execute(
+                "INSERT OR REPLACE INTO sync_tombstones(kind, key, deleted_at)
+                 VALUES ('group', ?1, ?2)",
+                rusqlite::params![n, now_ms()],
+            )
+            .map_err(err_sql)?;
+        }
         tx.commit().map_err(err_sql)
     }
 
@@ -1105,7 +1230,12 @@ impl HistoryStore {
             })
             .collect();
         let mut stmt = conn
-            .prepare("SELECT name, sort_by, created_at FROM bookmark_groups ORDER BY position, id")
+            .prepare(
+                "SELECT g.name, g.sort_by, g.created_at, p.name
+                 FROM bookmark_groups g
+                 LEFT JOIN bookmark_groups p ON p.id = g.parent_id
+                 ORDER BY g.position, g.id",
+            )
             .map_err(err_sql)?;
         let groups = stmt
             .query_map([], |r| {
@@ -1113,6 +1243,7 @@ impl HistoryStore {
                     name: r.get(0)?,
                     sort_by: r.get(1)?,
                     created_at: r.get(2)?,
+                    parent: r.get(3)?,
                 })
             })
             .map_err(err_sql)?
@@ -1252,8 +1383,11 @@ impl HistoryStore {
             .map_err(err_sql)?;
             stats.applied += 1;
         }
-        // 4) закладки облака: по url; надгробие свежее добавления — скип.
-        //    Карта имя→id групп — после шага 3 (свежие группы видны).
+        // 3b) вложенность (duopulse-151): родитель из облака — по имени;
+        //     не разрешается/цикл/глубина > 3 — группа остаётся как есть.
+        //     Существующей группе родителя тоже подтягиваем — структура
+        //     синкается, локальны только порядок и сортировка. Карта имя→id —
+        //     после шага 3 (свежие группы видны), до членств закладок.
         let gid_of_name: std::collections::HashMap<String, i64> = {
             let mut stmt = tx
                 .prepare("SELECT name, id FROM bookmark_groups")
@@ -1265,6 +1399,32 @@ impl HistoryStore {
                 .map_err(err_sql)?;
             map
         };
+        for g in &remote.groups {
+            let Some(parent_name) = g.parent.as_deref().map(str::trim) else {
+                continue;
+            };
+            let (Some(&gid), Some(&pid)) = (
+                gid_of_name.get(g.name.trim()),
+                gid_of_name.get(parent_name),
+            ) else {
+                continue;
+            };
+            if parent_name.is_empty() || gid == pid {
+                continue;
+            }
+            let parents = parents_map(&tx)?;
+            if is_descendant(&parents, gid, pid)
+                || chain_depth(&parents, pid) + subtree_height(&parents, gid) > MAX_GROUP_DEPTH
+            {
+                continue;
+            }
+            tx.execute(
+                "UPDATE bookmark_groups SET parent_id = ?1 WHERE id = ?2 AND is_default = 0",
+                rusqlite::params![pid, gid],
+            )
+            .map_err(err_sql)?;
+        }
+        // 4) закладки облака: по url; надгробие свежее добавления — скип.
         for b in &remote.bookmarks {
             let url = b.url.trim();
             if url.is_empty() {
@@ -1392,12 +1552,13 @@ impl HistoryStore {
     }
 
     /// Дамп групп (экспорт профиля): позиция, сортировка, флаг «по
-    /// умолчанию»; id — локальный (импорт мапит по имени).
+    /// умолчанию», родитель (duopulse-151); id — локальный (импорт мапит
+    /// по имени).
     pub fn dump_groups(&self) -> Result<Vec<BookmarkGroupRow>, String> {
         let conn = self.conn.lock().expect("history: лок не отравлен");
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, position, sort_by, is_default
+                "SELECT id, name, position, sort_by, is_default, parent_id
                  FROM bookmark_groups ORDER BY position, id",
             )
             .map_err(err_sql)?;
@@ -1409,6 +1570,7 @@ impl HistoryStore {
                     position: r.get::<_, i64>(2)? as u32,
                     sort_by: r.get(3)?,
                     is_default: r.get::<_, i64>(4)? != 0,
+                    parent_id: r.get(5)?,
                 })
             })
             .map_err(err_sql)?
@@ -1511,6 +1673,28 @@ impl HistoryStore {
                 )
                 .map_err(err_sql)?;
             }
+        }
+        // вложенность (duopulse-151): родитель из файла — по карте id; цикл
+        // или глубина > 3 — группа остаётся корнем
+        for row in rows {
+            let Some(&local) = map.get(&row.id) else { continue };
+            let Some(src_parent) = row.parent_id else { continue };
+            let Some(&parent) = map.get(&src_parent) else { continue };
+            if local == parent {
+                continue;
+            }
+            let parents = parents_map(&tx)?;
+            if is_descendant(&parents, local, parent)
+                || chain_depth(&parents, parent) + subtree_height(&parents, local)
+                    > MAX_GROUP_DEPTH
+            {
+                continue;
+            }
+            tx.execute(
+                "UPDATE bookmark_groups SET parent_id = ?1 WHERE id = ?2 AND is_default = 0",
+                rusqlite::params![parent, local],
+            )
+            .map_err(err_sql)?;
         }
         tx.commit().map_err(err_sql)?;
         Ok(map)
@@ -1659,13 +1843,16 @@ pub struct SyncBookmark {
 }
 
 /// Группа облачного документа: имя — ключ слияния, created_at — арбитр
-/// против надгробия удаления.
+/// против надгробия удаления; parent (duopulse-151) — имя родительской
+/// группы (отсутствует/не разрешается — группа станет корнем).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncGroup {
     pub name: String,
     pub sort_by: String,
     pub created_at: i64,
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 /// Надгробие удаления: kind — TOMBSTONE_BOOKMARK | TOMBSTONE_GROUP,
@@ -1801,6 +1988,89 @@ fn normalize_sort_by(s: &str) -> &'static str {
         "added" => "added",
         _ => "manual",
     }
+}
+
+// --- duopulse-151: вложенность групп ------------------------------------------
+
+/// Максимум уровней дерева групп: корень — 1, подгруппы — 2 и 3.
+const MAX_GROUP_DEPTH: u32 = 3;
+
+/// Карта id → родитель всех групп (одним запросом; None — корень).
+fn parents_map(
+    conn: &rusqlite::Connection,
+) -> Result<std::collections::HashMap<i64, Option<i64>>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, parent_id FROM bookmark_groups")
+        .map_err(err_sql)?;
+    let map = stmt
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)))
+        .map_err(err_sql)?
+        .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()
+        .map_err(err_sql)?;
+    Ok(map)
+}
+
+/// Глубина группы по цепочке родителей (1 — корень; группа без записи — 1).
+fn chain_depth(parents: &std::collections::HashMap<i64, Option<i64>>, id: i64) -> u32 {
+    let mut depth = 1u32;
+    let mut cur = parents.get(&id).copied().flatten();
+    // страховка от битого цикла в данных: счётчик итераций
+    for _ in 0..=parents.len() {
+        let Some(pid) = cur else { break };
+        depth += 1;
+        cur = parents.get(&pid).copied().flatten();
+    }
+    depth.min(MAX_GROUP_DEPTH)
+}
+
+/// node — потомок ли ancestor (или совпадает с ним) в дереве групп.
+fn is_descendant(
+    parents: &std::collections::HashMap<i64, Option<i64>>,
+    ancestor: i64,
+    node: i64,
+) -> bool {
+    let mut cur = Some(node);
+    for _ in 0..=parents.len() {
+        let Some(id) = cur else { return false };
+        if id == ancestor {
+            return true;
+        }
+        cur = parents.get(&id).copied().flatten();
+    }
+    false
+}
+
+/// Высота поддерева группы, считая её саму (лист — 1).
+fn subtree_height(parents: &std::collections::HashMap<i64, Option<i64>>, id: i64) -> u32 {
+    let children_of: std::collections::HashMap<i64, Vec<i64>> = {
+        let mut m: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
+        for (gid, parent) in parents {
+            if let Some(p) = parent {
+                m.entry(*p).or_default().push(*gid);
+            }
+        }
+        m
+    };
+    fn height(
+        children_of: &std::collections::HashMap<i64, Vec<i64>>,
+        id: i64,
+        guard: &mut usize,
+    ) -> u32 {
+        *guard = guard.saturating_sub(1);
+        if *guard == 0 {
+            return 1; // страховка от цикла
+        }
+        1 + children_of
+            .get(&id)
+            .map(|kids| {
+                kids.iter()
+                    .map(|k| height(children_of, *k, guard))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
+    }
+    height(&children_of, id, &mut parents.len().saturating_add(1))
 }
 
 fn err_sql(e: rusqlite::Error) -> String {
@@ -2301,8 +2571,8 @@ mod tests {
     fn group_crud_and_membership() {
         let store = HistoryStore::open_in_memory().unwrap();
         let fav = store.group_list().unwrap().remove(0);
-        let work = store.group_add("Работа").unwrap();
-        let study = store.group_add("Учёба").unwrap();
+        let work = store.group_add("Работа", None).unwrap();
+        let study = store.group_add("Учёба", None).unwrap();
         // позиции растут, счётчики нулевые
         let groups = store.group_list().unwrap();
         assert_eq!(
@@ -2312,8 +2582,8 @@ mod tests {
         assert!(groups.iter().all(|g| g.count == 0));
 
         // пустое имя и дубликат — ошибки
-        assert!(store.group_add("   ").is_err());
-        assert!(store.group_add("Работа").is_err());
+        assert!(store.group_add("   ", None).is_err());
+        assert!(store.group_add("Работа", None).is_err());
         // переименование в занятое имя — ошибка, в своё — ок
         assert!(store.group_rename(work.id, "Учёба").is_err());
         store.group_rename(work.id, "Работа и проект").unwrap();
@@ -2398,13 +2668,94 @@ mod tests {
         assert_eq!(groups[0].count, 0, "членства a.example ушли вместе с ней");
     }
 
+    /// duopulse-151: вложенность групп — подгруппы до 3 уровней, группу по
+    /// умолчанию нельзя двигать, циклы и превышение глубины пресекаются,
+    /// удаление родителя уносит поддерево (закладки живы).
+    #[test]
+    fn nested_subgroups_tree_limits_and_cascade() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let fav = store.group_list().unwrap().remove(0);
+        let work = store.group_add("Работа", None).unwrap();
+        let docs = store.group_add("Документы", Some(work.id)).unwrap();
+        let year = store.group_add("2026", Some(docs.id)).unwrap();
+        assert_eq!((work.depth, docs.depth, year.depth), (1, 2, 3));
+        assert_eq!(docs.parent_id, Some(work.id));
+        // четвёртый уровень и несуществующий родитель — ошибки; имя глобально уникально
+        assert!(store.group_add("Слишком глубоко", Some(year.id)).is_err());
+        assert!(store.group_add("Сирота", Some(999)).is_err());
+        assert!(store.group_add("2026", None).is_err());
+        // group_move: циклы, самовложение и перенос группы по умолчанию — ошибки
+        assert!(store.group_move(work.id, Some(docs.id)).is_err());
+        assert!(store.group_move(work.id, Some(work.id)).is_err());
+        assert!(store.group_move(fav.id, Some(work.id)).is_err());
+        // корневая группа под потомком 3-го уровня — превышение глубины
+        let other = store.group_add("Прочее", None).unwrap();
+        assert!(store.group_move(other.id, Some(year.id)).is_err());
+        // в корень и обратно — ок, глубина пересчитывается
+        store.group_move(year.id, None).unwrap();
+        let y = store
+            .group_list()
+            .unwrap()
+            .into_iter()
+            .find(|g| g.name == "2026")
+            .unwrap();
+        assert_eq!((y.depth, y.parent_id), (1, None));
+        store.group_move(year.id, Some(docs.id)).unwrap();
+
+        // членство закладки работает на любой глубине
+        store
+            .bookmark_add_to("https://doc.example/", "Документ", Some(year.id))
+            .unwrap();
+        let (marks, _) = store
+            .bookmark_list("", GroupFilter::Group(year.id), 0, 100)
+            .unwrap();
+        assert_eq!(marks.len(), 1);
+
+        // удаление родителя уносит поддерево, закладки живы
+        store.group_remove(work.id).unwrap();
+        let names: Vec<String> = store.group_list().unwrap().into_iter().map(|g| g.name).collect();
+        assert!(!names.iter().any(|n| n == "Документы" || n == "2026"));
+        assert_eq!(
+            store.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1,
+            1
+        );
+    }
+
+    /// duopulse-151: облачный документ несёт родителей групп (по имени),
+    /// слияние восстанавливает вложенность на машине-приёмнике.
+    #[test]
+    fn sync_doc_carries_group_parents() {
+        let a = HistoryStore::open_in_memory().unwrap();
+        let work = a.group_add("Работа", None).unwrap();
+        let docs = a.group_add("Документы", Some(work.id)).unwrap();
+        a.bookmark_add_to("https://doc.example/", "Документ", Some(docs.id))
+            .unwrap();
+        let doc = a.export_sync_doc().unwrap();
+        let wg = doc.groups.iter().find(|g| g.name == "Работа").unwrap();
+        let dg = doc.groups.iter().find(|g| g.name == "Документы").unwrap();
+        assert_eq!(wg.parent, None);
+        assert_eq!(dg.parent.as_deref(), Some("Работа"));
+
+        let b = HistoryStore::open_in_memory().unwrap();
+        b.merge_sync_doc(&doc).unwrap();
+        let groups = b.group_list().unwrap();
+        let d = groups.iter().find(|g| g.name == "Документы").unwrap();
+        let w = groups.iter().find(|g| g.name == "Работа").unwrap();
+        assert_eq!(d.parent_id, Some(w.id));
+        assert_eq!(d.depth, 2);
+        let (marks, _) = b
+            .bookmark_list("", GroupFilter::Group(d.id), 0, 100)
+            .unwrap();
+        assert_eq!(marks.len(), 1, "закладка пришла с членством в подгруппу");
+    }
+
     /// Сортировка группы: manual — позиции (bookmark_move/drag&drop),
     /// title — по имени без учёта регистра, added — свежие первыми.
     #[test]
     fn group_sort_modes_and_manual_move() {
         let store = HistoryStore::open_in_memory().unwrap();
         let fav = store.group_list().unwrap().remove(0);
-        let read = store.group_add("Чтение").unwrap();
+        let read = store.group_add("Чтение", None).unwrap();
         for (url, title) in [
             ("https://w.example/", "Википедия"),
             ("https://g.example/", "GitHub"),
@@ -2512,7 +2863,7 @@ mod tests {
     fn search_hits_carry_group_labels() {
         let store = HistoryStore::open_in_memory().unwrap();
         let fav = store.group_list().unwrap().remove(0);
-        let work = store.group_add("Работа").unwrap();
+        let work = store.group_add("Работа", None).unwrap();
         store
             .bookmark_add_to("https://rust.example/", "Rust", Some(fav.id))
             .unwrap();
@@ -2565,6 +2916,7 @@ mod tests {
                     position: 0,
                     sort_by: "manual".into(),
                     is_default: true,
+                    parent_id: None,
                 },
                 BookmarkGroupRow {
                     id: 11,
@@ -2572,6 +2924,7 @@ mod tests {
                     position: 1,
                     sort_by: "title".into(),
                     is_default: false,
+                    parent_id: None,
                 },
             ])
             .unwrap();
@@ -2591,6 +2944,7 @@ mod tests {
                 position: 9,
                 sort_by: "manual".into(),
                 is_default: false,
+                parent_id: None,
             }])
             .unwrap();
         assert!(map2.is_empty());
@@ -2790,7 +3144,7 @@ mod tests {
     fn sync_doc_moves_bookmarks_and_groups_between_machines() {
         let a = HistoryStore::open_in_memory().unwrap();
         let b = HistoryStore::open_in_memory().unwrap();
-        let work = a.group_add("Музыка").unwrap();
+        let work = a.group_add("Музыка", None).unwrap();
         a.bookmark_add_to("https://yt.example/", "YouTube", None)
             .unwrap();
         a.bookmark_add_to("https://m.example/track", "Трек", Some(work.id))
@@ -2978,7 +3332,7 @@ mod tests {
     fn group_deletion_tombstone_keeps_bookmarks() {
         let a = HistoryStore::open_in_memory().unwrap();
         let b = HistoryStore::open_in_memory().unwrap();
-        let work = a.group_add("Работа").unwrap();
+        let work = a.group_add("Работа", None).unwrap();
         a.bookmark_add_to("https://task.example/", "Задача", Some(work.id))
             .unwrap();
         b.merge_sync_doc(&a.export_sync_doc().unwrap()).unwrap();

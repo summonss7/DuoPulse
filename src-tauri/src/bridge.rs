@@ -198,8 +198,9 @@ pub use crate::history::contract::{
     BookmarkGroupInfo, BookmarkGroupRow, HistoryBookmarkAddParams, HistoryBookmarkListParams,
     HistoryBookmarkListResult, HistoryBookmarkMoveParams, HistoryBookmarkRemoveParams,
     HistoryBookmarkUpdateParams, HistoryDeleteRangeParams, HistoryDeleteUrlsParams,
-    HistoryGroupAddParams, HistoryGroupListResult, HistoryGroupRemoveParams,
-    HistoryGroupRenameParams, HistoryGroupSetSortParams, HistoryGroupToggleBookmarkParams,
+    HistoryGroupAddParams, HistoryGroupListResult, HistoryGroupMoveParams,
+    HistoryGroupRemoveParams, HistoryGroupRenameParams, HistoryGroupSetSortParams,
+    HistoryGroupToggleBookmarkParams,
     HistoryListParams, HistoryListResult, HistorySearchParams, HistorySearchResult,
     HistoryVisitParams,
 };
@@ -1128,6 +1129,9 @@ pub fn contract_json() -> serde_json::Value {
             "history.group_add": { "handler": "history_group_add",
                                    "params": schema!(HistoryGroupAddParams),
                                    "result": schema!(BookmarkGroupInfo) },
+            "history.group_move": { "handler": "history_group_move",
+                                    "params": schema!(HistoryGroupMoveParams),
+                                    "result": null },
             "history.group_rename": { "handler": "history_group_rename",
                                       "params": schema!(HistoryGroupRenameParams),
                                       "result": null },
@@ -1911,14 +1915,30 @@ fn history_group_list(
     })
 }
 
-/// history.group_add: создать группу. Правки групп — пометка на синк (этап 5).
+/// history.group_add: создать группу (duopulse-151: parent — подгруппа).
+/// Правки групп — пометка на синк (этап 5).
 #[tauri::command]
 fn history_group_add(
     history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
     aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
     params: HistoryGroupAddParams,
 ) -> Result<BookmarkGroupInfo, String> {
-    let res = history.group_add(&params.name);
+    let res = history.group_add(&params.name, params.parent_id);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
+}
+
+/// history.group_move: переложить группу в другого родителя (duopulse-151);
+/// структура дерева синкается (родители групп в доке по именам).
+#[tauri::command]
+fn history_group_move(
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
+    params: HistoryGroupMoveParams,
+) -> Result<(), String> {
+    let res = history.group_move(params.id, params.parent_id);
     if res.is_ok() {
         aila.schedule_sync();
     }
@@ -3321,6 +3341,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         history_bookmark_list,
         history_group_list,
         history_group_add,
+        history_group_move,
         history_group_rename,
         history_group_remove,
         history_group_set_sort,

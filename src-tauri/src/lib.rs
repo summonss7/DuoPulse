@@ -196,6 +196,7 @@ fn mobile_run() {
             mobile_history::history_bookmark_list,
             mobile_history::history_group_list,
             mobile_history::history_group_add,
+            mobile_history::history_group_move,
             mobile_history::history_group_rename,
             mobile_history::history_group_remove,
             mobile_history::history_group_set_sort,

@@ -9,6 +9,7 @@
 
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
+import { MAX_GROUP_DEPTH, groupPath, groupTreeOrder } from "../chrome/groups-tree";
 import { t } from "../i18n";
 
 /** Что выбрал пользователь в ряду чипов: «Все» или конкретная группа. */
@@ -251,13 +252,14 @@ export class MobileBookmarks {
       return b;
     };
     chip(t("Все"), "all", t("Все закладки"));
-    for (const g of this.groups) {
+    for (const g of groupTreeOrder(this.groups)) {
       const c = chip(
         // Имя группы — данные из БД; дефолтная «Избранное» создаётся Core
         // с русским именем — показываем перевод (duopulse-138, RTL-аудит).
-        `${(g.isDefault ? t(g.name) : g.name)} · ${g.count}`,
+        // duopulse-151: подгруппы — с отступом «· » по глубине
+        `${g.depth > 1 ? `${"· ".repeat(g.depth - 1)}` : ""}${g.isDefault ? t(g.name) : g.name} · ${g.count}`,
         g.id,
-        g.isDefault ? t("Группа по умолчанию (звёздочка без выбора)") : t("Группа закладок"),
+        g.isDefault ? t("Группа по умолчанию (звёздочка без выбора)") : groupPath(this.groups, g.id),
       );
       c.dataset.drop = String(g.id); // цель тяги (dropTargetOf)
       this.armChipLongPress(c, g);
@@ -311,6 +313,12 @@ export class MobileBookmarks {
       return b;
     };
     this.sheet.append(mk(t("Переименовать…"), () => this.editGroupName(g)));
+    // duopulse-151: подгруппа внутри группы (до 3 уровней)
+    if (g.depth < MAX_GROUP_DEPTH) {
+      this.sheet.append(
+        mk(t("Создать подгруппу…"), () => this.editGroupName(null, g.id)),
+      );
+    }
     if (!g.isDefault) {
       this.sheet.append(
         mk(t("Удалить группу «{name}» (закладки останутся)", { name: g.name }), () => {
@@ -324,15 +332,16 @@ export class MobileBookmarks {
     this.sheetWrap.hidden = false;
   }
 
-  /** Инлайн-ввод имени группы: новая (g=null) или переименование. */
-  private editGroupName(g: BookmarkGroupInfo | null): void {
+  /** Инлайн-ввод имени группы: новая (g=null; parent — подгруппа этого
+   *  родителя, duopulse-151) или переименование. */
+  private editGroupName(g: BookmarkGroupInfo | null, parent?: number): void {
     this.closeSheet();
     const existing = this.chips.querySelector<HTMLInputElement>(".m-bm-chip-input");
     if (existing) existing.remove();
     const input = document.createElement("input");
     input.className = "m-bm-chip-input";
     input.type = "text";
-    input.placeholder = g ? t("Новое имя группы") : t("Имя группы");
+    input.placeholder = g ? t("Новое имя группы") : parent != null ? t("Имя подгруппы") : t("Имя группы");
     input.value = g?.name ?? "";
     let done = false;
     const cancel = (): void => {
@@ -353,7 +362,7 @@ export class MobileBookmarks {
         }
         const call = g
           ? this.api.history.groupRename({ id: g.id, name })
-          : this.api.history.groupAdd({ name });
+          : this.api.history.groupAdd({ name, parentId: parent ?? null });
         void call.then(() => this.reload()).catch((e) => this.host.note(t("Группа: {error}", { error: e })));
       }
     });
@@ -531,11 +540,15 @@ export class MobileBookmarks {
         .then(() => this.host.note(t("Добавлено в закладки")))
         .catch((e) => this.host.note(t("Закладка: {error}", { error: String(e) })));
     };
-    for (const g of groups) {
+    for (const g of groupTreeOrder(groups)) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "m-sheet-item";
-      b.textContent = g.isDefault ? t("{name} (по умолчанию)", { name: g.name }) : g.name;
+      // duopulse-151: подгруппы — с отступом по глубине и путём в подсказке
+      b.textContent = g.isDefault
+        ? t("{name} (по умолчанию)", { name: g.name })
+        : `${g.depth > 1 ? `${"· ".repeat(g.depth - 1)}` : ""}${g.name}`;
+      b.title = groupPath(groups, g.id);
       b.addEventListener("click", () => pick(g.id));
       this.sheet.append(b);
     }
