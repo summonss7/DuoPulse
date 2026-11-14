@@ -6178,3 +6178,6 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   правки (duopulse-120); эмуляторная x86_64-сборка релиза —
   builds/duopulse_0.1.46_android_release/DuoPulse-0.1.46-android-release-x86_64.apk
   (в канал/хаб не публиковалась).
+- Коммит: dc25b5f feat(mobile): duopulse-146 — cleartext в релизе Android:
+  web-оверлей открывает http-сайты; стенд e2e/mobile/http-release-smoke;
+  версия 0.1.46.
