@@ -100,6 +100,7 @@ root.innerHTML = `
         </div>
         <label class="m-engine"><span data-i18n="Поиск:">Поиск:</span> <select id="mEngine"></select></label>
         <label class="m-engine"><span data-i18n="Язык:">Язык:</span> <select id="mLang"></select></label>
+        <label class="m-engine"><span data-i18n="Блокировщик рекламы:">Блокировщик рекламы:</span> <select id="mAdblock"></select></label>
         <div id="mAila"></div>
         <button id="mTranslate" class="m-check-update" data-i18n="Перевести текст…">Перевести текст…</button>
         <button id="mCheckUpdate" class="m-check-update" data-i18n="Проверить обновления">Проверить обновления</button>
@@ -494,6 +495,30 @@ for (const l of UI_LANGS) {
 langSel.addEventListener("change", () => {
   const next = UI_LANGS.find((l) => l.id === langSel.value)?.id;
   if (next && next !== uiLang) void setUiLang(next);
+});
+
+// ── Блокировщик рекламы (duopulse-144): тумблер полного движка (EasyList +
+// uBO + quick-fixes — тот же Core, что на десктопе) для web-оверлея.
+// Состояние — ключ "adblock" мобильного settings.json (переживает
+// перезапуск); выкл — оверлей остаётся на лёгком хостовом списке
+// (duopulse-139). Инкогнито не трогает: настройка и списки — не след
+// активности.
+const adblockSel = root.querySelector<HTMLSelectElement>("#mAdblock")!;
+for (const [v, label] of [["on", t("Вкл")], ["off", t("Выкл")]] as const) {
+  const opt = document.createElement("option");
+  opt.value = v;
+  opt.textContent = label;
+  adblockSel.append(opt);
+}
+void invoke<{ enabled: boolean }>("mobile_adblock_status")
+  .then((s) => {
+    adblockSel.value = s.enabled ? "on" : "off";
+  })
+  .catch(() => {
+    adblockSel.value = "on"; // команда недоступна — дефолт включён
+  });
+adblockSel.addEventListener("change", () => {
+  void invoke("mobile_adblock_set_enabled", { on: adblockSel.value === "on" }).catch(() => {});
 });
 
 /** Открыть адрес системным браузером (mobile.open_url → Intent ACTION_VIEW):

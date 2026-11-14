@@ -21,8 +21,18 @@
 //! `serialize_raw` ресурсы НЕ сериализует — `use_resources` вызывается и
 //! после `Engine::from_rules`, и после `deserialize`.
 //!
+//! Мобильная ветка Android (карточка duopulse-144): тот же сервис компилирует
+//! и тонкая либа (src/lib.rs) — COM-специфика осталась в бине main.rs, здесь
+//! только движок/списки/настройки. Сетевые решения для shouldInterceptRequest
+//! нативного web-оверлея берёт JNI-модуль src/mobile_adblock.rs
+//! ([`AdblockService::should_block`] + [`guess_request_type`]), косметику
+//! ([`AdblockService::cosmetic_injection_script`]) оверлей инжектирует
+//! evaluateJavascript'ом; списки/кэш/тумблер — те же profile/filters и
+//! settings.json мобильного профиля (filesDir/profile).
+//!
 //! Списки: EasyList + uBO filters (ads) + живой uBO quick-fixes (SSAI-ансамбль,
-//! карточка 074; оффлайн-фолбэк — встроенный снапшот) + встроенный compat;
+//! карточка 074; оффлайн-фолбэк — встроенный снапшот) + встроенные compat
+//! (YouTube-исключения) и tubes (преролл pornhub/xhamster, карточка 140);
 //! загрузка по HTTPS,
 //! кэш текстов в `profile/filters/<имя>.txt` (docs/02 §8), скомпилированный
 //! движок в `engine.bin` (deserialize — сотни мс против секунд парсинга),
@@ -59,12 +69,18 @@ use adblock::lists::ParseOptions;
 use adblock::request::Request;
 use adblock::resources::Resource;
 use adblock::Engine;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+// События UI (счётчик блокировок, белые списки) — десктопный bridge. Типы
+// результата AdblockStatusResult/AdblockListInfo — общие: объявлены в этом
+// модуле ниже (мобильная либа duopulse-144 компилирует его без bridge, а
+// bridge десктопа их перепродаёт).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::bridge::{
-    emit, AdblockBlockedCount, AdblockBlockedCountEvent, AdblockListInfo, AdblockSiteException,
-    AdblockSiteExceptionChangedEvent, AdblockStatusResult,
+    emit, AdblockBlockedCount, AdblockBlockedCountEvent, AdblockSiteException,
+    AdblockSiteExceptionChangedEvent,
 };
 
 /// Сутки: обновлять список, если кэш старше (docs/04: «кэш, фоновое
@@ -72,7 +88,8 @@ use crate::bridge::{
 const STALE_AFTER_MS: i64 = 24 * 60 * 60 * 1000;
 /// Период фоновых проверок протухлости.
 const CHECK_PERIOD: Duration = Duration::from_secs(60 * 60);
-/// Период слива счётчика блокировок в UI.
+/// Период слива счётчика блокировок в UI (десктоп: события adblock:blocked_count).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const FLUSH_PERIOD: Duration = Duration::from_millis(400);
 /// Таймаут загрузки списка и потолок размера ответа (EasyList ~4 МБ).
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -83,7 +100,11 @@ const FETCH_MAX_BYTES: usize = 32 * 1024 * 1024;
 /// uBO «uBlock filters – Ads» живёт в uAssets как filters.txt (проверять
 /// при обновлении: прежний ads.txt удалён апстримом и отдавал 404).
 const DEFAULT_LISTS: [(&str, &str); 2] = [
-    ("easylist", "https://easylist.to/easylist/easylist.txt"),
+    // Источник — официальный дистрибьютор eyeo/ABP (Akamai), а не easylist.to
+    // (Cloudflare): на Android rustls-клиент списков падал по easylist.to
+    // «cannot decrypt peer's message» (GitHub/Akamai — ок, duopulse-144;
+    // содержимое — тот же канонический EasyList).
+    ("easylist", "https://easylist-downloads.adblockplus.org/easylist.txt"),
     (
         "ublock-ads",
         "https://ublockorigin.github.io/uAssets/filters/filters.txt",
@@ -104,8 +125,17 @@ const SCRIPTLETS_JSON: &str = include_str!("scriptlets-resources.json");
 /// живут на своих списках.
 const COMPAT_RULES: &str = include_str!("compat.txt");
 /// Источник-маркер встроенного списка: текст не качается, а берётся из
-/// `COMPAT_RULES` (обновление — пересборкой бинарника).
+/// вкомпилированного текста (обновление — пересборкой бинарника).
 const COMPAT_SOURCE: &str = "builtin:";
+
+/// Встроенный список туб-сайтов (карточка duopulse-140): преролл-реклама и
+/// попандеры pornhub/xhamster (обе платформы DuoPulse — движок общий).
+/// Общие списки (EasyList/uBO) режут баннерную сеть, но преролл у этих сайтов
+/// живёт на собственных/приклеенных к плееру интеграциях и часто уходит мимо;
+/// здесь точечные сетевые правила и скриптлеты по фактам стенда
+/// e2e/adblock/tube-ads-probe.mjs. Обновление — пересборкой бинарника
+/// (тот же механизм, что compat).
+const TUBES_RULES: &str = include_str!("tubes.txt");
 
 /// Встроенный снапшот uBO quick-fixes (карточки 069/072/074): оффлайн-фолбэк
 /// живого источника `QUICKFIX_URL` — первый запуск без сети/кэша работает на
@@ -157,7 +187,20 @@ struct ListDef {
 /// duopulse-quickfix (карточка 074) — живой кураторский список uBO
 /// quick-fixes: тот же уровень доверия, который даёт ему сам uBO.
 fn trusted_list(name: &str) -> bool {
-    matches!(name, "ublock-ads" | "duopulse-compat" | "duopulse-quickfix")
+    matches!(
+        name,
+        "ublock-ads" | "duopulse-compat" | "duopulse-quickfix" | "duopulse-tubes"
+    )
+}
+
+/// Текст встроенного списка по имени (compat — карточка 044, tubes — 140):
+/// источник-маркер `builtin:` один на всех, текст — свой.
+fn builtin_text(name: &str) -> Option<&'static str> {
+    match name {
+        "duopulse-compat" => Some(COMPAT_RULES),
+        "duopulse-tubes" => Some(TUBES_RULES),
+        _ => None,
+    }
 }
 
 /// Реестр источников: DUOPULSE_ADBLOCK_LISTS (e2e) или DEFAULT_LISTS +
@@ -177,6 +220,13 @@ fn list_defs() -> Vec<ListDef> {
             name: "duopulse-compat".into(),
             source: COMPAT_SOURCE.into(),
             trusted: trusted_list("duopulse-compat"),
+        });
+        // Карточка 140: преролл-реклама туб-сайтов — свой встроенный список
+        // (те же механизмы кэша/меток, что compat).
+        defs.push(ListDef {
+            name: "duopulse-tubes".into(),
+            source: COMPAT_SOURCE.into(),
+            trusted: trusted_list("duopulse-tubes"),
         });
         // Карточка 074: живой список uBO quick-fixes (URL, качается как
         // EasyList; оффлайн-фолбэк — встроенный снапшот) — trusted-источник,
@@ -223,6 +273,50 @@ struct ListMetaEntry {
 #[serde(default)]
 struct ListsMeta {
     lists: std::collections::BTreeMap<String, ListMetaEntry>,
+}
+
+// ---------------------------------------------------------------------------
+// Типы контракта adblock.status (общие: десктоп-bridge перепродаёт их для
+// generate_handler и contract.json, мобильная либа duopulse-144 сериализует
+// в JSON для команды mobile_adblock_status)
+// ---------------------------------------------------------------------------
+
+/// adblock.status (и результат set_enabled/update_lists): снапшот состояния
+/// блокировщика для меню и e2e.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockStatusResult {
+    /// Глобальный тумблер.
+    pub enabled: bool,
+    /// Движок построен (списки загружены/из кэша) — фильтрация активна.
+    pub ready: bool,
+    /// Заблокировано запросов за сеанс.
+    pub blocked_total: u64,
+    /// Всех http(s)-запросов через перехватчик (диагностика P-07).
+    pub seen_total: u64,
+    /// Загружено $replace-правил перезаписи ответов (карточка duopulse-050;
+    /// живые правила uBO движок adblock-rs игнорирует — парсит их наш слой).
+    pub replace_rules: u32,
+    /// Ответов, чьи тела реально переписаны ($replace), за сеанс.
+    pub replaced_total: u64,
+    pub lists: Vec<AdblockListInfo>,
+    /// Сайты-исключения (хосты).
+    pub site_exceptions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockListInfo {
+    pub name: String,
+    /// http(s)-адрес или путь файла-источника.
+    pub source: String,
+    /// Число правил в последней загруженной версии.
+    pub rules: u32,
+    /// Успешная загрузка, unix-ms (0 — списка ещё не было).
+    pub updated_at: i64,
+    /// Последняя ошибка загрузки (None — ошибок нет).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -367,14 +461,24 @@ impl AdblockService {
         }
     }
 
-    /// Фоновые нити: обновление списков + слив счётчика блокировок.
-    /// Вызывается один раз из setup.
+    /// Фоновые нити десктопа: обновление списков + слив счётчика блокировок
+    /// в события UI. Вызывается один раз из setup бина.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn start(self: &Arc<Self>, app: &AppHandle) {
         let updater = Arc::clone(self);
         std::thread::spawn(move || updater.updater_loop());
         let flusher = Arc::clone(self);
         let app = app.clone();
         std::thread::spawn(move || flusher.flusher_loop(&app));
+    }
+
+    /// Фоновая нить мобильной ветки (duopulse-144): только обновление списков
+    /// (слушателей событий adblock:* у мобильного UI нет — счётчик блокировок
+    /// пишет в logcat Kotlin-сторона оверлея, статус доступен командой).
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    pub fn start_mobile(self: &Arc<Self>) {
+        let updater = Arc::clone(self);
+        std::thread::spawn(move || updater.updater_loop());
     }
 
     /// Решение для COM-перехватчика WebView2: блокировать ли запрос.
@@ -529,6 +633,31 @@ impl AdblockService {
         site: Option<&str>,
         on: bool,
     ) -> Result<AdblockStatusResult, String> {
+        let site = self.set_enabled_inner(site, on)?;
+        // Событие белого-листа — десктопное UI (меню сайта); мобильная ветка
+        // site-исключениями не пользуется (глобальный тумблер, duopulse-144).
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let _site = site;
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if let Some(host) = &site {
+            emit::<AdblockSiteExceptionChangedEvent>(
+                app,
+                &AdblockSiteException {
+                    site: host.clone(),
+                    on,
+                },
+            )
+            .ok();
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let _ = app;
+        Ok(self.status())
+    }
+
+    /// Общая часть тумблера (десктоп set_enabled, мобильная либа duopulse-144):
+    /// изменить состояние, сохранить settings.json; вернуть нормализованный
+    /// хост site-исключения (None — глобальный тумблер).
+    fn set_enabled_inner(&self, site: Option<&str>, on: bool) -> Result<Option<String>, String> {
         let site = match site.map(normalize_site) {
             Some(Ok(host)) => Some(host),
             Some(Err(e)) => return Err(e),
@@ -554,17 +683,13 @@ impl AdblockService {
         };
         drop(guard);
         save_persisted(&self.profile_dir, &persisted)?;
-        if let Some(host) = &site {
-            emit::<AdblockSiteExceptionChangedEvent>(
-                app,
-                &AdblockSiteException {
-                    site: host.clone(),
-                    on,
-                },
-            )
-            .ok();
-        }
-        Ok(self.status())
+        Ok(site)
+    }
+
+    /// Глобальный тумблер мобильной ветки (duopulse-144, без AppHandle):
+    /// меню «⋮» оверлея и настройки мобильного UI.
+    pub fn set_enabled_mobile(&self, on: bool) -> Result<(), String> {
+        self.set_enabled_inner(None, on).map(|_| ())
     }
 
     /// adblock.update_lists: разбудить нить обновления (force — качать
@@ -696,6 +821,22 @@ impl AdblockService {
         selectors
     }
 
+    /// Готовый JS-пейлоад косметики для WebView мобильной ветки (duopulse-144,
+    /// второй этап карточки): скриптлеты движка (injected_script) + селекторы
+    /// скрытия одним скриптом под evaluateJavascript onPageStarted/Finished.
+    /// Пустая строка — применять нечего (выключен/списки грузятся/сайт-
+    /// исключение). Generic class/id-фаза (матчинг реальных DOM-классов,
+    /// [`Self::cosmetic_generic_selectors`]) не выполняется: она требует
+    /// обратного рейнда со страницей; hide-набор уже несёт host-специфичные и
+    /// misc-generic правила — основная косметика работает.
+    pub fn cosmetic_injection_script(&self, url: &str) -> String {
+        let res = self.cosmetic_resources(url);
+        if !res.active || !res.ready {
+            return String::new();
+        }
+        cosmetic_script_from(&res)
+    }
+
     // --- нить обновления ----------------------------------------------------
 
     fn updater_loop(self: Arc<Self>) {
@@ -747,13 +888,13 @@ impl AdblockService {
         let mut states: Vec<ListState> = Vec::new();
         for def in &defs {
             let path = list_path(&filters_dir, &def.name);
-            let text = if def.source == COMPAT_SOURCE {
-                Some(COMPAT_RULES.to_string())
-            } else {
-                std::fs::read_to_string(&path).ok().or_else(|| {
-                    (def.name == "duopulse-quickfix").then(|| QUICKFIX_RULES.to_string())
-                })
-            };
+            let text = builtin_text(&def.name)
+                .map(|t| t.to_string())
+                .or_else(|| {
+                    std::fs::read_to_string(&path).ok().or_else(|| {
+                        (def.name == "duopulse-quickfix").then(|| QUICKFIX_RULES.to_string())
+                    })
+                });
             let Some(text) = text else {
                 continue; // кэша нет — первый запуск, дождёмся сети
             };
@@ -825,11 +966,11 @@ impl AdblockService {
                 || cached.is_none()
                 || (def.source.starts_with("http://") || def.source.starts_with("https://"))
                     && (cached_at == 0 || now - cached_at > STALE_AFTER_MS);
-            let (text, updated_at, error) = if def.source == COMPAT_SOURCE {
-                // Встроенный список совместимости (карточка 044): текст
+            let (text, updated_at, error) = if let Some(builtin) = builtin_text(&def.name) {
+                // Встроенный список (compat — 044, tubes — 140): текст
                 // вкомпилирован; пишем его в кэш для единообразия меток.
-                atomic_write(&path, COMPAT_RULES.as_bytes());
-                (Some(COMPAT_RULES.to_string()), now, String::new())
+                atomic_write(&path, builtin.as_bytes());
+                (Some(builtin.to_string()), now, String::new())
             } else if need_fetch {
                 match fetch_list(&def.source) {
                     Ok(t) => {
@@ -1055,8 +1196,9 @@ impl AdblockService {
         Some(port)
     }
 
-    // --- нить слива счётчика --------------------------------------------------
+    // --- нить слива счетчика (десктоп: события UI через bridge) --------------
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn flusher_loop(self: &Arc<Self>, app: &AppHandle) {
         loop {
             std::thread::sleep(FLUSH_PERIOD);
@@ -1443,6 +1585,88 @@ fn fetch_list(source: &str) -> Result<String, String> {
         .read_to_string(&mut buf)
         .map_err(|e| format!("чтение {source}: {e}"))?;
     Ok(buf)
+}
+
+// ---------------------------------------------------------------------------
+// Мобильная ветка (duopulse-144): чистые помощники JNI-слоя
+// ---------------------------------------------------------------------------
+
+/// Приблизительный тип запроса для shouldInterceptRequest мобильного WebView:
+/// Android не раскрывает тип ресурса (script/image/xhr — только URL и
+/// заголовки). Главный фрейм — «document» (семантика $document и выбор
+/// источника в [`AdblockService::should_block`]); подресурсы — по расширению
+/// пути и Accept-заголовку; неизвестное — «other» (нетипизированные правила
+/// `||host^` матчатся при любом типе, так что основная сетевая фильтрация
+/// работает и без точного типа).
+pub fn guess_request_type(uri: &str, accept: Option<&str>, is_main_frame: bool) -> &'static str {
+    if is_main_frame {
+        return "document";
+    }
+    /// Расширение → тип (проверки до '?'/#; to_lowercase — пути регистронезависимы).
+    const BY_EXT: &[(&str, &str)] = &[
+        (".js", "script"),
+        (".mjs", "script"),
+        (".css", "stylesheet"),
+        (".png", "image"),
+        (".jpg", "image"),
+        (".jpeg", "image"),
+        (".gif", "image"),
+        (".webp", "image"),
+        (".svg", "image"),
+        (".ico", "image"),
+        (".avif", "image"),
+        (".mp4", "media"),
+        (".webm", "media"),
+        (".m3u8", "media"),
+        (".mp3", "media"),
+        (".m4a", "media"),
+        (".woff", "font"),
+        (".woff2", "font"),
+        (".ttf", "font"),
+        (".otf", "font"),
+    ];
+    let path = uri.split(['?', '#']).next().unwrap_or(uri).to_lowercase();
+    for (ext, ty) in BY_EXT {
+        if path.ends_with(ext) {
+            return ty;
+        }
+    }
+    match accept {
+        Some(a) if a.starts_with("image/") => "image",
+        Some(a) if a.starts_with("text/css") => "stylesheet",
+        Some(a) if a.contains("javascript") || a.contains("ecmascript") => "script",
+        Some(a) if a.starts_with("video/") || a.starts_with("audio/") => "media",
+        Some(a) if a.starts_with("font/") || a.contains("font") => "font",
+        _ => "other",
+    }
+}
+
+/// Обёртка косметики в самодостаточный JS для evaluateJavascript (duopulse-144):
+/// скриптлеты движка (injected_script — function-вызовы uBO, каждый в своём
+/// try/catch) + <style> c hide-селекторами; всё под общей обёрткой, чтобы
+/// одна ошибка не гасила остальное. Селекторы уходят в скрипт JSON-литералом
+/// массива (экранирование без ручного escape). Пустой результат — «нет ни
+/// скриптлетов, ни скрытий» (клиент не зовёт evaluateJavascript).
+pub(crate) fn cosmetic_script_from(res: &CosmeticResources) -> String {
+    if res.hide.is_empty() && res.injected_script.is_empty() {
+        return String::new();
+    }
+    let mut js = String::from("(function(){try{\n");
+    if !res.injected_script.is_empty() {
+        js.push_str(&res.injected_script);
+        js.push_str("\n");
+    }
+    if !res.hide.is_empty() {
+        // Массив-литерал селекторов → один CSS-лист display:none
+        let selectors = serde_json::to_string(&res.hide).unwrap_or_else(|_| "[]".into());
+        js.push_str(&format!(
+            "var st=document.createElement('style');\
+             st.textContent={selectors}.join(',')+'{{display:none!important}}';\
+             (document.head||document.documentElement).appendChild(st);"
+        ));
+    }
+    js.push_str("}catch(e){}})();");
+    js
 }
 
 // ---------------------------------------------------------------------------
@@ -2853,12 +3077,16 @@ mod tests {
         let defs = list_defs();
         assert!(defs.iter().any(|d| d.source == COMPAT_SOURCE));
         assert!(
+            defs.iter().any(|d| d.name == "duopulse-tubes" && d.source == COMPAT_SOURCE),
+            "tubes-список — встроенный (карточка 140)"
+        );
+        assert!(
             defs.iter().any(|d| d.source == QUICKFIX_URL),
             "quick-fixes — живой URL (карточка 074)"
         );
         assert_eq!(
             defs.iter()
-                .filter(|d| d.source != COMPAT_SOURCE && d.source != QUICKFIX_URL)
+                .filter(|d| builtin_text(&d.name).is_none() && d.source != QUICKFIX_URL)
                 .count(),
             DEFAULT_LISTS.len(),
             "сетевые списки не задвоены"
@@ -2947,5 +3175,53 @@ mod tests {
         // байты не движка — deserialize не пройдёт, но метки уже с digest
         assert!(load_compiled(&filters, &digests).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- duopulse-144: мобильные помощники (тип запроса, JS-обёртка) --------
+
+    #[test]
+    fn guess_request_type_main_frame_is_document() {
+        assert_eq!(guess_request_type("https://x.test/a?b.js", None, true), "document");
+    }
+
+    #[test]
+    fn guess_request_type_by_extension_and_accept() {
+        assert_eq!(guess_request_type("https://x.test/app.JS?q=1", None, false), "script");
+        assert_eq!(guess_request_type("https://x.test/a.css#frag", None, false), "stylesheet");
+        assert_eq!(guess_request_type("https://x.test/i.webp", None, false), "image");
+        assert_eq!(guess_request_type("https://x.test/v.m3u8", None, false), "media");
+        // без расширения — Accept-заголовок
+        assert_eq!(guess_request_type("https://x.test/gen", Some("image/*"), false), "image");
+        assert_eq!(
+            guess_request_type("https://x.test/api", Some("application/json"), false),
+            "other"
+        );
+        // ничто не подошло — other: правила без $типа продолжают матчиться
+        assert_eq!(guess_request_type("https://x.test/path", None, false), "other");
+    }
+
+    #[test]
+    fn cosmetic_script_wraps_scriptlets_and_hide() {
+        let empty = CosmeticResources {
+            active: true,
+            ready: true,
+            hide: vec![],
+            generichide: false,
+            injected_script: String::new(),
+        };
+        assert_eq!(cosmetic_script_from(&empty), "");
+        let res = CosmeticResources {
+            active: true,
+            ready: true,
+            hide: vec!["#ad".into(), "#banner .x".into()],
+            generichide: false,
+            injected_script: "try{noop()}catch(e){}".into(),
+        };
+        let js = cosmetic_script_from(&res);
+        assert!(js.starts_with("(function(){try{"));
+        assert!(js.contains("try{noop()}catch(e){}"));
+        // селекторы — JSON-литералом (экранировано serde, не руками)
+        assert!(js.contains(r##"["#ad","#banner .x"].join(',')+'{display:none!important}'"##));
+        assert!(js.ends_with("}catch(e){}})();"));
     }
 }

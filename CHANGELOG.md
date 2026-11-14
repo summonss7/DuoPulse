@@ -6061,3 +6061,74 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Релизы: 0.1.44 (версии синхронны) — десктоп npm run release (GitHub-фид,
   хаб, C:\DuoPulse) и android-build.sh release (APK в builds/ + канал Aila).
 - Коммит: 410ad52 feat(mobile): duopulse-145 (шапка/меню/фикс close, версия 0.1.44).
+
+## 14.11.2026, 02:02–05:10 — duopulse-144: полный адблок (adblock-rs + EasyList/uBO) в мобильной ветке Android (0.1.45)
+
+- Что изменено: полный движок блокировщика десктопа (adblock-rs: EasyList
+  + uBO-ads + uBO quick-fixes + compat, сетевая фильтрация до загрузки,
+  косметика, скриптлеты) перенесён в мобильную ветку — web-оверлей
+  (MobileWebHelper) спрашивает движок из shouldInterceptRequest через JNI:
+  1) src-tauri/src/adblock/mod.rs компилируется теперь и мобильной либой
+  (COM-специфика осталась в бине): DTO AdblockStatusResult/AdblockListInfo
+  перенесены из bridge.rs (bridge перепродаёт — контракт v15 без изменений),
+  flusher счётчика и события — десктоп-only cfg, новая start_mobile()/
+  set_enabled_mobile(), guess_request_type() (Android тип ресурса не
+  раскрывает — тип из расширения пути + Accept) и cosmetic_script_from()
+  (JS-обёртка скриптлетов + hide-селекторов) — обе с юнит-тестами;
+  2) новый src-tauri/src/mobile_adblock.rs: синглтон AdblockService (init из
+  setup мобильной либы), JNI-экспорты Java_dev_duopulse_mobile_
+  MobileAdblockNative_{shouldBlock,cosmeticScript,isEnabled,setEnabled,
+  status} (строки извлекаются до catch_unwind — паника не валит браузер),
+  команды mobile_adblock_status / mobile_adblock_set_enabled;
+  3) Kotlin: MobileAdblockNative.kt (обёртки гасят UnsatisfiedLinkError —
+  сбой моста = прежнее поведение), shouldInterceptRequest оверлея — движок
+  первым, лёгкий хост-лист duopulse-139 остаётся фолбэком (логи
+  adblock-engine: / adblock:); ВАЖНЫЙ фикс по смоуку: view.url в
+  shouldInterceptRequest нельзя (нити загрузчика WebView, WebView-геттеры
+  роняли процесс) — текущий адрес в @Volatile pageUrl из onPageStarted/
+  DPURL-хука; косметика — JS-пейлоад движка evaluateJavascript'ом на
+  onPageStarted/onPageFinished (дедуп по тексту скрипта); тумблер
+  «✓/○ Блокировщик рекламы» в меню «⋮» оверлея (тост, статус в logcat);
+  4) настройки мобильного UI: строка «Блокировщик рекламы:» (Вкл/Выкл) в
+  m-menu (mobile.ts, команда set_enabled; i18n +3 ключа в en/uk/ro/ar/sk);
+  5) Cargo.toml: adblock (те же фичи, что десктоп) + пин rmp=0.8.14 + regex
+  в мобильную секцию; proguard-keep для MobileAdblockNative (R8);
+  6) источник EasyList сменён с easylist.to (Cloudflare — rustls клиента
+  списков на Android падал «cannot decrypt peer's message») на официальный
+  дистрибьютор eyeo/ABP easylist-downloads.adblockplus.org (Akamai, тот же
+  канонический файл; выгоду получает и десктоп); списки качаются/кэшируются
+  тем же механизмом profile/filters мобильного профиля (filesDir/profile),
+  суточное фоновое обновление, engine.bin-кэш — всё как на десктопе.
+  Вместе с правками в коммит попали незакоммиченные остатки оборвавшейся
+  сессии duopulse-140 (tubes-список: include_str tubes.txt, builtin_text(),
+  e2e/adblock/tube-ads-probe.mjs) — карточка 140 остаётся в работе, отчёта
+  по ней здесь нет.
+- Как проверено: cargo 376 (Host; +5 тестов: тип запроса ×2, JS-обёртка
+  косметики, defs-списки, интерполяция) — один флак-прогон history
+  (sqlite-времянки в параллельных тестах) зелёный при повторе; vitest 491;
+  typecheck чист; npm run gen:bridge — контракт v15 идентичен. На
+  эмуляторе (x86_64, AVD duopulse144 android-36, debug-APK 0.1.45) новый
+  смоук e2e/adblock/mobile-adblock-smoke.mjs (+ страницы
+  e2e/adblock/mobile-smoke/) — 16/16 PASS: движок режет EasyList-хосты
+  вне лёгкого списка (ads.rubiconproject.com, track.adform.net,
+  ad.yieldmo.com — строки adblock-engine: в logcat, blockedTotal растёт),
+  контрольный локальный ресурс жив, тумблер выкл = движковых строк нет,
+  лёгкий список (doubleclick) работает и счётчик замер, тумблер переживает
+  рестарт (settings.json), движок из кэша готов после рестарта, косметика —
+  наш <style> в документе живой страницы m.youtube, тяжёлая страница
+  (1800 узлов + JS-нагрузка) не роняет приложение, TOTAL PSS 243 МБ;
+  строка «Блокировщик рекламы:» в m-menu проверена CDP (значение/опции/
+  метка) + скриншот. Релиз-APK (R8, у релиза нет CDP-сокета webview —
+  полный смоук гоняется debug-сборкой): статически — R8-кип держит
+  MobileAdblockNative с методами (строки в classes.dex), libduopulse_lib.so
+  (13.5 МБ) экспортирует все 5 Java_dev_duopulse_mobile_MobileAdblockNative_*
+  символов; живой запуск — оверлей ходит в сеть, logcat без исключений.
+  Побочная находка — карточка 146: http-адреса в релизном оверлее падают
+  ERR_CLEARTEXT_NOT_PERMITTED (debug разрешал — потому в 139/145 не
+  замечали). Размер: debug-universal .so +33 МБ/аби (без strip);
+  релиз-APK (aarch64) 11.1 → 14.6 МБ (+3.6 МБ за движок, strip+lto),
+  память в норме.
+- Релизы: 0.1.45 (версии синхронны) — android-build.sh release (APK в
+  builds/ + канал Aila) и десктоп npm run release (GitHub-фид, хаб,
+  C:\DuoPulse) — тот же сеанс, что и правки (duopulse-120).
+- Коммит: feat(mobile): duopulse-144 — полный адблок в мобильной ветке.

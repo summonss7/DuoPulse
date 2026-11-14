@@ -48,6 +48,14 @@ pub mod mobile_settings;
 // не в системном браузере; Kotlin-хелпер MobileWebHelper + команды
 // mobile_web_open/mobile_web_close.
 pub mod mobile_web;
+// Полный адблок в мобильной ветке (duopulse-144): движок crate::adblock
+// (EasyList + uBO + quick-fixes, сетевая фильтрация/косметика/скриптлеты)
+// для shouldInterceptRequest оверлея — JNI-экспорты + команды статуса и
+// тумблера. Общий движок объявлен ниже (десктоп держит его бином main.rs).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod adblock;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod mobile_adblock;
 pub mod mobile_private;
 pub mod mobile_updater;
 // Загрузка музыки с YouTube мобильной веткой (duopulse-121): чистые функции
@@ -130,6 +138,10 @@ fn mobile_run() {
             use std::sync::Arc;
             use tauri::Manager;
             let dir = mobile_history::profile_dir()?;
+            // Полный адблок оверлея (duopulse-144): движок из кэша прошлой
+            // сессии публикуется сразу, списки досматривает фоновая нить;
+            // JNI-вызовы MobileAdblockNative падают в этот же синглтон
+            mobile_adblock::init(&dir);
             // закладки — как в 104; пароли и аккаунт Aila — этап 6 (112):
             // открываются до старта окна; недоступный каталог роняет запуск
             // с внятной причиной (как десктопный main.rs)
@@ -163,6 +175,8 @@ fn mobile_run() {
             mobile_open::mobile_open_url,
             mobile_web::mobile_web_open,
             mobile_web::mobile_web_close,
+            mobile_adblock::mobile_adblock_status,
+            mobile_adblock::mobile_adblock_set_enabled,
             mobile_private::mobile_private_cleanup,
             mobile_settings::mobile_ui_lang_set,
             mobile_download::cmd::duo_mobile_formats,

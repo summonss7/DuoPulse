@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- duopulse-144 смоук: «тяжёлая» страница — большой DOM, data-URI картинки
+     (без сетевого шума) и JS-нагрузка; оверлей с движком обязан пережить её
+     без падения приложения, память — dumpsys meminfo (см.
+     mobile-adblock-smoke.mjs). -->
+<meta charset="utf-8">
+<title>duopulse-144 heavy probe</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  .cell { display:inline-block; width:90px; height:60px; margin:2px;
+          background:#1d282b; color:#BDFE4F; font:10px monospace;
+          overflow:hidden; }
+</style>
+<body>
+<div id="out">heavy…</div>
+<div id="grid"></div>
+<script>
+  // ~1800 узлов + строка в каждом
+  var g = document.getElementById("grid");
+  var s = "";
+  for (var i = 0; i < 1800; i++) s += '<span class="cell">' + i + " ■■■■□□□□</span>";
+  g.innerHTML = s;
+  // JS-нагрузка ~1.5 с (главый поток занят — проверка, что блокировщик не
+  // подвешивает загрузчик слишком длинным локом)
+  var t = Date.now(), x = 0;
+  while (Date.now() - t < 1500) for (var j = 0; j < 1e5; j++) x = (x + j) | 0;
+  window.__dp144Heavy = "done:" + x;
+  document.getElementById("out").textContent = "heavy done";
+</script>
+</body>

@@ -40,6 +40,8 @@ e2e/adblock/p07-last-run.txt
 
 # Рантайм-артефакт SSAI-стенда (e2e/adblock/ssai-probe.mjs)
 e2e/adblock/ssai-last-run.json
+e2e/adblock/tube-ads-last-run.json
+e2e/adblock/mobile-adblock-smoke-last-run.json
 
 # Рантайм-артефакт трассировки P-08 (e2e/perf/p08-trace.mjs)
 e2e/perf/p08-trace-last.json

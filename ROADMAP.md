@@ -1004,3 +1004,16 @@
   tabs.updated и ресайзу окна (pw-save.ts reconcile) — вернулись на вкладку
   кандидата, бар открывается снова (как бабл Chrome). e2e-стенд паролей
   +4 проверки (19/19). План M5/M6 не меняет.
+- 14.11.2026: duopulse-144 — полный адблок в мобильной ветке Android: движок
+  десктопа adblock-rs (EasyList + uBO + quick-fixes) скомпилирован в тонкую
+  мобильную либу (COM-специфика осталась в бине, DTO статуса перенесены из
+  bridge.rs), shouldInterceptRequest web-оверлея спрашивает его через JNI
+  (src-tauri/src/mobile_adblock.rs; тип запроса — из URL/Accept, Android его
+  не раскрывает), косметика — JS-пейлоадом движка на onPageStarted/
+  onPageFinished; лёгкий хост-лист duopulse-139 — фолбэк (выкл/сбой).
+  Тумблеры: меню «⋮» оверлея + строка в m-menu (settings.json мобильного
+  профиля, переживает рестарт). Источник EasyList — eyeo/ABP (Akamai):
+  easylist.to (Cloudflare) валил rustls на Android «cannot decrypt peer's
+  message». Смок e2e/adblock/mobile-adblock-smoke.mjs — 16/16 (движок,
+  тумблер, рестарт, косметика, тяжёлая страница/память 243 МБ). Релиз
+  0.1.45. План M-этапов не меняет (мобильная ветка — вне M-гейтов).

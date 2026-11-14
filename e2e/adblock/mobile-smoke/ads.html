@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- duopulse-144 смоук: страница с рекламными подгрузками, которые режет
+     ПОЛНЫЙ движок (EasyList), но НЕ лёгкий хост-лист MobileWebHelper
+     (rubiconproject/adform/yieldmo не входят в AD_HOSTS) + контрольный
+     ресурс, который резаться не должен. Открывается в web-оверлее мобильной
+     ветки; решение движка видно в logcat (тег DuoPulseWeb, префикс
+     adblock-engine: / adblock:), состояние страницы — из CDP-цели оверлея. -->
+<meta charset="utf-8">
+<title>duopulse-144 ads probe</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<body>
+<h3>duopulse-144: ads probe</h3>
+<div id="out">loading…</div>
+<!-- движок обязан резать (EasyList, вне AD_HOSTS) -->
+<script src="https://ads.rubiconproject.com/test.js"></script>
+<script src="https://track.adform.net/Serving/TrackPoint/"></script>
+<script src="https://ad.yieldmo.com/ad.js"></script>
+<!-- doubleclick: и движком, и лёгким списком — санити, что подрезка вообще
+     происходит (main-frame не трогаем) -->
+<img src="https://ad.doubleclick.net/x.gif" width="1" height="1">
+<!-- контроль: локальный ресурс, резаться не должен -->
+<script src="./control.js"></script>
+</body>

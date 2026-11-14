@@ -54,10 +54,13 @@ import java.io.ByteArrayInputStream
  *    разрушается — выдача живёт), системный «назад» возвращает к ней;
  *    SPA-навигации m.youtube (Navigation API — pushState не зовётся,
  *    см. duopulse-SPA-память проекта) ловит консоль-хук DPURL;
- *  - лёгкий адблок: shouldInterceptRequest режет подгрузки рекламных/
- *    трекинговых хостов (doubleclick, googlesyndication, …); полный движок
- *    adblock-rs десктопа (WebView2 COM-перехват) в мобильную ветку не
- *    тащим — это отдельная карточка.
+ *  - полный адблок (duopulse-144): shouldInterceptRequest спрашивает движок
+ *    adblock-rs десктопа через JNI (EasyList + uBO + quick-fixes — списки
+ *    качаются/кэшируются Core в profile/filters, тумблер в меню «⋮»),
+ *    лёгкий хост-лист duopulse-139 (doubleclick, googlesyndication, …)
+ *    остаётся фолбэком — движок выключен/собирается/сбой = прежнее
+ *    поведение; косметика (hide-селекторы + скриптлеты) — JS-пейлоадом
+ *    движка на onPageStarted/onPageFinished (evaluateJavascript).
  * Rust-команды mobile_web_open / mobile_web_close (src-tauri/src/mobile_web.rs)
  * валидируют схему и зовут один статический метод — как MobileOpenHelper;
  * исключения гасятся здесь и возвращаются строкой. Системный «назад» —
@@ -67,7 +70,9 @@ object MobileWebHelper {
   private const val TAG = "DuoPulseWeb"
 
   /** Хвосты рекламных/трекинговых хостов для лёгкого адблока (суффикс-матч
-   *  по host подресурсов; главные фреймы не режем — сайт должен открыться). */
+   *  по host подресурсов; главные фреймы не режем — сайт должен открыться).
+   *  С duopulse-144 — фолбэк полного движка: решает первым adblock-rs,
+   *  сюда попадает то, что движок не взял (выключен/собирается/сбой JNI). */
   private val AD_HOSTS = setOf(
     "doubleclick.net", "googlesyndication.com", "googleadservices.com",
     "adservice.google.com", "google-analytics.com", "googletagmanager.com",
@@ -95,6 +100,16 @@ object MobileWebHelper {
 
   /** Последний URL консоль-хука DPURL — на повторы не реагируем. */
   private var lastReportedUrl: String? = null
+
+  /** Последний применённый косметический скрипт (дедуп между
+   *  onPageStarted/onPageFinished и повторами на том же документе). */
+  private var lastCosmetic: String? = null
+
+  /** Текущий URL страницы для движка (shouldInterceptRequest идёт с нити
+   *  загрузчика WebView, где нельзя звать view.url — только UI-нить; поле
+   *  пишется на onPageStarted/консоль-хуке и читается без лока — гонка
+   *  безвредна: это лишь запасной источник запроса, Referer точнее). */
+  @Volatile private var pageUrl: String = ""
 
   /** Системный «назад»: оверлей спрятан — вернуться к выдаче; иначе история
    *  WebView; исчерпана — закрыть оверлей. */
@@ -251,6 +266,21 @@ object MobileWebHelper {
     items += "⧉  Копировать ссылку" to { copyUrl(act, url) }
     items += "↗  Поделиться…" to { share(act, url) }
     items += "⌘  Открыть в браузере" to { openInBrowser(act, url) }
+    // Тумблер полного блокировщика (duopulse-144): галка — состояние из
+    // settings.json Core (переживает перезапуск); выкл = прежнее поведение
+    // (лёгкий хост-лист duopulse-139)
+    val adOn = MobileAdblockNative.adblockEnabled()
+    items += (if (adOn) "✓" else "○") + "  Блокировщик рекламы" to {
+      val on = !adOn
+      MobileAdblockNative.setAdblockEnabled(on)
+      Toast.makeText(
+        act,
+        if (on) "Блокировщик рекламы включён"
+        else "Блокировщик выключен — остался лёгкий список",
+        Toast.LENGTH_SHORT
+      ).show()
+      MobileAdblockNative.logStatus()
+    }
 
     val list = LinearLayout(act)
     list.orientation = LinearLayout.VERTICAL
@@ -288,6 +318,27 @@ object MobileWebHelper {
     popup.showAsDropDown(anchor, 0, 0, Gravity.TOP or Gravity.END)
   }
 
+  /** Косметика движка (duopulse-144, второй этап): JS-пейлоад (скриптлеты
+   *  + hide-селекторы) собирается в Rust на фоновой нити (холодный расчёт
+   *  до ~0,9 с — UI не подвешиваем), применяется в UI-нити оверлея
+   *  evaluateJavascript'ом. Дедуп: тот же скрипт повторно не гоняем
+   *  (onPageStarted + onPageFinished + SPA-повторы одного документа). */
+  private fun injectCosmetic(wv: WebView, url: String) {
+    if (!url.startsWith("http")) return
+    Thread {
+      val js = MobileAdblockNative.cosmeticFor(url) ?: return@Thread
+      if (js.isEmpty() || js == lastCosmetic) return@Thread
+      val act = MainActivity.current ?: return@Thread
+      act.runOnUiThread {
+        // WebView мог уже закрыться/перейти — строка адреса скажет какую
+        if (webView === wv) {
+          lastCosmetic = js
+          wv.evaluateJavascript(js, null)
+        }
+      }
+    }.start()
+  }
+
   /** Сообщение консоль-хука DPURL (SPA-навигации m.youtube — Navigation API,
    *  shouldOverrideUrlLoading их не видит). Смена URL — обновить хром;
    * переход на YouTube-видео — откатить SPA-навигацию (выдача остаётся под
@@ -297,6 +348,7 @@ object MobileWebHelper {
     val url = msg.removePrefix("DPURL:")
     if (url == lastReportedUrl) return
     lastReportedUrl = url
+    pageUrl = url // SPA-навигация: адрес для движка (нити загрузчика)
     syncChrome(url)
     if (hidden) return
     youTubeVideoId(url)?.let { id ->
@@ -344,6 +396,8 @@ object MobileWebHelper {
     progress = null
     hidden = false
     lastReportedUrl = null
+    lastCosmetic = null
+    pageUrl = ""
     // WebView.detach перед destroy (иначе окна/текстуры текут): сначала
     // снимаем оверлей с активити, потом гасим WebView
     (ov.parent as? FrameLayout)?.removeView(ov)
@@ -536,9 +590,21 @@ object MobileWebHelper {
       override fun shouldInterceptRequest(
         view: WebView, request: WebResourceRequest
       ): WebResourceResponse? {
-        // лёгкий адблок (duopulse-139): рекламные/трекинговые подгрузки —
-        // пустым ответом; главную навигацию не трогаем
+        // полный адблок (duopulse-144) + лёгкий фолбэк (duopulse-139):
+        // решает движок adblock-rs (EasyList/uBO, тип запроса Core выводит
+        // из URL/Accept); невырезанное проходит хвостовой хост-лист.
+        // Главную навигацию не трогаем — сайт должен открыться.
         if (request.isForMainFrame) return null
+        val url = request.url.toString()
+        val headers = request.requestHeaders
+        val referer = headers?.get("Referer") ?: headers?.get("referer") ?: ""
+        val accept = headers?.get("Accept") ?: headers?.get("accept") ?: ""
+        // pageUrl (не view.url!): shouldInterceptRequest — фоновая нить
+        // загрузчика, WebView-геттеры там роняют процесс (поймано смоуком)
+        if (MobileAdblockNative.engineBlocks(url, pageUrl, referer, accept, false)) {
+          Log.d(TAG, "adblock-engine: $url")
+          return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+        }
         val host = request.url.host?.lowercase() ?: return null
         if (AD_HOSTS.any { host == it || host.endsWith(".$it") }) {
           Log.d(TAG, "adblock: $host${request.url.path ?: ""}")
@@ -550,11 +616,18 @@ object MobileWebHelper {
       override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
         // прогресс: страница грузится — полоса видна (100% погасит onProgress)
         progress?.let { it.progress = 5; it.visibility = View.VISIBLE }
+        // текущий адрес — фоновым нитям загрузчика (движок адблока)
+        pageUrl = url
+        // косметика — пораньше (документ создаётся): скриптлеты до скриптов
+        injectCosmetic(view, url)
       }
 
       override fun onPageFinished(view: WebView, url: String) {
         syncChrome(url)
         installUrlWatch(view)
+        // повтор — на случай холодного движка (пустой пейлоад на старте);
+        // дубли исключены сравнением с последним применённым скриптом
+        injectCosmetic(view, url)
       }
     }
     // duopulse-134: кнопка «на весь экран» YouTube — без WebChromeClient

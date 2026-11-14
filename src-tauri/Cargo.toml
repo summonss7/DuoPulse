@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.44"
+version = "0.1.45"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
@@ -189,6 +189,17 @@ hkdf = "0.12"
 # приложения кладёт tao, эталон novagrid-063).
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 ureq = { version = "2", features = ["tls"], default-features = false }
+# Полный адблок мобильной ветки (duopulse-144): тот же движок, что у десктопа
+# (crate::adblock из бина main.rs) — default-features = false по той же
+# причине (один Sync-движок на все WebView за мьютексом), фичи совпадают с
+# десктоп-секцией. Пин rmp — тот же (rmp-serde 0.15).
+adblock = { version = "0.9", default-features = false, features = [
+    "embedded-domain-resolver",
+    "full-regex-handling",
+] }
+rmp = "=0.8.14"
+# Регексы $replace-правил (replace.rs общего движка); в дереве транзитивно.
+regex = "1"
 # exit-шим Android (duopulse-135): прямой SYS_exit_group вместо exit(3) с
 # atexit-обработчиками Chromium (см. src/lib.rs exit_shim)
 libc = "0.2"

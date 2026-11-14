@@ -602,43 +602,13 @@ pub struct AdblockUpdateListsParams {
     pub force: bool,
 }
 
-/// adblock.status (и результат set_enabled/update_lists): снапшот состояния
-/// блокировщика для меню и e2e.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AdblockStatusResult {
-    /// Глобальный тумблер.
-    pub enabled: bool,
-    /// Движок построен (списки загружены/из кэша) — фильтрация активна.
-    pub ready: bool,
-    /// Заблокировано запросов за сеанс.
-    pub blocked_total: u64,
-    /// Всех http(s)-запросов через перехватчик (диагностика P-07).
-    pub seen_total: u64,
-    /// Загружено $replace-правил перезаписи ответов (карточка duopulse-050;
-    /// живые правила uBO движок adblock-rs игнорирует — парсит их наш слой).
-    pub replace_rules: u32,
-    /// Ответов, чьи тела реально переписаны ($replace), за сеанс.
-    pub replaced_total: u64,
-    pub lists: Vec<AdblockListInfo>,
-    /// Сайты-исключения (хосты).
-    pub site_exceptions: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AdblockListInfo {
-    pub name: String,
-    /// http(s)-адрес или путь файла-источника.
-    pub source: String,
-    /// Число правил в последней загруженной версии.
-    pub rules: u32,
-    /// Успешная загрузка, unix-ms (0 — списка ещё не было).
-    pub updated_at: i64,
-    /// Последняя ошибка загрузки (None — ошибок нет).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
+// AdblockStatusResult / AdblockListInfo объявлены в src/adblock/mod.rs
+// (duopulse-144: модуль компилирует и мобильная либа без bridge) — здесь
+// перепродаются для generate_handler и contract.json. AdblockListInfo в
+// этом модуле напрямую не зовётся (поле статуса) — реэкспорт для полноты
+// пути bridge::*, allow на неизбежный «unused» бина.
+#[allow(unused_imports)]
+pub use crate::adblock::{AdblockListInfo, AdblockStatusResult};
 
 // --- задача 2.5: метрики производительности (src/perf/) ----------------------
 // Типы команд/событий perf.* определены в src/perf.rs рядом с их логикой;

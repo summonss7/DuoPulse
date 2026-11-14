@@ -45,3 +45,9 @@
 # close) — та же грабля, что 083/102/119/121: без Java-ссылок R8 вырезает
 # методы в release.
 -keep class dev.duopulse.mobile.MobileWebHelper { *; }
+# duopulse-144: JNI-мост движка блокировщика (MobileAdblockNative.* —
+# external-методы зовутся shouldInterceptRequest'ом оверлея; символы
+# Java_dev_duopulse_mobile_MobileAdblockNative_* экспортирует libduopulse_lib).
+# Та же грабля, что 083/102/126: без Java-ссылок из generated-кода R8
+# переименует класс и каждый external-вызов упадёт UnsatisfiedLinkError.
+-keep class dev.duopulse.mobile.MobileAdblockNative { *; }
