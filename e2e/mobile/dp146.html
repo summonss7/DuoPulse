@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- Страница мини-стенда duopulse-146 (e2e/mobile/http-release-smoke.mjs):
+     локальный plain-http контент для web-оверлея релиз-сборки. Яркий маркер
+     DP146-OK виден на скриншоте, JS-флаг __dp146="loaded" — если в оверлей
+     вдруг появится CDP (сейчас у релиза нет сокета webview_devtools_remote). -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DP146 cleartext OK</title>
+  <style>
+    body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: #111d2b; color: #F2F7EE; }
+    .mark { background: #BDFE4F; color: #0a0e17; font-weight: 700; padding: 18px; text-align: center; font-size: 22px; }
+    p { padding: 12px 16px; }
+  </style>
+</head>
+<body>
+  <div class="mark">DP146-OK: http открылся</div>
+  <p>Эта страница отдана по plain-http локальным сервером стенда — cleartext
+     в релизном web-оверлее разрешён (duopulse-146).</p>
+  <script>window.__dp146 = "loaded";</script>
+</body>
+</html>

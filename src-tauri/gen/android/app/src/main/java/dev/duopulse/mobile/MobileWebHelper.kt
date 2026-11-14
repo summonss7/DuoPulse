@@ -622,7 +622,21 @@ object MobileWebHelper {
         injectCosmetic(view, url)
       }
 
+      // duopulse-146: журнал загрузок/ошибок главного фрейма в logcat — у
+      // релиз-сборки нет CDP-сокета webview (полный смоук гоняется debug), а
+      // ERR_CLEARTEXT_NOT_PERMITTED и прочие сетевые ошибки оверлея видны
+      // только по «Webpage not available» на экране. Стенд e2e/mobile/
+      // http-release-smoke.mjs верифицирует релиз по этим строкам.
+      override fun onReceivedError(
+        view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError
+      ) {
+        if (request.isForMainFrame) {
+          Log.d(TAG, "overlay-error: ${request.url} ${error.description}")
+        }
+      }
+
       override fun onPageFinished(view: WebView, url: String) {
+        Log.d(TAG, "overlay-loaded: $url")
         syncChrome(url)
         installUrlWatch(view)
         // повтор — на случай холодного движка (пустой пейлоад на старте);

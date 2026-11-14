@@ -6133,3 +6133,48 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   C:\DuoPulse) — тот же сеанс, что и правки (duopulse-120).
 - Коммит: 9e2a67f feat(mobile): duopulse-144 — полный адблок в мобильной
   ветке (+ остатки duopulse-140 tubes-списка из оборвавшейся сессии).
+
+## 14.11.2026, 04:57–05:25 — duopulse-146: http-сайты (без TLS) в web-оверлее релизного Android (0.1.46)
+
+- Что изменено: мобильный DuoPulse — браузер, plain-http страницы (локальные
+  стенды, старые сайты) обязаны открываться, но в релизе web-оверлей валил
+  любой http:// «Webpage not available, net::ERR_CLEARTEXT_NOT_PERMITTED»
+  (находка релиз-смоука duopulse-144; debug разрешал cleartext — в 139/145
+  не замечали): gen/android/app/build.gradle.kts держал
+  manifestPlaceholders usesCleartextTraffic=false в defaultConfig (true —
+  только debug), манифест подставляет его в android:usesCleartextTraffic.
+  Решение: manifestPlaceholders usesCleartextTraffic=true в release-блоке
+  gradle. Почему НЕ networkSecurityConfig: политика cleartext у Android
+  применяется к приложению целиком — конфиг различает только домены, а не
+  источники запросов, «разрешить http только web-оверлею (WebView-трафику),
+  запретить Core» средствами ОС невыразимо (оверлей живёт в том же
+  процессе); Core остаётся https-only на уровне кода — все сетевые
+  эндпоинты https-константы (aila.rs DEFAULT_SERVER, updater endpoints,
+  списки адблока), так что запрет в релизе ничего не защищал, только ломал
+  браузерную функцию (как в Chrome: http открывается). Debug-сборка вела
+  себя так же (true) с самого начала — поведение выровнено.
+- Диагностика релиза без CDP: у релиз-APK нет сокета
+  webview_devtools_remote (полный смоук 144 гоняется debug-сборкой), сетевые
+  ошибки оверлея видны только заглушкой на экране — MobileWebHelper.kt
+  теперь логирует главный фрейм в TAG DuoPulseWeb (overlay-loaded:
+  onPageFinished, overlay-error: onReceivedError).
+- e2e: новый мини-стенд e2e/mobile/http-release-smoke.mjs (+ страница
+  e2e/mobile/dp146.html, рантайм-отчёт в .gitignore) — отдельный, а не
+  релиз-ветка смоука 144: тот управляется через CDP invoke, в релизе
+  недоступный. Управление adb (тап omnibox мобильной ветки → input text →
+  ENTER; координаты по wm size, переопределяются DP146_OMNI_X/Y),
+  верификация: GET на локальном http-сервере стенда (10.0.2.2:8901) +
+  overlay-loaded в logcat + отсутствие ERR_CLEARTEXT_NOT_PERMITTED;
+  https-фаза — https://example.com без overlay-error.
+- Как проверено: aapt dump xmltree релизного APK —
+  usesCleartextTraffic=0xffffffff (true). Живой прогон стенда на релиз-APK
+  0.1.46 (x86_64, эмулятор duopulse144): 5/5 PASS — http-страница стенда
+  открылась (GET пришёл, overlay-loaded, ERR нет; скриншот — зелёный маркер
+  DP146-OK), https://example.com открылся без ошибок (скриншот), оба
+  визуально сверены. cargo 376/376, vitest 491/491, typecheck чист.
+- Релизы: 0.1.46 (версии синхронны) — android-build.sh release aarch64
+  (builds/ + хаб «Скачать» + канал Aila) и десктоп npm run release (фид
+  GitHub Pages stable+canary, хаб, C:\DuoPulse) — тот же сеанс, что и
+  правки (duopulse-120); эмуляторная x86_64-сборка релиза —
+  builds/duopulse_0.1.46_android_release/DuoPulse-0.1.46-android-release-x86_64.apk
+  (в канал/хаб не публиковалась).

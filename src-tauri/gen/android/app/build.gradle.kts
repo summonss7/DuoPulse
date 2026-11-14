@@ -52,6 +52,15 @@ android {
             }
         }
         getByName("release") {
+            // duopulse-146: DuoPulse — браузер: http-сайты (без TLS) обязаны
+            // открываться и в релизе, не только debug (иначе «Webpage not
+            // available, net::ERR_CLEARTEXT_NOT_PERMITTED»). Выбран полный
+            // usesCleartextTraffic=true, а не networkSecurityConfig: политика
+            // cleartext у Android применяется к приложению целиком — различить
+            // «запрос из web-оверлея» и «запрос Core» конфиг не может (только
+            // домены); Core остаётся https-only на уровне кода (aila.rs
+            // DEFAULT_SERVER, updater endpoints, списки адблока — https-константы).
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
             if (keystoreProperties.isNotEmpty() && releaseKeystoreFile.exists()) {
                 signingConfig = signingConfigs.maybeCreate("release").apply {
                     storeFile = releaseKeystoreFile

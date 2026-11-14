@@ -43,6 +43,9 @@ e2e/adblock/ssai-last-run.json
 e2e/adblock/tube-ads-last-run.json
 e2e/adblock/mobile-adblock-smoke-last-run.json
 
+# Рантайм-артефакт cleartext-стенда релиза (e2e/mobile/http-release-smoke.mjs, duopulse-146)
+e2e/mobile/http-release-smoke-last-run.json
+
 # Рантайм-артефакт трассировки P-08 (e2e/perf/p08-trace.mjs)
 e2e/perf/p08-trace-last.json
 
