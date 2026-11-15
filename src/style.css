@@ -498,6 +498,29 @@ body {
 .bm-item.drop-after::after {
   right: -3px;
 }
+/* duopulse-149: переименование закладок строки — чип без названия (только
+   значок, компактный отступ — больше закладок влезает) и поле правки
+   (правый клик → «Переименовать…», Enter — сохранить) */
+.bm-item.bm-icon-only {
+  max-width: none;
+  padding: 0 3px;
+}
+.bm-rename {
+  height: 18px;
+  width: 150px;
+  padding: 0 6px;
+  border: 1px solid var(--accent-neon); /* правка — неон, как mgr-chip-input */
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1;
+  outline: none;
+}
+.bm-row .bm-rename {
+  flex: 1;
+  width: auto;
+}
 
 /* --- Меню папки закладок (панель-webview bmfolder, duopulse-147):
        строки-закладки с бейджами-доменами, подгруппы, хлебная крошка;

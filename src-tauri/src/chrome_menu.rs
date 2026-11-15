@@ -20,7 +20,8 @@
 //! пересылается событием «menu-action» в UI — транспорт совпадает с
 //! прежним оверлеем, фронтенд (tabbar.ts/star.ts) не зависит от бэкенда.
 //! Идентификаторы пунктов: «tab:<act>» и «star:g:<id группы>» /
-//! «star:newgroup». Меню папки строки закладок — панель-webview bmfolder
+//! «star:newgroup», «bmchip:rename:<url>» / «bmgroup:rename:<id группы>»
+//! (строка закладок, duopulse-149). Меню папки строки закладок — панель-webview bmfolder
 //! (chrome_panel.rs, duopulse-147): нативное меню не умеет drag&drop и
 //! подсветку доменов.
 
@@ -118,6 +119,23 @@ fn build_star_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>,
         app,
         "star:newgroup",
         "Новая группа… (в управлении)",
+        true,
+        None,
+    )?)
+    .map_err(|e| format!("меню: {e}"))?;
+    Ok(menu)
+}
+
+/// Меню закладки строки (duopulse-149: правый клик по чипу — «Переименовать…»,
+/// как в Chrome) и папки строки. Один пункт; выбранный адрес/ид группы
+/// кодируется в id (bmchip:rename:<url> / bmgroup:rename:<id>) — UI не хранит
+/// снапшот, чип ищется по data-url после события.
+fn build_bm_item_menu(app: &AppHandle, kind: &str, key: &str) -> Result<Menu<tauri::Wry>, String> {
+    let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
+    menu.append(&item(
+        app,
+        &format!("{kind}:rename:{key}"),
+        "Переименовать…",
         true,
         None,
     )?)
@@ -428,6 +446,20 @@ pub async fn ui_menu_open(
         "tab" => build_tab_menu(&app, &payload)?,
         "star" => build_star_menu(&app, &payload)?,
         "duo" => build_duo_menu(&app, &payload)?,
+        "bmchip" => build_bm_item_menu(
+            &app,
+            "bmchip",
+            payload.get("url").and_then(Value::as_str).unwrap_or(""),
+        )?,
+        "bmgroup" => build_bm_item_menu(
+            &app,
+            "bmgroup",
+            &payload
+                .get("id")
+                .and_then(Value::as_i64)
+                .unwrap_or(-1)
+                .to_string(),
+        )?,
         other => return Err(format!("неизвестное меню: {other}")),
     };
     let window = app.get_window("main").ok_or("окно main не найдено")?;
@@ -455,6 +487,10 @@ pub fn emit_action(app: &AppHandle, id: &str) {
         serde_json::json!({ "menu": "star", "groupId": g.parse::<i64>().unwrap_or(-1) })
     } else if id == "star:newgroup" {
         serde_json::json!({ "menu": "star", "newGroup": true })
+    } else if let Some(url) = id.strip_prefix("bmchip:rename:") {
+        serde_json::json!({ "menu": "bmchip", "act": "rename", "url": url })
+    } else if let Some(g) = id.strip_prefix("bmgroup:rename:") {
+        serde_json::json!({ "menu": "bmgroup", "act": "rename", "groupId": g.parse::<i64>().unwrap_or(-1) })
     } else if let Some(rest) = id.strip_prefix("duo:") {
         let (act, param) = rest.split_once(':').unwrap_or((rest, ""));
         match act {

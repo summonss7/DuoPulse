@@ -16,11 +16,18 @@
 // (group_reorder) или вкладываются в другую папку (group_move); меню
 // папки — панель-webview bmfolder (chrome_panel.rs): богаче нативного
 // меню (бейджи-домены, подсветки) и умеет drag&drop внутри папки.
+// duopulse-149: правый клик по чипу/папке — нативное меню
+// «Переименовать…» (chrome_menu.rs, kind bmchip/bmgroup) и инлайн-правка;
+// закладке можно оставить пустое имя — чип-значок без подписи, как в
+// Chrome (больше сайтов влезает в строку).
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
 import { groupTreeOrder, canGroupMoveTo } from "./groups-tree";
 import { openPanel, closePanel } from "./panel-window";
+import { openOverlayMenu, onOverlayMenuAction } from "./overlay-menu";
+import { beginInlineRename } from "./bm-rename";
+import { t } from "../i18n";
 
 const err = (e: unknown): void => console.error("bmbar:", e);
 
@@ -55,10 +62,25 @@ export function bmBarModel(
     .map((g) => ({ id: g.id, name: g.name, parentId: g.parentId ?? null }));
   const chip = (b: HistoryBookmark) => ({
     url: b.url,
-    title: b.title.trim() || b.url,
+    title: b.title.trim(),
   });
   const chips = [...defaultMembers.map(chip), ...ungrouped.map(chip)];
   return { visible: chips.length > 0 || folders.length > 0, chips, folders };
+}
+
+/** Вид чипа для рендера (чистая, тестится): подпись может быть пустой —
+ * duopulse-149 разрешает закладку без названия (только значок, как в
+ * Chrome); подсказка пустого чипа — один адрес. */
+export function chipView(b: {
+  url: string;
+  title: string;
+}): { label: string; iconOnly: boolean; tooltip: string } {
+  const label = b.title.trim();
+  return {
+    label,
+    iconOnly: label === "",
+    tooltip: label ? `${label}\n${b.url}` : b.url,
+  };
 }
 
 /** Новый порядок чипов после drag&drop (чистая, тестится): dragged
@@ -162,6 +184,8 @@ let defGroupId: number | null = null;
 let defMemberUrls = new Set<string>();
 /** Все группы (проверки переноса папок, canGroupMoveTo). */
 let groupsById = new Map<number, BookmarkGroupInfo>();
+/** Имена чипов последнего рендера (стартовое значение input правки). */
+let chipTitleByUrl = new Map<string, string>();
 
 /** Тянутый чип закладки (url) — для подсветки папок-целей. */
 let dragUrl = "";
@@ -174,22 +198,29 @@ let openFolderPanelId: number | null = null;
 /** Рендер модели в строку (кнопки-чипы + кнопки-папки). */
 function render(model: BmBarModel): void {
   bar().replaceChildren();
+  // чистые имена для инлайн-правки (duopulse-149): рендер уже без адреса-
+  // фолбэка, input стартует с сохранённого имени (в т.ч. пустого)
+  chipTitleByUrl = new Map(model.chips.map((c) => [c.url, c.title]));
   const chip = (b: { url: string; title: string }): HTMLButtonElement => {
+    const view = chipView(b);
     const el = document.createElement("button");
     el.type = "button";
-    el.className = "bm-item";
+    el.className = view.iconOnly ? "bm-item bm-icon-only" : "bm-item";
     el.dataset.url = b.url;
     el.draggable = true; // перетаскивание: в папку и между чипами (duopulse-147)
     const host = badgeHost(b.url);
     const ico = document.createElement("i");
     ico.className = "bm-ico";
-    ico.textContent = badgeLetter(b.title, host);
+    ico.textContent = badgeLetter(view.label, host);
     ico.style.background = `linear-gradient(145deg, hsl(${badgeHue(host || b.url)} 46% 46%), hsl(${badgeHue(host || b.url)} 46% 33%))`;
-    const label = document.createElement("span");
-    label.className = "bm-label";
-    label.textContent = b.title;
-    el.append(ico, label);
-    el.title = `${b.title}\n${b.url}`;
+    el.append(ico);
+    if (!view.iconOnly) {
+      const label = document.createElement("span");
+      label.className = "bm-label";
+      label.textContent = view.label;
+      el.append(label);
+    }
+    el.title = view.tooltip;
     return el;
   };
   const folder = (f: { id: number; name: string }, first: boolean): HTMLButtonElement => {
@@ -246,6 +277,7 @@ function openFolderMenu(btn: HTMLElement): void {
  * подхватываются первым переключением), drag&drop (duopulse-147). */
 export function initBmBar(): void {
   bar().addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("input")) return; // правка имени
     const folder = (e.target as HTMLElement).closest<HTMLElement>(".bm-folder");
     if (folder) {
       if (hoverTimer !== null) window.clearTimeout(hoverTimer);
@@ -259,6 +291,7 @@ export function initBmBar(): void {
   // средний клик по чипу — новая вкладка (как на панели закладок Chrome)
   bar().addEventListener("auxclick", (e) => {
     if (e.button !== 1) return;
+    if ((e.target as HTMLElement).closest("input")) return;
     const item = (e.target as HTMLElement).closest<HTMLElement>(".bm-item:not(.bm-folder)");
     const url = item?.dataset.url;
     if (url) {
@@ -292,6 +325,30 @@ export function initBmBar(): void {
   // панель-меню закрылась (Escape, клик мимо) — тумблер папки сбрасывается
   void listen("chrome-panel-closed", () => {
     openFolderPanelId = null;
+  });
+
+  // --- переименование (duopulse-149) ---------------------------------------
+  // правый клик по чипу/папке — нативное меню «Переименовать…» (адрес/ид
+  // группы кодируется в id пункта, снапшот не нужен)
+  bar().addEventListener("contextmenu", (e) => {
+    if ((e.target as HTMLElement).closest("input")) return;
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".bm-item");
+    if (!item) return;
+    e.preventDefault();
+    const url = item.dataset.url;
+    if (url !== undefined) {
+      openOverlayMenu("bmchip", e.clientX, e.clientY, { url });
+      return;
+    }
+    const fid = item.dataset.folder;
+    if (fid !== undefined)
+      openOverlayMenu("bmgroup", e.clientX, e.clientY, { id: Number(fid) });
+  });
+  onOverlayMenuAction((a) => {
+    if (a.menu === "bmchip" && a.act === "rename" && typeof a.url === "string" && a.url)
+      beginChipRename(a.url);
+    else if (a.menu === "bmgroup" && a.act === "rename" && typeof a.groupId === "number")
+      beginFolderRename(a.groupId);
   });
 
   // --- drag&drop (duopulse-147) -------------------------------------------
@@ -456,6 +513,51 @@ async function moveChipToFolder(url: string, groupId: number): Promise<void> {
     err(e);
     await refreshBmBar();
   }
+}
+
+/** Инлайн-правка имени чипа (menu-action bmchip:rename, duopulse-149):
+ * пустое имя разрешено — чип останется только значком. */
+function beginChipRename(url: string): void {
+  const btn = bar().querySelector<HTMLElement>(`.bm-item[data-url="${CSS.escape(url)}"]`);
+  if (!btn) return;
+  beginInlineRename({
+    host: btn,
+    initial: chipTitleByUrl.get(url) ?? "",
+    allowEmpty: true,
+    ariaLabel: t("Переименовать закладку"),
+    save: (title) => {
+      void bridge.history
+        .bookmarkUpdate({ url, title })
+        .then(refreshBmBar)
+        .catch((e) => {
+          err(e);
+          void refreshBmBar();
+        });
+    },
+  });
+}
+
+/** Инлайн-правка имени папки строки (bmgroup:rename): пустое запрещено —
+ * папка без подписи не отличима на строке (в Chrome так же). */
+function beginFolderRename(id: number): void {
+  const btn = bar().querySelector<HTMLElement>(`.bm-folder[data-folder="${id}"]`);
+  if (!btn) return;
+  const name = groupsById.get(id)?.name ?? "";
+  beginInlineRename({
+    host: btn,
+    initial: name,
+    allowEmpty: false,
+    ariaLabel: t("Переименовать группу"),
+    save: (title) => {
+      void bridge.history
+        .groupRename({ id, name: title })
+        .then(refreshBmBar)
+        .catch((e) => {
+          err(e);
+          void refreshBmBar();
+        });
+    },
+  });
 }
 
 /** Папка под курсором (делегированный hover) и таймер открытия. */

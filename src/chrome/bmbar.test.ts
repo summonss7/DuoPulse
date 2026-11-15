@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 // слушатели не живут, мокаем до импорта модуля
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve() }));
-import { badgeHost, badgeLetter, badgeHue, bmBarModel, chipReorder, folderReorderAllowed } from "./bmbar";
+import { badgeHost, badgeLetter, badgeHue, bmBarModel, chipReorder, chipView, folderReorderAllowed } from "./bmbar";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge/gen/types";
 
 const group = (over: Partial<BookmarkGroupInfo>): BookmarkGroupInfo => ({
@@ -93,9 +93,28 @@ describe("bmBarModel — состав строки", () => {
     expect(m.folders).toEqual([{ id: 3, name: "Ещё", parentId: 7 }]);
   });
 
-  it("пустой заголовок чипа — адрес (как на странице управления)", () => {
+  it("duopulse-149: пустой заголовок чипа остаётся пустым (чип-значок)", () => {
     const m = bmBarModel([group({ isDefault: true })], [bm("https://x.example/page")], []);
-    expect(m.chips[0].title).toBe("https://x.example/page");
+    expect(m.chips[0].title).toBe("");
+  });
+});
+
+describe("duopulse-149: chipView — вид чипа", () => {
+  it("обычная закладка: подпись + подсказка «имя, адрес»", () => {
+    expect(chipView({ url: "https://a.example/", title: "Сайт" })).toEqual({
+      label: "Сайт",
+      iconOnly: false,
+      tooltip: "Сайт\nhttps://a.example/",
+    });
+  });
+
+  it("пустое имя — только значок, подсказка один адрес", () => {
+    expect(chipView({ url: "https://a.example/", title: "" })).toEqual({
+      label: "",
+      iconOnly: true,
+      tooltip: "https://a.example/",
+    });
+    expect(chipView({ url: "https://a.example/", title: "   " }).iconOnly).toBe(true);
   });
 });
 

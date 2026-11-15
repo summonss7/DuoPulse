@@ -2970,6 +2970,24 @@ mod tests {
         assert!(store.bmbar_reorder(&["https://нет.example/".into()]).is_err());
     }
 
+    /// duopulse-149: переименование закладки в пустое имя (чип-значок без
+    /// подписи, как в Chrome) — не ошибка, строки списка и синк не ломаются.
+    #[test]
+    fn bookmark_update_allows_empty_title() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        store
+            .bookmark_add_to("https://icon.example/", "Полное имя", None)
+            .unwrap();
+        store.bookmark_update("https://icon.example/", "").unwrap();
+        let (marks, _) = store.bookmark_list("", GroupFilter::All, 0, 100).unwrap();
+        assert_eq!(marks[0].title, "");
+        // пустое → непустое и обратно: updated_at растёт, слияние не мешает
+        store.bookmark_update("https://icon.example/", "Снова имя").unwrap();
+        store.bookmark_update("https://icon.example/", "  ").unwrap();
+        let (marks, _) = store.bookmark_list("", GroupFilter::All, 0, 100).unwrap();
+        assert_eq!(marks[0].title, "  ", "пробельное имя храним как есть");
+    }
+
     /// duopulse-147: перестановка группы среди сестёрских — позиция
     /// переписывается плотно; чужой родитель и группа по умолчанию — ошибки.
     #[test]

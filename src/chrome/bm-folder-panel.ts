@@ -8,10 +8,14 @@
 // она переложится в неё. Клик по подгруппе — спуск внутрь (хлебная крошка
 // «‹ родитель» наверху), клик по закладке — переход активной вкладкой
 // (средний клик — новая вкладка), после чего панель закрывается.
+// duopulse-149: правый клик по закладке — инлайн-переименование прямо в
+// строке (нативное меню bmchip живёт в UI-окне, panel-webview его события
+// не получает); пустое имя разрешено — строка с одним бейджем.
 // Группа — из ?group=<id> (передал открывший, ui_panel_open query).
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
-import { badgeHost, badgeHue, badgeLetter } from "./bmbar";
+import { badgeHost, badgeHue, badgeLetter, chipView } from "./bmbar";
+import { beginInlineRename } from "./bm-rename";
 import { closePanel } from "./panel-window";
 import { t } from "../i18n";
 
@@ -82,6 +86,8 @@ function renderRows(
 ): void {
   const el = panel();
   el.replaceChildren();
+  // имена для инлайн-правки (duopulse-149) — рендер уже без адреса-фолбэка
+  bmTitleByUrl = new Map(bookmarks.map((b) => [b.url, b.title.trim()]));
   const parent = cur.parentId != null ? groups.find((g) => g.id === cur.parentId) : undefined;
   if (parent) {
     const back = document.createElement("button");
@@ -140,7 +146,7 @@ function renderRows(
     return;
   }
   for (const b of bookmarks) {
-    const title = b.title.trim() || b.url;
+    const view = chipView(b); // подпись может быть пустой (duopulse-149)
     const host = badgeHost(b.url);
     const row = document.createElement("button");
     row.type = "button";
@@ -149,22 +155,24 @@ function renderRows(
     row.draggable = true; // перестановка внутри папки / перенос в подгруппу
     const ico = document.createElement("i");
     ico.className = "bm-ico";
-    ico.textContent = badgeLetter(title, host);
+    ico.textContent = badgeLetter(view.label, host);
     ico.style.background = `linear-gradient(145deg, hsl(${badgeHue(host || b.url)} 46% 46%), hsl(${badgeHue(host || b.url)} 46% 33%))`;
     const label = document.createElement("span");
     label.className = "bm-label";
-    label.textContent = title;
+    label.textContent = view.label;
     const site = document.createElement("span");
     site.className = "bm-host";
     site.textContent = host || new URL(b.url).protocol.replace(":", "");
     row.append(ico, label, site);
-    row.title = `${title}\n${b.url}`;
+    row.title = view.tooltip;
     el.append(row);
   }
 }
 
 /** Тянутая закладка (url) — маркеры вставки и подгруппы-цели. */
 let dragUrl = "";
+/** Имена закладок последнего рендера (стартовое значение input правки). */
+let bmTitleByUrl = new Map<string, string>();
 
 /** Обработчики панели: клики/средний клик, drag&drop (вешаются один раз —
  *  панель перерисовывает только детей). */
@@ -173,6 +181,7 @@ export function initBmFolderPanel(): void {
   if (inited) return;
   inited = true;
   panel().addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("input")) return; // правка имени
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
     const url = row?.dataset.url;
     if (url) {
@@ -185,6 +194,7 @@ export function initBmFolderPanel(): void {
   // средний клик — новая вкладка (как по чипу строки)
   panel().addEventListener("auxclick", (e) => {
     if (e.button !== 1) return;
+    if ((e.target as HTMLElement).closest("input")) return;
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
     const url = row?.dataset.url;
     if (url) {
@@ -194,6 +204,28 @@ export function initBmFolderPanel(): void {
         .then(closePanel)
         .catch(err);
     }
+  });
+  // правый клик — инлайн-переименование закладки (duopulse-149)
+  panel().addEventListener("contextmenu", (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
+    if (!row || (e.target as HTMLElement).closest("input")) return;
+    const url = row.dataset.url as string;
+    e.preventDefault();
+    beginInlineRename({
+      host: row,
+      initial: bmTitleByUrl.get(url) ?? "",
+      allowEmpty: true, // пустое имя — только бейдж (как чип-значок строки)
+      ariaLabel: t("Переименовать закладку"),
+      save: (title) => {
+        void bridge.history
+          .bookmarkUpdate({ url, title })
+          .then(renderPanel)
+          .catch((e2) => {
+            err(e2);
+            void renderPanel();
+          });
+      },
+    });
   });
   panel().addEventListener("dragstart", (e) => {
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
