@@ -158,6 +158,15 @@ struct TabEntry {
     title: Option<String>,
     /// Идёт загрузка документа (пульс-индикатор на вкладке, гайд 06 §3).
     loading: bool,
+    /// Вкладке принадлежит живой документ: ContentLoading основной рамки
+    /// пришёл — сервер начал отдавать страницу (duopulse-157). Хвостовая
+    /// навигация может упасть (например, CONNECTION_RESET после начала
+    /// отдачи YouTube-mix) уже поверх работающей страницы — браузерное
+    /// поведение (и Chromium, и Firefox): текущий документ остаётся, страницу
+    /// ошибки не подставляем. false — документ ещё не начинал грузиться
+    /// (новая/ленивая вкладка): падение первой загрузки показывает
+    /// duopulse://error.
+    has_document: bool,
     /// Внутренняя страница duopulse:// (см. модульный комментарий).
     internal: bool,
     /// Ленивая вкладка восстановленной сессии (задача 1.6): стоит в баре с
@@ -316,6 +325,7 @@ impl TabManager {
             url: parsed.to_string(),
             title: None,
             loading: false,
+            has_document: false,
             internal: name.is_some(),
             lazy: true,
             sleeping: false,
@@ -370,6 +380,7 @@ impl TabManager {
                 url: tab.url.clone(),
                 title: tab.title.clone(),
                 loading: false,
+                has_document: false,
                 internal: internal.is_some(),
                 lazy: true,
                 sleeping: false,
@@ -882,6 +893,7 @@ impl TabManager {
                     url: parsed.to_string(),
                     title: None,
                     loading: false,
+                    has_document: false,
                     internal: internal.is_some(),
                     lazy: false,
                     sleeping: false,
@@ -1109,6 +1121,14 @@ impl TabManager {
         }
         entry.url = url.to_string();
         entry.loading = matches!(event, PageLoadEvent::Started);
+        if entry.loading {
+            // ContentLoading (wry Started): документ вкладки существует —
+            // сервер начал его отдавать (duopulse-157). Даже если догрузка
+            // оборвётся (CONNECTION_RESET), документ жив и работает: сбой
+            // не подменяет вкладку страницей ошибки — так ведут себя
+            // браузеры. До ContentLoading (DNS/отказ/таймаут) документа нет.
+            entry.has_document = true;
+        }
         let (visit_url, visit_title) = if record_visit {
             (url.to_string(), entry.title.clone().unwrap_or_default())
         } else {
@@ -1163,6 +1183,10 @@ impl TabManager {
     /// «этот сайт — через туннель». Вызывается из COM-колбэка на главном
     /// потоке: только фильтры под локом, пересоздание webview — async-задачей
     /// (round-trip создания нельзя делать на потоке цикла событий, см. open).
+    /// Живой документ не подменяем (duopulse-157): сбой хвостовой навигации
+    /// (CONNECTION_RESET поверх доигранного редиректа YouTube-mix) раньше
+    /// сносил работающую вкладку — вместе с видео и кэшем дорожек субтитров,
+    /// панель «Скачать» видела «дорожек нет».
     pub(crate) fn on_nav_failed(&self, app: &AppHandle, tab_id: &str, status: i32) {
         let url = {
             let st = self.state.lock().expect("tabs: лок не отравлен");
@@ -1175,7 +1199,7 @@ impl TabManager {
             if status == WEB_ERROR_AUTH_REQUIRED && crate::auth::suppress_error_page() {
                 return;
             }
-            if !should_show_error_page(entry.internal, parsed.as_ref(), status) {
+            if !should_show_error_page(entry.internal, entry.has_document, parsed.as_ref(), status) {
                 return;
             }
             entry.url.clone()
@@ -1347,8 +1371,12 @@ pub(crate) fn describe_web_error(status: i32) -> &'static str {
 /// http/https-страницы (внутренние duopulse:// и app-origin бандл не считаются)
 /// и только настоящие сбои — отменённая навигация (Esc, перебитая новой) не
 /// ошибка сайта.
-fn should_show_error_page(internal: bool, url: Option<&Url>, status: i32) -> bool {
-    if internal || status == WEB_ERROR_OPERATION_CANCELED {
+fn should_show_error_page(internal: bool, has_document: bool, url: Option<&Url>, status: i32) -> bool {
+    // Живой документ вкладки (duopulse-157): сбой хвостовой навигации
+    // (например CONNECTION_RESET после начала отдачи YouTube-mix) не
+    // подменяет работающую страницу — браузерное поведение; до ContentLoading
+    // документа нет, падение первой загрузки строит страницу ошибки.
+    if internal || has_document || status == WEB_ERROR_OPERATION_CANCELED {
         return false;
     }
     matches!(url.map(|u| u.scheme()), Some("http" | "https"))
@@ -1551,6 +1579,7 @@ mod tests {
             url: url.into(),
             title: None,
             loading: false,
+            has_document: false,
             internal: false,
             lazy: false,
             sleeping: false,
@@ -1607,21 +1636,25 @@ mod tests {
     fn error_page_filters() {
         let site = Url::parse("https://blocked.example/").unwrap();
         // отменённая навигация — не ошибка сайта (критерий карточки)
-        assert!(!should_show_error_page(false, Some(&site), 14));
+        assert!(!should_show_error_page(false, false, Some(&site), 14));
         // внутренняя страница / app-origin бандл (в т.ч. повторная ошибка
         // поверх страницы ошибки, пока вкладка не ушла «Повторить»)
-        assert!(!should_show_error_page(true, Some(&site), 13));
-        assert!(!should_show_error_page(true, None, 13));
+        assert!(!should_show_error_page(true, false, Some(&site), 13));
+        assert!(!should_show_error_page(true, false, None, 13));
         // не-внешние схемы (tauri:// бандл, file://, about:)
         assert!(!should_show_error_page(
+            false,
             false,
             Some(&Url::parse("tauri://localhost/index.html").unwrap()),
             13
         ));
-        assert!(!should_show_error_page(false, None, 13));
+        assert!(!should_show_error_page(false, false, None, 13));
         // настоящий сетевой сбой внешней страницы — показываем
-        assert!(should_show_error_page(false, Some(&site), 13));
-        assert!(should_show_error_page(false, Some(&site), 0));
+        assert!(should_show_error_page(false, false, Some(&site), 13));
+        assert!(should_show_error_page(false, false, Some(&site), 0));
+        // duopulse-157: живой документ (ContentLoading был) — сбой хвостовой
+        // навигации страницу ошибки не строит, вкладка остаётся на странице
+        assert!(!should_show_error_page(false, true, Some(&site), 9));
     }
 
     /// Словарь причин: ключевые статусы дают осмысленный текст, неизвестный
