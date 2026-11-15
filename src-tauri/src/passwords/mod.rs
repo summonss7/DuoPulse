@@ -185,21 +185,31 @@ fn decode_hex(s: &str) -> Option<Vec<u8>> {
 }
 
 /// Загрузить ключ хранилища или создать (32 случайных байта, hex под DPAPI).
-/// Существующий, но нечитаемый ключ — ошибка, НЕ пересоздание: пересоздание
-/// молча угробило бы все сохранённые пароли.
+/// duopulse-153: существующий, но нечитаемый ключ (шифроключ ОС умер: на
+/// Android Keystore-ключ не переживает снос приложения, а auto-backup
+/// возвращает passwords.key; на Windows — профиль с другого пользователя)
+/// больше НЕ роняет запуск ошибкой из setup-хука: сохранённые пароли всё
+/// равно криптографически невосстановимы, поэтому хранилище сбрасывается —
+/// passwords.key и passwords.db удаляются, ключ создаётся заново (как
+/// поступают браузеры при потере OS-ключа шифрования).
 fn load_or_create_key(profile_dir: &Path) -> Result<[u8; 32], String> {
     let path = profile_dir.join("passwords.key");
     if crate::secrets::exists(&path) {
-        let hex = crate::secrets::load(&path).ok_or(
-            "не удалось расшифровать passwords.key (DPAPI): файл создан другим \
-             пользователем Windows или повреждён",
-        )?;
-        let bytes = decode_hex(&hex)
-            .filter(|b| b.len() == 32)
-            .ok_or("passwords.key повреждён (ожидался hex 32 байт)")?;
-        let mut key = [0u8; 32];
-        key.copy_from_slice(&bytes);
-        return Ok(key);
+        let readable = crate::secrets::load(&path)
+            .and_then(|hex| decode_hex(&hex).filter(|b| b.len() == 32));
+        if let Some(bytes) = readable {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&bytes);
+            return Ok(key);
+        }
+        eprintln!(
+            "[passwords] passwords.key не читается (ключ ОС умер: переустановка \
+             на Android либо профиль с другой машины/пользователя) — хранилище \
+             паролей сброшено, сохранённые пароли восстановить невозможно"
+        );
+        // логины зашифрованы потерянным ключом — вместе с ним невосстановимы
+        let _ = std::fs::remove_file(profile_dir.join("passwords.db"));
+        let _ = std::fs::remove_file(&path);
     }
     let mut key = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut key);
@@ -909,7 +919,7 @@ mod tests {
     }
 
     #[test]
-    fn key_file_persists_and_corrupt_fails() {
+    fn key_file_persists_and_dead_key_resets() {
         let dir = std::env::temp_dir().join(format!("duopulse-pw-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         // чистый запуск — ключ создаётся
@@ -917,9 +927,41 @@ mod tests {
         // второй запуск — тот же ключ (DPAPI roundtrip)
         let k2 = load_or_create_key(&dir).unwrap();
         assert_eq!(k1, k2);
-        // файл существует, но не читается DPAPI → ошибка, НЕ пересоздание
+        // файл существует, но не читается DPAPI (ключ ОС умер) — duopulse-153:
+        // НЕ ошибка, а сброс — свежий ключ, старый не возвращается
         std::fs::write(dir.join("passwords.key"), b"garbage-not-dpapi").unwrap();
-        assert!(load_or_create_key(&dir).is_err());
+        let k3 = load_or_create_key(&dir).unwrap();
+        assert_ne!(k3, k1, "мёртвый ключ — сброс на свежий");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// duopulse-153: сценарий телефона Артёма — снос приложения убил ключ
+    /// Keystore, auto-backup вернул passwords.key и passwords.db. Открытие
+    /// хранилища обязано жить (раньше — ошибка из setup-хука → краш на
+    /// старте), невосстановимые логины сбрасываются, новое сохранение работает.
+    #[test]
+    fn dead_os_key_resets_store_and_app_opens() {
+        let dir = std::env::temp_dir().join(format!("duopulse-pw-dead-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            // было рабочее хранилище с записью
+            let s = PasswordStore::open(&dir).unwrap();
+            s.add("https://example.com/", None, "u", "p").unwrap();
+            assert_eq!(s.list("", 10).unwrap().total, 1);
+        }
+        // ключ ОС умер: файл больше не расшифровывается
+        std::fs::write(dir.join("passwords.key"), b"garbage-not-dpapi").unwrap();
+        // ранее load_or_create_key возвращал ошибку → паника setup-хука
+        let s = PasswordStore::open(&dir).unwrap();
+        assert_eq!(s.list("", 10).unwrap().total, 0, "логины сброшены");
+        // новое сохранение шифруется свежим ключом и читается
+        s.add("https://other.org/", None, "artem", "secret").unwrap();
+        assert_eq!(s.list("", 10).unwrap().total, 1);
+        drop(s);
+        // переоткрытие — данные на месте
+        let s = PasswordStore::open(&dir).unwrap();
+        assert_eq!(s.list("", 10).unwrap().total, 1);
+        drop(s);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
