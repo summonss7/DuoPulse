@@ -23,6 +23,7 @@ import type {
   DownloadBeginResult,
   DownloadCancelParams,
   DownloadStatusResult,
+  HistoryBmbarReorderParams,
   HistoryBookmarkAddParams,
   HistoryBookmarkListParams,
   HistoryBookmarkListResult,
@@ -36,6 +37,7 @@ import type {
   HistoryGroupMoveParams,
   HistoryGroupRemoveParams,
   HistoryGroupRenameParams,
+  HistoryGroupReorderParams,
   HistoryGroupSetSortParams,
   HistoryGroupToggleBookmarkParams,
   HistoryListParams,
@@ -185,6 +187,12 @@ export const bridge = {
     /** history.bookmark_move (duopulse-058): переставить закладку внутри
      *  группы (drag&drop; позиция 0 = верх). */
     bookmarkMove: (params: HistoryBookmarkMoveParams) => invoke<void>("history_bookmark_move", { params }),
+    /** history.group_reorder (duopulse-147): переставить группу среди
+     *  сестринских (beforeId — перед кем, null — в конец). */
+    groupReorder: (params: HistoryGroupReorderParams) => invoke<void>("history_group_reorder", { params }),
+    /** history.bmbar_reorder (duopulse-147): записать порядок чипов строки
+     *  закладок (безгрупповые усыновляются «Избранным»). */
+    bmbarReorder: (params: HistoryBmbarReorderParams) => invoke<void>("history_bmbar_reorder", { params }),
   },
   passwords: {
     /** passwords.list (duopulse-107): записи менеджера паролей без самих

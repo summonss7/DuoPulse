@@ -2,8 +2,13 @@
 // закладки группы по умолчанию и без группы, папки — группы бар-уровня
 // (корневые и подгруппы «Избранного», duopulse-151) с закладками или
 // подгруппами; пустое избранное строку скрывает.
-import { describe, expect, it } from "vitest";
-import { badgeHost, badgeLetter, badgeHue, bmBarModel } from "./bmbar";
+import { describe, expect, it, vi } from "vitest";
+
+// bmbar тянет tauri-транспорт (panel-window/bridge) — вне приложения их
+// слушатели не живут, мокаем до импорта модуля
+vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve() }));
+import { badgeHost, badgeLetter, badgeHue, bmBarModel, chipReorder, folderReorderAllowed } from "./bmbar";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge/gen/types";
 
 const group = (over: Partial<BookmarkGroupInfo>): BookmarkGroupInfo => ({
@@ -49,8 +54,8 @@ describe("bmBarModel — состав строки", () => {
     ];
     const m = bmBarModel(groups, [bm("https://a/", "A")], []);
     expect(m.folders).toEqual([
-      { id: 9, name: "Видео" },
-      { id: 3, name: "Музыка" },
+      { id: 9, name: "Видео", parentId: null },
+      { id: 3, name: "Музыка", parentId: null },
     ]);
   });
 
@@ -64,7 +69,7 @@ describe("bmBarModel — состав строки", () => {
     const m = bmBarModel(groups, [], []);
     expect(m.visible).toBe(true);
     expect(m.chips).toEqual([]);
-    expect(m.folders).toEqual([{ id: 5, name: "Видео" }]);
+    expect(m.folders).toEqual([{ id: 5, name: "Видео", parentId: null }]);
   });
 
   it("duopulse-151: подгруппа папки не выходит на строку — она в меню родителя", () => {
@@ -74,7 +79,7 @@ describe("bmBarModel — состав строки", () => {
       group({ id: 4, name: "Джаз", parentId: 3, depth: 2, count: 1 }),
     ];
     const m = bmBarModel(groups, [bm("https://a/", "A")], []);
-    expect(m.folders).toEqual([{ id: 3, name: "Музыка" }]);
+    expect(m.folders).toEqual([{ id: 3, name: "Музыка", parentId: null }]);
   });
 
   it("duopulse-151: подгруппа «Избранного» — папка строки; папка с одними подгруппами видна", () => {
@@ -85,7 +90,7 @@ describe("bmBarModel — состав строки", () => {
       group({ id: 5, name: "Пустой корень", count: 0 }),
     ];
     const m = bmBarModel(groups, [bm("https://a/", "A")], []);
-    expect(m.folders).toEqual([{ id: 3, name: "Ещё" }]);
+    expect(m.folders).toEqual([{ id: 3, name: "Ещё", parentId: 7 }]);
   });
 
   it("пустой заголовок чипа — адрес (как на странице управления)", () => {
@@ -110,5 +115,31 @@ describe("бейдж домена", () => {
   it("цвет стабилен и разный у разных доменов", () => {
     expect(badgeHue("youtube.com")).toBe(badgeHue("youtube.com"));
     expect(badgeHue("youtube.com")).toBeLessThan(360);
+  });
+});
+
+describe("duopulse-147: переупорядочивание drag&drop", () => {
+  it("chipReorder: вынуть и вставить перед целью; null — в конец", () => {
+    const urls = ["a", "b", "c", "d"];
+    expect(chipReorder(urls, "a", "c")).toEqual(["b", "a", "c", "d"]);
+    expect(chipReorder(urls, "d", "a")).toEqual(["d", "a", "b", "c"]);
+    expect(chipReorder(urls, "b", null)).toEqual(["a", "c", "d", "b"]);
+    expect(chipReorder(urls, "b", "b")).toEqual(urls); // перед собой — нет хода
+    expect(chipReorder(urls, "a", "нет")).toEqual(["b", "c", "d", "a"]); // цель пропала — конец
+  });
+
+  it("folderReorderAllowed: только сестринские (тот же родитель)", () => {
+    const folders = [
+      { id: 1, parentId: null },
+      { id: 2, parentId: null },
+      { id: 3, parentId: 7 },
+      { id: 4, parentId: 7 },
+    ];
+    expect(folderReorderAllowed(folders, 1, 2)).toBe(true);
+    expect(folderReorderAllowed(folders, 1, null)).toBe(true);
+    expect(folderReorderAllowed(folders, 3, 4)).toBe(true);
+    expect(folderReorderAllowed(folders, 1, 3)).toBe(false); // корень перед подгруппой
+    expect(folderReorderAllowed(folders, 3, 1)).toBe(false);
+    expect(folderReorderAllowed(folders, 99, null)).toBe(false); // нет такой папки
   });
 });

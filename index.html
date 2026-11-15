@@ -39,9 +39,12 @@
       </div>
       <!-- Строка закладок (карточка duopulse-143): отдельной строкой под
            навбаром, как в Chrome — основные закладки (группа по умолчанию и
-           без группы) иконками, группы-папками: наведение открывает нативное
+           без группы) иконками, группы-папками: наведение открывает панель
            меню папки; наполняет src/chrome/bmbar.ts -->
       <div id="bmbar" class="bmbar" hidden role="toolbar" aria-label="Панель закладок" data-i18n-aria-label="Панель закладок"></div>
+      <!-- Меню папки закладок (duopulse-147): панель-webview bmfolder,
+           содержимое строит src/chrome/bm-folder-panel.ts -->
+      <div id="bmFolder" class="bm-menu" hidden role="menu" aria-label="Меню папки закладок" data-i18n-aria-label="Меню папки закладок"></div>
       <div id="proxyMenu" class="proxy-menu" hidden>
         <div class="proxy-row proxy-head">
           <span class="proxy-title">Прокси</span>

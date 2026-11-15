@@ -453,6 +453,8 @@ export const dict: Record<string, string> = {
   "Ошибка": "Chyba",
   "Панель загрузки": "Panel sťahovania",
   "Панель закладок": "Panel záložiek",
+  "Папка пуста": "Priečinok je prázdny",
+  "Меню папки закладок": "Ponuka priečinka záložiek",
   "Панель VPN": "Panel VPN",
   "Пароли — DuoPulse": "Heslá — DuoPulse",
   "Перевод ({provider})… {done}/{total}": "Preklad ({provider})… {done}/{total}",

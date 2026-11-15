@@ -18,7 +18,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type PanelKind = "main" | "proxy" | "vpn" | "duo" | "download" | "suggest" | "pwsave";
+export type PanelKind =
+  | "main"
+  | "proxy"
+  | "vpn"
+  | "duo"
+  | "download"
+  | "suggest"
+  | "pwsave"
+  | "bmfolder";
 
 /** Хост-элемент панели в разметке index.html (панельный режим показывает его). */
 export const PANEL_HOST: Record<PanelKind, string> = {
@@ -29,6 +37,7 @@ export const PANEL_HOST: Record<PanelKind, string> = {
   download: "downloadPanel",
   suggest: "suggest",
   pwsave: "pwSaveBar",
+  bmfolder: "bmFolder",
 };
 
 const PANEL_KINDS: readonly PanelKind[] = [
@@ -39,6 +48,7 @@ const PANEL_KINDS: readonly PanelKind[] = [
   "download",
   "suggest",
   "pwsave",
+  "bmfolder",
 ];
 
 /** Этот webview — панель? (панельный режим UI-бандла, ?panel=<kind>). */
@@ -62,7 +72,9 @@ export function currentPanel(): PanelKind | null {
  *  UI-webview; Core клампит в окно main). Ресайз после открытия запрещён —
  *  размер должен быть точным сразу (см. комментарий модуля). focus=false —
  *  окно подсказок omnibox: Core возвращает фокус UI-webview после создания
- *  панели (duopulse-097), иначе набор в адресной строке умирает. */
+ *  панели (duopulse-097), иначе набор в адресной строке умирает.
+ *  query — доп. параметры после ?panel=<kind> (bmfolder: «&group=<id>»,
+ *  duopulse-147). */
 export function openPanel(
   kind: PanelKind,
   x: number,
@@ -70,9 +82,10 @@ export function openPanel(
   w: number,
   h: number,
   focus = true,
+  query = "",
 ): void {
   openKind = kind;
-  void invoke("ui_panel_open", { kind, x, y, w, h, focus }).catch((e) => {
+  void invoke("ui_panel_open", { kind, x, y, w, h, focus, query: query || null }).catch((e) => {
     openKind = null;
     console.error("panel-window:", e);
   });

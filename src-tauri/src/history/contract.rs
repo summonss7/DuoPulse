@@ -265,6 +265,27 @@ pub struct HistoryGroupMoveParams {
     pub parent_id: Option<i64>,
 }
 
+/// history.group_reorder: переставить группу среди сестёрских (drag&drop
+/// папки на строке закладок, duopulse-147): before_id — сестринская группа,
+/// перед которой поставить (null — в конец); только тот же родитель.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryGroupReorderParams {
+    pub id: i64,
+    #[serde(default)]
+    pub before_id: Option<i64>,
+}
+
+/// history.bmbar_reorder: записать порядок чипов строки закладок
+/// (drag&drop, duopulse-147): urls — закладки строки в новом порядке;
+/// все становятся членами группы по умолчанию с плотными позициями
+/// (безгрупповые «усыновляются», как перенос на панель закладок Chrome).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryBmbarReorderParams {
+    pub urls: Vec<String>,
+}
+
 /// history.group_rename: переименовать группу.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

@@ -20,7 +20,9 @@
 //! пересылается событием «menu-action» в UI — транспорт совпадает с
 //! прежним оверлеем, фронтенд (tabbar.ts/star.ts) не зависит от бэкенда.
 //! Идентификаторы пунктов: «tab:<act>» и «star:g:<id группы>» /
-//! «star:newgroup», «bmfolder:<url>» (папка строки закладок, duopulse-143).
+//! «star:newgroup». Меню папки строки закладок — панель-webview bmfolder
+//! (chrome_panel.rs, duopulse-147): нативное меню не умеет drag&drop и
+//! подсветку доменов.
 
 use serde_json::Value;
 use tauri::menu::{CheckMenuItem, ContextMenu, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -51,103 +53,6 @@ fn item<R: tauri::Runtime>(
     accel: Option<&str>,
 ) -> Result<MenuItem<R>, String> {
     MenuItem::with_id(app, id, text, enabled, accel).map_err(|e| format!("пункт меню: {e}"))
-}
-
-/// Меню папки строки закладок (карточка duopulse-143): закладки группы в её
-/// порядке сортировки (manual/title/added — как на странице управления),
-/// до 500; пустая — один неактивный пункт. Идентификатор пункта — url
-/// закладки, выбор уходит в UI событием menu-action.
-/// duopulse-151: подгруппы — подменю той же сборки (рекурсивно, дерево ≤ 3);
-/// идут перед закладками, как папки в меню Chrome.
-fn build_bmfolder_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, String> {
-    let group_id = payload
-        .get("groupId")
-        .and_then(Value::as_i64)
-        .ok_or("папка закладок не указана")?;
-    let history = app.state::<std::sync::Arc<crate::history::HistoryStore>>();
-    let mut menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
-    let kids = child_groups(&history, group_id);
-    if !kids.is_empty() {
-        for g in &kids {
-            let sub = build_group_submenu(app, &history, g)?;
-            menu.append(&sub).map_err(|e| format!("меню: {e}"))?;
-        }
-        menu.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
-            .map_err(|e| format!("меню: {e}"))?;
-    }
-    let (bookmarks, _) = history.bookmark_list(
-        "",
-        crate::history::GroupFilter::Group(group_id),
-        0,
-        500,
-    )?;
-    if bookmarks.is_empty() && kids.is_empty() {
-        menu.append(&item(app, "bmfolder:none", "Папка пуста", false, None)?)
-            .map_err(|e| format!("меню: {e}"))?;
-        return Ok(menu);
-    }
-    for b in &bookmarks {
-        let label = b.title.trim();
-        let label = if label.is_empty() { b.url.as_str() } else { label };
-        menu.append(&item(app, &format!("bmfolder:{}", b.url), label, true, None)?)
-            .map_err(|e| format!("меню: {e}"))?;
-    }
-    Ok(menu)
-}
-
-/// Дочерние группы папки (по позициям) — подменю bmfolder.
-fn child_groups(
-    history: &std::sync::Arc<crate::history::HistoryStore>,
-    parent: i64,
-) -> Vec<crate::history::contract::BookmarkGroupInfo> {
-    history
-        .group_list()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|g| g.parent_id == Some(parent))
-        .collect()
-}
-
-/// Подменю подгруппы: её подгруппы (рекурсивно), затем закладки.
-fn build_group_submenu(
-    app: &AppHandle,
-    history: &std::sync::Arc<crate::history::HistoryStore>,
-    group: &crate::history::contract::BookmarkGroupInfo,
-) -> Result<Submenu<tauri::Wry>, String> {
-    let sub = Submenu::with_id(
-        app,
-        format!("bmfolder:g:{}", group.id),
-        &group.name,
-        true,
-    )
-    .map_err(|e| format!("подменю: {e}"))?;
-    let kids = child_groups(history, group.id);
-    if !kids.is_empty() {
-        for g in &kids {
-            let inner = build_group_submenu(app, history, g)?;
-            sub.append(&inner).map_err(|e| format!("подменю: {e}"))?;
-        }
-        sub.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
-            .map_err(|e| format!("меню: {e}"))?;
-    }
-    let (bookmarks, _) = history.bookmark_list(
-        "",
-        crate::history::GroupFilter::Group(group.id),
-        0,
-        500,
-    )?;
-    if bookmarks.is_empty() && kids.is_empty() {
-        sub.append(&item(app, "bmfolder:none", "Пусто", false, None)?)
-            .map_err(|e| format!("подменю: {e}"))?;
-        return Ok(sub);
-    }
-    for b in &bookmarks {
-        let label = b.title.trim();
-        let label = if label.is_empty() { b.url.as_str() } else { label };
-        sub.append(&item(app, &format!("bmfolder:{}", b.url), label, true, None)?)
-            .map_err(|e| format!("подменю: {e}"))?;
-    }
-    Ok(sub)
 }
 
 /// Меню вкладки: вкладочные действия, недоступные — из payload.disabled.
@@ -523,7 +428,6 @@ pub async fn ui_menu_open(
         "tab" => build_tab_menu(&app, &payload)?,
         "star" => build_star_menu(&app, &payload)?,
         "duo" => build_duo_menu(&app, &payload)?,
-        "bmfolder" => build_bmfolder_menu(&app, &payload)?,
         other => return Err(format!("неизвестное меню: {other}")),
     };
     let window = app.get_window("main").ok_or("окно main не найдено")?;
@@ -551,13 +455,6 @@ pub fn emit_action(app: &AppHandle, id: &str) {
         serde_json::json!({ "menu": "star", "groupId": g.parse::<i64>().unwrap_or(-1) })
     } else if id == "star:newgroup" {
         serde_json::json!({ "menu": "star", "newGroup": true })
-    } else if let Some(url) = id.strip_prefix("bmfolder:") {
-        // папка строки закладок (duopulse-143): пункт — url закладки
-        // («none» — заглушка пустой папки, не действие)
-        if url == "none" || url.is_empty() {
-            return;
-        }
-        serde_json::json!({ "menu": "bmfolder", "url": url })
     } else if let Some(rest) = id.strip_prefix("duo:") {
         let (act, param) = rest.split_once(':').unwrap_or((rest, ""));
         match act {

@@ -103,4 +103,12 @@ export function bootPanel(kind: PanelKind): void {
     void importPanel("бар паролей", () => import("./chrome/pw-save"), "/src/chrome/pw-save.ts").then(
       (m) => m?.openPwSavePanel(),
     );
+  if (kind === "bmfolder")
+    // Меню папки строки закладок (duopulse-147): панель с бейджами-доменами
+    // и drag&drop внутри папки; группа — из ?group= (открывший передал).
+    void importPanel(
+      "меню папки закладок",
+      () => import("./chrome/bm-folder-panel"),
+      "/src/chrome/bm-folder-panel.ts",
+    ).then((m) => m?.openBmFolderPanel());
 }

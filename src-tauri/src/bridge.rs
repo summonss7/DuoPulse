@@ -195,12 +195,12 @@ pub struct NavResolveOmniboxResult {
 // контейнеру (BookmarkGroupRow — settings/profile.rs). Остальные берите из
 // crate::history (реэкспорт contract).
 pub use crate::history::contract::{
-    BookmarkGroupInfo, BookmarkGroupRow, HistoryBookmarkAddParams, HistoryBookmarkListParams,
-    HistoryBookmarkListResult, HistoryBookmarkMoveParams, HistoryBookmarkRemoveParams,
-    HistoryBookmarkUpdateParams, HistoryDeleteRangeParams, HistoryDeleteUrlsParams,
-    HistoryGroupAddParams, HistoryGroupListResult, HistoryGroupMoveParams,
-    HistoryGroupRemoveParams, HistoryGroupRenameParams, HistoryGroupSetSortParams,
-    HistoryGroupToggleBookmarkParams,
+    BookmarkGroupInfo, BookmarkGroupRow, HistoryBmbarReorderParams, HistoryBookmarkAddParams,
+    HistoryBookmarkListParams, HistoryBookmarkListResult, HistoryBookmarkMoveParams,
+    HistoryBookmarkRemoveParams, HistoryBookmarkUpdateParams, HistoryDeleteRangeParams,
+    HistoryDeleteUrlsParams, HistoryGroupAddParams, HistoryGroupListResult, HistoryGroupMoveParams,
+    HistoryGroupRemoveParams, HistoryGroupRenameParams, HistoryGroupReorderParams,
+    HistoryGroupSetSortParams, HistoryGroupToggleBookmarkParams,
     HistoryListParams, HistoryListResult, HistorySearchParams, HistorySearchResult,
     HistoryVisitParams,
 };
@@ -1147,6 +1147,12 @@ pub fn contract_json() -> serde_json::Value {
             "history.bookmark_move": { "handler": "history_bookmark_move",
                                        "params": schema!(HistoryBookmarkMoveParams),
                                        "result": null },
+            "history.group_reorder": { "handler": "history_group_reorder",
+                                       "params": schema!(HistoryGroupReorderParams),
+                                       "result": null },
+            "history.bmbar_reorder": { "handler": "history_bmbar_reorder",
+                                       "params": schema!(HistoryBmbarReorderParams),
+                                       "result": null },
             "passwords.list": { "handler": "passwords_list",
                                 "params": schema!(PasswordListParams),
                                 "result": schema!(PasswordListResult) },
@@ -2010,6 +2016,33 @@ fn history_bookmark_move(
     params: HistoryBookmarkMoveParams,
 ) -> Result<(), String> {
     history.bookmark_move(&params.url, params.group_id, params.position)
+}
+
+/// history.group_reorder: переставить группу среди сестринских (drag&drop
+/// папки строки закладок, duopulse-147). Позиции — локальный выбор, синком
+/// не переносятся (как bookmark_move).
+#[tauri::command]
+fn history_group_reorder(
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    params: HistoryGroupReorderParams,
+) -> Result<(), String> {
+    history.group_reorder(params.id, params.before_id)
+}
+
+/// history.bmbar_reorder: порядок чипов строки закладок (drag&drop,
+/// duopulse-147). Может менять членство (безгрупповые «усыновляются»
+/// группой по умолчанию) — синкается, как group_toggle_bookmark.
+#[tauri::command]
+fn history_bmbar_reorder(
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
+    params: HistoryBmbarReorderParams,
+) -> Result<(), String> {
+    let res = history.bmbar_reorder(&params.urls);
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 #[tauri::command]
@@ -3347,6 +3380,8 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         history_group_set_sort,
         history_group_toggle_bookmark,
         history_bookmark_move,
+        history_group_reorder,
+        history_bmbar_reorder,
         passwords_list,
         passwords_add,
         passwords_update,

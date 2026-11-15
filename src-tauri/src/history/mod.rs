@@ -1194,6 +1194,129 @@ impl HistoryStore {
         tx.commit().map_err(err_sql)
     }
 
+    /// Записать порядок чипов строки закладок (drag&drop, duopulse-147):
+    /// urls — закладки строки в новом порядке. Все они становятся членами
+    /// группы по умолчанию с плотными позициями 0..n (безгрупповые чипы
+    /// «усыновляются» группой — как перенос на панель закладок Chrome);
+    /// члены группы вне списка (за пределами лимита строки) уходят в конец,
+    /// сохраняя относительный порядок. Сортировка группы — manual.
+    pub fn bmbar_reorder(&self, urls: &[String]) -> Result<(), String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let def_id: i64 = tx
+            .query_row(
+                "SELECT id FROM bookmark_groups WHERE is_default != 0",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|_| "группа по умолчанию не найдена".to_string())?;
+        // url → bookmark_id, дубли url схлопываются (первое вхождение)
+        let mut order: Vec<i64> = Vec::with_capacity(urls.len());
+        let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        for url in urls {
+            let bid: i64 = tx
+                .query_row("SELECT id FROM bookmarks WHERE url = ?1", [url], |r| {
+                    r.get(0)
+                })
+                .map_err(|_| format!("закладка {url} не найдена"))?;
+            if seen.insert(bid) {
+                order.push(bid);
+            }
+        }
+        // члены группы сверх списка — в конец, прежним относительным порядком
+        let mut rest: Vec<i64> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT bookmark_id FROM bookmark_group_items
+                     WHERE group_id = ?1 ORDER BY position, bookmark_id",
+                )
+                .map_err(err_sql)?;
+            let rows = stmt
+                .query_map([def_id], |r| r.get::<_, i64>(0))
+                .map_err(err_sql)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(err_sql)?;
+            rows
+        };
+        rest.retain(|id| !seen.contains(id));
+        order.extend(rest);
+        tx.execute(
+            "DELETE FROM bookmark_group_items WHERE group_id = ?1",
+            [def_id],
+        )
+        .map_err(err_sql)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO bookmark_group_items(group_id, bookmark_id, position)
+                     VALUES (?1, ?2, ?3)",
+                )
+                .map_err(err_sql)?;
+            for (idx, bid) in order.iter().enumerate() {
+                stmt.execute(rusqlite::params![def_id, bid, idx as i64])
+                    .map_err(err_sql)?;
+            }
+        }
+        tx.execute(
+            "UPDATE bookmark_groups SET sort_by = 'manual' WHERE id = ?1",
+            [def_id],
+        )
+        .map_err(err_sql)?;
+        tx.commit().map_err(err_sql)
+    }
+
+    /// Переставить группу среди сестринских (drag&drop папки строки
+    /// закладок, duopulse-147): before_id — сестринская группа, перед
+    /// которой поставить (null — в конец). Сёстры — тот же parent_id
+    /// (иначе ошибка); позиции сестёр переписываются плотно. Группа по
+    /// умолчанию не двигается.
+    pub fn group_reorder(&self, id: i64, before_id: Option<i64>) -> Result<(), String> {
+        let mut conn = self.conn.lock().expect("history: лок не отравлен");
+        let tx = conn.transaction().map_err(err_sql)?;
+        let (parent, is_default): (Option<i64>, bool) = tx
+            .query_row(
+                "SELECT parent_id, is_default != 0 FROM bookmark_groups WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|_| format!("группа {id} не найдена"))?;
+        if is_default {
+            return Err("группу по умолчанию нельзя перемещать".into());
+        }
+        let mut siblings: Vec<i64> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id FROM bookmark_groups
+                     WHERE parent_id IS ?1 AND id != ?2 ORDER BY position, id",
+                )
+                .map_err(err_sql)?;
+            let rows = stmt
+                .query_map(rusqlite::params![parent, id], |r| r.get::<_, i64>(0))
+                .map_err(err_sql)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(err_sql)?;
+            rows
+        };
+        let at = match before_id {
+            Some(b) if b != id => siblings
+                .iter()
+                .position(|s| *s == b)
+                .ok_or_else(|| format!("группа {b} не соседняя с {id}"))?,
+            _ => siblings.len(),
+        };
+        siblings.insert(at, id);
+        {
+            let mut stmt = tx
+                .prepare("UPDATE bookmark_groups SET position = ?1 WHERE id = ?2")
+                .map_err(err_sql)?;
+            for (idx, sid) in siblings.iter().enumerate() {
+                stmt.execute(rusqlite::params![idx as i64, sid])
+                    .map_err(err_sql)?;
+            }
+        }
+        tx.commit().map_err(err_sql)
+    }
+
     // --- этап 5 duopulse-111: синк закладок через аккаунт Aila ---------------
 
     /// Документ облачного блоба закладок: всё живое + надгробия удалений.
@@ -2779,6 +2902,107 @@ mod tests {
             store.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1,
             1
         );
+    }
+
+    /// duopulse-147: порядок строки закладок — urls становятся группой по
+    /// умолчанию с плотными позициями; безгрупповые «усыновляются», члены
+    /// вне списка уходят в конец; неизвестный url — ошибка без изменений.
+    #[test]
+    fn bmbar_reorder_rewrites_default_group_order() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let fav = store.group_list().unwrap().remove(0);
+        for u in ["a", "b", "c"] {
+            store
+                .bookmark_add_to(&format!("https://{u}.example/"), u, Some(fav.id))
+                .unwrap();
+        }
+        // d — безгрупповая (добавили в «Избранное» и вышли из него)
+        store
+            .bookmark_add_to("https://d.example/", "d", Some(fav.id))
+            .unwrap();
+        store.group_toggle_bookmark("https://d.example/", fav.id, false).unwrap();
+        assert_eq!(
+            store
+                .bookmark_list("", GroupFilter::Ungrouped, 0, 100)
+                .unwrap()
+                .0
+                .len(),
+            1
+        );
+        // новый порядок строки: d, b, a — c (вне списка) хвостом
+        store
+            .bmbar_reorder(&[
+                "https://d.example/".into(),
+                "https://b.example/".into(),
+                "https://a.example/".into(),
+            ])
+            .unwrap();
+        let (marks, _) = store
+            .bookmark_list("", GroupFilter::Group(fav.id), 0, 100)
+            .unwrap();
+        assert_eq!(
+            marks.iter().map(|m| m.url.as_str()).collect::<Vec<_>>(),
+            vec![
+                "https://d.example/",
+                "https://b.example/",
+                "https://a.example/",
+                "https://c.example/"
+            ]
+        );
+        assert_eq!(
+            store.bookmark_list("", GroupFilter::Ungrouped, 0, 100).unwrap().0.len(),
+            0,
+            "безгрупповый чип усыновлён группой по умолчанию"
+        );
+        // порядок строки = manual, дубли url схлопываются, чужой url — ошибка
+        assert_eq!(
+            store.group_list().unwrap()[0].sort_by,
+            "manual",
+            "строка всегда в ручном порядке"
+        );
+        store
+            .bmbar_reorder(&["https://d.example/".into(), "https://d.example/".into()])
+            .unwrap();
+        let (marks, _) = store
+            .bookmark_list("", GroupFilter::Group(fav.id), 0, 100)
+            .unwrap();
+        assert_eq!(marks[0].url, "https://d.example/", "дубли схлопнулись");
+        assert!(store.bmbar_reorder(&["https://нет.example/".into()]).is_err());
+    }
+
+    /// duopulse-147: перестановка группы среди сестёрских — позиция
+    /// переписывается плотно; чужой родитель и группа по умолчанию — ошибки.
+    #[test]
+    fn group_reorder_moves_among_siblings() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        let fav = store.group_list().unwrap().remove(0);
+        let work = store.group_add("Работа", None).unwrap();
+        let media = store.group_add("Медиа", None).unwrap();
+        let other = store.group_add("Прочее", None).unwrap();
+        let docs = store.group_add("Документы", Some(work.id)).unwrap();
+        let roots = |store: &HistoryStore| -> Vec<String> {
+            store
+                .group_list()
+                .unwrap()
+                .into_iter()
+                .filter(|g| !g.is_default && g.parent_id.is_none())
+                .map(|g| g.name)
+                .collect()
+        };
+        // «Медиа» перед «Работой» (before_id — сестра)
+        store.group_reorder(media.id, Some(work.id)).unwrap();
+        assert_eq!(roots(&store), vec!["Медиа", "Работа", "Прочее"]);
+        // null — в конец; позиции сестёр остаются плотными
+        store.group_reorder(media.id, None).unwrap();
+        assert_eq!(roots(&store), vec!["Работа", "Прочее", "Медиа"]);
+        store.group_reorder(work.id, Some(media.id)).unwrap();
+        assert_eq!(roots(&store), vec!["Прочее", "Работа", "Медиа"]);
+        // подгруппа — не сестра корневых, группа по умолчанию не двигается
+        assert!(store.group_reorder(media.id, Some(docs.id)).is_err());
+        assert!(store.group_reorder(fav.id, Some(work.id)).is_err());
+        assert!(store.group_reorder(999, None).is_err());
+        // порядок не изменился после ошибок
+        assert_eq!(roots(&store), vec!["Прочее", "Работа", "Медиа"]);
     }
 
     /// duopulse-151: облачный документ несёт родителей групп (по имени),

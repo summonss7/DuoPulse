@@ -88,6 +88,14 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["history", "bookmarkMove"],
     params: { url: "https://example.com/", groupId: 2, position: 0 },
   },
+  "history.group_reorder": {
+    path: ["history", "groupReorder"],
+    params: { id: 2, beforeId: 3 },
+  },
+  "history.bmbar_reorder": {
+    path: ["history", "bmbarReorder"],
+    params: { urls: ["https://example.com/"] },
+  },
   "passwords.list": { path: ["passwords", "list"], params: { query: null, limit: null } },
   "passwords.add": {
     path: ["passwords", "add"],

@@ -71,6 +71,7 @@ export interface DuoPulseBridgeContract {
   DownloadCancelParams: DownloadCancelParams;
   DownloadStatusResult: DownloadStatusResult;
   DownloadJobInfo: DownloadJobInfo;
+  HistoryBmbarReorderParams: HistoryBmbarReorderParams;
   HistoryBookmarkAddParams: HistoryBookmarkAddParams;
   HistoryBookmarkListParams: HistoryBookmarkListParams;
   HistoryBookmarkListResult: HistoryBookmarkListResult;
@@ -87,6 +88,7 @@ export interface DuoPulseBridgeContract {
   HistoryGroupMoveParams: HistoryGroupMoveParams;
   HistoryGroupRemoveParams: HistoryGroupRemoveParams;
   HistoryGroupRenameParams: HistoryGroupRenameParams;
+  HistoryGroupReorderParams: HistoryGroupReorderParams;
   HistoryGroupSetSortParams: HistoryGroupSetSortParams;
   HistoryGroupToggleBookmarkParams: HistoryGroupToggleBookmarkParams;
   HistoryListParams: HistoryListParams;
@@ -530,6 +532,12 @@ export interface DownloadJobInfo {
   speed: string;
 }
 /**
+ * history.bmbar_reorder: записать порядок чипов строки закладок (drag&drop, duopulse-147): urls — закладки строки в новом порядке; все становятся членами группы по умолчанию с плотными позициями (безгрупповые «усыновляются», как перенос на панель закладок Chrome).
+ */
+export interface HistoryBmbarReorderParams {
+  urls: string[];
+}
+/**
  * history.bookmark_add: добавить закладку (url — ключ; повторное добавление обновляет заголовок, пустой заголовок сохраняет прежний).
  */
 export interface HistoryBookmarkAddParams {
@@ -663,6 +671,13 @@ export interface HistoryGroupRemoveParams {
 export interface HistoryGroupRenameParams {
   id: number;
   name: string;
+}
+/**
+ * history.group_reorder: переставить группу среди сестёрских (drag&drop папки на строке закладок, duopulse-147): before_id — сестринская группа, перед которой поставить (null — в конец); только тот же родитель.
+ */
+export interface HistoryGroupReorderParams {
+  beforeId?: number | null;
+  id: number;
 }
 /**
  * history.group_set_sort: режим сортировки группы — manual | title | added.

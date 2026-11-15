@@ -467,6 +467,8 @@ export const dict: Record<string, string> = {
   "Ошибка": "Error",
   "Панель загрузки": "Download panel",
   "Панель закладок": "Bookmarks bar",
+  "Папка пуста": "The folder is empty",
+  "Меню папки закладок": "Bookmark folder menu",
   "Панель VPN": "VPN panel",
   "Пароли — DuoPulse": "Passwords — DuoPulse",
   "Перевод ({provider})… {done}/{total}": "Translating ({provider})… {done}/{total}",

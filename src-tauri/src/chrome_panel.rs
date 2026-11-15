@@ -81,7 +81,9 @@ pub fn close(app: &AppHandle) {
 }
 
 /// Открыть панель-child-webview у якоря (x/y/w/h — логические координаты
-/// UI-webview; контент уточнит размер через ui_panel_fit). focus=false — окно
+/// UI-webview; контент уточнит размер через ui_panel_fit). query — доп.
+/// строка параметров после ?panel=<kind> (bmfolder: «&group=<id>», duopulse-147).
+/// focus=false — окно
 /// подсказок omnibox: панель не держит фокус (создание child-webview
 /// перехватывает фокус ОС — та же ловушка, что у фоновых вкладок
 /// duopulse-088; фокус возвращаем UI-webview, иначе набор в адресной строке
@@ -95,10 +97,11 @@ pub async fn ui_panel_open(
     w: f64,
     h: f64,
     focus: Option<bool>,
+    query: Option<String>,
 ) -> Result<(), String> {
     if !matches!(
         kind.as_str(),
-        "main" | "proxy" | "vpn" | "duo" | "download" | "suggest" | "pwsave"
+        "main" | "proxy" | "vpn" | "duo" | "download" | "suggest" | "pwsave" | "bmfolder"
     ) {
         return Err(format!("неизвестная панель: {kind}"));
     }
@@ -121,7 +124,15 @@ pub async fn ui_panel_open(
     let h = h.min(win_h - y);
     let x = x.clamp(0.0, (win_w - w).max(0.0));
     let y = y.clamp(0.0, (win_h - h).max(0.0));
-    let url = tauri::WebviewUrl::App(format!("index.html?panel={kind}").into());
+    // query — доп. параметры панели после ?panel=<kind> (bmfolder: &group=<id>,
+    // duopulse-147); панели без параметров передают None
+    let url = tauri::WebviewUrl::App(
+        format!(
+            "index.html?panel={kind}{}",
+            query.as_deref().unwrap_or("")
+        )
+        .into(),
+    );
     let builder = WebviewBuilder::new(PANEL_WEBVIEW, url)
         // Язык интерфейса (duopulse-136): до скриптов панели — src/i18n.
         .initialization_script(crate::settings::ui_lang_script(
