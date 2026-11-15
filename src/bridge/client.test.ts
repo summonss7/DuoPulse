@@ -112,6 +112,11 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["passwords", "resolveCandidate"],
     params: { action: "save" },
   },
+  "auth.pending": { path: ["auth", "pending"] },
+  "auth.respond": {
+    path: ["auth", "respond"],
+    params: { username: "admin", password: "router" },
+  },
   "aila.status": { path: ["aila", "status"] },
   "aila.login": { path: ["aila", "login"], params: { username: "artem", password: "x" } },
   "aila.logout": { path: ["aila", "logout"] },

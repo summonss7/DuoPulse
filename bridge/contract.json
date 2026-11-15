@@ -794,6 +794,83 @@
         "type": "object"
       }
     },
+    "auth.pending": {
+      "handler": "auth_pending",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "anyOf": [
+          {
+            "$ref": "#/definitions/AuthChallengeView"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "definitions": {
+          "AuthChallengeView": {
+            "description": "Ожидающий запрос авторизации для панели (auth.pending; null — нет).",
+            "properties": {
+              "attempts": {
+                "description": "Номер попытки: >1 — прежние креды отвергнуты сервером.",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "host": {
+                "description": "Хост для заголовка диалога (из uri; пустой — покажем uri).",
+                "type": "string"
+              },
+              "lastUsername": {
+                "description": "Логин прошлой попытки (подставить в поле формы).",
+                "type": "string"
+              },
+              "realm": {
+                "description": "realm из заголовка WWW-Authenticate (может быть пустым).",
+                "type": "string"
+              },
+              "uri": {
+                "description": "Адрес, запросивший авторизацию (страница роутера и т.п.).",
+                "type": "string"
+              }
+            },
+            "required": [
+              "attempts",
+              "host",
+              "lastUsername",
+              "realm",
+              "uri"
+            ],
+            "type": "object"
+          }
+        },
+        "title": "Nullable_AuthChallengeView"
+      }
+    },
+    "auth.respond": {
+      "handler": "auth_respond",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "auth.respond: решение диалога. Some — креды уходят в WebView2, None — отмена (пустой ответ, навигация падает на страницу ошибки).",
+        "properties": {
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "AuthRespondParams",
+        "type": "object"
+      },
+      "result": null
+    },
     "bridge.version": {
       "handler": "bridge_version",
       "params": null,
@@ -6022,6 +6099,45 @@
           "site"
         ],
         "title": "AdblockSiteException",
+        "type": "object"
+      }
+    },
+    "auth:challenge": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Ожидающий запрос авторизации для панели (auth.pending; null — нет).",
+        "properties": {
+          "attempts": {
+            "description": "Номер попытки: >1 — прежние креды отвергнуты сервером.",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "host": {
+            "description": "Хост для заголовка диалога (из uri; пустой — покажем uri).",
+            "type": "string"
+          },
+          "lastUsername": {
+            "description": "Логин прошлой попытки (подставить в поле формы).",
+            "type": "string"
+          },
+          "realm": {
+            "description": "realm из заголовка WWW-Authenticate (может быть пустым).",
+            "type": "string"
+          },
+          "uri": {
+            "description": "Адрес, запросивший авторизацию (страница роутера и т.п.).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempts",
+          "host",
+          "lastUsername",
+          "realm",
+          "uri"
+        ],
+        "title": "AuthChallengeView",
         "type": "object"
       }
     },

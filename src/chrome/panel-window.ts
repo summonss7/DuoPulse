@@ -26,6 +26,7 @@ export type PanelKind =
   | "download"
   | "suggest"
   | "pwsave"
+  | "auth"
   | "bmfolder";
 
 /** Хост-элемент панели в разметке index.html (панельный режим показывает его). */
@@ -37,6 +38,7 @@ export const PANEL_HOST: Record<PanelKind, string> = {
   download: "downloadPanel",
   suggest: "suggest",
   pwsave: "pwSaveBar",
+  auth: "authDialog",
   bmfolder: "bmFolder",
 };
 
@@ -48,6 +50,7 @@ const PANEL_KINDS: readonly PanelKind[] = [
   "download",
   "suggest",
   "pwsave",
+  "auth",
   "bmfolder",
 ];
 

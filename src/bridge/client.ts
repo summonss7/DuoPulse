@@ -9,6 +9,8 @@ import type {
   AilaLoginParams,
   AilaStatusResult,
   AilaSyncResult,
+  AuthChallengeView,
+  AuthRespondParams,
   AdblockStatusResult,
   AppBuildInfoResult,
   AdblockUpdateListsParams,
@@ -214,6 +216,15 @@ export const bridge = {
      *  save (upsert в хранилище) | never (denylist) | dismiss. */
     resolveCandidate: (params: PasswordsResolveParams) =>
       invoke<void>("passwords_resolve_candidate", { params }),
+  },
+  auth: {
+    /** auth.pending (duopulse-148): ожидающий запрос HTTP-авторизации сайта
+     *  (401, роутер; панель auth при загрузке; null — запроса нет). */
+    pending: () => invoke<AuthChallengeView | null>("auth_pending"),
+    /** auth.respond (duopulse-148): решение диалога авторизации — креды
+     *  уходят в WebView2 (страница грузится), null — отмена (навигация
+     *  падает на страницу ошибки «сервер требует авторизацию»). */
+    respond: (params: AuthRespondParams) => invoke<void>("auth_respond", { params }),
   },
   aila: {
     /** aila.status (duopulse-110): вход в аккаунт Aila / сервер / итог
@@ -437,6 +448,9 @@ export const bridge = {
     /** passwords.save_prompt (duopulse-108): сабмит формы логина в активной
      *  вкладке заслужил бар «Сохранить пароль?» (payload без пароля). */
     passwordsSavePrompt: "passwords:save_prompt",
+    /** auth.challenge (duopulse-148): сайт запросил HTTP-авторизацию (401,
+     *  роутер) — Core держит запрос, UI открывает диалог логин/пароль. */
+    authChallenge: "auth:challenge",
     /** download.progress (карточка duopulse-118): живой прогресс задания
      *  загрузки — докачка инструментов / загрузка / обработка ffmpeg. */
     downloadProgress: "download:progress",

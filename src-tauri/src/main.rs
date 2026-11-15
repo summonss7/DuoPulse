@@ -37,6 +37,9 @@ mod adblock;
 /// Аккаунт Aila и синк паролей между устройствами (этап 4 duopulse-106).
 mod aila;
 mod asr;
+/// HTTP-авторизация сайта (карточка duopulse-148): 401-челлендж роутера —
+/// диалог логин/пароль (панель auth) вместо падения навигации с кодом 17.
+mod auth;
 mod bridge;
 mod chrome_menu;
 mod chrome_panel;
@@ -1216,6 +1219,7 @@ pub(crate) unsafe fn install_content_handlers(
     install_request_blocker(&core, &env, app, tab_id);
     install_content_messaging(&core, app, tab_id);
     translate_menu::install_translate_menu(&core, &env, app);
+    auth::install_basic_auth_handler(&core, app, tab_id);
     install_new_window_handler(&core, app, tab_id);
     install_cosmetic_prewarm(&core, app, tab_id);
     install_nav_failure_watcher(&core, app, tab_id);
@@ -1226,9 +1230,11 @@ pub(crate) unsafe fn install_content_handlers(
 /// успеха отдаётся TabManager::on_nav_failed — вкладка превращается в
 /// duopulse://error с адресом, причиной и действием «этот сайт — через
 /// туннель». Отменённые навигации (WebErrorStatus OPERATION_CANCELED — Esc,
-/// перебита новой) и внутренние страницы отфильтровывает TabManager (у него
+/// перебитая новой) и внутренние страницы отфильтровывает TabManager (у него
 /// состояние вкладки). Вызывается после подписки wry на то же событие —
 /// on_page_load(Finished) успевает актуализировать URL вкладки.
+/// Любое завершение навигации вкладки-владельца закрывает диалог
+/// HTTP-авторизации (duopulse-148): успех — вошли, ошибка — отменили/таймаут.
 #[cfg(windows)]
 unsafe fn install_nav_failure_watcher(core: &ICoreWebView2, app: &AppHandle, tab_id: &str) {
     use webview2_com::{
@@ -1245,13 +1251,18 @@ unsafe fn install_nav_failure_watcher(core: &ICoreWebView2, app: &AppHandle, tab
                 return Ok(());
             };
             let mut ok = BOOL::default();
-            if args.IsSuccess(&mut ok).is_err() || ok.as_bool() {
+            if args.IsSuccess(&mut ok).is_err() {
+                return Ok(());
+            }
+            if ok.as_bool() {
+                auth::on_nav_completed(&app, &tab_id);
                 return Ok(());
             }
             let mut status = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
             if args.WebErrorStatus(&mut status).is_err() {
                 return Ok(());
             }
+            auth::on_nav_completed(&app, &tab_id);
             app.state::<tabs::TabManager>()
                 .on_nav_failed(&app, &tab_id, status.0);
             Ok(())

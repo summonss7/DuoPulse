@@ -103,6 +103,13 @@ export function bootPanel(kind: PanelKind): void {
     void importPanel("бар паролей", () => import("./chrome/pw-save"), "/src/chrome/pw-save.ts").then(
       (m) => m?.openPwSavePanel(),
     );
+  if (kind === "auth")
+    // Диалог HTTP-авторизации (карточка duopulse-148): сайт (роутер) запросил
+    // логин/пароль (401) — Core держит запрос на деферрале, форма решает
+    // командой auth.respond (креды в WebView2 / null — отмена).
+    void importPanel("диалог авторизации", () => import("./chrome/auth-dialog"), "/src/chrome/auth-dialog.ts").then(
+      (m) => m?.openAuthPanel(),
+    );
   if (kind === "bmfolder")
     // Меню папки строки закладок (duopulse-147): панель с бейджами-доменами
     // и drag&drop внутри папки; группа — из ?group= (открывший передал).

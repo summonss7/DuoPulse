@@ -360,6 +360,26 @@
           <button type="button" id="pwSaveClose" class="icon-btn" title="Закрыть" data-i18n-title="Закрыть"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
         </div>
       </div>
+      <!-- Диалог HTTP-авторизации (карточка duopulse-148): сайт (роутер и
+           т.п.) ответил 401 — панель auth по центру окна контента; хост,
+           realm и подсказку о неверном пароле наполняет src/chrome/auth-dialog.ts -->
+      <form id="authDialog" class="auth-dialog" hidden role="dialog" aria-label="Вход на сайт" data-i18n-aria-label="Вход на сайт">
+        <div class="auth-title" id="authTitle"></div>
+        <div class="auth-realm" id="authRealm"></div>
+        <div class="auth-error" id="authError" hidden data-i18n="Неверный логин или пароль">Неверный логин или пароль</div>
+        <label class="auth-field">
+          <span data-i18n="Логин">Логин</span>
+          <input type="text" id="authLogin" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="auth-field">
+          <span data-i18n="Пароль">Пароль</span>
+          <input type="password" id="authPassword" autocomplete="off">
+        </label>
+        <div class="auth-actions">
+          <button type="button" id="authCancel" class="ghost" data-i18n="Отмена">Отмена</button>
+          <button type="submit" id="authSubmit" class="primary" data-i18n="Войти">Войти</button>
+        </div>
+      </form>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

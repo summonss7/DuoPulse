@@ -209,6 +209,7 @@ pub use crate::passwords::{
     PasswordRevealParams, PasswordRevealResult, PasswordSaveResult, PasswordUpdateParams,
     PasswordsCandidateView, PasswordsResolveParams,
 };
+pub use crate::auth::{AuthChallengeView, AuthRespondParams};
 
 /// aila.status: состояние аккаунта Aila (этап 4 duopulse-110): вход, сервер,
 /// ревизия облачного блоба паролей и итог последней синхронизации.
@@ -890,6 +891,17 @@ impl BridgeEvent for PasswordsSavePromptEvent {
     type Payload = PasswordsSavePrompt;
 }
 
+/// auth:challenge (карточка duopulse-148): сайт запросил HTTP-авторизацию
+/// (401, роутер) — Core держит запрос на деферрале, UI открывает диалог
+/// логин/пароль (панель auth). Тип и эмит — src/auth.rs.
+#[derive(Debug, Clone)]
+pub struct AuthChallengeEvent;
+
+impl BridgeEvent for AuthChallengeEvent {
+    const NAME: &'static str = "auth:challenge";
+    type Payload = crate::auth::AuthChallengeView;
+}
+
 /// subtitles:translate_progress: конвейер перевода дорожки (задача 4.2,
 /// docs/05 §2) — панель показывает «Перевод… 12/40» и итог (кэш/сеть/ошибка).
 /// Тип и эмит — src/translate/pipeline.rs рядом с конвейером.
@@ -1170,6 +1182,10 @@ pub fn contract_json() -> serde_json::Value {
             "passwords.resolve_candidate": { "handler": "passwords_resolve_candidate",
                                               "params": schema!(PasswordsResolveParams),
                                               "result": null },
+            "auth.pending": { "handler": "auth_pending", "params": null,
+                              "result": schema!(Option<AuthChallengeView>) },
+            "auth.respond": { "handler": "auth_respond", "params": schema!(AuthRespondParams),
+                              "result": null },
             "aila.status": { "handler": "aila_status", "params": null,
                              "result": schema!(AilaStatusResult) },
             "aila.login": { "handler": "aila_login", "params": schema!(AilaLoginParams),
@@ -1317,6 +1333,7 @@ pub fn contract_json() -> serde_json::Value {
             "updater:check_done": { "payload": schema!(crate::updater::UpdaterCheckResult) },
             "settings:ui_lang_changed": { "payload": schema!(UiLangChanged) },
             "passwords:save_prompt": { "payload": schema!(PasswordsSavePrompt) },
+            "auth:challenge": { "payload": schema!(crate::auth::AuthChallengeView) },
             "download:progress": { "payload": schema!(crate::download::DownloadProgress) },
             "download:finished": { "payload": schema!(crate::download::DownloadFinished) },
         },
@@ -1412,6 +1429,10 @@ fn event_names_match_registry() {
             (
                 <crate::asr::pipeline::SubtitlesAsrProgressEvent as BridgeEvent>::NAME,
                 schema!(crate::asr::pipeline::SubtitlesAsrProgress),
+            ),
+            (
+                <AuthChallengeEvent as BridgeEvent>::NAME,
+                schema!(crate::auth::AuthChallengeView),
             ),
             (
                 <crate::updater::UpdaterCheckDoneEvent as BridgeEvent>::NAME,
@@ -3445,6 +3466,8 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         crate::download::download_status,
         crate::chrome_menu::ui_menu_open,
         crate::chrome_panel::ui_panel_open,
-        crate::chrome_panel::ui_panel_close
+        crate::chrome_panel::ui_panel_close,
+        crate::auth::auth_pending,
+        crate::auth::auth_respond
     ])
 }

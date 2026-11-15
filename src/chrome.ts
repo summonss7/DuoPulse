@@ -10,6 +10,7 @@ import { initStar, setActivePage } from "./chrome/star";
 import { initBmBar, refreshBmBar } from "./chrome/bmbar";
 import { closePanel, currentPanel } from "./chrome/panel-window";
 import { initPwSaveBar } from "./chrome/pw-save";
+import { initAuthDialog } from "./chrome/auth-dialog";
 import { initUpdateBar } from "./chrome/update-bar";
 import "./chrome/mainmenu";
 import "./proxy-menu";
@@ -48,6 +49,9 @@ initBmBar();
 // Бар «Сохранить пароль?» (этап 2 duopulse-108): панель pwsave по событию
 // passwords:save_prompt, закрытие при переключении вкладки.
 initPwSaveBar();
+// Диалог HTTP-авторизации (карточка duopulse-148): 401 сайта (роутер) —
+// панель auth с формой логин/пароль по центру окна контента.
+initAuthDialog();
 // Бар «Появилась новая версия» (карточка duopulse-127): строка поверх
 // таб-бара, пока найденное обновление не установлено/отклонено.
 initUpdateBar();

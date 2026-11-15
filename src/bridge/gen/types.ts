@@ -9,6 +9,7 @@ export type LocalModelSize = "base" | "small";
  * Движок распознавания (решение автора 29.10.2026 — гибрид; выбор в настройках): локальный whisper.cpp (приватно, офлайн) или облачный OpenAI-совместимый API (OpenAI / Groq / свой whisper-server).
  */
 export type AsrProviderId = "local" | "openai";
+export type Nullable_AuthChallengeView = AuthChallengeView | null;
 /**
  * Откуда подсказка: посещение из истории или закладка.
  */
@@ -65,6 +66,9 @@ export interface DuoPulseBridgeContract {
   AsrSetSettingsParams: AsrSetSettingsParams;
   AsrConfig: AsrConfig;
   AsrTestResult: AsrTestResult;
+  Nullable_AuthChallengeView: Nullable_AuthChallengeView;
+  AuthChallengeView: AuthChallengeView;
+  AuthRespondParams: AuthRespondParams;
   BridgeVersionResult: BridgeVersionResult;
   DownloadBeginParams: DownloadBeginParams;
   DownloadBeginResult: DownloadBeginResult;
@@ -433,6 +437,38 @@ export interface AsrTestResult {
    */
   detail: string;
   ok: boolean;
+}
+/**
+ * Ожидающий запрос авторизации для панели (auth.pending; null — нет).
+ */
+export interface AuthChallengeView {
+  /**
+   * Номер попытки: >1 — прежние креды отвергнуты сервером.
+   */
+  attempts: number;
+  /**
+   * Хост для заголовка диалога (из uri; пустой — покажем uri).
+   */
+  host: string;
+  /**
+   * Логин прошлой попытки (подставить в поле формы).
+   */
+  lastUsername: string;
+  /**
+   * realm из заголовка WWW-Authenticate (может быть пустым).
+   */
+  realm: string;
+  /**
+   * Адрес, запросивший авторизацию (страница роутера и т.п.).
+   */
+  uri: string;
+}
+/**
+ * auth.respond: решение диалога. Some — креды уходят в WebView2, None — отмена (пустой ответ, навигация падает на страницу ошибки).
+ */
+export interface AuthRespondParams {
+  password?: string | null;
+  username?: string | null;
 }
 /**
  * bridge.version: версия контракта живого приложения (диагностика, e2e).

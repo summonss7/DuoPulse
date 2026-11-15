@@ -58,7 +58,14 @@ static OPEN_KIND: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None)
 /// сам — close_if_open).
 pub fn close(app: &AppHandle) {
     let gen = PANEL_GEN.fetch_add(1, Ordering::SeqCst);
-    *OPEN_KIND.lock().unwrap() = None;
+    // Диалог HTTP-авторизации (duopulse-148) умер без решения (Esc, клик по
+    // хрому, ресайз) — гасим ожидающий деферрал пустым ответом, иначе запрос
+    // сайта висит до таймаута. Успешный путь не задет: auth.respond забирает
+    // запрос из реестра ДО закрытия панели.
+    let closing_kind = OPEN_KIND.lock().unwrap().take();
+    if closing_kind.as_deref() == Some("auth") {
+        crate::auth::cancel_pending(app);
+    }
     if let Some(wv) = app.get_webview(PANEL_WEBVIEW) {
         let _ = wv.hide();
         let app2 = app.clone();
@@ -101,17 +108,23 @@ pub async fn ui_panel_open(
 ) -> Result<(), String> {
     if !matches!(
         kind.as_str(),
-        "main" | "proxy" | "vpn" | "duo" | "download" | "suggest" | "pwsave" | "bmfolder"
+        "main" | "proxy" | "vpn" | "duo" | "download" | "suggest" | "pwsave" | "auth" | "bmfolder"
     ) {
         return Err(format!("неизвестная панель: {kind}"));
     }
-    // предыдущая панель уходит (единое «одно меню на экран»); поколение
+    // предыдущая панель уходит (единое «одно меню на экране»); поколение
     // растёт ДО разрушения — отложенные close() прошлых поколений новую
     // панель не тронут (проверка поколения в run_on_main_thread)
     PANEL_GEN.fetch_add(1, Ordering::SeqCst);
     wait_pending_destroy();
+    let old_kind = OPEN_KIND.lock().unwrap().take();
     if let Some(old) = app.get_webview(PANEL_WEBVIEW) {
         let _ = old.close();
+    }
+    // старый диалог авторизации заместили другой панелью — его запрос
+    // (если ждёт) гасим; новый челлендж → снова «auth» — не трогаем
+    if old_kind.as_deref() == Some("auth") && kind != "auth" {
+        crate::auth::cancel_pending(&app);
     }
     let window = app.get_window("main").ok_or("окно main не найдено")?;
     // в пределах окна main (кламп справа/снизу — панель у правого края кнопок)
@@ -179,6 +192,15 @@ fn wait_pending_destroy() {
     }
 }
 
+/// Закрыть панель, если открыт именно этот kind (диалог авторизации закрывается
+/// по исходу навигации владельца, duopulse-148; другие панели не трогаем —
+/// close() закрыл бы и главное меню).
+pub fn close_if_kind(app: &AppHandle, kind: &str) {
+    if OPEN_KIND.lock().unwrap().as_deref() == Some(kind) {
+        close(app);
+    }
+}
+
 /// Новый webview в окне main (вкладка/внутренняя страница) — панель больше не
 /// верхняя по композитору: закрываем. Вызывается из TabManager::create.
 pub fn close_if_open(app: &AppHandle) {
@@ -195,12 +217,13 @@ pub fn close_on_main_geometry_change(app: &AppHandle) {
 
 /// Клик по контенту страницы (сообщение dp-close-panel из content-скрипта):
 /// выпадающая панель закрывается кликом мимо, как нативный дропдаун.
-/// Бар «Сохранить пароль?» — не дропдаун: клики по странице его не трогают
-/// (бабл живёт, пока хозяин не решит; duopulse-142).
+/// Бар «Сохранить пароль?» и диалог авторизации — не дропдауны: клики по
+/// странице их не трогают (бабл — duopulse-142; диалог 401 — модальный,
+/// как в Chrome, duopulse-148).
 pub fn on_content_close_message(app: &AppHandle) {
     let spare = matches!(
         OPEN_KIND.lock().unwrap().as_deref(),
-        Some("pwsave")
+        Some("pwsave") | Some("auth")
     );
     if !spare {
         close_if_open(app);

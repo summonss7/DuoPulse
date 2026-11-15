@@ -1170,6 +1170,11 @@ impl TabManager {
                 return;
             };
             let parsed = Url::parse(&entry.url).ok();
+            // код 17 при живом/отвеченном челлендже авторизации — не ошибка
+            // сайта (duopulse-148): нога-ретрай с кредами грузится сама
+            if status == WEB_ERROR_AUTH_REQUIRED && crate::auth::suppress_error_page() {
+                return;
+            }
             if !should_show_error_page(entry.internal, parsed.as_ref(), status) {
                 return;
             }
@@ -1312,6 +1317,10 @@ fn session_projection(
 /// Навигация отменена (Esc, перебита новой) — не ошибка сайта, страницу
 /// ошибки не показываем.
 const WEB_ERROR_OPERATION_CANCELED: i32 = 14;
+
+/// Сервер требует HTTP-авторизацию: решает диалог auth (duopulse-148), а не
+/// страница ошибки — ошибка показывается только если диалог отменён.
+pub(crate) const WEB_ERROR_AUTH_REQUIRED: i32 = 17;
 
 /// Человекочитаемая причина для страницы ошибки (дефолт — «сайт недоступен»).
 pub(crate) fn describe_web_error(status: i32) -> &'static str {
