@@ -6348,4 +6348,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   панели (подписи папок читаемы, бейджи с градиентом). Релиз 0.1.51 тем же
   сеансом: npm run release — NSIS в фиды GitHub stable+canary, хаб «Скачать»
   Aila, локальная копия C:\DuoPulse обновлена.
-- Коммит: (дополнено ниже)
+- Коммит: 822bcf5 feat(bookmarks): duopulse-147 — drag&drop строки закладок и панель меню папок (полное сообщение в git log); версия 0.1.51
