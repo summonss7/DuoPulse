@@ -61,8 +61,31 @@ fn fmt_range_part(sec: f64) -> String {
 /// Шаблон вывода: имя файла с суффиксом диапазона/без.
 fn output_template(spec: &RunSpec) -> String {
     let suffix = spec.name_suffix.as_deref().unwrap_or("");
-    // ограничиваем длину имени — Windows потолок пути 260 символов
-    format!("%(title).120B [%(id)s]{suffix}.%(ext)s")
+    // duopulse-150: имя — «исполнитель - трек» (метаданные музыки YouTube),
+    // иначе очищенный title; без кода видео и служебных слов в скобках
+    // («(Official Video)» и пр. — срезает clean_name_rules ДО шаблона).
+    // Ограничиваем длину имени — Windows потолок пути 260 символов.
+    format!("%(artist&{{}} - |)s%(track,title).120B{suffix}.%(ext)s")
+}
+
+/// Поля, которые чистим от «слов в скобках» (duopulse-150): title — источник
+/// имени для обычных видео, track/artist — метаданные музыки YouTube.
+const NAME_CLEAN_FIELDS: &str = "title,track,artist";
+/// Скобочная группа целиком: (…) […] {…} （…） 【…】 《…》 〈…〉.
+const RE_BRACKET_GROUP: &str = "[([{（【《〈][^(){}\\[\\]（）《》〈〉【】]*[)\\]}）】》〉]";
+
+/// Правила --replace-in-metadata для чистки имени файла (duopulse-150):
+/// (regex, замена) в порядке применения. Скобки срезаем дважды — на случай
+/// вложенных («[Foo (Bar)]»); дальше — схлопнуть двойные пробелы, убрать
+/// осиротевшие разделители по краям и подрезать концы.
+pub fn clean_name_rules() -> [(&'static str, &'static str); 5] {
+    [
+        (RE_BRACKET_GROUP, ""),
+        (RE_BRACKET_GROUP, ""), // второй проход — вложенные скобки
+        ("\\s{2,}", " "),
+        ("^\\s*[-–—:|]+\\s*|\\s*[-–—:|]+\\s*$", ""),
+        ("^\\s+|\\s+$", ""),
+    ]
 }
 
 /// Аргументы командной строки yt-dlp для спецификации.
@@ -77,6 +100,13 @@ pub fn build_args(spec: &RunSpec) -> Vec<String> {
     a.push("--print".into());
     a.push("after_move:filepath".into());
     a.push("--no-mtime".into());
+    // duopulse-150: чистим поля имени до подстановки шаблона
+    for (re, repl) in clean_name_rules() {
+        a.push("--replace-in-metadata".into());
+        a.push(NAME_CLEAN_FIELDS.into());
+        a.push(re.into());
+        a.push(repl.into());
+    }
     a.push("-o".into());
     a.push(format!("{}/{}", spec.out_dir.trim_end_matches('/'), output_template(spec)));
     match spec.mode {
@@ -237,7 +267,10 @@ mod tests {
         let a = build_args(&spec(MediaMode::Video));
         assert!(a.contains(&"-f".into()) && a.contains(&"bv*[height<=720]+ba/b[height<=720]/b".into()));
         assert!(a.contains(&"--ffmpeg-location".into()));
-        assert!(a.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("D:/Загрузки/%(title).120B [%(id)s].%(ext)s")));
+        // duopulse-150: «исполнитель - трек»/очищенный title, без кода [id]
+        assert!(a.windows(2).any(|w| w[0] == "-o"
+            && w[1].starts_with("D:/Загрузки/%(artist&{} - |)s%(track,title).120B.%(ext)s")));
+        assert!(!a.iter().any(|x| x.contains("[%(id)s]")));
         assert_eq!(a.last().unwrap(), "https://www.youtube.com/watch?v=abc");
         assert!(a.contains(&"--no-playlist".into()));
     }
@@ -252,6 +285,25 @@ mod tests {
         let a = build_args(&s);
         assert!(a.contains(&"bv*+ba/b".into()));
         assert!(!a.contains(&"--ffmpeg-location".into()));
+    }
+
+    #[test]
+    fn args_name_cleaning_rules() {
+        // duopulse-150: слова в скобках срезаются --replace-in-metadata
+        // из title/track/artist до подстановки шаблона имени
+        let a = build_args(&spec(MediaMode::Video));
+        let rules = clean_name_rules();
+        for (re, repl) in &rules {
+            assert!(
+                a.windows(4).any(|w| w[0] == "--replace-in-metadata"
+                    && w[1] == "title,track,artist"
+                    && w[2] == *re
+                    && w[3] == *repl),
+                "нет правила {re:?}"
+            );
+        }
+        // скобочная группа — двумя проходами (вложенные скобки)
+        assert_eq!(rules.iter().filter(|(r, _)| *r == rules[0].0).count(), 2);
     }
 
     #[test]
@@ -277,7 +329,9 @@ mod tests {
         let a = build_args(&s);
         assert!(a.contains(&"*72.500-340.000".into()));
         assert_eq!(range_suffix(72.5, 340.0), "1m13s-5m40s"); // 72.5 → 73 с
-        assert!(a.windows(2).any(|w| w[0] == "-o" && w[1].contains("[%(id)s](1m13s-5m40s)")));
+        assert!(a.windows(2).any(|w| w[0] == "-o"
+            && w[1].contains("(1m13s-5m40s)")
+            && !w[1].contains("[%(id)s]")));
         assert!(a.windows(2).any(|w| w[0] == "--proxy" && w[1] == "socks5://127.0.0.1:1080"));
         // часы в суффиксе
         assert_eq!(range_suffix(3725.0, 7325.0), "1h02m05s-2h02m05s");
