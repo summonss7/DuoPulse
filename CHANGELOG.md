@@ -6406,4 +6406,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   npm run test — 49 файлов / 507 тестов ok; релиз 0.1.53 собран и опубликован
   (GitHub stable+canary, канал Aila, хаб «Скачать» builds/, локальная копия
   C:\DuoPulse обновлена).
-- Коммит: (см. git log — feat(subtitles): duopulse-157); версия 0.1.53
+- Коммит: e6ced48 fix(subtitles): duopulse-157 — «нет дорожек субтитров» на клипах YouTube-микса (полное сообщение в git log); версия 0.1.53
