@@ -89,6 +89,46 @@ describe("resolveMobileInput", () => {
       kind: "url",
       url: "http://localhost:8899/audio-test.html",
     });
+    // путь после localhost раньше терял http-догадку (проверка схемы не
+    // учитывала «/») — паритет с omnibox.rs is_local_host
+    expect(resolveMobileInput("localhost/admin")).toEqual({
+      kind: "url",
+      url: "http://localhost/admin",
+    });
+  });
+  it("голый IP — http: панель роутера открывается (duopulse-154, паритет is_ipv4)", () => {
+    expect(resolveMobileInput("192.168.31.1")).toEqual({
+      kind: "url",
+      url: "http://192.168.31.1",
+    });
+    expect(resolveMobileInput("192.168.31.1/cgi-bin/luci/")).toEqual({
+      kind: "url",
+      url: "http://192.168.31.1/cgi-bin/luci/",
+    });
+    expect(resolveMobileInput("10.0.0.138:8080/setup")).toEqual({
+      kind: "url",
+      url: "http://10.0.0.138:8080/setup",
+    });
+    expect(resolveMobileInput("127.0.0.1")).toEqual({ kind: "url", url: "http://127.0.0.1" });
+  });
+  it("IPv6-литерал в скобках — http (паритет is_ipv6_literal)", () => {
+    expect(resolveMobileInput("[::1]:8080")).toEqual({
+      kind: "url",
+      url: "http://[::1]:8080",
+    });
+    expect(resolveMobileInput("[fe80::1]/status")).toEqual({
+      kind: "url",
+      url: "http://[fe80::1]/status",
+    });
+  });
+  it("IP с неверной группой — не IP-догадка http", () => {
+    // 256 — не октет: не isIpv4Input (дальше решает BARE_DOMAIN/поиск)
+    expect(resolveMobileInput("256.1.1.1").url).not.toBe("http://256.1.1.1");
+    expect(resolveMobileInput("1.2.3").url).not.toBe("http://1.2.3");
+  });
+  it("числа с точками — поиск, не адрес (паритет numbers_with_dots_are_search)", () => {
+    expect(resolveMobileInput("2.5").kind).toBe("search");
+    expect(resolveMobileInput("1.2.3.4.5").kind).toBe("search");
   });
   it("ссылка YouTube с видео — встраиваемый плеер", () => {
     expect(resolveMobileInput("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toEqual({

@@ -45,8 +45,24 @@ export function normalizeEngine(v: string | null): MobileEngineId {
   return MOBILE_SEARCH_ENGINES.some((e) => e.id === v) ? (v as MobileEngineId) : DEFAULT_MOBILE_ENGINE;
 }
 
-/** Похоже на домен/IP (без схемы): «example.com», «example.com/path», «1.2.3.4». */
-const BARE_DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+([/?#:].*)?$/i;
+/** Похоже на домен (без схемы), TLD с буквы — как is_domain omnibox.rs
+ *  (отсекает числа с точками «2.5»/«1.2.3.4.5» — это поиск; IP ловится
+ *  отдельным isIpv4Input до этой эвристики). */
+const BARE_DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]*([/?#:].*)?$/i;
+
+/** IPv4-литерал ввода (без схемы), порт/путь допустимы после хоста:
+ *  «192.168.31.1», «192.168.31.1:80/cgi-bin/» — 4 точечно-разделённые
+ *  группы 0–255, пара is_ipv4 omnibox.rs. */
+function isIpv4Input(q: string): boolean {
+  const host = (q.split(/[/?#]/, 1)[0] ?? "").replace(/:\d+$/, "");
+  const parts = host.split(".");
+  return parts.length === 4 && parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255);
+}
+
+/** IPv6-литерал в квадратных скобках, возможно с портом и путём:
+ *  «[::1]:8080» — пара is_ipv6_literal omnibox.rs (без скобок двоеточия
+ *  неоднозначны со «схемой», как в браузерах — требуем скобки). */
+const IPV6_LITERAL = /^\[[0-9a-f:.]+\](:\d+)?([/?#].*)?$/i;
 
 /** YouTube-плеер, который можно встроить в iframe: обычные /watch, /shorts,
  *  /live, music.youtube.com и youtu.be — страница YouTube отдаёт с
@@ -97,10 +113,13 @@ export function resolveMobileInput(
   if (/^https?:\/\//i.test(q)) {
     return { kind: "url", url: youtubeEmbedUrl(q) ?? q };
   }
-  // «голый» домен/IP — https, как в omnibox.rs (localhost без точки — тоже
-  // адрес: http, локальная разработка)
-  if (BARE_DOMAIN.test(q) || /^localhost([/:?]|$)/i.test(q)) {
-    const scheme = /^localhost(:|$)/i.test(q) ? "http" : "https";
+  // «голый» домен — https; localhost и IP-литералы — http, как в omnibox.rs
+  // (is_local_host/is_ipv4/is_ipv6_literal): роутеры и локальные устройства
+  // почти всегда без TLS — https-догадка оставляла панель роутера
+  // «неработающей» (duopulse-154)
+  const local = /^localhost([/:?]|$)/i.test(q) || isIpv4Input(q) || IPV6_LITERAL.test(q);
+  if (BARE_DOMAIN.test(q) || local) {
+    const scheme = local ? "http" : "https";
     return { kind: "url", url: youtubeEmbedUrl(`${scheme}://${q}`) ?? `${scheme}://${q}` };
   }
   return { kind: "search", url: enginePrefix(engine) + encodeURIComponent(q) };
