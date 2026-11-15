@@ -6287,4 +6287,5 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   C:\DuoPulse запускается (0.1.49). Релизы 0.1.49 тем же сеансом: десктоп
   npm run release (NSIS, фиды GitHub stable+canary, хаб «Скачать»), мобильный
   android-build.sh release aarch64 — подписанный APK в канале Aila.
-- Коммит: <укажу после коммита>
+- Коммит: 266fd79 fix(passwords): duopulse-153 — мёртвый ключ Keystore/DPAPI
+  сбрасывает хранилище паролей вместо паники на старте; версия 0.1.49.
