@@ -1429,6 +1429,11 @@ fn build_tab_webview(
         builder
     };
     builder
+        // HTML5 drag&drop на страницах (duopulse-155): без этого wry ставит
+        // свой OLE IDropTarget на HWND webview — перетаскивание мышью внутри
+        // страницы (и файловый дроп на контент, content/adapters/file.ts)
+        // глохнет курсором «нельзя»; синтетические e2e-DragEvent не ловили.
+        .disable_drag_drop_handler()
         // Язык интерфейса (duopulse-136): нужен странице ошибки (App-бандл);
         // на сайтах безвреден — UI-бандл туда не грузится.
         .initialization_script(crate::settings::ui_lang_script(
@@ -1500,6 +1505,10 @@ fn build_page_webview(id: &str) -> WebviewBuilder<tauri::Wry> {
     let id_for_load = id.to_string();
     let id_for_title = id.to_string();
     WebviewBuilder::new(id, WebviewUrl::App("index.html".into()))
+        // HTML5 drag&drop (duopulse-155): OLE-перехватчик wry глушил drag
+        // мышью и в контентных webview — выключаем (как у вкладок-сайтов и
+        // UI-окна, см. build_tab_webview и main.rs).
+        .disable_drag_drop_handler()
         // Язык интерфейса (duopulse-136): до бандла — внутренние страницы
         // переводятся src/i18n по window.__DUOPULSE_UI_LANG__.
         .initialization_script(crate::settings::ui_lang_script(

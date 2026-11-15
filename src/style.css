@@ -448,6 +448,7 @@ body {
   align-items: center;
   justify-content: center;
   flex: none;
+  position: relative; /* фавикон сайта поверх бейджа (duopulse-155) */
   width: 16px;
   height: 16px;
   border-radius: 5px;
@@ -457,6 +458,26 @@ body {
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   transition: transform 0.12s ease;
+}
+/* duopulse-155: фавикон сайта (/favicon.ico) — img поверх бейджа-буквы;
+   загрузился — буква и градиент гасятся (has-fav), не вышел — бейдж */
+.bm-ico .bm-fav {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.bm-ico.has-fav {
+  color: transparent; /* буква бейджа не просвечивает сквозь иконку */
+  text-shadow: none;
+  box-shadow: none;
+}
+.bm-ico.has-fav .bm-fav {
+  opacity: 1;
 }
 .bm-item:hover .bm-ico {
   transform: scale(1.06); /* бейдж чуть оживает под курсором */
@@ -582,6 +603,7 @@ body {
   align-items: center;
   justify-content: center;
   flex: none;
+  position: relative; /* фавикон поверх бейджа (duopulse-155) */
   width: 20px;
   height: 20px;
   border-radius: 6px;

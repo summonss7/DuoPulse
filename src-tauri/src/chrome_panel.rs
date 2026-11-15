@@ -147,6 +147,10 @@ pub async fn ui_panel_open(
         .into(),
     );
     let builder = WebviewBuilder::new(PANEL_WEBVIEW, url)
+        // HTML5 drag&drop в панели (duopulse-155): в bmfolder закладки
+        // перетаскиваются мышью (duopulse-147) — OLE-перехватчик wry глушил
+        // drag курсором «нельзя» (тот же фикс, что у UI-окна и вкладок).
+        .disable_drag_drop_handler()
         // Язык интерфейса (duopulse-136): до скриптов панели — src/i18n.
         .initialization_script(crate::settings::ui_lang_script(
             &crate::proxy::profile_dir(),

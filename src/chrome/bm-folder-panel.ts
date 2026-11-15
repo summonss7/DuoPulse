@@ -14,7 +14,7 @@
 // Группа — из ?group=<id> (передал открывший, ui_panel_open query).
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
-import { badgeHost, badgeHue, badgeLetter, chipView } from "./bmbar";
+import { applyFavicon, badgeHost, badgeHue, badgeLetter, chipView } from "./bmbar";
 import { beginInlineRename } from "./bm-rename";
 import { closePanel } from "./panel-window";
 import { t } from "../i18n";
@@ -157,6 +157,7 @@ function renderRows(
     ico.className = "bm-ico";
     ico.textContent = badgeLetter(view.label, host);
     ico.style.background = `linear-gradient(145deg, hsl(${badgeHue(host || b.url)} 46% 46%), hsl(${badgeHue(host || b.url)} 46% 33%))`;
+    applyFavicon(ico, b.url); // фавикон сайта поверх бейджа (duopulse-155)
     const label = document.createElement("span");
     label.className = "bm-label";
     label.textContent = view.label;

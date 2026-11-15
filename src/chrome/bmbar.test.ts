@@ -8,7 +8,17 @@ import { describe, expect, it, vi } from "vitest";
 // слушатели не живут, мокаем до импорта модуля
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve() }));
-import { badgeHost, badgeLetter, badgeHue, bmBarModel, chipReorder, chipView, folderReorderAllowed } from "./bmbar";
+import {
+  badgeHost,
+  badgeLetter,
+  badgeHue,
+  bmBarModel,
+  chipReorder,
+  chipView,
+  folderReorderAllowed,
+  faviconUrl,
+  bmFolderPanelHeight,
+} from "./bmbar";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge/gen/types";
 
 const group = (over: Partial<BookmarkGroupInfo>): BookmarkGroupInfo => ({
@@ -160,5 +170,25 @@ describe("duopulse-147: переупорядочивание drag&drop", () => {
     expect(folderReorderAllowed(folders, 1, 3)).toBe(false); // корень перед подгруппой
     expect(folderReorderAllowed(folders, 3, 1)).toBe(false);
     expect(folderReorderAllowed(folders, 99, null)).toBe(false); // нет такой папки
+  });
+});
+
+describe("duopulse-155: фавикон сайта и высота панели папки", () => {
+  it("faviconUrl: /favicon.ico корня, схема адреса; внутренние страницы — пусто", () => {
+    expect(faviconUrl("https://www.youtube.com/watch?v=1")).toBe("https://www.youtube.com/favicon.ico");
+    expect(faviconUrl("http://192.168.31.1/")).toBe("http://192.168.31.1/favicon.ico");
+    expect(faviconUrl("http://localhost:8080/x")).toBe("http://localhost:8080/favicon.ico");
+    expect(faviconUrl("duopulse://history")).toBe("");
+    expect(faviconUrl("не адрес")).toBe("");
+  });
+
+  it("bmFolderPanelHeight: точная по строкам (крошка 26, строки 30, сеп 11, паддинги 12, зазоры 1)", () => {
+    // жалоба Артёма: 2 закладки давали панель 148px при контенте 73px
+    expect(bmFolderPanelHeight(false, 0, 2)).toBe(12 + 2 * 30 + 1);
+    expect(bmFolderPanelHeight(false, 0, 1)).toBe(12 + 30); // одна — без зазора
+    expect(bmFolderPanelHeight(false, 0, 0)).toBe(12 + 30); // пустая папка — строка «Папка пуста»
+    expect(bmFolderPanelHeight(true, 0, 1)).toBe(12 + 26 + 30 + 1); // крошка + закладка
+    expect(bmFolderPanelHeight(false, 2, 3)).toBe(12 + 5 * 30 + 11 + 5); // 2 подгруппы + сеп + 3
+    expect(bmFolderPanelHeight(false, 2, 0)).toBe(12 + 2 * 30 + 1); // только подгруппы — без сепа
   });
 });

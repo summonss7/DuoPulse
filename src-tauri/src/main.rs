@@ -1639,6 +1639,13 @@ fn main() {
             .inner_size(1360.0, 860.0)
             .min_inner_size(800.0, 600.0)
             .resizable(true)
+            // HTML5 drag&drop в UI (duopulse-155): перехватчик drop-событий
+            // Tauri по умолчанию регистрирует свой OLE IDropTarget поверх
+            // WebView2 — реальный drag мышью в UI-webview (строка закладок,
+            // duopulse-147/151) умирал курсором «нельзя», синтетические
+            // DragEvent в e2e этого не видели. Выключаем перехватчик: событие
+            // окна onDragDrop не используется (файлы ловит контент HTML5-дропом).
+            .disable_drag_drop_handler()
             // Язык интерфейса (duopulse-136): до скриптов UI — src/i18n читает
             // window.__DUOPULSE_UI_LANG__ при загрузке модуля.
             .initialization_script(crate::settings::ui_lang_script(

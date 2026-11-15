@@ -141,6 +141,51 @@ export function badgeLetter(title: string, host: string): string {
   return ch ? ch.toUpperCase() : "•";
 }
 
+/** Адрес фавикона сайта (duopulse-155): /favicon.ico корня сайта — реальные
+ * значки сайтов (у большинства есть, как в Chrome). Внутренние страницы
+ * (duopulse:// и т.п.) и неразобранные адреса — "" (остаётся бейдж-буква).
+ * Схема — как у самого адреса: http-сайты (роутеры, LAN) по http. */
+export function faviconUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return "";
+    return `${u.origin}/favicon.ico`;
+  } catch {
+    return "";
+  }
+}
+
+/** Показать фавикон сайта в значке чипа/строки (duopulse-155): <img> поверх
+ * бейджа-буквы; загрузился — бейдж гасится (буква и градиент), не вышло
+ * (404, не-картинка, оффлайн) — остаётся бейдж, как раньше. Повторные
+ * рендеры отдаёт HTTP-кэш WebView2 — по сети иконка ходит один раз. */
+export function applyFavicon(ico: HTMLElement, url: string): void {
+  const fav = faviconUrl(url);
+  if (!fav) return;
+  const img = document.createElement("img");
+  img.className = "bm-fav";
+  img.alt = "";
+  img.decoding = "async";
+  img.addEventListener("load", () => {
+    ico.classList.add("has-fav");
+    ico.style.background = ""; // градиент-подложка бейджа не мешает иконке
+  });
+  img.addEventListener("error", () => img.remove());
+  img.src = fav;
+  ico.append(img);
+}
+
+/** Высота панели папки по содержимому (duopulse-155): точная — по числу
+ * строк разметки (крошка 26px, строки 30px, разделитель 11px, паддинги 12,
+ * зазоры 1px), панель без пустого поля внизу. Раньше оценка «52+строк×32»
+ * с полом 160px оставляла до ~120px пустоты (жалоба Артёма). */
+export function bmFolderPanelHeight(back: boolean, kids: number, bookmarks: number): number {
+  const rows = (back ? 1 : 0) + kids + (bookmarks > 0 || kids > 0 ? bookmarks : 1);
+  const sep = kids > 0 && bookmarks > 0 ? 1 : 0;
+  const children = rows + sep;
+  return 12 + (back ? 26 : 0) + (rows - (back ? 1 : 0)) * 30 + sep * 11 + (children - 1);
+}
+
 /** Сообщить Core фактическую высоту хрома (#app) — под неё кладутся
  * webview вкладок; CSS-переменную --chrome-h актуализируем для якорей
  * панелей (подсказки omnibox и т.п., panel-window.chromeHeight). */
@@ -213,6 +258,7 @@ function render(model: BmBarModel): void {
     ico.className = "bm-ico";
     ico.textContent = badgeLetter(view.label, host);
     ico.style.background = `linear-gradient(145deg, hsl(${badgeHue(host || b.url)} 46% 46%), hsl(${badgeHue(host || b.url)} 46% 33%))`;
+    applyFavicon(ico, b.url); // фавикон сайта, не вышел — бейдж-буква (155)
     el.append(ico);
     if (!view.iconOnly) {
       const label = document.createElement("span");
@@ -256,11 +302,13 @@ function openFolderMenu(btn: HTMLElement): void {
   }
   openFolderPanelId = groupId;
   const r = btn.getBoundingClientRect();
-  // размер окна панели — по числу пунктов (подгруппы + закладки), как меню
-  // Chrome: растёт со списком, но не выше окна; контент дальше скроллится
+  // высота панели — точная по содержимому (duopulse-155): подгруппы и счёт
+  // прямых закладок известны из group_list, крошка — если папка вложенная;
+  // сверху ограничена окном (глубокие папки скроллятся внутри, как раньше)
   const g = groupsById.get(groupId);
-  const rows = 1 + (g?.count ?? 0);
-  const h = Math.min(52 + rows * 32, Math.max(160, window.innerHeight - r.bottom - 10));
+  const kids = g ? [...groupsById.values()].filter((x) => x.parentId === groupId).length : 0;
+  const contentH = bmFolderPanelHeight(g?.parentId != null, kids, g?.count ?? 0);
+  const h = Math.min(contentH, Math.max(60, window.innerHeight - r.bottom - 10));
   openPanel(
     "bmfolder",
     Math.round(r.left),
