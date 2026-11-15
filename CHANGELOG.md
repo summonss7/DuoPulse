@@ -6289,3 +6289,33 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   android-build.sh release aarch64 — подписанный APK в канале Aila.
 - Коммит: 266fd79 fix(passwords): duopulse-153 — мёртвый ключ Keystore/DPAPI
   сбрасывает хранилище паролей вместо паники на старте; версия 0.1.49.
+
+## 15.11.2026 03:33 — duopulse-150: имя скачанной музыки без кода и слов в скобках
+
+- Начало работы: 15.11.2026 03:11
+- Окончание работы: 15.11.2026 03:33
+- Что сделано: пожелание Артёма — при скачивании музыки имя файла получало
+  «какой-то код в скобках» (шаблон yt-dlp «%(title).120B [%(id)s]»: [abc123] —
+  videoId) и слова из заголовка YouTube («(Official Video)» и пр.).
+  src-tauri/src/download/runner.rs: (1) шаблон имени →
+  «%(artist&{} - |)s%(track,title).120B» — «исполнитель - трек» из метаданных
+  музыки, иначе заголовок, код видео [id] больше не дописывается; (2) перед
+  шаблоном --replace-in-metadata (×5) чистит title/track/artist: скобочные
+  группы (…) […] {…} （…） 【…】 《…》 〈…〉 целиком (двумя проходами — вложенные),
+  двойные пробелы, осиротевшие разделители по краям, подрезка концов.
+  Суффикс диапазона «(1m13s-…)» сохранён. Субтитры (build_subs_args) не
+  тронуты — фолбэк поиска .srt по маркеру [id] (mod.rs newest_file_with_marker)
+  остаётся согласован. README (строка «Загрузка видео, музыки и субтитров»)
+  дополнена про именование. Версия 0.1.50. Бэкап backup.bat перед правкой.
+- Как проверено: живой прогон yt-dlp 2026.10.26 (--simulate, с куками
+  профиля): «Rick Astley - Never Gonna Give You Up (Official Video)
+  (4K Remaster)» → «Rick Astley - Never Gonna Give You Up.webm» (YouTube
+  artist/track не отдаёт — имя из очищенного заголовка); The Weeknd с
+  SoundCloud (artist/track есть) → «The Weeknd - Blinding Lights.mp3»
+  (ветка метаданных). cargo 381/381 (+1 новый тест args_name_cleaning_rules),
+  vitest 502/502, tsc чист. Релизы 0.1.50 тем же сеансом: десктоп npm run
+  release (NSIS, фиды GitHub stable+canary, хаб «Скачать», C:\DuoPulse) и
+  мобильный android-build.sh release aarch64 — APK в манифесте канала Aila
+  (apk-ассет проверен curl'ом манифеста).
+- Коммит: b8c9603 fix(download): duopulse-150 — имя скачанного файла
+  «исполнитель - трек» без кода видео и слов в скобках; версия 0.1.50.
