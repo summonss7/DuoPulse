@@ -33,6 +33,7 @@ import {
 import { MobileDuo, type DuoStatus } from "./duo";
 import { MobileBookmarks } from "./bookmarks";
 import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
+import { MobileHistory } from "./history";
 import { installMobileAccount } from "./account";
 import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
 import { createMusicDownloader } from "./download";
@@ -102,6 +103,8 @@ root.innerHTML = `
         <label class="m-engine"><span data-i18n="Язык:">Язык:</span> <select id="mLang"></select></label>
         <label class="m-engine"><span data-i18n="Блокировщик рекламы:">Блокировщик рекламы:</span> <select id="mAdblock"></select></label>
         <div id="mAila"></div>
+        <button id="mHistory" class="m-check-update" data-i18n="История">История</button>
+        <button id="mReopen" class="m-check-update" data-i18n="Восстановить вкладку" hidden>Восстановить вкладку</button>
         <button id="mTranslate" class="m-check-update" data-i18n="Перевести текст…">Перевести текст…</button>
         <button id="mCheckUpdate" class="m-check-update" data-i18n="Проверить обновления">Проверить обновления</button>
         <p class="m-menu-version" id="mVersionMenu"></p>
@@ -118,6 +121,8 @@ const go = root.querySelector<HTMLButtonElement>("#mGo")!;
 const home = root.querySelector<HTMLButtonElement>("#mHome")!;
 const menuBtn = root.querySelector<HTMLButtonElement>("#mMenu")!;
 const menuWrap = root.querySelector<HTMLElement>("#mMenuWrap")!;
+const historyBtn = root.querySelector<HTMLButtonElement>("#mHistory")!;
+const reopenBtn = root.querySelector<HTMLButtonElement>("#mReopen")!;
 const privateBtn = root.querySelector<HTMLButtonElement>("#mPrivate")!;
 const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
 const musicBtn = root.querySelector<HTMLButtonElement>("#mMusic")!;
@@ -145,6 +150,8 @@ function isoLtr(s: string): string {
 function setMenu(open: boolean): void {
   menuWrap.hidden = !open;
   menuBtn.setAttribute("aria-expanded", String(open));
+  // «Восстановить вкладку» — только когда стек закрытых не пуст (duopulse-156)
+  if (open) reopenBtn.hidden = !tabs.canReopen;
   // статус аккаунта живой: воркер синка меняет его в фоне (duopulse-112)
   if (open) void account.refresh();
 }
@@ -299,6 +306,17 @@ const bookmarks = new MobileBookmarks({
   note,
 });
 
+// ── История посещений (duopulse-156, паритет с десктопом): визиты видео-
+// вкладок пишет onTabActive ниже, страницы web-оверлея — хук
+// __duopulseVisit (Kotlin onPageFinished); лист «История» — из меню «⋮».
+const history = new MobileHistory({
+  content,
+  note,
+  isPrivate: () => incognito,
+  // тап по записи — новая вкладка (видео) / web-оверлей, как у закладок
+  open: (url) => void navigate(url, true),
+});
+
 // ── Вкладки (duopulse-123): каждая — своё видео в своём iframe; активная
 // видна, фоновые на паузе; сессия в localStorage переживает перезапуск
 // (восстановление — в конце файла, когда все модули готовы).
@@ -328,10 +346,32 @@ function onTabActive(tab: MobileTab | null): void {
   }
   // канонический watch-URL (как у закладки), не /embed (duopulse-105)
   omnibox.value = `https://www.youtube.com/watch?v=${tab.videoId}`;
-  void duo.open(tab.videoId).then(() => tabs.setTitle(tab.videoId, duo.currentTitle));
+  void duo
+    .open(tab.videoId)
+    .then(() => {
+      tabs.setTitle(tab.videoId, duo.currentTitle);
+      // визит в историю (duopulse-156): дедуп 60 с в сторе, повторное
+      // открытие позже — честное «посещений: 2»; инкогнито молчит
+      history.record(omnibox.value, duo.currentTitle);
+    })
+    .catch(() => {});
   void bookmarks.syncVideo();
   note(t("Плеер YouTube. Нажмите «duo» для субтитров и перевода."));
 }
+
+// ── Меню «⋮»: «История» и «Восстановить вкладку» (duopulse-156 — паритет
+// с пунктами главного меню десктопа). Запись — видео-вкладки и страницы
+// web-оверлея (хук __duopulseVisit ниже); восстановление — стек закрытых
+// вкладок (tabs.reopenLast).
+historyBtn.addEventListener("click", () => {
+  setMenu(false);
+  history.setSheet(true);
+});
+reopenBtn.addEventListener("click", () => {
+  setMenu(false);
+  const reopened = tabs.reopenLast();
+  note(reopened ? t("Вкладка восстановлена") : "");
+});
 
 // ── Аккаунт Aila (этап 6 duopulse-112): блок в меню «⋮», листы входа и
 // паролей; синк паролей/закладок — общее ядро с десктопом (aila.rs). После
@@ -584,6 +624,14 @@ async function navigate(input: string, newTab = false): Promise<void> {
   pdfView.close();
   tabs.open(id, "", true);
 };
+
+/** Визит страницы web-оверлея в историю (duopulse-156): Kotlin-хелпер зовёт
+ *  из onPageFinished с URL и заголовком страницы; запись валидируется и
+ *  молчит в инкогнито (см. MobileHistory.record). */
+(window as { __duopulseVisit?: (url: string, title: string) => void }).__duopulseVisit = (
+  url: string,
+  title: string,
+) => history.record(String(url).slice(0, 2000), String(title ?? "").slice(0, 300));
 
 /** Оверлей веб-поиска вернулся на экран (Kotlin show() после системного
  *  «назад» из встроенного плеера, duopulse-139): активное видео под ним —

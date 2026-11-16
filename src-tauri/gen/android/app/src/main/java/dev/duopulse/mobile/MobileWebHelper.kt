@@ -1,6 +1,8 @@
 package dev.duopulse.mobile
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -10,6 +12,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Environment
+import android.text.InputType
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -18,11 +22,15 @@ import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.webkit.CookieManager
+import android.webkit.HttpAuthHandler
+import android.webkit.URLUtil
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -65,6 +73,15 @@ import java.io.ByteArrayInputStream
  * валидируют схему и зовут один статический метод — как MobileOpenHelper;
  * исключения гасятся здесь и возвращаются строкой. Системный «назад» —
  * из плеера к выдаче / история WebView / исчерпана — закрыть.
+ *
+ * duopulse-156 (паритет базовых функций с десктопом):
+ *  - клик по ссылке на файл качается системным DownloadManager (на десктопе
+ *    файловые загрузки — duopulse-158): куки/UA сессии, прогресс в шторке
+ *    уведомлений, сбой — фолбэк системным браузером;
+ *  - HTTP Basic-auth (onReceivedHttpAuthRequest) — диалог логин/пароль,
+ *    как auth.rs десктопа; прежде запрос молча падал;
+ *  - onPageFinished репортит визит (window.__duopulseVisit в UI-webview
+ *    Tauri → history.visit SQLite) — история посещений мобильной ветки.
  */
 object MobileWebHelper {
   private const val TAG = "DuoPulseWeb"
@@ -162,6 +179,20 @@ object MobileWebHelper {
     duoBtn?.visibility = if (hasVideo) View.VISIBLE else View.GONE
   }
 
+  /** JSON-строка для evaluateJavascript (duopulse-156: визит в историю —
+   *  URL/заголовок с кавычками и переводами строк не ломают JS-литерал). */
+  private fun jsonStr(s: String): String {
+    val sb = StringBuilder("\"")
+    for (c in s) when {
+      c == '"' -> sb.append("\\\"")
+      c == '\\' -> sb.append("\\\\")
+      c == '\n' -> sb.append("\\n")
+      c == '\r' || c < ' ' -> {} // управляющие выкидываем
+      else -> sb.append(c)
+    }
+    return sb.append("\"").toString()
+  }
+
   @JvmStatic fun open(context: Context, url: String): String {
     val act = MainActivity.current ?: return "error: активность не готова"
     act.runOnUiThread {
@@ -245,6 +276,13 @@ object MobileWebHelper {
     } catch (e: android.content.ActivityNotFoundException) {
       Toast.makeText(act, "Браузер не найден", Toast.LENGTH_SHORT).show()
     }
+  }
+
+  /** Обёртка openInBrowser для мест без активности под рукой (фолбэк
+   *  загрузчика файлов, duopulse-156). */
+  private fun openInBrowserSafe(url: String) {
+    val a = MainActivity.current ?: return
+    openInBrowser(a, url)
   }
 
   /** Меню «⋮» шапки оверлея (duopulse-145): действия над страницей, стиль —
@@ -642,6 +680,66 @@ object MobileWebHelper {
         // повтор — на случай холодного движка (пустой пейлоад на старте);
         // дубли исключены сравнением с последним применённым скриптом
         injectCosmetic(view, url)
+        // визит в историю мобильной ветки (duopulse-156): URL + заголовок
+        // страницы — в UI Tauri (запись/дедуп/инкогнито решает фронт)
+        if (url.startsWith("http")) {
+          MainActivity.tauriWebView?.evaluateJavascript(
+            "window.__duopulseVisit && window.__duopulseVisit(" +
+              jsonStr(url) + "," + jsonStr(view.title ?: "") + ")", null)
+        }
+      }
+
+      // HTTP Basic-auth (duopulse-156): диалог логин/пароль, как auth.rs
+      // десктопа; прежде запрос авторизации молча проваливал загрузку.
+      override fun onReceivedHttpAuthRequest(
+        view: WebView, handler: HttpAuthHandler, host: String, realm: String
+      ) {
+        val a = MainActivity.current
+        if (a == null) { handler.cancel(); return }
+        val pad = (10 * a.resources.displayMetrics.density).toInt()
+        val user = EditText(a).apply { hint = "Логин" }
+        val pass = EditText(a).apply {
+          hint = "Пароль"
+          inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val box = LinearLayout(a).apply {
+          orientation = LinearLayout.VERTICAL
+          setPadding(pad, pad / 2, pad, 0)
+          addView(user)
+          addView(pass)
+        }
+        AlertDialog.Builder(a)
+          .setTitle("Вход: $host" + (realm.takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""))
+          .setView(box)
+          .setPositiveButton("Войти") { _, _ ->
+            handler.proceed(user.text.toString(), pass.text.toString())
+          }
+          .setNegativeButton(android.R.string.cancel) { _, _ -> handler.cancel() }
+          .setOnCancelListener { handler.cancel() }
+          .show()
+      }
+    }
+    // Файловые загрузки (duopulse-156): клик по ссылке на файл качает
+    // системный DownloadManager (куки/UA сессии, прогресс в шторке), сбой —
+    // фолбэк внешним браузером; прежде клик просто молчал.
+    wv.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+      val a = MainActivity.current
+      if (a == null) { openInBrowserSafe(url); return@setDownloadListener }
+      try {
+        val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
+        val req = DownloadManager.Request(Uri.parse(url))
+        if (mimeType.isNotEmpty()) req.setMimeType(mimeType)
+        CookieManager.getInstance().getCookie(url)?.let { req.addRequestHeader("Cookie", it) }
+        if (userAgent.isNotEmpty()) req.addRequestHeader("User-Agent", userAgent)
+        req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+        req.setTitle(name)
+        req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        val dm = a.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        dm.enqueue(req)
+        Toast.makeText(a, "Загрузка началась: $name", Toast.LENGTH_SHORT).show()
+      } catch (e: Exception) {
+        Log.d(TAG, "download-fallback: $url ${e.message}")
+        openInBrowserSafe(url)
       }
     }
     // duopulse-134: кнопка «на весь экран» YouTube — без WebChromeClient

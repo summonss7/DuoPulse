@@ -2,8 +2,14 @@
 // «Настройки»). Ключ — русская строка-исходник; нет ключа — t() вернёт ru.
 export const dict: Record<string, string> = {
   // шапка и язык
+  "Вкладка восстановлена": "Tab reopened",
+  "Восстановить вкладку": "Reopen closed tab",
+  "Инкогнито: история не записывается": "Incognito: history is not recorded",
+  "История очищена": "History cleared",
+  "История пуста": "History is empty",
   "Настройки — DuoPulse": "Settings — DuoPulse",
   "Настройки": "Settings",
+  "Убрать из истории": "Remove from history",
   "Язык интерфейса": "Interface language",
   "Язык": "Language",
   // внешний вид
@@ -25,6 +31,7 @@ export const dict: Record<string, string> = {
   "код из 2–3 букв (ru, es, pt-br)": "2–3 letter code (ru, es, pt-br)",
   "Размер плашки": "Plate size",
   "Гарнитура плашки": "Plate font",
+  "посещений: {n}": "visits: {n}",
   "фирменные с кириллицей или системная": "brand fonts with Cyrillic or system",
   "Системная": "System",
   "Позиция плашки": "Plate position",

@@ -1,8 +1,14 @@
 // DuoPulse — slovník slovenčiny (karta duopulse-131, etapa 1: stránka
 // «Nastavenia»). Kľúč — ruský zdrojový reťazec; bez kľúča t() vráti ru.
 export const dict: Record<string, string> = {
+  "Вкладка восстановлена": "Karta obnovená",
+  "Восстановить вкладку": "Obnoviť zatvorenú kartu",
+  "Инкогнито: история не записывается": "Anonymný režim: história sa nezaznamenáva",
+  "История очищена": "História vymazaná",
+  "История пуста": "História je prázdna",
   "Настройки — DuoPulse": "Nastavenia — DuoPulse",
   "Настройки": "Nastavenia",
+  "Убрать из истории": "Odstrániť z histórie",
   "Язык интерфейса": "Jazyk rozhrania",
   "Язык": "Jazyk",
   "Внешний вид": "Vzhľad",
@@ -21,6 +27,7 @@ export const dict: Record<string, string> = {
   "код из 2–3 букв (ru, es, pt-br)": "kód 2–3 písmená (ru, es, pt-br)",
   "Размер плашки": "Veľkosť plakičky",
   "Гарнитура плашки": "Písmo plakičky",
+  "посещений: {n}": "návštev: {n}",
   "фирменные с кириллицей или системная": "firemné s azbukou alebo systémové",
   "Системная": "Systémové",
   "Позиция плашки": "Pozícia plakičky",

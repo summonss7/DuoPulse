@@ -1,8 +1,14 @@
 // DuoPulse — dicționar română (cardul duopulse-131, etapa 1: pagina
 // «Setări»). Cheia — șirul sursă în rusă; fără cheie — t() returnează ru.
 export const dict: Record<string, string> = {
+  "Вкладка восстановлена": "Filă redeschisă",
+  "Восстановить вкладку": "Redeschide fila închisă",
+  "Инкогнито: история не записывается": "Incognito: istoricul nu este înregistrat",
+  "История очищена": "Istoricul a fost șters",
+  "История пуста": "Istoricul este gol",
   "Настройки — DuoPulse": "Setări — DuoPulse",
   "Настройки": "Setări",
+  "Убрать из истории": "Elimină din istoric",
   "Язык интерфейса": "Limba interfeței",
   "Язык": "Limba",
   "Внешний вид": "Aspect",
@@ -21,6 +27,7 @@ export const dict: Record<string, string> = {
   "код из 2–3 букв (ru, es, pt-br)": "cod de 2–3 litere (ru, es, pt-br)",
   "Размер плашки": "Dimensiunea plăcii",
   "Гарнитура плашки": "Fontul plăcii",
+  "посещений: {n}": "vizite: {n}",
   "фирменные с кириллицей или системная": "fonturi de brand cu chirilică sau sistem",
   "Системная": "Sistem",
   "Позиция плашки": "Poziția plăcii",

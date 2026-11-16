@@ -115,6 +115,22 @@ export function planOpen(hasActive: boolean, newTab: boolean): "replace" | "crea
   return hasActive && !newTab ? "replace" : "create";
 }
 
+/** Закрытые вкладки — стек «Восстановить вкладку» (duopulse-156: паритет с
+ *  пунктом меню десктопа): LIFO, потолок как у вкладок; выход из инкогнито
+ *  (closeAll) чистит стек вместе с вкладками. */
+export const CLOSED_CAP = 12;
+
+/** Чистая правка стека закрытий (тест): добавить в конец, лишнее за потолок
+ *  срезать спереди. */
+export function pushClosed(
+  stack: { videoId: string; title: string }[],
+  entry: { videoId: string; title: string },
+  cap = CLOSED_CAP,
+): { videoId: string; title: string }[] {
+  const next = [...stack, entry];
+  return next.length > cap ? next.slice(next.length - cap) : next;
+}
+
 /** Контекст мобильной ветки (mobile.ts). */
 export interface TabsHost {
   /** .m-content — сюда вставляются iframe вкладок и лист переключателя. */
@@ -135,6 +151,8 @@ export interface TabsSnapshot {
   activeVideoId: string | null;
   tabs: { id: number; videoId: string; title: string; loaded: boolean }[];
   switcherOpen: boolean;
+  /** Есть ли что восстановить (пункт «Восстановить вкладку», duopulse-156). */
+  canReopen: boolean;
 }
 
 export class MobileTabs {
@@ -143,6 +161,8 @@ export class MobileTabs {
   private order: number[] = [];
   private activeId: number | null = null;
   private seq = 0;
+  /** Стек закрытых вкладок («Восстановить вкладку», duopulse-156). */
+  private closed: { videoId: string; title: string }[] = [];
 
   /** Кнопка в шапке с бейджем количества и лист-переключатель. */
   private readonly btn: HTMLButtonElement;
@@ -274,6 +294,10 @@ export class MobileTabs {
       if (this.activeId === id) pauseFrame(frame);
       frame.remove();
     }
+    const closedMeta = this.meta.get(id);
+    if (closedMeta && VIDEO_ID_RE.test(closedMeta.videoId)) {
+      this.closed = pushClosed(this.closed, closedMeta);
+    }
     this.frames.delete(id);
     this.meta.delete(id);
     this.order = this.order.filter((x) => x !== id);
@@ -308,9 +332,24 @@ export class MobileTabs {
     this.meta.clear();
     this.order = [];
     this.activeId = null;
+    this.closed = []; // выход из инкогнито — следов нет (duopulse-156)
     this.persist();
     this.renderBadge();
     this.host.onActive(null);
+  }
+
+  /** Есть ли закрытая вкладка для восстановления (меню «⋮», duopulse-156). */
+  get canReopen(): boolean {
+    return this.closed.length > 0;
+  }
+
+  /** «Восстановить вкладку» (duopulse-156, паритет с десктопным пунктом
+   *  меню): последняя закрытая открывается новой вкладкой; пусто — null. */
+  reopenLast(): { videoId: string; title: string } | null {
+    const last = this.closed.pop();
+    if (!last) return null;
+    this.open(last.videoId, last.title, true);
+    return last;
   }
 
   /** Стереть сохранённую сессию (вход в инкогнито — не оставлять следов). */
@@ -438,6 +477,7 @@ export class MobileTabs {
         return { id, videoId: m.videoId, title: m.title, loaded: !!f?.src && f.src !== "about:blank" };
       }),
       switcherOpen: this.switcherOpen,
+      canReopen: this.closed.length > 0,
     };
   }
 

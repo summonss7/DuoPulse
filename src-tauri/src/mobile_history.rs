@@ -1,11 +1,13 @@
-//! DuoPulse — закладки на мобильной ветке (карточка duopulse-104): те же
-//! команды history.*, что регистрирует десктопный bridge.rs (имена и форма
-//! аргументов `invoke(name, { params })` совпадают — фронтенд переиспользует
-//! TS-клиент bridge.history без изменений), но только подмножество закладок:
-//! вкладки/история посещений на мобильной обёртке не существуют (один iframe,
-//! визиты не пишутся — см. шапку lib.rs). Хранилище — общее с десктопом
-//! HistoryStore (SQLite в профиле); на Android каталог профиля — filesDir
-//! приложения (JNI getFilesDir, как cacheDir в mobile_updater).
+//! DuoPulse — история и закладки на мобильной ветке (карточка duopulse-104):
+//! те же команды history.*, что регистрирует десктопный bridge.rs (имена и
+//! форма аргументов `invoke(name, { params })` совпадают — фронтенд
+//! переиспользует TS-клиент bridge.history без изменений). Закладки — с
+//! 104; визиты посещений (duopulse-156: паритет базовых функций с десктопом)
+//! пишутся фронтом мобильной ветки (видео-вкладки + страницы web-оверлея,
+//! Core-обёртка их сама не видит) и читаются листом «История» в меню «⋮».
+//! Хранилище — общее с десктопом HistoryStore (SQLite в профиле); на Android
+//! каталог профиля — filesDir приложения (JNI getFilesDir, как cacheDir в
+//! mobile_updater).
 //!
 //! Модуль компилируется только мобильными таргетами (lib.rs) — как history:
 //! на десктопе команды уже есть в bridge.rs, дубль в либе не нужен.
@@ -17,9 +19,11 @@
 use crate::history::contract::{
     BookmarkGroupInfo, HistoryBookmarkAddParams, HistoryBookmarkListParams,
     HistoryBookmarkListResult, HistoryBookmarkMoveParams, HistoryBookmarkRemoveParams,
-    HistoryBookmarkUpdateParams, HistoryGroupAddParams, HistoryGroupListResult,
-    HistoryGroupMoveParams, HistoryGroupRemoveParams, HistoryGroupRenameParams,
-    HistoryGroupSetSortParams, HistoryGroupToggleBookmarkParams,
+    HistoryBookmarkUpdateParams, HistoryDeleteRangeParams, HistoryDeleteUrlsParams,
+    HistoryGroupAddParams, HistoryGroupListResult, HistoryGroupMoveParams,
+    HistoryGroupRemoveParams, HistoryGroupRenameParams, HistoryGroupSetSortParams,
+    HistoryGroupToggleBookmarkParams, HistoryListParams, HistoryListResult,
+    HistoryVisitParams,
 };
 use crate::history::{GroupFilter, HistoryStore};
 
@@ -195,4 +199,51 @@ pub fn history_bookmark_move(
     history.bookmark_move(&params.url, params.group_id, params.position)?;
     account.schedule_sync();
     Ok(())
+}
+
+/// history.visit: записать посещение (duopulse-156). На десктопе визиты
+/// пишет Core из on_page_load вкладок; на мобильной обёртке источников два —
+/// фронт ветки (видео-вкладка открыта) и web-оверлей (onPageFinished → хук
+/// __duopulseVisit). Дедуп по времени — внутри HistoryStore (DEDUP_MS).
+/// Синк аккаунта не будит: визиты не синкаются (только закладки/пароли).
+#[tauri::command]
+pub fn history_visit(
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    params: HistoryVisitParams,
+) -> Result<(), String> {
+    history.visit(&params.url, &params.title)
+}
+
+/// history.list: история посещений для листа «История» (агрегат по URL,
+/// свежие сверху) — как страница duopulse://history десктопа.
+#[tauri::command]
+pub fn history_list(
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    params: HistoryListParams,
+) -> Result<HistoryListResult, String> {
+    let (entries, total) = history.list(
+        params.query.as_deref().unwrap_or(""),
+        params.offset,
+        params.limit,
+    )?;
+    Ok(HistoryListResult { entries, total })
+}
+
+/// history.delete_urls: удалить посещения адресов (крестик строки листа).
+#[tauri::command]
+pub fn history_delete_urls(
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    params: HistoryDeleteUrlsParams,
+) -> Result<(), String> {
+    history.delete_urls(&params.urls)
+}
+
+/// history.delete_range: очистить историю (закладки не трогаются) —
+/// «Очистить историю» листа: fromMs=0, toMs=∞.
+#[tauri::command]
+pub fn history_delete_range(
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    params: HistoryDeleteRangeParams,
+) -> Result<(), String> {
+    history.delete_range(params.from_ms, params.to_ms)
 }

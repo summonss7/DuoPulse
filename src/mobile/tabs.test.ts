@@ -5,10 +5,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  CLOSED_CAP,
   MAX_TABS,
   parseSavedTabs,
   planAfterClose,
   planOpen,
+  pushClosed,
   serializeTabs,
 } from "./tabs";
 
@@ -106,5 +108,30 @@ describe("planOpen (заменить вкладку или создать нов
   it("видео не открыто — всегда новая", () => {
     expect(planOpen(false, false)).toBe("create");
     expect(planOpen(false, true)).toBe("create");
+  });
+});
+
+describe("pushClosed (стек «Восстановить вкладку», duopulse-156)", () => {
+  it("закрытия копятся в порядке LIFO — восстановление с конца", () => {
+    const st = pushClosed(pushClosed([], { videoId: "aaa12345678", title: "A" }), {
+      videoId: "bbb12345678",
+      title: "B",
+    });
+    expect(st).toHaveLength(2);
+    expect(st[st.length - 1].videoId).toBe("bbb12345678");
+  });
+
+  it("потолок CLOSED_CAP срезает старейшие", () => {
+    let st: { videoId: string; title: string }[] = [];
+    for (let i = 0; i < CLOSED_CAP + 5; i++) st = pushClosed(st, { videoId: `vid${i}pad1234`, title: String(i) });
+    expect(st).toHaveLength(CLOSED_CAP);
+    expect(st[0].videoId).toBe("vid5pad1234");
+    expect(st[st.length - 1].videoId).toBe(`vid${CLOSED_CAP + 4}pad1234`);
+  });
+
+  it("явный cap тоже уважается", () => {
+    let st: { videoId: string; title: string }[] = [];
+    for (let i = 0; i < 4; i++) st = pushClosed(st, { videoId: `vid${i}pad1234`, title: "" }, 2);
+    expect(st).toHaveLength(2);
   });
 });
