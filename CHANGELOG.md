@@ -6620,4 +6620,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   android-build.sh — aarch64-release APK собран и подписан (Rust-либа и Kotlin с новыми командами
   компилируются), публикация в канал Aila успешна (manifest.json — APK 0.1.55, sha256 5d00b79b…);
   десктоп-релиз 0.1.55 — сборка+публикация обеих каналов (см. вывод release.mjs).
-- Коммит: (вписан после коммита)
+- Коммит: 9dfe7ff — feat(mobile): duopulse-156 — паритет базовых функций мобильной и Windows-версии; релизы 0.1.55
