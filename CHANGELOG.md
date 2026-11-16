@@ -6727,4 +6727,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   в канал Aila (14.6 МБ, sha256 b8fe1deb…), Windows — npm run release
   (stable+canary GitHub Pages, канал Aila, хаб «Скачать», C:\DuoPulse
   обновлён); manifest.json канала содержит и APK, и установщик.
-- Коммит: <HASH> — feat(bookmarks): duopulse-163 — «Удалить группу» в меню папки строки + нативные меню у курсора (клиентские координаты popup); e2e single-instance рубильник; релизы 0.1.58 Android+Windows
+- Коммит: f7d2f23 — feat(bookmarks): duopulse-163 — «Удалить группу» в меню папки строки + нативные меню у курсора (клиентские координаты popup); e2e single-instance рубильник; релизы 0.1.58 Android+Windows
