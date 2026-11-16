@@ -102,13 +102,20 @@ export function videoIdOfResponse(response: unknown): string | null {
 
 /** Языки оригинала видео: выбор базы перевода по умолчанию и пометка в
  * списке; определить не удалось — пусто. Источники по приоритету (живые
- * пробы web-клиента, карточка duopulse-070, 04.11.2026):
+ * пробы web-клиента, карточки duopulse-070/159):
  * 1. верхнеуровневые audioTracks[].original — формы ANDROID/TV-клиентов
  *    (web-клиент их не отдаёт);
- * 2. captions.playerCaptionsTracklistRenderer.audioTracks[].originalLanguage —
- *    web-клиент пробы 04.11.2026 поля ещё не отдаёт, задел на будущее;
+ * 2. renderer.audioTracks: originalLanguage (web-клиент не отдаёт, задел)
+ *    или audioTrackId вида «ru.4» — язык первого трека: на мульти-даб
+ *    видео оригинальная озвучка идёт первой (проба Rc-AVTv5nMI 16.11.2026:
+ *    ru.4 первый при hl=en и hl=ro, канал RU; en-US.10 — дуб). audioTrackId
+ *    есть только у мульти-даб — одиночные видео (пробы Gangnam/TED) несут
+ *    лишь captionTrackIndices и проходят мимо;
  * 3. фолбэк — asr-дорожка: авто-субтитры генерятся из оригинального звука
- *    (TED iG9CE55wbtY: en-asr → en; Gangnam 9bZkp7q19f0: ko-asr → ko).
+ *    (TED iG9CE55wbtY: en-asr → en; Gangnam 9bZkp7q19f0: ko-asr → ko);
+ *    НЕ применяется при данных п.2 — на мульти-даб видео asr-дорожка есть
+ *    у каждого дубля (en-asr Милана — распознанный ДУБ), «оригиналами» все
+ *    быть не могут (duopulse-159: дефолт-набор брал en-asr дуба вместо ru).
  * defaultCaptionTrackIndex НЕ использовать — это рекомендация под язык
  * ИНТЕРФЕЙСА зрителя (проба: UI ro → индекс дорожки ro), не оригинал. */
 export function originalLangsOf(response: unknown): Set<string> {
@@ -127,8 +134,28 @@ export function originalLangsOf(response: unknown): Set<string> {
   }
   const raw = extractCaptionList(response);
   if (!raw) return out;
+  // П.2: языки аудиотреков рендерера. originalLanguage — явная помеченная;
+  // иначе язык audioTrackId первого трека (первичный подтег: «en-US.10» → en).
+  const marked: string[] = [];
   for (const t of raw.audioTracks) {
-    if (t && typeof t === "object") add((t as { originalLanguage?: unknown }).originalLanguage);
+    if (!t || typeof t !== "object") continue;
+    const olang = (t as { originalLanguage?: unknown }).originalLanguage;
+    if (typeof olang === "string" && olang) marked.push(olang);
+  }
+  if (marked.length === 0) {
+    for (const t of raw.audioTracks) {
+      if (!t || typeof t !== "object") continue;
+      const id = (t as { audioTrackId?: unknown }).audioTrackId;
+      if (typeof id === "string" && id) {
+        const lang = id.split(".")[0]?.split("-")[0] ?? "";
+        if (/^[a-z]{2,3}$/i.test(lang)) marked.push(lang.toLowerCase());
+        break; // язык первого трека с audioTrackId — оригинальная озвучка
+      }
+    }
+  }
+  if (marked.length > 0) {
+    for (const lang of marked) add(lang);
+    return out; // asr-дорожки дублируют дубли — фолбэк не нужен
   }
   for (const t of raw.captionTracks) {
     if (t.kind === "asr") add(t.languageCode);

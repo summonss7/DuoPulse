@@ -171,6 +171,55 @@ describe("извлечение списка из player-ответа (фикст
     expect(originalLangsOf(playerResponseOf(fx))).toEqual(new Set(["ko"]));
   });
 
+  it("duopulse-159: мульти-даб (Милан ru+en-US) — оригинал ru по первому audioTrackId, asr-дуб en не оригинал", async () => {
+    const fx = fixtures.find((f) => f.videoId === "Rc-AVTv5nMI")!;
+    // фикстура — живой web-ответ 16.11.2026: captionTracks [en:asr, ru:asr],
+    // renderer.audioTracks [ru.4 (ON_RECOMMENDED), en-US.10 (OFF)] — RU-канал,
+    // оригинальная озвучка первая при hl=en и hl=ro
+    const response = playerResponseOf(fx);
+    expect(originalLangsOf(response)).toEqual(new Set(["ru"]));
+    const adapter = new YouTubeAdapter({
+      win: makeWindow({ href: `https://www.youtube.com/watch?v=${fx.videoId}`, playerResponse: response }),
+    });
+    const list = await adapter.listTracks();
+    expect(list!.base.find((b) => b.id === "yt:ru:asr")!.original).toBe(true);
+    expect(list!.base.find((b) => b.id === "yt:en:asr")!.original).toBe(false);
+    // дефолт-набор при предпочитаемом ru (настройка Артёма): русская база,
+    // перевод ru исключён как язык оригинала → en вторым; НЕ en-asr дуба
+    const ids = defaultSetIds(list, ["ru", "en", "ro", "ru", "ar"]);
+    expect(ids).toEqual(["yt:ru:asr", "en"]);
+  });
+
+  it("duopulse-159: audioTrackId даба не подменяет явную пометку originalLanguage", () => {
+    const response = playerResponseOf({
+      videoId: "x",
+      url: "",
+      title: "",
+      captionTracks: [
+        { languageCode: "ja", vssId: ".ja" },
+        { languageCode: "en", vssId: ".en" },
+      ],
+      translationLanguages: [],
+      audioTracks: [
+        { captionTrackIndices: [0], audioTrackId: "en-US.10" },
+        { captionTrackIndices: [1], originalLanguage: "ja" },
+      ],
+    });
+    expect(originalLangsOf(response)).toEqual(new Set(["ja"]));
+  });
+
+  it("duopulse-159: renderer.audioTracks без аудио-маркеров (одиночное видео) — asr-фолбэк работает", () => {
+    const response = playerResponseOf({
+      videoId: "x",
+      url: "",
+      title: "",
+      captionTracks: [{ languageCode: "ko", kind: "asr", vssId: "a.ko" }],
+      translationLanguages: [],
+      audioTracks: [{ captionTrackIndices: [0], hasDefaultTrack: true, defaultCaptionTrackIndex: 0 }],
+    });
+    expect(originalLangsOf(response)).toEqual(new Set(["ko"]));
+  });
+
   it("duopulse-070: renderer.audioTracks[].originalLanguage помечается (задел на web-клиент)", () => {
     const response = playerResponseOf({
       videoId: "x",
