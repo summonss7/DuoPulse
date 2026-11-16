@@ -6690,4 +6690,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   глазами реальные логотипы YouTube/GitHub/Хабр/Википедия. Релизы 0.1.57: Android — подписанный APK
   в канал Aila (манифест: APK 0.1.57, sha256 a56bf0a8…) + хаб «Скачать»; Windows — npm run release
   (stable+canary GitHub Pages, канал Aila, хаб, C:\DuoPulse обновлён).
-- Коммит: (дополняется ниже)
+- Коммит: 94c34eb — feat(bookmarks): duopulse-161 — строка закладок: настоящие иконки всех сайтов (Core-фетчер, кэш в профиле); релизы 0.1.57 Android+Windows
