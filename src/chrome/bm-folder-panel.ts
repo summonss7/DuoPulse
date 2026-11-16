@@ -17,6 +17,9 @@
 // закладку можно утащить на папку строки (другую группу) и наоборот — чип
 // строки бросается в открытую папку, перенос снимает группу-источник
 // (payload своего MIME-типа, общий с bmbar).
+// duopulse-173: правый клик в панели — «Создать раздел…»: подгруппа внутри
+// открытой папки (уникальное имя «Новый раздел», сразу инлайн-правка на
+// новой строке); глубина дерева ≤ 3 — на третьем уровне пункт не предлагается.
 // Группа — из ?group=<id> (передал открывший, ui_panel_open query).
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
@@ -26,6 +29,7 @@ import {
   badgeHue,
   badgeLetter,
   chipView,
+  uniqueGroupName,
   BM_DRAG_MIME,
   isExternalBmDrag,
   parseDragPayload,
@@ -41,6 +45,10 @@ const panel = (): HTMLElement => document.getElementById("bmFolder") as HTMLElem
 
 /** Путь спуска: группы от открытой до текущей (последняя — на экране). */
 let stack: number[] = [];
+
+/** Открытая группа последнего рендера (глубина — можно ли вкладывать
+ *  ещё раздел, duopulse-173; дерево групп ≤ 3 уровней). */
+let openGroup: BookmarkGroupInfo | null = null;
 
 /** Порядок закладок панели после drag&drop (чистая, тестится): dragged
  * вынимается и вставляется на индекс at (0 = верх, клампится). */
@@ -77,6 +85,7 @@ async function renderPanel(): Promise<void> {
       await renderPanel();
       return;
     }
+    openGroup = curGroup;
     const kids = groups
       .filter((g) => g.parentId === cur)
       .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
@@ -194,13 +203,21 @@ let bmTitleByUrl = new Map<string, string>();
 /** Открытое мини-меню строки (duopulse-160) — одно на панель. */
 let rowMenu: HTMLElement | null = null;
 
-/** Показать мини-меню строки закладки (duopulse-160): «Переименовать…» /
- * «Удалить закладку». Закрывается кликом мимо, Escape и любым выбором;
- * позиция клампится в границы панели (клип у webview). */
+/** Можно ли создать подгруппу в открытой папке (duopulse-173): дерево
+ *  групп ≤ 3 уровней — внутри подгруппы 3-го уровня уже нельзя. */
+export function canNestSections(depth: number | null | undefined): boolean {
+  return (depth ?? 1) < 3;
+}
+
+/** Показать мини-меню строки закладки (duopulse-160): «Создать раздел…»
+ * (duopulse-173), «Переименовать…», «Удалить закладку». Закрывается кликом
+ * мимо, Escape и любым выбором; позиция клампится в границы панели (клип
+ * у webview). */
 function showRowMenu(row: HTMLElement, url: string, x: number, y: number): void {
   closeRowMenu();
   const menu = document.createElement("div");
   menu.className = "bm-ctx";
+  if (canNestSections(openGroup?.depth)) menu.append(sectionMenuItem());
   const rename = document.createElement("button");
   rename.type = "button";
   rename.textContent = t("Переименовать…");
@@ -251,6 +268,69 @@ function closeRowMenu(): void {
   rowMenu = null;
 }
 
+/** Пункт «Создать раздел…» (duopulse-173) — общий у меню строки и меню
+ *  пустого места: подгруппа внутри открытой папки. */
+function sectionMenuItem(): HTMLButtonElement {
+  const add = document.createElement("button");
+  add.type = "button";
+  add.textContent = t("Создать раздел…");
+  add.addEventListener("click", () => {
+    closeRowMenu();
+    void createSection();
+  });
+  return add;
+}
+
+/** Показать меню пустого места панели (duopulse-173): клик мимо закладки —
+ *  пустое место, подгруппа, крошка «‹ родитель» — один пункт «Создать
+ *  раздел…» для открытой папки. */
+function showSectionMenu(x: number, y: number): void {
+  closeRowMenu();
+  const menu = document.createElement("div");
+  menu.className = "bm-ctx";
+  menu.append(sectionMenuItem());
+  document.body.append(menu);
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 4))}px`;
+  rowMenu = menu;
+}
+
+/** Создать подгруппу внутри открытой папки (duopulse-173): уникальное имя
+ *  «Новый раздел» (group_add отклоняет дубликаты), после рендера — сразу
+ *  инлайн-правка имени на новой строке (Enter — сохранить, Escape —
+ *  оставить имя по умолчанию, как у новой папки строки). */
+async function createSection(): Promise<void> {
+  const gid = stack[stack.length - 1];
+  if (gid == null) return;
+  try {
+    const { groups } = await bridge.history.groupList();
+    const name = uniqueGroupName(t("Новый раздел"), groups.map((g) => g.name));
+    const g = await bridge.history.groupAdd({ name, parentId: gid });
+    await renderPanel();
+    const row = panel().querySelector<HTMLElement>(`.bm-sub[data-sub="${g.id}"]`);
+    row &&
+      beginInlineRename({
+        host: row,
+        initial: name,
+        allowEmpty: false, // раздел без имени не виден в дереве
+        ariaLabel: t("Создать раздел"),
+        save: (title) => {
+          void bridge.history
+            .groupRename({ id: g.id, name: title })
+            .then(renderPanel)
+            .catch((e2) => {
+              err(e2);
+              void renderPanel();
+            });
+        },
+      });
+  } catch (e) {
+    err(e);
+    await renderPanel();
+  }
+}
+
 /** Обработчики панели: клики/средний клик, drag&drop (вешаются один раз —
  *  панель перерисовывает только детей). */
 let inited = false;
@@ -296,13 +376,19 @@ export function initBmFolderPanel(): void {
   });
   // правый клик — мини-меню закладки (duopulse-160): «Переименовать…»
   // (инлайн, duopulse-149) и «Удалить закладку»; HTML-меню внутри панели —
-  // события нативного меню хрома сюда не доезжают
+  // события нативного меню хрома сюда не доезжают. Клик мимо закладки —
+  // «Создать раздел…» в открытой папке (duopulse-173)
   panel().addEventListener("contextmenu", (e) => {
+    if ((e.target as HTMLElement).closest("input")) return; // правка имени
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
-    if (!row || (e.target as HTMLElement).closest("input")) return;
-    const url = row.dataset.url as string;
+    if (row) {
+      e.preventDefault();
+      showRowMenu(row, row.dataset.url as string, e.clientX, e.clientY);
+      return;
+    }
+    if (!canNestSections(openGroup?.depth)) return; // 3-й уровень — нельзя
     e.preventDefault();
-    showRowMenu(row, url, e.clientX, e.clientY);
+    showSectionMenu(e.clientX, e.clientY);
   });
   panel().addEventListener("dragstart", (e) => {
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
