@@ -18,6 +18,10 @@ import {
   folderReorderAllowed,
   faviconUrl,
   bmFolderPanelHeight,
+  isExternalBmDrag,
+  parseDragPayload,
+  uniqueGroupName,
+  BM_DRAG_MIME,
 } from "./bmbar";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge/gen/types";
 
@@ -55,7 +59,7 @@ describe("bmBarModel — состав строки", () => {
     expect(m.folders).toEqual([]);
   });
 
-  it("папки: непустые группы-не-по-умолчанию по position; пустые скрыты", () => {
+  it("папки: группы-не-по-умолчанию по position; пустые тоже видны (duopulse-160)", () => {
     const groups = [
       group({ id: 7, name: "Избранное", isDefault: true, position: 0, count: 2 }),
       group({ id: 3, name: "Музыка", position: 2, count: 5 }),
@@ -66,6 +70,7 @@ describe("bmBarModel — состав строки", () => {
     expect(m.folders).toEqual([
       { id: 9, name: "Видео", parentId: null },
       { id: 3, name: "Музыка", parentId: null },
+      { id: 11, name: "Пустая", parentId: null },
     ]);
   });
 
@@ -100,7 +105,11 @@ describe("bmBarModel — состав строки", () => {
       group({ id: 5, name: "Пустой корень", count: 0 }),
     ];
     const m = bmBarModel(groups, [bm("https://a/", "A")], []);
-    expect(m.folders).toEqual([{ id: 3, name: "Ещё", parentId: 7 }]);
+    // пустой корень тоже на строке (duopulse-160: созданная группа видна)
+    expect(m.folders).toEqual([
+      { id: 3, name: "Ещё", parentId: 7 },
+      { id: 5, name: "Пустой корень", parentId: null },
+    ]);
   });
 
   it("duopulse-149: пустой заголовок чипа остаётся пустым (чип-значок)", () => {
@@ -190,5 +199,51 @@ describe("duopulse-155: фавикон сайта и высота панели �
     expect(bmFolderPanelHeight(true, 0, 1)).toBe(12 + 26 + 30 + 1); // крошка + закладка
     expect(bmFolderPanelHeight(false, 2, 3)).toBe(12 + 5 * 30 + 11 + 5); // 2 подгруппы + сеп + 3
     expect(bmFolderPanelHeight(false, 2, 0)).toBe(12 + 2 * 30 + 1); // только подгруппы — без сепа
+  });
+});
+
+describe("duopulse-160: drag через webview-границу и новая группа", () => {
+  it("isExternalBmDrag: свой MIME или text/plain; пустой набор — нет", () => {
+    expect(isExternalBmDrag([BM_DRAG_MIME])).toBe(true);
+    expect(isExternalBmDrag(["text/plain"])).toBe(true);
+    expect(isExternalBmDrag(["text/uri-list"])).toBe(false);
+    expect(isExternalBmDrag([])).toBe(false);
+  });
+
+  it("parseDragPayload: свой MIME — url + группа-источник", () => {
+    const data = new Map([
+      [BM_DRAG_MIME, JSON.stringify({ url: "https://a.example/w", group: 5 })],
+      ["text/plain", "https://a.example/w"],
+    ]);
+    expect(parseDragPayload((m) => data.get(m) ?? "")).toEqual({
+      url: "https://a.example/w",
+      fromGroup: 5,
+    });
+  });
+
+  it("parseDragPayload: фолбэк text/plain — адрес без группы-источника", () => {
+    expect(parseDragPayload((m) => (m === "text/plain" ? "https://a.example/x" : ""))).toEqual({
+      url: "https://a.example/x",
+      fromGroup: null,
+    });
+  });
+
+  it("parseDragPayload: произвольный текст и битый JSON — null (дроп игнорируется)", () => {
+    expect(parseDragPayload(() => "просто выделенный текст")).toBe(null);
+    expect(parseDragPayload((m) => (m === BM_DRAG_MIME ? "{не json" : ""))).toBe(null);
+    // свой MIME без URL-строки — тоже нет дропа
+    expect(
+      parseDragPayload((m) => (m === BM_DRAG_MIME ? JSON.stringify({ group: 3 }) : "")),
+    ).toBe(null);
+  });
+
+  it("uniqueGroupName: свободное имя как есть, занятое — счётчик-суффикс", () => {
+    expect(uniqueGroupName("Новая группа", ["Музыка"])).toBe("Новая группа");
+    expect(uniqueGroupName("Новая группа", ["Новая группа"])).toBe("Новая группа (2)");
+    expect(uniqueGroupName("Новая группа", ["Новая группа", "Новая группа (2)"])).toBe(
+      "Новая группа (3)",
+    );
+    // регистр не важен — как проверка дубликата в Core
+    expect(uniqueGroupName("Музыка", ["МУЗЫКА"])).toBe("Музыка (2)");
   });
 });

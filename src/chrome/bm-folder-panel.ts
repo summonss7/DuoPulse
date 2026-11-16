@@ -11,10 +11,25 @@
 // duopulse-149: правый клик по закладке — инлайн-переименование прямо в
 // строке (нативное меню bmchip живёт в UI-окне, panel-webview его события
 // не получает); пустое имя разрешено — строка с одним бейджем.
+// duopulse-160: правый клик — мини-меню «Переименовать… / Удалить закладку»
+// (HTML внутри панели: события нативного меню сюда не доезжают, а жалоба
+// была «только переименовывать»); drag&drop работает и через webview-границу:
+// закладку можно утащить на папку строки (другую группу) и наоборот — чип
+// строки бросается в открытую папку, перенос снимает группу-источник
+// (payload своего MIME-типа, общий с bmbar).
 // Группа — из ?group=<id> (передал открывший, ui_panel_open query).
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
-import { applyFavicon, badgeHost, badgeHue, badgeLetter, chipView } from "./bmbar";
+import {
+  applyFavicon,
+  badgeHost,
+  badgeHue,
+  badgeLetter,
+  chipView,
+  BM_DRAG_MIME,
+  isExternalBmDrag,
+  parseDragPayload,
+} from "./bmbar";
 import { beginInlineRename } from "./bm-rename";
 import { closePanel } from "./panel-window";
 import { t } from "../i18n";
@@ -86,6 +101,7 @@ function renderRows(
 ): void {
   const el = panel();
   el.replaceChildren();
+  closeRowMenu(); // строки перестроились — меню прошлой строки уходит
   // имена для инлайн-правки (duopulse-149) — рендер уже без адреса-фолбэка
   bmTitleByUrl = new Map(bookmarks.map((b) => [b.url, b.title.trim()]));
   const parent = cur.parentId != null ? groups.find((g) => g.id === cur.parentId) : undefined;
@@ -175,12 +191,84 @@ let dragUrl = "";
 /** Имена закладок последнего рендера (стартовое значение input правки). */
 let bmTitleByUrl = new Map<string, string>();
 
+/** Открытое мини-меню строки (duopulse-160) — одно на панель. */
+let rowMenu: HTMLElement | null = null;
+
+/** Показать мини-меню строки закладки (duopulse-160): «Переименовать…» /
+ * «Удалить закладку». Закрывается кликом мимо, Escape и любым выбором;
+ * позиция клампится в границы панели (клип у webview). */
+function showRowMenu(row: HTMLElement, url: string, x: number, y: number): void {
+  closeRowMenu();
+  const menu = document.createElement("div");
+  menu.className = "bm-ctx";
+  const rename = document.createElement("button");
+  rename.type = "button";
+  rename.textContent = t("Переименовать…");
+  rename.addEventListener("click", () => {
+    closeRowMenu();
+    beginInlineRename({
+      host: row,
+      initial: bmTitleByUrl.get(url) ?? "",
+      allowEmpty: true, // пустое имя — только бейдж (как чип-значок строки)
+      ariaLabel: t("Переименовать закладку"),
+      save: (title) => {
+        void bridge.history
+          .bookmarkUpdate({ url, title })
+          .then(renderPanel)
+          .catch((e2) => {
+            err(e2);
+            void renderPanel();
+          });
+      },
+    });
+  });
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "bm-ctx-danger";
+  del.textContent = t("Удалить закладку");
+  del.addEventListener("click", () => {
+    closeRowMenu();
+    void bridge.history
+      .bookmarkRemove({ url })
+      .then(renderPanel)
+      .catch((e2) => {
+        err(e2);
+        void renderPanel();
+      });
+  });
+  menu.append(rename, del);
+  document.body.append(menu);
+  // размер известен после вставки — клампим, чтобы меню не вышло за панель
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 4))}px`;
+  rowMenu = menu;
+}
+
+/** Закрыть мини-меню строки (безопасно при закрытом). */
+function closeRowMenu(): void {
+  rowMenu?.remove();
+  rowMenu = null;
+}
+
 /** Обработчики панели: клики/средний клик, drag&drop (вешаются один раз —
  *  панель перерисовывает только детей). */
 let inited = false;
 export function initBmFolderPanel(): void {
   if (inited) return;
   inited = true;
+  // клик мимо мини-меню и Escape закрывают его (duopulse-160); capture —
+  // раньше обработчиков строк, но сами пункты меню клика не теряют
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (rowMenu && !rowMenu.contains(e.target as Node)) closeRowMenu();
+    },
+    true,
+  );
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeRowMenu();
+  });
   panel().addEventListener("click", (e) => {
     if ((e.target as HTMLElement).closest("input")) return; // правка имени
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
@@ -206,27 +294,15 @@ export function initBmFolderPanel(): void {
         .catch(err);
     }
   });
-  // правый клик — инлайн-переименование закладки (duopulse-149)
+  // правый клик — мини-меню закладки (duopulse-160): «Переименовать…»
+  // (инлайн, duopulse-149) и «Удалить закладку»; HTML-меню внутри панели —
+  // события нативного меню хрома сюда не доезжают
   panel().addEventListener("contextmenu", (e) => {
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
     if (!row || (e.target as HTMLElement).closest("input")) return;
     const url = row.dataset.url as string;
     e.preventDefault();
-    beginInlineRename({
-      host: row,
-      initial: bmTitleByUrl.get(url) ?? "",
-      allowEmpty: true, // пустое имя — только бейдж (как чип-значок строки)
-      ariaLabel: t("Переименовать закладку"),
-      save: (title) => {
-        void bridge.history
-          .bookmarkUpdate({ url, title })
-          .then(renderPanel)
-          .catch((e2) => {
-            err(e2);
-            void renderPanel();
-          });
-      },
-    });
+    showRowMenu(row, url, e.clientX, e.clientY);
   });
   panel().addEventListener("dragstart", (e) => {
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
@@ -234,11 +310,21 @@ export function initBmFolderPanel(): void {
     if (!url) return;
     dragUrl = url;
     row?.classList.add("dragging");
+    // payload для приёмников в ДРУГИХ webview (строка закладок): url +
+    // текущая группа — источник, чтобы перенос снимал членство здесь
+    e.dataTransfer?.setData(
+      BM_DRAG_MIME,
+      JSON.stringify({ url, group: stack[stack.length - 1] ?? null }),
+    );
     e.dataTransfer?.setData("text/plain", url);
     if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
   });
   panel().addEventListener("dragover", (e) => {
-    if (!dragUrl) return;
+    // внешний drag закладки (чип строки — другой webview, duopulse-160):
+    // цель — подгруппа или сама папка (без позиции: чужой порядок не правим)
+    const external =
+      !dragUrl && !!e.dataTransfer && isExternalBmDrag([...e.dataTransfer.types]);
+    if (!dragUrl && !external) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
     clearMarks("insert");
@@ -247,6 +333,7 @@ export function initBmFolderPanel(): void {
       sub.classList.add("drop-target");
       return;
     }
+    if (external) return;
     // маркер-вставка у первой строки ниже курсора (вертикальный список)
     const rows = [...panel().querySelectorAll<HTMLElement>(".bm-row[data-url]")];
     const next = rows.find((el) => {
@@ -256,9 +343,21 @@ export function initBmFolderPanel(): void {
     (next ?? rows[rows.length - 1])?.classList.add(next ? "drop-before" : "drop-after");
   });
   panel().addEventListener("drop", (e) => {
-    if (!dragUrl) return;
-    e.preventDefault();
+    if (!dragUrl && !e.dataTransfer) return;
     const sub = (e.target as HTMLElement).closest<HTMLElement>(".bm-sub");
+    // внешний drag (чип строки, duopulse-160): подгруппа — перенос в неё,
+    // любое другое место панели — перенос в саму папку (в конец)
+    if (!dragUrl) {
+      const payload = parseDragPayload((m) => e.dataTransfer?.getData(m) ?? "");
+      if (!payload) return;
+      e.preventDefault();
+      clearMarks();
+      const target = sub ? Number(sub.dataset.sub) : (stack[stack.length - 1] ?? -1);
+      if (Number.isFinite(target) && target >= 0)
+        void moveBookmark(payload.url, target, payload.fromGroup);
+      return;
+    }
+    e.preventDefault();
     const url = dragUrl;
     dragUrl = "";
     clearMarks();
@@ -315,11 +414,19 @@ async function reorderBookmark(url: string, at: number): Promise<void> {
 }
 
 /** Переложить закладку в подгруппу (drop на строку подгруппы): членство в
- *  текущей папке снимается (перенос, как у чипа строки на папку). */
-async function moveBookmark(url: string, target: number): Promise<void> {
+ *  текущей папке снимается (перенос, как у чипа строки на папку). fromGroup
+ *  известен у внешнего drags (чип строки, duopulse-160) — снимаем его. */
+async function moveBookmark(
+  url: string,
+  target: number,
+  fromGroup: number | null = null,
+): Promise<void> {
   const gid = stack[stack.length - 1];
   try {
-    await bridge.history.groupToggleBookmark({ url, groupId: gid, on: false });
+    const src = fromGroup ?? gid;
+    if (src !== target) {
+      await bridge.history.groupToggleBookmark({ url, groupId: src, on: false });
+    }
     await bridge.history.groupToggleBookmark({ url, groupId: target, on: true });
     await renderPanel();
   } catch (e) {

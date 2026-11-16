@@ -20,8 +20,10 @@
 //! пересылается событием «menu-action» в UI — транспорт совпадает с
 //! прежним оверлеем, фронтенд (tabbar.ts/star.ts) не зависит от бэкенда.
 //! Идентификаторы пунктов: «tab:<act>» и «star:g:<id группы>» /
-//! «star:newgroup», «bmchip:rename:<url>» / «bmgroup:rename:<id группы>»
-//! (строка закладок, duopulse-149). Меню папки строки закладок — панель-webview bmfolder
+//! «star:newgroup», «bmchip:rename:<url>» / «bmchip:delete:<url>» /
+//! «bmgroup:rename:<id группы>» (строка закладок, duopulse-149/160) и
+//! «bmbar:newgroup» (правый клик по пустому месту строки, duopulse-160).
+//! Меню папки строки закладок — панель-webview bmfolder
 //! (chrome_panel.rs, duopulse-147): нативное меню не умеет drag&drop и
 //! подсветку доменов.
 
@@ -127,9 +129,12 @@ fn build_star_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>,
 }
 
 /// Меню закладки строки (duopulse-149: правый клик по чипу — «Переименовать…»,
-/// как в Chrome) и папки строки. Один пункт; выбранный адрес/ид группы
-/// кодируется в id (bmchip:rename:<url> / bmgroup:rename:<id>) — UI не хранит
-/// снапшот, чип ищется по data-url после события.
+/// как в Chrome; duopulse-160 — ещё и «Удалить»: жалоба «могу только
+/// переименовывать») и папки строки (только переименование — удаление
+/// группы с содержимым уводим на страницу управления). Выбранный адрес/ид группы
+/// кодируется в id (bmchip:rename:<url> / bmchip:delete:<url> /
+/// bmgroup:rename:<id>) — UI не хранит снапшот, чип ищется по data-url
+/// после события.
 fn build_bm_item_menu(app: &AppHandle, kind: &str, key: &str) -> Result<Menu<tauri::Wry>, String> {
     let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
     menu.append(&item(
@@ -140,6 +145,28 @@ fn build_bm_item_menu(app: &AppHandle, kind: &str, key: &str) -> Result<Menu<tau
         None,
     )?)
     .map_err(|e| format!("меню: {e}"))?;
+    if kind == "bmchip" {
+        menu.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
+            .map_err(|e| format!("меню: {e}"))?;
+        menu.append(&item(
+            app,
+            &format!("{kind}:delete:{key}"),
+            "Удалить",
+            true,
+            None,
+        )?)
+        .map_err(|e| format!("меню: {e}"))?;
+    }
+    Ok(menu)
+}
+
+/// Меню пустого места строки закладок (duopulse-160: «нажать правую кнопку
+/// и создать новую группу»): один пункт — группа создаётся сразу на строке
+/// (пустые папки видимы) и получает инлайн-правку имени в UI.
+fn build_bmbar_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, String> {
+    let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
+    menu.append(&item(app, "bmbar:newgroup", "Новая группа…", true, None)?)
+        .map_err(|e| format!("меню: {e}"))?;
     Ok(menu)
 }
 
@@ -460,6 +487,7 @@ pub async fn ui_menu_open(
                 .unwrap_or(-1)
                 .to_string(),
         )?,
+        "bmbar" => build_bmbar_menu(&app)?,
         other => return Err(format!("неизвестное меню: {other}")),
     };
     let window = app.get_window("main").ok_or("окно main не найдено")?;
@@ -489,8 +517,12 @@ pub fn emit_action(app: &AppHandle, id: &str) {
         serde_json::json!({ "menu": "star", "newGroup": true })
     } else if let Some(url) = id.strip_prefix("bmchip:rename:") {
         serde_json::json!({ "menu": "bmchip", "act": "rename", "url": url })
+    } else if let Some(url) = id.strip_prefix("bmchip:delete:") {
+        serde_json::json!({ "menu": "bmchip", "act": "delete", "url": url })
     } else if let Some(g) = id.strip_prefix("bmgroup:rename:") {
         serde_json::json!({ "menu": "bmgroup", "act": "rename", "groupId": g.parse::<i64>().unwrap_or(-1) })
+    } else if id == "bmbar:newgroup" {
+        serde_json::json!({ "menu": "bmbar", "act": "newgroup" })
     } else if let Some(rest) = id.strip_prefix("duo:") {
         let (act, param) = rest.split_once(':').unwrap_or((rest, ""));
         match act {

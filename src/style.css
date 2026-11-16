@@ -633,6 +633,45 @@ body {
   background: var(--hover-neutral);
   box-shadow: inset 0 0 0 1px var(--accent-neon);
 }
+/* duopulse-160: мини-меню строки панели папки (правый клик — «Переименовать…»
+   / «Удалить закладку»); события нативного меню хрома в panel-webview не
+   приходят — меню HTML внутри панели, fixed-позиция у курсора */
+.bm-ctx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  position: fixed;
+  z-index: 40;
+  min-width: 160px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.bm-ctx button {
+  display: block;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bm-ctx button:hover {
+  background: var(--hover-neutral);
+}
+.bm-ctx button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-soft);
+}
+.bm-ctx .bm-ctx-danger {
+  color: var(--err);
+}
 .bm-row.bm-back {
   min-height: 26px;
   color: var(--text-muted);

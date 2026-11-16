@@ -20,6 +20,11 @@
 // «Переименовать…» (chrome_menu.rs, kind bmchip/bmgroup) и инлайн-правка;
 // закладке можно оставить пустое имя — чип-значок без подписи, как в
 // Chrome (больше сайтов влезает в строку).
+// duopulse-160: чипу в меню добавлено «Удалить» (bookmark_remove); правый
+// клик по пустому месту строки — «Новая группа…» (пустые папки теперь
+// видны на строке — иначе новую группу не видно и некуда перетаскивать);
+// drag&drop закладки работает и ЧЕРЕЗ webview-границу (строка ↔ панель
+// папки): свой MIME-тип несёт url + группу-источник, text/plain — фолбэк.
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
@@ -35,9 +40,10 @@ const err = (e: unknown): void => console.error("bmbar:", e);
 const bar = (): HTMLElement => document.getElementById("bmbar") as HTMLElement;
 
 /** Модель строки: чипы — закладки группы по умолчанию (в её порядке) +
- * без группы; папки — группы бар-уровня (корневые и подгруппы «Избранного»)
- * с закладками или подгруппами. parentId папки — для перестановки среди
- * сестринских (duopulse-147). */
+ * без группы; папки — группы бар-уровня (корневые и подгруппы «Избранного»),
+ * в том числе пустые (duopulse-160: папка, созданная правым кликом по
+ * строке, сразу видна — в неё можно перетащить закладки, как в Chrome).
+ * parentId папки — для перестановки среди сестринских (duopulse-147). */
 export interface BmBarModel {
   visible: boolean;
   chips: { url: string; title: string }[];
@@ -53,12 +59,7 @@ export function bmBarModel(
 ): BmBarModel {
   const defId = groups.find((g) => g.isDefault)?.id ?? null;
   const folders = groupTreeOrder(groups)
-    .filter(
-      (g) =>
-        !g.isDefault &&
-        (g.parentId == null || g.parentId === defId) &&
-        (g.count > 0 || groups.some((o) => o.parentId === g.id)),
-    )
+    .filter((g) => !g.isDefault && (g.parentId == null || g.parentId === defId))
     .map((g) => ({ id: g.id, name: g.name, parentId: g.parentId ?? null }));
   const chip = (b: HistoryBookmark) => ({
     url: b.url,
@@ -95,6 +96,68 @@ export function chipReorder(
   const at = beforeUrl === null ? rest.length : rest.indexOf(beforeUrl);
   rest.splice(at < 0 ? rest.length : at, 0, dragged);
   return rest;
+}
+
+/** Свой MIME-тип drag-слоя закладок (duopulse-160): перенос между webview
+ * (строка ↔ панель папки) идёт через системный OLE-drag — text/plain
+ * доезжает, но группу-источник знает только этот payload. */
+export const BM_DRAG_MIME = "application/x-duopulse-bm";
+
+/** Похоже ли на drag закладки (чистая, тестится): свой тип или просто
+ * текст — External-ветка dragover/drop строки и панели папки. */
+export function isExternalBmDrag(types: readonly string[]): boolean {
+  return types.includes(BM_DRAG_MIME) || types.includes("text/plain");
+}
+
+/** Payload дропа закладки: url + группа-источник (null — источник не
+ * известен: фолбэк text/plain, снимаем членство только по догадке). */
+export interface DragPayload {
+  url: string;
+  fromGroup: number | null;
+}
+
+/** Разобрать payload дропа (чистая, тестится): свой MIME — url и группа-
+ * источник; иначе text/plain-адрес без источника. Не-URL (произвольный
+ * выделенный текст) — null, дроп игнорируется. */
+export function parseDragPayload(get: (mime: string) => string): DragPayload | null {
+  const raw = get(BM_DRAG_MIME);
+  if (raw) {
+    try {
+      const v = JSON.parse(raw) as { url?: unknown; group?: unknown };
+      if (typeof v.url === "string" && looksLikeUrl(v.url)) {
+        return {
+          url: v.url,
+          fromGroup: typeof v.group === "number" ? v.group : null,
+        };
+      }
+    } catch {
+      // не JSON — ниже фолбэк text/plain
+    }
+  }
+  const url = get("text/plain").trim();
+  return looksLikeUrl(url) ? { url, fromGroup: null } : null;
+}
+
+/** Строка разбирается как абсолютный адрес (схема любые, не только web). */
+const looksLikeUrl = (s: string): boolean => {
+  try {
+    new URL(s);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Имя новой группы, не конфликтующее с существующими (duopulse-160):
+ * group_add отклоняет дубликаты — «Новая группа», «Новая группа (2)», …
+ * Регистр не важен — как проверка в Core (WHERE name = ?1). */
+export function uniqueGroupName(base: string, existing: readonly string[]): string {
+  const taken = new Set(existing.map((s) => s.toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let i = 2; ; i++) {
+    const n = `${base} (${i})`;
+    if (!taken.has(n.toLowerCase())) return n;
+  }
 }
 
 /** Можно ли бросить папку dragged перед папкой before (перестановка среди
@@ -375,13 +438,18 @@ export function initBmBar(): void {
     openFolderPanelId = null;
   });
 
-  // --- переименование (duopulse-149) ---------------------------------------
-  // правый клик по чипу/папке — нативное меню «Переименовать…» (адрес/ид
-  // группы кодируется в id пункта, снапшот не нужен)
+  // --- переименование (duopulse-149) / удаление и новая группа (duopulse-160) ---
+  // правый клик по чипу/папке — нативное меню «Переименовать…» («Удалить» —
+  // закладке, адрес/ид группы кодируется в id пункта, снапшот не нужен);
+  // правый клик по пустому месту строки — «Новая группа…»
   bar().addEventListener("contextmenu", (e) => {
     if ((e.target as HTMLElement).closest("input")) return;
     const item = (e.target as HTMLElement).closest<HTMLElement>(".bm-item");
-    if (!item) return;
+    if (!item) {
+      e.preventDefault();
+      openOverlayMenu("bmbar", e.clientX, e.clientY, {});
+      return;
+    }
     e.preventDefault();
     const url = item.dataset.url;
     if (url !== undefined) {
@@ -395,8 +463,11 @@ export function initBmBar(): void {
   onOverlayMenuAction((a) => {
     if (a.menu === "bmchip" && a.act === "rename" && typeof a.url === "string" && a.url)
       beginChipRename(a.url);
+    else if (a.menu === "bmchip" && a.act === "delete" && typeof a.url === "string" && a.url)
+      deleteChip(a.url);
     else if (a.menu === "bmgroup" && a.act === "rename" && typeof a.groupId === "number")
       beginFolderRename(a.groupId);
+    else if (a.menu === "bmbar" && a.act === "newgroup") createGroupFromBar();
   });
 
   // --- drag&drop (duopulse-147) -------------------------------------------
@@ -407,6 +478,9 @@ export function initBmBar(): void {
     if (url) {
       dragUrl = url;
       item.classList.add("dragging");
+      // payload для приёмников в ДРУГИХ webview (панель папки): url +
+      // группа-источник, чтобы перенос снимал членство там, где чип жил
+      e.dataTransfer?.setData(BM_DRAG_MIME, JSON.stringify({ url, group: defMemberUrls.has(url) ? defGroupId : null }));
       e.dataTransfer?.setData("text/plain", url);
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
       return;
@@ -419,18 +493,27 @@ export function initBmBar(): void {
     }
   });
   bar().addEventListener("dragover", (e) => {
-    if (!dragUrl && dragFolderId === null) return;
+    // внешний drag закладки (из панели папки — другой webview, duopulse-160):
+    // свой ход только в папку-цель, маркеров-вставки нет (порядок чипов
+    // чужой закладки на строке не меняется)
+    const external =
+      !dragUrl &&
+      dragFolderId === null &&
+      !!e.dataTransfer &&
+      isExternalBmDrag([...e.dataTransfer.types]);
+    if (!dragUrl && dragFolderId === null && !external) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
     const folder = (e.target as HTMLElement).closest<HTMLElement>(".bm-folder");
     clearDragMarks("insert");
     if (folder) {
       // на папке: чип — перенос в неё (duopulse-151), папка — вложение
-      if ((dragUrl && folder.dataset.url === undefined) || dragFolderId !== null) {
+      if ((dragUrl && folder.dataset.url === undefined) || dragFolderId !== null || external) {
         folder.classList.add("drop-target");
       }
       return;
     }
+    if (external) return;
     // между пунктами: маркер-вставка у ближайшего правого соседа своего ряда
     const items = [...bar().querySelectorAll<HTMLElement>(".bm-item")];
     const next = items.find((el) => {
@@ -450,7 +533,18 @@ export function initBmBar(): void {
     }
   });
   bar().addEventListener("drop", (e) => {
-    if (!dragUrl && dragFolderId === null) return;
+    // внешний drag закладки (панель папки → строка, duopulse-160): только
+    // в папку-цель — payload с группой-источником либо text/plain-фолбэк
+    if (!dragUrl && dragFolderId === null) {
+      if (!e.dataTransfer) return;
+      const folder = (e.target as HTMLElement).closest<HTMLElement>(".bm-folder");
+      const payload = parseDragPayload((m) => e.dataTransfer?.getData(m) ?? "");
+      if (!folder || !payload) return;
+      e.preventDefault();
+      clearDragMarks();
+      void moveChipToFolder(payload.url, Number(folder.dataset.folder), payload.fromGroup);
+      return;
+    }
     e.preventDefault();
     const folder = (e.target as HTMLElement).closest<HTMLElement>(".bm-folder");
     const url = dragUrl;
@@ -549,11 +643,18 @@ function clearDragMarks(mark: "insert" | "all" = "all"): void {
 }
 
 /** Переложить закладку в группу папки (drop чипа на папку): членство в
- *  «Избранном» снимается (перенос, не копия), цель добавляется идемпотентно. */
-async function moveChipToFolder(url: string, groupId: number): Promise<void> {
+ *  группе-источнике снимается (перенос, не копия), цель добавляется
+ *  идемпотентно. fromGroup известен у внешнего drags (панель папки,
+ *  duopulse-160); свой чип — «Избранное», если он его член. */
+async function moveChipToFolder(
+  url: string,
+  groupId: number,
+  fromGroup: number | null = null,
+): Promise<void> {
   try {
-    if (defGroupId !== null && defGroupId !== groupId && defMemberUrls.has(url)) {
-      await bridge.history.groupToggleBookmark({ url, groupId: defGroupId, on: false });
+    const src = fromGroup ?? (defMemberUrls.has(url) ? defGroupId : null);
+    if (src !== null && src !== groupId) {
+      await bridge.history.groupToggleBookmark({ url, groupId: src, on: false });
     }
     await bridge.history.groupToggleBookmark({ url, groupId, on: true });
     await refreshBmBar();
@@ -561,6 +662,36 @@ async function moveChipToFolder(url: string, groupId: number): Promise<void> {
     err(e);
     await refreshBmBar();
   }
+}
+
+/** Удалить закладку (menu-action bmchip:delete, duopulse-160): команда
+ *  идемпотентна — повторный клик по уже удалённой не ошибки. */
+function deleteChip(url: string): void {
+  void bridge.history
+    .bookmarkRemove({ url })
+    .then(refreshBmBar)
+    .catch((e) => {
+      err(e);
+      void refreshBmBar();
+    });
+}
+
+/** Создать группу правым кликом по строке (bmbar:newgroup, duopulse-160):
+ * имя уникальное (счётчик-суффикс), папка пустая, но видна на строке —
+ * сразу инлайн-правка имени (Enter — сохранить, Escape — оставить как есть). */
+function createGroupFromBar(): void {
+  void (async () => {
+    try {
+      const { groups } = await bridge.history.groupList();
+      const name = uniqueGroupName(t("Новая группа"), groups.map((g) => g.name));
+      const g = await bridge.history.groupAdd({ name });
+      await refreshBmBar();
+      beginFolderRename(g.id);
+    } catch (e) {
+      err(e);
+      void refreshBmBar();
+    }
+  })();
 }
 
 /** Инлайн-правка имени чипа (menu-action bmchip:rename, duopulse-149):
