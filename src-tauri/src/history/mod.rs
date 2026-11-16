@@ -1047,14 +1047,46 @@ impl HistoryStore {
         if dup.is_some() {
             return Err(format!("группа «{name}» уже есть"));
         }
+        // СТАРОЕ имя: ключ слияния синка — имя (id локальны); без надгробия
+        // старое имя воскрешает другим устройством после переименования —
+        // на строке остаются обе папки, старая и новая (duopulse-174).
+        let old: Option<String> = tx
+            .query_row(
+                "SELECT name FROM bookmark_groups WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })
+            .map_err(err_sql)?;
+        let Some(old_name) = old.map(|s| s.trim().to_string()) else {
+            return Err(format!("группа {id} не найдена"));
+        };
+        // created_at := сейчас: новое имя считается созданным в момент
+        // переименования — надгробие старого имени не убьёт группу при
+        // обратном переименовании (правило «повторное создание побеждает
+        // удаление»), приёмники вставят группу с тем же арбитром.
+        let now = now_ms();
         let changed = tx
             .execute(
-                "UPDATE bookmark_groups SET name = ?1 WHERE id = ?2",
-                rusqlite::params![name, id],
+                "UPDATE bookmark_groups SET name = ?1, created_at = ?3 WHERE id = ?2",
+                rusqlite::params![name, id, now],
             )
             .map_err(err_sql)?;
         if changed == 0 {
             return Err(format!("группа {id} не найдена"));
+        }
+        if old_name != name {
+            tx.execute(
+                "INSERT INTO sync_tombstones(kind, key, deleted_at) VALUES ('group', ?1, ?2)
+                 ON CONFLICT(kind, key)
+                 DO UPDATE SET deleted_at = MAX(deleted_at, ?2)",
+                rusqlite::params![old_name, now],
+            )
+            .map_err(err_sql)?;
         }
         tx.commit().map_err(err_sql)
     }
@@ -3676,6 +3708,61 @@ mod tests {
                 .title,
             "Новое имя"
         );
+    }
+
+    /// Переименование группы синкается без воскрешения старого имени
+    /// (duopulse-174): раньше rename не писал надгробие на старое имя —
+    /// приёмник сохранял старую папку и вставлял новую, после синки на
+    /// строке жили ОБЕ (жалоба: «после переименования две закладки»).
+    /// Теперь старое имя уезжает в надгробия, новое приезжает с created_at
+    /// момента переименования; обратное переименование не убивается
+    /// собственным старым надгробием (ping-pong).
+    #[test]
+    fn group_rename_syncs_without_duplicate() {
+        let a = HistoryStore::open_in_memory().unwrap();
+        let b = HistoryStore::open_in_memory().unwrap();
+        let work = a.group_add("Работа", None).unwrap();
+        a.bookmark_add_to("https://task.example/", "Задача", Some(work.id))
+            .unwrap();
+        b.merge_sync_doc(&a.export_sync_doc().unwrap()).unwrap();
+        let names = |s: &HistoryStore| {
+            s.group_list()
+                .unwrap()
+                .iter()
+                .map(|g| g.name.clone())
+                .collect::<Vec<_>>()
+        };
+
+        // a переименовала группу; b вливает свежий документ: старая папка
+        // уходит надгробием, новая приезжает — не дубль
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a.group_rename(work.id, "Проекты").unwrap();
+        let doc = a.export_sync_doc().unwrap();
+        assert!(doc
+            .tombstones
+            .iter()
+            .any(|t| t.kind == TOMBSTONE_GROUP && t.key == "Работа"));
+        b.merge_sync_doc(&doc).unwrap();
+        assert_eq!(names(&b), ["Избранное", "Проекты"]);
+        // обратный merge не воскрешает «Работу» на a
+        let st = a.merge_sync_doc(&b.export_sync_doc().unwrap()).unwrap();
+        assert_eq!(st.applied, 0);
+        assert_eq!(names(&a), ["Избранное", "Проекты"]);
+
+        // ping-pong: обратное переименование живёт — created_at момента
+        // rename свежее старого надгробия «Работа»
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let proj = a
+            .group_list()
+            .unwrap()
+            .into_iter()
+            .find(|g| g.name == "Проекты")
+            .unwrap();
+        a.group_rename(proj.id, "Работа").unwrap();
+        b.merge_sync_doc(&a.export_sync_doc().unwrap()).unwrap();
+        assert_eq!(names(&b), ["Избранное", "Работа"]);
+        a.merge_sync_doc(&b.export_sync_doc().unwrap()).unwrap();
+        assert_eq!(names(&a), ["Избранное", "Работа"]);
     }
 
     /// Удаление группы синкается надгробием по имени: группа уходит на другой
