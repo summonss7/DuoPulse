@@ -330,3 +330,21 @@ pub struct HistoryBookmarkMoveParams {
     pub group_id: i64,
     pub position: u32,
 }
+
+/// history.favicon: фавикон сайта для строки закладок (duopulse-161) —
+/// Core разбирает `<link rel=icon>` в HTML страницы (фолбэки /favicon.ico,
+/// /apple-touch-icon.png), качает и отдаёт data-URL; кэш по хосту в
+/// профиле, негатив-кэш 7 дней.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryFaviconParams {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryFaviconResult {
+    /// data:-URL иконки; null — иконки нет (в UI остаётся бейдж-буква).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}

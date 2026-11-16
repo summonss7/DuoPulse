@@ -16,7 +16,6 @@ import {
   chipReorder,
   chipView,
   folderReorderAllowed,
-  faviconUrl,
   bmFolderPanelHeight,
   isExternalBmDrag,
   parseDragPayload,
@@ -182,15 +181,7 @@ describe("duopulse-147: переупорядочивание drag&drop", () => {
   });
 });
 
-describe("duopulse-155: фавикон сайта и высота панели папки", () => {
-  it("faviconUrl: /favicon.ico корня, схема адреса; внутренние страницы — пусто", () => {
-    expect(faviconUrl("https://www.youtube.com/watch?v=1")).toBe("https://www.youtube.com/favicon.ico");
-    expect(faviconUrl("http://192.168.31.1/")).toBe("http://192.168.31.1/favicon.ico");
-    expect(faviconUrl("http://localhost:8080/x")).toBe("http://localhost:8080/favicon.ico");
-    expect(faviconUrl("duopulse://history")).toBe("");
-    expect(faviconUrl("не адрес")).toBe("");
-  });
-
+describe("duopulse-155: высота панели папки", () => {
   it("bmFolderPanelHeight: точная по строкам (крошка 26, строки 30, сеп 11, паддинги 12, зазоры 1)", () => {
     // жалоба Артёма: 2 закладки давали панель 148px при контенте 73px
     expect(bmFolderPanelHeight(false, 0, 2)).toBe(12 + 2 * 30 + 1);

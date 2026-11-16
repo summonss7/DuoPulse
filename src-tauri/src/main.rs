@@ -46,6 +46,9 @@ mod chrome_panel;
 /// Загрузка видео/аудио/субтитров (карточка duopulse-118): yt-dlp + ffmpeg
 /// по требованию, субтитры — контент-адаптером активной вкладки.
 mod download;
+/// Фавиконы сайтов (карточка duopulse-161): фетч `<link rel=icon>` + фолбэки
+/// для строки закладок, кэш — таблица favicons профиля (history).
+mod favicon;
 mod history;
 mod omnibox;
 /// Менеджер паролей (этап 1 duopulse-106): passwords.db + ключ под DPAPI.

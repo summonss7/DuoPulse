@@ -1455,6 +1455,37 @@
       },
       "result": null
     },
+    "history.favicon": {
+      "handler": "history_favicon",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "history.favicon: фавикон сайта для строки закладок (duopulse-161) — Core разбирает `<link rel=icon>` в HTML страницы (фолбэки /favicon.ico, /apple-touch-icon.png), качает и отдаёт data-URL; кэш по хосту в профиле, негатив-кэш 7 дней.",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "HistoryFaviconParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "icon": {
+            "description": "data:-URL иконки; null — иконки нет (в UI остаётся бейдж-буква).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "HistoryFaviconResult",
+        "type": "object"
+      }
+    },
     "history.group_add": {
       "handler": "history_group_add",
       "params": {

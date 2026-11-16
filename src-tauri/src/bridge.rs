@@ -198,7 +198,8 @@ pub use crate::history::contract::{
     BookmarkGroupInfo, BookmarkGroupRow, HistoryBmbarReorderParams, HistoryBookmarkAddParams,
     HistoryBookmarkListParams, HistoryBookmarkListResult, HistoryBookmarkMoveParams,
     HistoryBookmarkRemoveParams, HistoryBookmarkUpdateParams, HistoryDeleteRangeParams,
-    HistoryDeleteUrlsParams, HistoryGroupAddParams, HistoryGroupListResult, HistoryGroupMoveParams,
+    HistoryDeleteUrlsParams, HistoryFaviconParams, HistoryFaviconResult, HistoryGroupAddParams,
+    HistoryGroupListResult, HistoryGroupMoveParams,
     HistoryGroupRemoveParams, HistoryGroupRenameParams, HistoryGroupReorderParams,
     HistoryGroupSetSortParams, HistoryGroupToggleBookmarkParams,
     HistoryListParams, HistoryListResult, HistorySearchParams, HistorySearchResult,
@@ -1136,6 +1137,9 @@ pub fn contract_json() -> serde_json::Value {
             "history.bookmark_list": { "handler": "history_bookmark_list",
                                        "params": schema!(HistoryBookmarkListParams),
                                        "result": schema!(HistoryBookmarkListResult) },
+            "history.favicon": { "handler": "history_favicon",
+                                 "params": schema!(HistoryFaviconParams),
+                                 "result": schema!(HistoryFaviconResult) },
             "history.group_list": { "handler": "history_group_list", "params": null,
                                     "result": schema!(HistoryGroupListResult) },
             "history.group_add": { "handler": "history_group_add",
@@ -1948,6 +1952,46 @@ fn history_bookmark_list(
         params.limit,
     )?;
     Ok(HistoryBookmarkListResult { bookmarks, total })
+}
+
+/// history.favicon: фавикон сайта для строки закладок (duopulse-161) —
+/// как в больших браузерах: `<link rel=icon>` из HTML страницы, фолбэки
+/// /favicon.ico и /apple-touch-icon.png, ответ — data-URL. Кэш по хосту в
+/// профиле (позитив 30 дней, негатив 7), фетч — в фоне (spawn_blocking),
+/// сетевой путь — локальный SOCKS5-роутер, если поднят (как у WebView2).
+#[tauri::command]
+async fn history_favicon(
+    app: AppHandle,
+    history: tauri::State<'_, std::sync::Arc<crate::history::HistoryStore>>,
+    params: HistoryFaviconParams,
+) -> Result<HistoryFaviconResult, String> {
+    let history = history.inner().clone();
+    // ключ кэша и рамки фетча — http/https хост (внутренние страницы без
+    // иконки, бейдж-буква остаётся)
+    let host = url::Url::parse(&params.url)
+        .ok()
+        .filter(|u| u.scheme() == "https" || u.scheme() == "http")
+        .and_then(|u| u.host_str().map(str::to_string));
+    let Some(host) = host else {
+        return Ok(HistoryFaviconResult { icon: None });
+    };
+    // негатив-кэш — тоже ответ: не фетчим сайты без иконки на каждом рендере
+    if let Some(cached) = history.favicon_get(&host) {
+        return Ok(HistoryFaviconResult {
+            icon: (!cached.is_empty()).then_some(cached),
+        });
+    }
+    let socks_port = app
+        .try_state::<Option<crate::vpn::router::Router>>()
+        .and_then(|r| r.inner().as_ref().map(crate::vpn::router::Router::port));
+    let fetch_url = params.url.clone();
+    let icon = tauri::async_runtime::spawn_blocking(move || {
+        crate::favicon::fetch_data_url(&fetch_url, socks_port)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let _ = history.favicon_put(&host, icon.as_deref().unwrap_or(""));
+    Ok(HistoryFaviconResult { icon })
 }
 
 // --- карточка duopulse-058: группы избранного --------------------------------
@@ -3413,6 +3457,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         history_bookmark_remove,
         history_bookmark_update,
         history_bookmark_list,
+        history_favicon,
         history_group_list,
         history_group_add,
         history_group_move,

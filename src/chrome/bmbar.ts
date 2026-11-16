@@ -204,38 +204,59 @@ export function badgeLetter(title: string, host: string): string {
   return ch ? ch.toUpperCase() : "•";
 }
 
-/** Адрес фавикона сайта (duopulse-155): /favicon.ico корня сайта — реальные
- * значки сайтов (у большинства есть, как в Chrome). Внутренние страницы
- * (duopulse:// и т.п.) и неразобранные адреса — "" (остаётся бейдж-буква).
- * Схема — как у самого адреса: http-сайты (роутеры, LAN) по http. */
-export function faviconUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return "";
-    return `${u.origin}/favicon.ico`;
-  } catch {
-    return "";
+/** Фавиконы этого сеанса (duopulse-161): host (badgeHost — http/https без
+ * www; "" — внутренние страницы и мусор, без запроса к Core) → data-URL;
+ * позитив кэша Core дублируется в UI — рендеры строки частые, IPC ни к
+ * чему. Негатив не запоминаем: Core держит его в SQLite 7 дней, повторный
+ * вызов дёшев. */
+const favMemo = new Map<string, string>();
+/** Идущие запросы фавикона: строка перерисовывается часто, дедуп в полёте
+ * не плодит параллельные фети одного хоста. */
+const favInflight = new Map<string, Promise<string | null>>();
+
+/** Попросить у Core фавикон хоста (кэш → фетч в фоне), без дублей в полёте. */
+function faviconOf(host: string, url: string): Promise<string | null> {
+  const memo = favMemo.get(host);
+  if (memo) return Promise.resolve(memo);
+  let p = favInflight.get(host);
+  if (!p) {
+    p = bridge.history
+      .favicon({ url })
+      .then((r) => {
+        if (r.icon) favMemo.set(host, r.icon);
+        return r.icon ?? null;
+      })
+      .catch(() => null)
+      .finally(() => favInflight.delete(host));
+    favInflight.set(host, p);
   }
+  return p;
 }
 
-/** Показать фавикон сайта в значке чипа/строки (duopulse-155): <img> поверх
- * бейджа-буквы; загрузился — бейдж гасится (буква и градиент), не вышло
- * (404, не-картинка, оффлайн) — остаётся бейдж, как раньше. Повторные
- * рендеры отдаёт HTTP-кэш WebView2 — по сети иконка ходит один раз. */
+/** Показать фавикон сайта в значке чипа/строки (duopulse-161): Core разбирает
+ * `<link rel=icon>` в HTML страницы (фолбэки /favicon.ico, /apple-touch-icon)
+ * и отдаёт data-URL — покрывает сайты без корневого .ico, которых не видел
+ * наивный img src=/favicon.ico (duopulse-155). <img> поверх бейджа-буквы;
+ * загрузился — бейдж гасится (буква и градиент), иконки нет — бейдж, как
+ * раньше. Кэш — в профиле (Core), повторные рендеры без сети. */
 export function applyFavicon(ico: HTMLElement, url: string): void {
-  const fav = faviconUrl(url);
-  if (!fav) return;
-  const img = document.createElement("img");
-  img.className = "bm-fav";
-  img.alt = "";
-  img.decoding = "async";
-  img.addEventListener("load", () => {
-    ico.classList.add("has-fav");
-    ico.style.background = ""; // градиент-подложка бейджа не мешает иконке
+  const host = badgeHost(url);
+  if (!host) return;
+  void faviconOf(host, url).then((icon) => {
+    // строка могла перерисоваться, пока Core фетчил
+    if (!icon || !ico.isConnected) return;
+    const img = document.createElement("img");
+    img.className = "bm-fav";
+    img.alt = "";
+    img.decoding = "async";
+    img.addEventListener("load", () => {
+      ico.classList.add("has-fav");
+      ico.style.background = ""; // градиент-подложка бейджа не мешает иконке
+    });
+    img.addEventListener("error", () => img.remove());
+    img.src = icon;
+    ico.append(img);
   });
-  img.addEventListener("error", () => img.remove());
-  img.src = fav;
-  ico.append(img);
 }
 
 /** Высота панели папки по содержимому (duopulse-155): точная — по числу

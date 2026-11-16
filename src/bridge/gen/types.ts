@@ -89,6 +89,8 @@ export interface DuoPulseBridgeContract {
   HistoryBookmarkUpdateParams: HistoryBookmarkUpdateParams;
   HistoryDeleteRangeParams: HistoryDeleteRangeParams;
   HistoryDeleteUrlsParams: HistoryDeleteUrlsParams;
+  HistoryFaviconParams: HistoryFaviconParams;
+  HistoryFaviconResult: HistoryFaviconResult;
   HistoryGroupAddParams: HistoryGroupAddParams;
   BookmarkGroupInfo: BookmarkGroupInfo;
   HistoryGroupListResult: HistoryGroupListResult;
@@ -698,6 +700,18 @@ export interface HistoryDeleteRangeParams {
  */
 export interface HistoryDeleteUrlsParams {
   urls: string[];
+}
+/**
+ * history.favicon: фавикон сайта для строки закладок (duopulse-161) — Core разбирает `<link rel=icon>` в HTML страницы (фолбэки /favicon.ico, /apple-touch-icon.png), качает и отдаёт data-URL; кэш по хосту в профиле, негатив-кэш 7 дней.
+ */
+export interface HistoryFaviconParams {
+  url: string;
+}
+export interface HistoryFaviconResult {
+  /**
+   * data:-URL иконки; null — иконки нет (в UI остаётся бейдж-буква).
+   */
+  icon?: string | null;
 }
 /**
  * history.group_add: создать группу (имя уникально); parent — id группы, внутрь которой создаётся подгруппа (duopulse-151; null — корень).

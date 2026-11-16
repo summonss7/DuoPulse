@@ -51,6 +51,11 @@ pub struct VisitRow {
 /// время и заголовок последнего (защита от F5/миграций заголовка).
 const DEDUP_MS: i64 = 60_000;
 
+/// TTL кэша фавиконов (duopulse-161): позитив — 30 дней (ребрендинг сайта
+/// подтянется сам), негатив «иконки нет» — 7 дней.
+const FAVICON_OK_MS: i64 = 30 * 24 * 3600 * 1000;
+const FAVICON_ERR_MS: i64 = 7 * 24 * 3600 * 1000;
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -158,6 +163,13 @@ impl HistoryStore {
                  key TEXT NOT NULL,
                  deleted_at INTEGER NOT NULL,
                  PRIMARY KEY(kind, key)
+             );
+             -- фавиконы сайтов (duopulse-161): data-URL по хосту; '' —
+             -- негатив-кэш «иконки нет», чтобы не фетчить на каждом рендере
+             CREATE TABLE IF NOT EXISTS favicons(
+                 host TEXT PRIMARY KEY,
+                 data TEXT NOT NULL,
+                 updated_at INTEGER NOT NULL
              );
              CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
                  title, url, source UNINDEXED, ref UNINDEXED
@@ -302,6 +314,44 @@ impl HistoryStore {
             .map_err(err_sql)?;
         }
         tx.commit().map_err(err_sql)?;
+        Ok(())
+    }
+
+    // --- фавиконы сайтов (карточка duopulse-161) ------------------------------
+    // Кэш host → data-URL в профиле: Core фетчит иконку один раз, повторные
+    // рендеры строки закладок читают SQLite. '' — негатив-кэш («иконки нет»),
+    // живёт короче позитива: сайт может добавить иконку.
+
+    /// Свежий кэш фавикона хоста: Some(data-URL) — иконка, Some("") —
+    /// негатив-кэш, None — записи нет или протухла (нужно фетчить).
+    pub fn favicon_get(&self, host: &str) -> Option<String> {
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        conn.query_row(
+            "SELECT data, updated_at FROM favicons WHERE host = ?1",
+            [host],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .ok()
+        .filter(|(data, at)| {
+            now_ms() - at < if data.is_empty() { FAVICON_ERR_MS } else { FAVICON_OK_MS }
+        })
+        .map(|(data, _)| data)
+    }
+
+    /// Записать фавикон хоста (пустая строка — «иконки нет»).
+    pub fn favicon_put(&self, host: &str, data: &str) -> Result<(), String> {
+        self.favicon_put_at(host, data, now_ms())
+    }
+
+    /// `favicon_put` с заданным временем (тесты проверяют TTL кэша).
+    fn favicon_put_at(&self, host: &str, data: &str, at: i64) -> Result<(), String> {
+        let conn = self.conn.lock().expect("history: лок не отравлен");
+        conn.execute(
+            "INSERT INTO favicons(host, data, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(host) DO UPDATE SET data = ?2, updated_at = ?3",
+            rusqlite::params![host, data, at],
+        )
+        .map_err(err_sql)?;
         Ok(())
     }
 
@@ -3690,5 +3740,29 @@ mod tests {
         );
         s.merge_sync_doc(&doc).unwrap();
         assert!(s.export_sync_doc().unwrap().tombstones.is_empty());
+    }
+
+    /// duopulse-161: кэш фавиконов — позитив живёт 30 дней, негатив-кэш
+    /// «иконки нет» — 7; протухшая запись отдаётся как «фетчить» (None).
+    #[test]
+    fn favicon_cache_roundtrip_and_ttl() {
+        let s = HistoryStore::open_in_memory().unwrap();
+        assert_eq!(s.favicon_get("youtube.com"), None, "пусто — фетчить");
+        s.favicon_put("youtube.com", "data:image/x-icon;base64,AAA")
+            .unwrap();
+        assert_eq!(
+            s.favicon_get("youtube.com"),
+            Some("data:image/x-icon;base64,AAA".to_string())
+        );
+        s.favicon_put("noicon.example", "").unwrap();
+        assert_eq!(s.favicon_get("noicon.example"), Some(String::new()));
+        // позитив старше 30 дней — протух
+        s.favicon_put_at("youtube.com", "data:,x", now_ms() - 31 * 24 * 3600 * 1000)
+            .unwrap();
+        assert_eq!(s.favicon_get("youtube.com"), None);
+        // негатив старше 7 дней — тоже (сайт мог добавить иконку)
+        s.favicon_put_at("noicon.example", "", now_ms() - 8 * 24 * 3600 * 1000)
+            .unwrap();
+        assert_eq!(s.favicon_get("noicon.example"), None);
     }
 }

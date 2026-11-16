@@ -59,6 +59,10 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["history", "bookmarkList"],
     params: { query: null, groupId: null, offset: 0, limit: 200 },
   },
+  "history.favicon": {
+    path: ["history", "favicon"],
+    params: { url: "https://www.youtube.com/" },
+  },
   "history.group_list": { path: ["history", "groupList"] },
   "history.group_add": {
     path: ["history", "groupAdd"],

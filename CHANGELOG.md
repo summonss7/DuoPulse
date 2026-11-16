@@ -6657,3 +6657,37 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   Android — подписанный APK в канал Aila (манифест: APK 0.1.56, sha256 89c6e9d1…) + хаб «Скачать»;
   Windows — npm run release (stable+canary GitHub Pages, хаб, C:\DuoPulse обновлён).
 - Коммит: c13b1f8 — feat(bookmarks): duopulse-160 — строка закладок: удаление, перенос между группами, «Новая группа…»; релизы 0.1.56
+
+## 2026-11-16, 14:20 — duopulse-161: настоящие иконки всех сайтов в строке закладок (Core-фетчер как в больших браузерах)
+- Начало работы: 2026-11-16, 13:46
+- Окончание работы: 2026-11-16, 14:20
+- Что сделано: жалоба Артёма — наивный <img src="{origin}/favicon.ico"> (duopulse-155) покрывал
+  только сайты с корневым .ico (YouTube, OLX); у современных сайтов иконка объявлена лишь
+  `<link rel="icon">` в HTML (часто SVG/PNG по произвольному пути) — чип оставался с бейдж-буквой.
+  Теперь иконку добывает Core: (1) модуль src-tauri/src/favicon.rs — GET страницы (лимит 256 КиБ,
+  браузерный UA) → разбор `<link rel=icon|apple-touch-icon|shortcut icon>` (кандидаты по убыванию
+  заявленного размера, any=512; относительные href разрешаются от адреса после редиректов) →
+  фолбэки /favicon.ico и /apple-touch-icon.png; скачивание ≤256 КиБ, MIME по магии байтов
+  (PNG/GIF/JPEG/WEBP/ICO/SVG) с опорой на Content-Type/расширение, HTML-ответ (бот-блок/редирект)
+  иконкой не считается; ответ — data-URL (base64 без внешнего крейта, векторы RFC 4648 тестами);
+  сеть — тем же путём, что WebView2: через локальный SOCKS5-роутер, когда поднят; (2) кэш по хосту
+  в SQLite профиля — новая таблица favicons (history/mod.rs: favicon_get/favicon_put), позитив
+  30 дней, негатив «иконки нет» 7 дней — без фетчей на каждом рендере; (3) команда моста
+  history.favicon (bridge.rs, fetch в spawn_blocking; contract v15, генерация gen:bridge,
+  клиент src/bridge/client.ts); (4) UI: applyFavicon (bmbar.ts) переписан на мост — дедуп запросов
+  одного хоста в полёте + кэш сеанса, <img data:…> поверх бейджа, загрузка гасит букву/градиент,
+  «иконки нет»/ошибка/оффлайн — бейдж, как раньше; панель папки — тем же applyFavicon; наивный
+  faviconUrl удалён; README обновлён. Мобильная ветка: таблица favicons компилируется в общей либе
+  history (UI-иконки на телефоне не менялись — вне карточки).
+- Как проверено: cargo test 418 ok / 4 ignored (новые юниты: парсер link-тегов, приоритет sizes,
+  MIME по магии, base64 RFC 4648, TTL кэша favicons; живой favicon_live --ignored по github.com/
+  habr.com/ru.wikipedia.org/youtube.com — все дали data:image/*); vitest 550 ok (+1: bm-favicon.test
+  переписан на мост — 6 проверок: data-URL img и гашение бейджа, негатив, ошибка моста, внутренние
+  страницы без запроса, дедуп+кэш один invoke на 3 значка, детач до ответа), typecheck чист,
+  client.test — контракт/клиент сходятся; новый постоянный e2e-стенд e2e/bookmarks/bm-favicon.mjs —
+  8/8 PASS (живое приложение: youtube/github/habr/wikipedia — img data:image/*, локальный сайт без
+  иконки — бейдж-буква, повторный рендер не плодит img); скриншот %TEMP%/duopulse-161-bar.png —
+  глазами реальные логотипы YouTube/GitHub/Хабр/Википедия. Релизы 0.1.57: Android — подписанный APK
+  в канал Aila (манифест: APK 0.1.57, sha256 a56bf0a8…) + хаб «Скачать»; Windows — npm run release
+  (stable+canary GitHub Pages, канал Aila, хаб, C:\DuoPulse обновлён).
+- Коммит: (дополняется ниже)

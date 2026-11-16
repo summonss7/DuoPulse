@@ -36,6 +36,8 @@ import type {
   HistoryBookmarkUpdateParams,
   HistoryDeleteRangeParams,
   HistoryDeleteUrlsParams,
+  HistoryFaviconParams,
+  HistoryFaviconResult,
   HistoryGroupAddParams,
   HistoryGroupListResult,
   HistoryGroupMoveParams,
@@ -197,6 +199,10 @@ export const bridge = {
     /** history.bmbar_reorder (duopulse-147): записать порядок чипов строки
      *  закладок (безгрупповые усыновляются «Избранным»). */
     bmbarReorder: (params: HistoryBmbarReorderParams) => invoke<void>("history_bmbar_reorder", { params }),
+    /** history.favicon (duopulse-161): фавикон сайта — Core разбирает
+     *  `<link rel=icon>` в HTML (фолбэки /favicon.ico, /apple-touch-icon.png)
+     *  и отдаёт data-URL; кэш по хосту в профиле. */
+    favicon: (params: HistoryFaviconParams) => invoke<HistoryFaviconResult>("history_favicon", { params }),
   },
   passwords: {
     /** passwords.list (duopulse-107): записи менеджера паролей без самих
