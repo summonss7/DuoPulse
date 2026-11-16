@@ -73,6 +73,12 @@ export interface SubtitlesParser {
 export interface LoadPorts {
   fetchImpl?: typeof fetch;
   parser: SubtitlesParser;
+  /** Прогрессивная выдача (duopulse-175): дорожка разобрана — отдать сразу,
+   * не дожидаясь конца набора. Перевод с ретраями (429 tlang-квота) не должен
+   * держать показ уже готового оригинала. Вызывается только для дорожек
+   * набора (скрытые базы переводов — мимо); финальный LoadedTracks — тот же
+   * состав в порядке refs. */
+  onTrack?: (track: Track) => void;
 }
 
 /** Адаптер платформы (docs/05 §1). */

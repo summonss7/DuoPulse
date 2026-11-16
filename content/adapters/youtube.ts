@@ -21,6 +21,14 @@
 //   клиенты) → renderer.audioTracks[].originalLanguage → asr-дорожка
 //   (web-клиент, duopulse-070). defaultCaptionTrackIndex — рекомендация под
 //   язык ИНТЕРФЕЙСА зрителя, не оригинал.
+// - Переводы (duopulse-175): наш собственный fetch tlang рейт-лимитится
+//   быстро (429, квота ~45–60 мин), а программирование плеера на перевод
+//   невозможно (setOption track {languageCode:'ru'} игнорируется — плеер
+//   валидирует только базовые captionTracks; пробы 16.11.2026). Спасают два
+//   пути: (1) плеер сам качает переведённые CC (нативное меню пользователя)
+//   и качает дорожки видео очереди mix-плейлиста — тела уже в буфере
+//   перехвата, переиспользуем (findTranslationFor); (2) прогрессивная выдача
+//   onTrack — готовый оригинал показывается, не дожидаясь ретраев перевода.
 
 import type {
   Adapter,
@@ -34,7 +42,7 @@ import type {
 import type { Track } from "../types";
 import { videoKeyFor } from "../detector/videoKey";
 
-export const YOUTUBE_ADAPTER_VERSION = "2026.10";
+export const YOUTUBE_ADAPTER_VERSION = "2026.11";
 
 /** Цепочка путей добычи по приоритету (docs/03 §9). */
 export const YOUTUBE_PATHS = ["player-api", "initial", "texttrack"] as const;
@@ -297,10 +305,14 @@ export interface TimedtextCaptureSource {
   /** Снятые ответы (для диагностики/повторного использования). */
   all(): TimedtextCapture[];
   /** Ждать ответ своей дорожки: v=<videoId>&lang=<languageCode> без tlang
-   * (реклама отфильтровывается по v=). null — таймаут. */
+   (реклама отфильтровывается по v=). null — таймаут. */
   waitFor(videoId: string, languageCode: string, timeoutMs: number): Promise<TimedtextCapture | null>;
   /** Уже снятый ответ дорожки (без ожидания). */
   findFor(videoId: string, languageCode: string): TimedtextCapture | null;
+  /** Уже снятый ответ перевода: v=<videoId>&lang=<baseLang>&tlang=<tlang>
+   * (плеер сам показывал переведённые CC / качал дорожки очереди — duopulse
+   * -175: тело бесплатно, без запроса и tlang-квоты). null — нет в буфере. */
+  findTranslationFor(videoId: string, baseLang: string, tlang: string): TimedtextCapture | null;
 }
 
 const CAPTURE_LIMIT = 16;
@@ -311,6 +323,19 @@ function matchesTrack(c: TimedtextCapture, videoId: string, languageCode: string
   if (!c.body) return false; // пустое тело (диагностика: нет PO-токена) не годится
   const p = paramsOf(c.url);
   return p.get("v") === videoId && p.get("lang") === languageCode && !p.has("tlang");
+}
+
+/** Перевод в буфере: точные v/lang/tlang (переводы чужих видео и базовые
+ * ответы с тем же lang — мимо). */
+function matchesTranslation(
+  c: TimedtextCapture,
+  videoId: string,
+  baseLang: string,
+  tlang: string,
+): boolean {
+  if (!c.body) return false;
+  const p = paramsOf(c.url);
+  return p.get("v") === videoId && p.get("lang") === baseLang && p.get("tlang") === tlang;
 }
 
 /** Подмена fetch/XHR страницы: тела timedtext-ответов — в кольцевой буфер.
@@ -364,6 +389,8 @@ export function installTimedtextCapture(win: PageWindow): TimedtextCaptureSource
   const source: TimedtextCaptureSource = {
     all: () => buffer.slice(),
     findFor: (videoId, languageCode) => buffer.find((c) => matchesTrack(c, videoId, languageCode)) ?? null,
+    findTranslationFor: (videoId, baseLang, tlang) =>
+      buffer.find((c) => matchesTranslation(c, videoId, baseLang, tlang)) ?? null,
     async waitFor(videoId, languageCode, timeoutMs) {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
@@ -770,11 +797,6 @@ export class YouTubeAdapter implements Adapter {
       ((input, init) => this.opts.win.fetch(input as RequestInfo | URL, init));
     const basesWanted = refs.filter((r) => r.role === "original");
     const translations = refs.filter((r) => r.role === "translation");
-    // Переводу нужна живая URL его базы: скрыто снимаем и те базы, которых
-    // нет в наборе (их cue в набор не попадают).
-    const hiddenBaseIds = Array.from(
-      new Set(translations.map((t) => t.baseId).filter((id): id is string => !!id)),
-    ).filter((id) => !basesWanted.some((b) => b.id === id));
 
     const transport =
       this.opts.transport ??
@@ -783,6 +805,10 @@ export class YouTubeAdapter implements Adapter {
         getVideo: () => this.opts.getVideo?.() ?? null,
         capture: this.opts.capture ?? installTimedtextCapture(this.opts.win),
       });
+    // Буфер перехвата и для переводов (duopulse-175): тело, скачанное самим
+    // плеером, переиспользуем без запроса. Идемпотентная установка — тот же
+    // источник, что у транспорта.
+    const capture = this.opts.capture ?? installTimedtextCapture(this.opts.win);
     const videoId = videoIdFromHref(this.opts.win.location.href) ?? "";
     const liveUrls = new Map<string, string>();
 
@@ -793,7 +819,9 @@ export class YouTubeAdapter implements Adapter {
           failures.push({ ref, reason: "дорожка без cue" });
           return;
         }
-        parsedById.set(ref.id, { id: ref.id, source: "youtube", lang: ref.lang, role: ref.role, cues });
+        const track: Track = { id: ref.id, source: "youtube", lang: ref.lang, role: ref.role, cues };
+        parsedById.set(ref.id, track);
+        ports.onTrack?.(track); // прогрессивная выдача (duopulse-175)
       } catch (e) {
         failures.push({ ref, reason: `разбор не удался: ${errorMessage(e)}` });
       }
@@ -805,7 +833,36 @@ export class YouTubeAdapter implements Adapter {
     } catch {
       began = false;
     }
+    // Переводы, покрытые буфером перехвата (duopulse-175) — применяются
+    // первыми и выпадают из fetch-фазы ниже.
+    const fetchedByCache = new Set<string>();
     if (began) {
+      // Переводы из буфера перехвата — ПЕРВЫМИ (duopulse-175): плеер сам
+      // качает переведённые CC зрителя и дорожки видео очереди mix-плейлиста;
+      // готовое тело бесплатно (без tlang-квоты) и не требует ни своей базы,
+      // ни её живой URL — применяется до всех загрузок transports.
+      await Promise.all(
+        translations.map(async (ref) => {
+          const baseLang = ref.baseId
+            ? this.lastList?.base.find((b) => b.id === ref.baseId)?.lang
+            : undefined;
+          const cached = baseLang ? capture.findTranslationFor(videoId, baseLang, ref.lang) : null;
+          if (cached) {
+            fetchedByCache.add(ref.id);
+            await parseInto(ref, cached.body);
+          }
+        }),
+      );
+      // Переводу без кэша нужна живая URL его базы: скрыто снимаем и те базы,
+      // которых нет в наборе (их cue в набор не попадают).
+      const hiddenBaseIds = Array.from(
+        new Set(
+          translations
+            .filter((t) => !fetchedByCache.has(t.id))
+            .map((t) => t.baseId)
+            .filter((id): id is string => !!id),
+        ),
+      ).filter((id) => !basesWanted.some((b) => b.id === id));
       const loadBase = async (ref: TrackRef, collect: boolean): Promise<void> => {
         const cap = await transport.loadBaseTrack(videoId, ref.languageCode ?? ref.lang);
         if (!cap) {
@@ -825,41 +882,43 @@ export class YouTubeAdapter implements Adapter {
       for (const ref of refs) failures.push({ ref, reason: "плеер страницы недоступен" });
     }
 
-    // Переводы — параллельным fetch поверх живых URL (подпись не покрывает
-    // tlang); без живых URL (плеер недоступен) не пробуем — уже отказаны.
-    // 429/5xx — платформа рейт-лимитит серийные запросы: повтор с паузой.
-    // Таймаут на попытку (duopulse-092): зависший после SSAI-цепочки запрос
-    // не резолвился никогда — selectTracks вис без failures; таймаут даёт
-    // честный отказ, ретрай включения (1.5 с в enableSubs) — второй шанс.
+    // Переводы, не покрытые буфером: параллельный fetch поверх живых URL
+    // (подпись не покрывает tlang). 429/5xx — платформа рейт-лимитит: максимум
+    // 2 попытки с короткой паузой (длинные повторы — лестницей enableSubs, а
+    // не здесь: пока перевод ретраится, оригинал уже показан прогрессивно).
+    // Таймаут на попытку (duopulse-092): зависший запрос не резолвился
+    // никогда — честный отказ.
     const TRANSLATION_TIMEOUT_MS = 20_000;
     const fetchTranslation = async (url: string): Promise<{ ok: boolean; status: number; body: string }> => {
       let res: Awaited<ReturnType<typeof fetchImpl>> | null = null;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         res = await fetchImpl(url, {
           credentials: "include",
           signal: AbortSignal.timeout(TRANSLATION_TIMEOUT_MS),
         });
         if (res.status !== 429 && res.status < 500) break;
-        await sleep((i + 1) * 6_000);
+        if (i < 1) await sleep(2_500); // пауза только между попытками
       }
       const body = res ? await res.text().catch(() => "") : "";
       return { ok: res?.ok ?? false, status: res?.status ?? 0, body };
     };
     if (began) {
       await Promise.all(
-        translations.map(async (ref) => {
-          const live = ref.baseId ? liveUrls.get(ref.baseId) : undefined;
-          if (!live) {
-            failures.push({ ref, reason: "базовая дорожка не получена" });
-            return;
-          }
-          try {
-            const res = await fetchTranslation(buildTranslationUrl(live, ref.lang));
-            if (!res.ok) {
-              failures.push({ ref, reason: `HTTP ${res.status}` });
+        translations
+          .filter((ref) => !fetchedByCache.has(ref.id))
+          .map(async (ref) => {
+            const live = ref.baseId ? liveUrls.get(ref.baseId) : undefined;
+            if (!live) {
+              failures.push({ ref, reason: "базовая дорожка не получена" });
               return;
             }
-            if (!res.body) {
+            try {
+              const res = await fetchTranslation(buildTranslationUrl(live, ref.lang));
+              if (!res.ok) {
+                failures.push({ ref, reason: `HTTP ${res.status}` });
+                return;
+              }
+              if (!res.body) {
               failures.push({ ref, reason: "пустой ответ перевода" });
               return;
             }

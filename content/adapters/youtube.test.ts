@@ -453,6 +453,10 @@ function makeLoadWindow(urls: { [u: string]: { ok: boolean; body?: string } }): 
         ok: hit?.ok ?? false,
         status: hit ? 200 : 404,
         text: () => Promise.resolve(hit?.body ?? ""),
+        // clone для хука перехвата timedtext (duopulse-175: буфер и в тестах)
+        clone() {
+          return { text: () => Promise.resolve(hit?.body ?? "") };
+        },
       });
     }) as unknown as typeof fetch,
   } as PageWindow;
@@ -559,6 +563,75 @@ describe("адаптер: загрузка выбранного набора 2�
       { parser: fakeParser },
     );
     expect(res.failures[0].reason).toContain("разбор не удался");
+  });
+
+  // duopulse-175: перевод с 429 не должен держать показ готового оригинала,
+  // а тело, скачанное самим плеером, — переиспользоваться без запроса.
+  it("onTrack: дорожки выдаются прогрессивно (база — до перевода), failures не отдаются", async () => {
+    const transUrl = "https://x/timedtext?v=TEST&lang=en&fmt=json3&pot=P&tlang=ru";
+    const { win } = makeLoadWindow({ [transUrl]: { ok: true, body: "trans:ru" } });
+    const transport = new FakeTransport(new Map([["en", liveEn]]));
+    const adapter = await adapterWithListFor(transport, win);
+    const delivered: string[] = [];
+    const res = await adapter.loadTracks(
+      [
+        { id: "yt:en", lang: "en", role: "original", source: "youtube", languageCode: "en" },
+        { id: "yt:en+ru", lang: "ru", role: "translation", source: "youtube", baseId: "yt:en" },
+      ],
+      {
+        parser: fakeParser,
+        onTrack: (t) => delivered.push(t.id),
+      },
+    );
+    expect(delivered).toEqual(["yt:en", "yt:en+ru"]); // обе готовы — обе отданы
+    expect(res.tracks.map((t) => t.id)).toEqual(delivered); // тот же состав
+    // отказ базы не отдаётся прогрессивно — только в failures финала
+    const transport2 = new FakeTransport(new Map([["en", null]]));
+    const adapter2 = await adapterWithListFor(transport2, makeLoadWindow({}).win);
+    const delivered2: string[] = [];
+    await adapter2.loadTracks(
+      [{ id: "yt:en", lang: "en", role: "original", source: "youtube", languageCode: "en" }],
+      { parser: fakeParser, onTrack: (t) => delivered2.push(t.id) },
+    );
+    expect(delivered2).toEqual([]);
+  });
+
+  it("duopulse-175: перевод, скачанный плеером сам (буфер перехвата) — без fetch, даже если своя база не получена", async () => {
+    const nativeUrl = "https://x/timedtext?v=TEST&lang=en&tlang=ru&fmt=json3&x=native";
+    const transUrl = "https://x/timedtext?v=TEST&lang=en&fmt=json3&pot=P&tlang=ru";
+    const { win, requested } = makeLoadWindow({ [nativeUrl]: { ok: true, body: "trans:ru" } });
+    const capture = installTimedtextCapture(win);
+    await win.fetch(nativeUrl); // плеер сам скачал ru-перевод — тело в буфере
+    await new Promise((r) => setTimeout(r, 10));
+    expect(capture.findTranslationFor("TEST", "en", "ru")?.body).toBe("trans:ru");
+    expect(capture.findTranslationFor("TEST", "en", "es")).toBeNull(); // чужой tlang — мимо
+    expect(capture.findTranslationFor("ДРУГОЕ", "en", "ru")).toBeNull(); // чужое видео — мимо
+    const transport = new FakeTransport(new Map([["en", null]])); // своя база не получена
+    const adapter = new YouTubeAdapter({ win, transport, capture });
+    await adapter.listTracks();
+    const res = await adapter.loadTracks(
+      [{ id: "yt:en+ru", lang: "ru", role: "translation", source: "youtube", baseId: "yt:en" }],
+      { parser: fakeParser },
+    );
+    expect(res.tracks.map((t) => t.id)).toEqual(["yt:en+ru"]);
+    expect(requested).toEqual([nativeUrl]); // своего fetch перевода не было
+  });
+
+  it("duopulse-175: 429 перевода — максимум 2 попытки, отказ с причиной HTTP 429", async () => {
+    let calls = 0;
+    const { win } = makeLoadWindow({});
+    const fetchImpl = (() => {
+      calls++;
+      return Promise.resolve({ ok: false, status: 429, text: () => Promise.resolve("") });
+    }) as unknown as typeof fetch;
+    const transport = new FakeTransport(new Map([["en", liveEn]]));
+    const adapter = await adapterWithListFor(transport, win);
+    const res = await adapter.loadTracks(
+      [{ id: "yt:en+ru", lang: "ru", role: "translation", source: "youtube", baseId: "yt:en" }],
+      { parser: fakeParser, fetchImpl },
+    );
+    expect(calls).toBe(2); // было 3 с паузами 6/12 с — квоту не долбим
+    expect(res.failures[0].reason).toContain("429");
   });
 });
 

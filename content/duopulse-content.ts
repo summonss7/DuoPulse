@@ -290,10 +290,12 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
 
   /** Выключить показ (docs/03 §8 п.2): погасить, состав набора помним —
    * включение восстановит его без перезагрузки. Состояние «выкл» уходит в
-   * набор-память: возврат к видео не включит показ сам. */
+   * набор-память: возврат к видео не включит показ сам. Гасит и идущую
+   * загрузку (duopulse-175): прогресс-применение её дорожек отменено. */
   const disableSubs = (via: string): void => {
     enabled = false;
     pendingEnable = null; // ждущее включение отменили (duopulse-079)
+    selectSeq++; // идущий selectTracks не должен вернуть показ (duopulse-175)
     applyTracks([]);
     rememberSetState();
     reportSetState(via);
@@ -413,7 +415,11 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
    * во время загрузки — результат не применяется (дорожки прошлого видео);
    * файловая часть набора не трогается (смешивание, docs/01 F-06).
    * Fast-path задачи 3.7: тот же состав в другом порядке (панель ↑/↓) —
-   * перестановка без повторной загрузки (tlang-запросы рейт-лимитятся). */
+   * перестановка без повторной загрузки (tlang-запросы рейт-лимитятся).
+   * Прогрессивное применение (duopulse-175): каждая готовая дорожка
+   * показывается сразу — перевод с 429-ретраями (tlang-квота) не держит
+   * показ уже загруженного оригинала; финальный состав — по концу загрузки. */
+  let selectSeq = 0;
   const selectTracks = async (
     ids: string[],
     via = "select",
@@ -431,8 +437,18 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     const failures = resolved.unknown.map((id) => ({ id, reason: "неизвестный id дорожки" }));
     if (resolved.refs.length === 0) return { loaded: 0, failures, unknown: resolved.unknown };
     const keyAtStart = currentVideo?.videoKey ?? null;
-    const loaded = await adapter.loadTracks(resolved.refs, { parser });
-    if (currentVideo?.videoKey !== keyAtStart) return { loaded: 0, failures, unknown: resolved.unknown };
+    const loadSeq = ++selectSeq; // параллельный selectTracks гасит прогресс прошлого
+    const loaded = await adapter.loadTracks(resolved.refs, {
+      parser,
+      onTrack: (track) => {
+        if (currentVideo?.videoKey !== keyAtStart || loadSeq !== selectSeq) return;
+        platformTracks = [...platformTracks.filter((t) => t.id !== track.id), track];
+        applySet(via);
+      },
+    });
+    if (currentVideo?.videoKey !== keyAtStart || loadSeq !== selectSeq) {
+      return { loaded: 0, failures, unknown: resolved.unknown };
+    }
     platformTracks = loaded.tracks;
     applySet(via);
     for (const f of loaded.failures) failures.push({ id: f.ref.id, reason: f.reason });
