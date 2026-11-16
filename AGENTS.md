@@ -18,7 +18,9 @@
 Проектом управляет диспетчер задач (D:\Scheduler, scheduler.cjs). Задания — карточки-файлы
 NNN-название.md в CARDS/: шапка между --- (id, title, status, priority, created, updated,
 session), затем разделы «Задача», «Критерии готовности» (чек-лист), «Журнал». Статусы:
-todo | in_progress | review | done | blocked.
+todo | in_progress | review | done | blocked. В шапке может стоять build: false —
+флажок Артёма «версию не собирать» (aila-418): по такой карточке новую версию программы
+НЕ собирать и номер версии НЕ поднимать (коммит, CHANGELOG и отчёт — как обычно).
 
 1. Получив задание — прочитай карточку целиком; поставь status: in_progress и обнови
    updated (поля id и session не менять).

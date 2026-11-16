@@ -1553,6 +1553,7 @@ fn main() {
         .manage(asr_jobs)
         .manage(updater::UpdaterService::new())
         .manage(download::DownloadService::default())
+        .manage(download::filedl::FileDownloadService::default())
         .manage(router)
         .manage(rules_store)
         .setup(move |app| {

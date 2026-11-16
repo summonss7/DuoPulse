@@ -3544,3 +3544,92 @@ html[data-panel="auth"] .auth-dialog {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Секция «Файлы» панели (карточка duopulse-158): файловые загрузки страниц —
+   имя, статус (байты/скорость), живая — бегущая полоска без процентов
+   (размер заранее не известен); готовая — клик показывает в Проводнике */
+.dl-files {
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dl-files-title {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.dl-file {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 4px;
+  border-radius: 6px;
+}
+.dl-file.revealable {
+  cursor: pointer;
+}
+.dl-file.revealable:hover {
+  background: var(--line-soft);
+}
+.dl-file-name {
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dl-file-status {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dl-file.active .dl-file-status {
+  color: var(--accent-neon);
+}
+.dl-file.error .dl-file-status {
+  color: var(--danger);
+}
+.dl-file-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, var(--accent-neon), transparent);
+  animation: dl-file-slide 1.4s ease-in-out infinite;
+}
+@keyframes dl-file-slide {
+  0% {
+    transform: translateX(-60%);
+  }
+  100% {
+    transform: translateX(155%);
+  }
+}
+
+/* --- Индикатор загрузок в навбаре (карточка duopulse-158): кнопка «↓»
+     справа; точка пульсирует, пока что-то качается (файлы/медиа), ровный
+     неон — свежие загрузки сеанса; клик — панель «Скачать» --- */
+.dl-ind-btn {
+  position: relative;
+}
+.dl-ind-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-neon);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent-neon) 60%, transparent);
+  pointer-events: none;
+}
+.dl-ind-btn[data-active="1"] .dl-ind-dot {
+  animation: vpn-dot-pulse 1.2s ease-in-out infinite;
+}
+.dl-ind-btn[data-active="1"] {
+  color: var(--accent-neon);
+}

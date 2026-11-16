@@ -240,6 +240,8 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   },
   "download.cancel": { path: ["download", "cancel"], params: { jobId: 3 } },
   "download.status": { path: ["download", "status"] },
+  "filedl.status": { path: ["filedl", "status"] },
+  "filedl.reveal": { path: ["filedl", "reveal"], params: { id: 1 } },
   "app.restart": { path: ["app", "restart"] },
   "app.build_info": { path: ["app", "buildInfo"] },
 };

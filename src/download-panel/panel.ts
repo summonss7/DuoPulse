@@ -19,6 +19,10 @@ import type {
   DownloadFinished,
   DownloadJobInfo,
   DownloadProgress,
+  FileDlFinished,
+  FileDlInfo,
+  FileDlProgress,
+  FileDlStarted,
   SubtitlesTracksReady,
   TranslationLangInfo,
 } from "../bridge/gen/types";
@@ -27,6 +31,8 @@ import { onTabsChanged } from "../chrome/tabbar";
 import {
   AUDIO_FORMAT_OPTIONS,
   QUALITY_OPTIONS,
+  fileDlStatusText,
+  fmtBytes,
   modeLabel,
   parseTimeInput,
   phaseLabel,
@@ -44,6 +50,8 @@ interface DlState {
   translations: TranslationLangInfo[];
   dir: string;
   activeJobId: number | null;
+  /** Файловые загрузки сеанса (сверху панели, карточка duopulse-158). */
+  files: FileDlInfo[];
 }
 
 const state: DlState = {
@@ -53,6 +61,7 @@ const state: DlState = {
   translations: [],
   dir: "",
   activeJobId: null,
+  files: [],
 };
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -161,6 +170,75 @@ function wireControls(): void {
   void listen<SubtitlesTracksReady>(bridge.events.subtitlesTracksReady, () => {
     void refreshTracks();
   });
+  // файловые загрузки (duopulse-158): старт/итог — снапшот из Core (порядок
+  // свежести), прогресс — правка строки на месте (событие ~500 мс на файл)
+  void listen<FileDlStarted>(bridge.events.filedlStarted, () => {
+    void refreshFiles();
+  });
+  void listen<FileDlFinished>(bridge.events.filedlFinished, () => {
+    void refreshFiles();
+  });
+  void listen<FileDlProgress>(bridge.events.filedlProgress, (ev) => {
+    const f = state.files.find((x) => x.id === ev.payload.id);
+    if (!f) {
+      void refreshFiles();
+      return;
+    }
+    f.received = ev.payload.received;
+    f.speed = ev.payload.speed;
+    renderFiles();
+  });
+}
+
+/** Секция «Файлы»: снапшот файловых загрузок из Core. */
+async function refreshFiles(): Promise<void> {
+  try {
+    state.files = (await bridge.filedl.status()).files;
+  } catch (e) {
+    err(e);
+    return;
+  }
+  renderFiles();
+}
+
+/** Перерисовать секцию «Файлы» (живые сверху — снапшот уже свежести). */
+function renderFiles(): void {
+  const host = $("dlFiles");
+  host.textContent = "";
+  for (const f of state.files.slice(0, 8)) {
+    const row = document.createElement("div");
+    row.className = `dl-file ${f.state === "active" ? "active" : f.state}`;
+    const name = document.createElement("span");
+    name.className = "dl-file-name";
+    name.textContent = f.fileName;
+    row.append(name);
+    if (f.state === "active") {
+      const bar = document.createElement("i");
+      bar.className = "dl-file-bar";
+      bar.setAttribute("aria-hidden", "true");
+      row.append(bar);
+    }
+    const status = document.createElement("span");
+    status.className = "dl-file-status";
+    status.textContent =
+      f.state === "active"
+        ? fileDlStatusText(f)
+        : f.state === "done"
+          ? `${t("готово")} · ${fmtBytes(f.received)}`
+          : fileDlStatusText(f);
+    row.append(status);
+    row.title = f.path;
+    // клик по завершённой — показать файл в Проводнике
+    if (f.state === "done") {
+      row.classList.add("revealable");
+      row.title = `${f.path}\n${t("показать в папке")}`;
+      row.addEventListener("click", () => {
+        void bridge.filedl.reveal({ id: f.id }).catch(err);
+      });
+    }
+    host.append(row);
+  }
+  $("dlFilesWrap").hidden = state.files.length === 0;
 }
 
 /** Полное обновление: адрес, инструменты/каталог, дорожки, задания. */
@@ -179,6 +257,7 @@ async function refreshAll(): Promise<void> {
   } catch (e) {
     err(e);
   }
+  void refreshFiles();
   await refreshTracks();
   renderMode();
 }

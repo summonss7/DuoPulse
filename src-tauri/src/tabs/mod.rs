@@ -1419,6 +1419,7 @@ fn build_tab_webview(
 ) -> WebviewBuilder<tauri::Wry> {
     let app_for_load = app.clone();
     let app_for_title = app.clone();
+    let app_for_dl = app.clone();
     let builder = WebviewBuilder::new(id, start);
     // Маркер инкогнито (карточка duopulse-096) — ПЕРВЫМ инициализационным
     // скриптом: контент-скрипты ниже читают его при старте (passwords-fill
@@ -1493,6 +1494,12 @@ fn build_tab_webview(
             app_for_title
                 .state::<TabManager>()
                 .on_title(&app_for_title, &label, title);
+        })
+        // Файловые загрузки (карточка duopulse-158): старт — в настроенный
+        // каталог «Загрузки» + события filedl:* (индикатор навбара и секция
+        // «Файлы» панели); итог — filedl:finished.
+        .on_download(move |_wv, event| {
+            crate::download::filedl::handle(&app_for_dl, event)
         })
 }
 

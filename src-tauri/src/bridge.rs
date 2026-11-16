@@ -1312,6 +1312,11 @@ pub fn contract_json() -> serde_json::Value {
                                   "result": null },
             "download.status": { "handler": "download_status", "params": null,
                                   "result": schema!(crate::download::DownloadStatusResult) },
+            "filedl.status": { "handler": "filedl_status", "params": null,
+                                 "result": schema!(crate::download::filedl::FileDlStatusResult) },
+            "filedl.reveal": { "handler": "filedl_reveal",
+                                 "params": schema!(crate::download::filedl::FileDlRevealParams),
+                                 "result": null },
             "app.restart": { "handler": "app_restart", "params": null, "result": null },
         },
         "events": {
@@ -1336,6 +1341,9 @@ pub fn contract_json() -> serde_json::Value {
             "auth:challenge": { "payload": schema!(crate::auth::AuthChallengeView) },
             "download:progress": { "payload": schema!(crate::download::DownloadProgress) },
             "download:finished": { "payload": schema!(crate::download::DownloadFinished) },
+            "filedl:started": { "payload": schema!(crate::download::filedl::FileDlStarted) },
+            "filedl:progress": { "payload": schema!(crate::download::filedl::FileDlProgress) },
+            "filedl:finished": { "payload": schema!(crate::download::filedl::FileDlFinished) },
         },
     })
 }
@@ -1449,6 +1457,18 @@ fn event_names_match_registry() {
             (
                 <crate::download::DownloadFinishedEvent as BridgeEvent>::NAME,
                 schema!(crate::download::DownloadFinished),
+            ),
+            (
+                <crate::download::filedl::FileDlStartedEvent as BridgeEvent>::NAME,
+                schema!(crate::download::filedl::FileDlStarted),
+            ),
+            (
+                <crate::download::filedl::FileDlProgressEvent as BridgeEvent>::NAME,
+                schema!(crate::download::filedl::FileDlProgress),
+            ),
+            (
+                <crate::download::filedl::FileDlFinishedEvent as BridgeEvent>::NAME,
+                schema!(crate::download::filedl::FileDlFinished),
             ),
             (
                 <UiLangChangedEvent as BridgeEvent>::NAME,
@@ -3464,6 +3484,8 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         crate::download::download_begin,
         crate::download::download_cancel,
         crate::download::download_status,
+        crate::download::filedl::filedl_status,
+        crate::download::filedl::filedl_reveal,
         crate::chrome_menu::ui_menu_open,
         crate::chrome_panel::ui_panel_open,
         crate::chrome_panel::ui_panel_close,

@@ -4,7 +4,7 @@
 // Видимые строки — через t() (i18n, карточка duopulse-137): в ru t() возвращает
 // исходник, тесты на ru-тексты не меняются.
 import { t } from "../i18n";
-import type { BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
+import type { BaseTrackInfo, FileDlInfo, TranslationLangInfo } from "../bridge/gen/types";
 
 /** «1:23» → 83; «1:23:45» → 5025; «12» → 12; мусор/отрицательное — null. */
 export function parseTimeInput(value: string): number | null {
@@ -112,4 +112,35 @@ export function modeLabel(mode: string): string {
     default:
       return mode;
   }
+}
+
+/** Байты → «843 КБ» / «12.4 МБ» / «2.5 ГБ» (карточка duopulse-158):
+ *  десятые — до сотни единиц, дальше — целое. */
+export function fmtBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return `0 ${t("Б")}`;
+  if (n < 1024) return `${Math.round(n)} ${t("Б")}`;
+  const kb = n / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb < 100 ? 1 : 0)} ${t("КБ")}`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(mb < 100 ? 1 : 0)} ${t("МБ")}`;
+  return `${(mb / 1024).toFixed(2)} ${t("ГБ")}`;
+}
+
+/** Скорость байт/с → «1,2 МБ/с» (0 — пустая строка). */
+export function fmtSpeed(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "";
+  return `${fmtBytes(bytesPerSec)}/${t("с")}`;
+}
+
+/** Строка статуса файловой загрузки для секции «Файлы» (duopulse-158):
+ *  активная — «12,4 МБ · 1,2 МБ/с», итог — «готово · путь» / причина. */
+export function fileDlStatusText(f: FileDlInfo): string {
+  if (f.state === "active") {
+    const bits = [t("скачивается"), fmtBytes(f.received)];
+    const speed = fmtSpeed(f.speed);
+    if (speed) bits.push(speed);
+    return bits.join(" · ");
+  }
+  if (f.state === "done") return t("готово");
+  return f.error ?? t("ошибка");
 }

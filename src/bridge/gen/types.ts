@@ -75,6 +75,9 @@ export interface DuoPulseBridgeContract {
   DownloadCancelParams: DownloadCancelParams;
   DownloadStatusResult: DownloadStatusResult;
   DownloadJobInfo: DownloadJobInfo;
+  FileDlRevealParams: FileDlRevealParams;
+  FileDlStatusResult: FileDlStatusResult;
+  FileDlInfo: FileDlInfo;
   HistoryBmbarReorderParams: HistoryBmbarReorderParams;
   HistoryBookmarkAddParams: HistoryBookmarkAddParams;
   HistoryBookmarkListParams: HistoryBookmarkListParams;
@@ -204,6 +207,9 @@ export interface DuoPulseBridgeContract {
   AdblockSiteException: AdblockSiteException;
   DownloadFinished: DownloadFinished;
   DownloadProgress: DownloadProgress;
+  FileDlFinished: FileDlFinished;
+  FileDlProgress: FileDlProgress;
+  FileDlStarted: FileDlStarted;
   PageLoaded: PageLoaded;
   PageVideoDetected: PageVideoDetected;
   PasswordsSavePrompt: PasswordsSavePrompt;
@@ -566,6 +572,46 @@ export interface DownloadJobInfo {
    */
   phase: string;
   speed: string;
+}
+export interface FileDlRevealParams {
+  id: number;
+}
+export interface FileDlStatusResult {
+  /**
+   * Живые и последние файловые загрузки (свежие первыми).
+   */
+  files: FileDlInfo[];
+}
+/**
+ * Одна файловая загрузка в filedl.status.
+ */
+export interface FileDlInfo {
+  error?: string | null;
+  /**
+   * Имя файла.
+   */
+  fileName: string;
+  id: number;
+  /**
+   * Полный целевой путь.
+   */
+  path: string;
+  /**
+   * Принято байт (по факту на диске).
+   */
+  received: number;
+  /**
+   * Скорость, байт/с (последний замер; 0 — не известно).
+   */
+  speed: number;
+  /**
+   * active | done | error.
+   */
+  state: string;
+  /**
+   * Адрес, с которого качаем.
+   */
+  url: string;
 }
 /**
  * history.bmbar_reorder: записать порядок чипов строки закладок (drag&drop, duopulse-147): urls — закладки строки в новом порядке; все становятся членами группы по умолчанию с плотными позициями (безгрупповые «усыновляются», как перенос на панель закладок Chrome).
@@ -1886,6 +1932,32 @@ export interface DownloadProgress {
    */
   phase: string;
   speed: string;
+}
+/**
+ * filedl:finished — файловая загрузка завершилась (успех/прерывание).
+ */
+export interface FileDlFinished {
+  fileName: string;
+  id: number;
+  ok: boolean;
+  path?: string | null;
+}
+/**
+ * filedl:progress — живой прогресс (байты на диске и скорость).
+ */
+export interface FileDlProgress {
+  id: number;
+  received: number;
+  speed: number;
+}
+/**
+ * filedl:started — загрузка файла началась.
+ */
+export interface FileDlStarted {
+  fileName: string;
+  id: number;
+  path: string;
+  url: string;
 }
 /**
  * page:loaded: документ загружен (M3 — детектор контента; каркас с 1.1).

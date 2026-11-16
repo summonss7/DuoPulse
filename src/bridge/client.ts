@@ -25,6 +25,8 @@ import type {
   DownloadBeginResult,
   DownloadCancelParams,
   DownloadStatusResult,
+  FileDlRevealParams,
+  FileDlStatusResult,
   HistoryBmbarReorderParams,
   HistoryBookmarkAddParams,
   HistoryBookmarkListParams,
@@ -394,6 +396,13 @@ export const bridge = {
     /** download.status: инструменты (yt-dlp/ffmpeg), каталог и задания. */
     status: () => invoke<DownloadStatusResult>("download_status"),
   },
+  filedl: {
+    /** filedl.status (карточка duopulse-158): живые и последние файловые
+     *  загрузки страниц (клики по ссылкам на файлы) — секция «Файлы» панели. */
+    status: () => invoke<FileDlStatusResult>("filedl_status"),
+    /** filedl.reveal: показать файл загрузки в Проводнике. */
+    reveal: (params: FileDlRevealParams) => invoke<void>("filedl_reveal", { params }),
+  },
   app: {
     /** app.restart: перезапуск (применение аргументов прокси WebView2). */
     restart: () => invoke<void>("app_restart"),
@@ -457,6 +466,15 @@ export const bridge = {
     /** download.finished (карточка duopulse-118): задание завершилось
      *  (успех с путём файла / отмена / ошибка). */
     downloadFinished: "download:finished",
+    /** filedl.started (карточка duopulse-158): началась файловая загрузка
+     *  страницы (клик по ссылке на файл) — зажигает индикатор загрузок. */
+    filedlStarted: "filedl:started",
+    /** filedl.progress (карточка duopulse-158): байты на диске и скорость
+     *  файловой загрузки (поллинг ~500 мс, только при изменении размера). */
+    filedlProgress: "filedl:progress",
+    /** filedl.finished (карточка duopulse-158): файловая загрузка завершилась
+     *  (успех с путём / прерывание). */
+    filedlFinished: "filedl:finished",
     /** settings.ui_lang_changed (duopulse-136): язык интерфейса сменился в
      *  Core — слушатель src/main.ts кэширует язык и перезагружает страницу. */
     settingsUiLangChanged: "settings:ui_lang_changed",

@@ -16,6 +16,7 @@
 //! download:finished идут в UI контрактом; отмена убивает процесс.
 
 pub mod cookies;
+pub mod filedl;
 pub mod runner;
 pub mod tools;
 

@@ -1084,6 +1084,102 @@
         "type": "object"
       }
     },
+    "filedl.reveal": {
+      "handler": "filedl_reveal",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "id": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "FileDlRevealParams",
+        "type": "object"
+      },
+      "result": null
+    },
+    "filedl.status": {
+      "handler": "filedl_status",
+      "params": null,
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "FileDlInfo": {
+            "description": "Одна файловая загрузка в filedl.status.",
+            "properties": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fileName": {
+                "description": "Имя файла.",
+                "type": "string"
+              },
+              "id": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "path": {
+                "description": "Полный целевой путь.",
+                "type": "string"
+              },
+              "received": {
+                "description": "Принято байт (по факту на диске).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "speed": {
+                "description": "Скорость, байт/с (последний замер; 0 — не известно).",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "state": {
+                "description": "active | done | error.",
+                "type": "string"
+              },
+              "url": {
+                "description": "Адрес, с которого качаем.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "fileName",
+              "id",
+              "path",
+              "received",
+              "speed",
+              "state",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "files": {
+            "description": "Живые и последние файловые загрузки (свежие первыми).",
+            "items": {
+              "$ref": "#/definitions/FileDlInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "FileDlStatusResult",
+        "type": "object"
+      }
+    },
     "history.bmbar_reorder": {
       "handler": "history_bmbar_reorder",
       "params": {
@@ -6217,6 +6313,98 @@
           "speed"
         ],
         "title": "DownloadProgress",
+        "type": "object"
+      }
+    },
+    "filedl:finished": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "filedl:finished — файловая загрузка завершилась (успех/прерывание).",
+        "properties": {
+          "fileName": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "fileName",
+          "id",
+          "ok"
+        ],
+        "title": "FileDlFinished",
+        "type": "object"
+      }
+    },
+    "filedl:progress": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "filedl:progress — живой прогресс (байты на диске и скорость).",
+        "properties": {
+          "id": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "received": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "speed": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "received",
+          "speed"
+        ],
+        "title": "FileDlProgress",
+        "type": "object"
+      }
+    },
+    "filedl:started": {
+      "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "filedl:started — загрузка файла началась.",
+        "properties": {
+          "fileName": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fileName",
+          "id",
+          "path",
+          "url"
+        ],
+        "title": "FileDlStarted",
         "type": "object"
       }
     },
