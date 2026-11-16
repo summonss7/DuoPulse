@@ -1513,31 +1513,42 @@ fn main() {
     let router_port = router.as_ref().map(vpn::router::Router::port);
     startup_mark("stores-open");
     let adblock_for_setup = std::sync::Arc::clone(&adblock_service);
-    bridge::register(tauri::Builder::default())
+    let builder = bridge::register(tauri::Builder::default())
         .on_menu_event(|app, event| {
             chrome_menu::emit_action(app, &event.id.0);
-        })
-        // Одиночный экземпляр (карточка duopulse-119): PDF, открытый из
-        // проводника при живом DuoPulse, не должен поднимать второй процесс
-        // (профиль/SQLite/session.json не переживают двух владельцев) —
-        // второй старт форвардит argv первому и гаснет. Регистрируется
-        // ПЕРВЫМ плагином (требование документации Tauri).
-        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-            if let Some(url) = pdf_arg_url(&argv, &cwd) {
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    let manager = app.state::<tabs::TabManager>();
-                    if let Err(e) = manager.open(&app, Some(url.to_string()), None, false) {
-                        eprintln!("[pdf] открыть из второго экземпляра: {e}");
-                    }
-                });
-            }
-            // Без PDF в argv — просто поднять окно живого экземпляра
-            if let Some(w) = app.get_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-        }))
+        });
+    // Одиночный экземпляр (карточка duopulse-119): PDF, открытый из
+    // проводника при живом DuoPulse, не должен поднимать второй процесс
+    // (профиль/SQLite/session.json не переживают двух владельцев) —
+    // второй старт форвардит argv первому и гаснет. Регистрируется
+    // ПЕРВЫМ плагином (требование документации Tauri).
+    // e2e-стенды запускают debug-exe при живом установленном DuoPulse:
+    // мьютекс идентификатора держит пользовательский процесс, и экземпляр
+    // стенда молча гаснет (exit 0 ещё до окна). Стенды всегда в изолированном
+    // APPDATA — двух владельцев профиля нет, для них single-instance
+    // выключаем отравленным env (duopulse-163).
+    let builder =
+        if std::env::var("DUOPULSE_E2E_NO_SINGLE_INSTANCE").ok().as_deref() == Some("1") {
+            builder
+        } else {
+            builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+                if let Some(url) = pdf_arg_url(&argv, &cwd) {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let manager = app.state::<tabs::TabManager>();
+                        if let Err(e) = manager.open(&app, Some(url.to_string()), None, false) {
+                            eprintln!("[pdf] открыть из второго экземпляра: {e}");
+                        }
+                    });
+                }
+                // Без PDF в argv — просто поднять окно живого экземпляра
+                if let Some(w) = app.get_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }))
+        };
+    builder
         .plugin(tauri_plugin_dialog::init())
         // Автообновление (задача 5.2): конфиг plugins.updater (pubkey/фид) и
         // состояние UpdaterExt::updater_builder — драйвится из src/updater.rs.

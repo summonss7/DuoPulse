@@ -19,7 +19,11 @@
 //      .bm-ctx («Переименовать…»/«Удалить закладку»), скриншот, клик
 //      «Удалить закладку» — закладка удалена;
 //   6) внешний drop в ОТКРЫТУЮ панель (тело, не подгруппа): E из
-//      «Избранного» переложена в «Медиа».
+//      «Избранного» переложена в «Медиа»;
+//   7) (duopulse-163) правый клик по папке «Тест» — нативное меню
+//      «Переименовать…/Удалить группа»: позиция попапа у курсора
+//      (GetWindowRect #32768 против клиентской точки → экран), выбор
+//      «Удалить группу» клавиатурой — группа и папка исчезли.
 // Реальный OLE-drag между webview синтетическими событиями не
 // воспроизводится (это транспорт Chromium, проверен живым перетаскиванием);
 // стенд проверяет приёмную логику обеих сторон.
@@ -181,13 +185,19 @@ for (let i = 0; i < 60; i++) {
 }
 
 await killOurExes();
+// stderr приложения — в лог tmp-профиля: [startup]/[menu163] и паники видны
+// при разборе провалов (приложение пишет человекочитаемые метки)
+const appLog = fs.openSync(path.join(tmp, "app.log"), "a");
 const app = spawn(EXE, [], {
-  stdio: "ignore",
+  stdio: ["ignore", appLog, appLog],
   env: {
     ...process.env,
     APPDATA: tmp,
     DUOPULSE_START_URL: `http://127.0.0.1:${HTTP_PORT}/start`,
     DUOPULSE_ADBLOCK_LISTS: "",
+    // single-instance держит установленный DuoPulse пользователя — без
+    // рубильника debug-exe стенда молча гаснет по мьютексу идентификатора
+    DUOPULSE_E2E_NO_SINGLE_INSTANCE: "1",
     WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, "webview2-data"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
   },
@@ -475,6 +485,178 @@ try {
     );
   }
 
+  // --- 7. папка «Тест»: позиция меню у курсора + «Удалить группу» (163) -------
+  step("правый клик по папке «Тест»: меню у курсора, «Удалить группу»");
+  // гигиена: панель папки закрываем тумблером, висящие попапы — ESC
+  await uiWs
+    .evalT(
+      `(() => { const f = [...document.querySelectorAll('#bmbar .bm-folder')].find(x => x.querySelector('.bm-label')?.textContent === 'Медиа'); f?.click(); return 'ok'; })()`,
+      4000,
+    )
+    .catch(() => {});
+  await sendKeys("{ESC}");
+  await sleep(600);
+  // точка клика: физические экранные = клиентные × dpr + клиент-ноль окна
+  // (ClientToScreen по hwnd; screenX/screenY вебвью врёт на смешанных DPI)
+  const probe = await uiWs.evalT(`(() => {
+    const f = [...document.querySelectorAll('#bmbar .bm-folder')].find(x => x.querySelector('.bm-label')?.textContent === 'Тест');
+    if (!f) return null;
+    const r = f.getBoundingClientRect();
+    return { x: r.left + 20, y: r.top + r.height / 2, dpr: window.devicePixelRatio };
+  })()`, 4000);
+  check("папка «Тест» на строке (зонд точки клика)", !!probe, JSON.stringify(probe));
+  const dispatchExpr = `(() => {
+    const f = [...document.querySelectorAll('#bmbar .bm-folder')].find(x => x.querySelector('.bm-label')?.textContent === 'Тест');
+    if (!f) return 'no-folder';
+    f.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: ${probe ? probe.x : 0}, clientY: ${probe ? probe.y : 0} }));
+    return 'ok';
+  })()`;
+  // замер позиции: ретраи — машина Артёма живая, Aila перетягивает
+  // foreground, а попап НЕ-foreground окна Windows закрывает мгновенно
+  // (no-popup при живом фиксе); замер — с короткой паузой, потом ESC
+  const psRect = () =>
+    run("powershell", [
+      "-NoProfile",
+      "-Command",
+      `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Collections.Generic;
+public class MP {
+  public static List<long> Found = new List<long>();
+  public static long Main = 0;
+  static uint Target;
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+  public struct RECT { public int L; public int T; public int R; public int B; }
+  public struct POINT { public int X; public int Y; }
+  static bool Cb(IntPtr h, IntPtr l) {
+    uint pid; GetWindowThreadProcessId(h, out pid);
+    if (pid == Target) {
+      var sb = new StringBuilder(64);
+      GetClassName(h, sb, 64);
+      if (sb.ToString() == "#32768") Found.Add(h.ToInt64());
+      if (sb.ToString() == "Tauri Window") Main = h.ToInt64();
+    }
+    return true;
+  }
+  public static void FindMenus(uint pid) { Target = pid; Found.Clear(); Main = 0; EnumWindows(Cb, IntPtr.Zero); }
+}
+"@
+$proc = Get-CimInstance Win32_Process -Filter "Name='duopulse.exe'" |
+  Where-Object { $_.ExecutablePath -eq '${EXE_PS}' } | Select-Object -First 1
+$p = Get-Process -Id $proc.ProcessId -ErrorAction Stop
+# hwnd и попап ищем EnumWindows: Get-Process MainWindowHandle у окна Tauri
+# бывает IntPtr.Zero (окно не foreground) — тогда ClientToScreen даёт (0,0);
+# попап #32768 — только среди окон НАШЕГО процесса (FindWindow глобален и на
+# живой машине ловит чужие меню, например Aila)
+[MP]::FindMenus($p.Id)
+if ([MP]::Main -eq 0) { "no-hwnd" } else {
+$pt = New-Object MP+POINT
+[MP]::ClientToScreen([IntPtr][MP]::Main, [ref]$pt) | Out-Null
+$origin = "$($pt.X),$($pt.Y)"
+if ([MP]::Found.Count -eq 0) { "no-popup origin=$origin" } else {
+  $r = New-Object MP+RECT
+  [MP]::GetWindowRect([IntPtr][MP]::Found[0], [ref]$r) | Out-Null
+  "$($r.L),$($r.T) origin=$origin"
+}
+}
+`,
+    ]).catch((e) => "ps-error " + String(e).slice(0, 80));
+  let menuAtCursor = false;
+  let menuInfo = "";
+  if (probe) {
+    for (let attempt = 0; attempt < 4 && !menuInfo; attempt++) {
+      await foregroundApp();
+      await uiWs.evalT(dispatchExpr, 2500).catch(() => {});
+      await sleep(800);
+      const r = String(await psRect()).trim();
+      const om = /origin=(-?\d+),(-?\d+)/.exec(r);
+      if (om && /^-?\d+,-?\d+ /.test(r)) {
+        const [ml, mt] = r.split(" ")[0].split(",").map(Number);
+        // ожидание — БЕЗ devicePixelRatio: muda делает to_physical по
+        // hwnd_dpi процесса (DPI-контекст хоста 1.0 при webview dpr 1.25),
+        // т.е. попап приходит в клиентскую точку clientX/clientY как есть
+        const ex = Number(om[1]) + Math.round(probe.x);
+        const ey = Number(om[2]) + Math.round(probe.y);
+        menuInfo = `${r} клик=${ex},${ey}`;
+        // TrackPopupMenu ставит верхний левый угол попапа в точку клика;
+        // допуск 30px — тени/округления ClientToScreen
+        menuAtCursor = Math.abs(ml - ex) <= 30 && Math.abs(mt - ey) <= 30;
+        await sendKeys("{ESC}"); // замерили — закрываем, удаление отдельно
+      } else {
+        menuInfo = "";
+        await sendKeys("{ESC}"); // попап не пойман (foreground украден) — ретрай
+      }
+      await sleep(500);
+    }
+    check(
+      "нативное меню открылось У КУРСОРА (не «три сантиметра ниже»)",
+      menuAtCursor,
+      menuInfo || "попап не пойман за 4 попытки (foreground ворует Aila?)",
+    );
+    if (!menuAtCursor) {
+      const shot = path.join(SHOT_DIR, "duopulse-163-menu-fail.png");
+      await run("powershell", [
+        "-NoProfile",
+        "-Command",
+        `Add-Type -AssemblyName System.Windows.Forms;
+         Add-Type -AssemblyName System.Drawing;
+         $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;
+         $bmp = New-Object System.Drawing.Bitmap($b.Width, $b.Height);
+         $g = [System.Drawing.Graphics]::FromImage($bmp);
+         $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size);
+         $bmp.Save('${shot.replaceAll("\\", "/")}');`,
+      ]).catch(() => {});
+      console.log("диагностика: скриншот", shot);
+    }
+
+    // --- 7b. «Удалить группу» (2-й пункт) — отдельное открытие меню ----------
+    const testGonePoll = () =>
+      uiWs.evalT(`window.__duopulse.history.groupList()`, 4000).then(
+        (r) => (r && r !== "EVAL-TIMEOUT" && Array.isArray(r.groups) && !r.groups.some((g) => g.name === "Тест") ? r : null),
+      );
+    let testGone = null;
+    for (let attempt = 0; attempt < 4 && !testGone; attempt++) {
+      await foregroundApp();
+      await uiWs.evalT(dispatchExpr, 2000).catch(() => {});
+      await sleep(700);
+      // гейт: клавиши — только по живому попапу (psRect видит его и после
+      // полутора секунд PS-запуска: значит окно держит foreground и клавиши
+      // попадут в меню, а не в Aila)
+      const gate = String(await psRect()).trim();
+      if (!/^-?\d+,-?\d+ /.test(gate)) {
+        await sendKeys("{ESC}");
+        await sleep(500);
+        continue;
+      }
+      await sendKeys("{DOWN}{DOWN}{ENTER}"); // 2-й пункт — «Удалить группу»
+      await sleep(800);
+      testGone = await waitFor(testGonePoll, 6000);
+      if (!testGone) await sendKeys("{ESC}"); // фокус ушёл между гейтом и клавишами — ретрай
+    }
+    const folderGone = await uiWs.evalT(
+      `![...document.querySelectorAll('#bmbar .bm-folder .bm-label')].some(x => x.textContent === 'Тест')`,
+      4000,
+    );
+    check(
+      "«Удалить группу» из меню папки: группа «Тест» удалена, папка исчезла",
+      !!testGone && folderGone === true,
+      JSON.stringify({ gone: !!testGone, folder: folderGone }),
+    );
+    const others = await uiWs.evalT(
+      `window.__duopulse.history.groupList().then(r => r.groups.map(g => g.name).join('|'))`,
+      4000,
+    );
+    check("остальные группы целы (Работа/Медиа/Избранное)", String(others).includes("Работа") && String(others).includes("Медиа"), String(others));
+  }
+
   // --- скриншот бара ----------------------------------------------------------
   const barShot = await uiWs
     .send("Page.captureScreenshot", {
@@ -491,16 +673,25 @@ try {
 } catch (e) {
   check("стенд завершился без падения", false, String(e));
 } finally {
+  let appLogText = "";
+  try {
+    appLogText = fs.readFileSync(path.join(tmp, "app.log"), "utf8").trim();
+  } catch { /* лога нет — ок */ }
   try { app.kill(); } catch {}
   try { vite.kill(); } catch {}
   try { httpServer.close(); } catch {}
   await killOurExes();
   fs.rmSync(tmp, { recursive: true, force: true });
+  if (appLogText) globalThis.__dp163AppLog = appLogText;
 }
 
 if (consoleLog.length) {
   console.log("\nКонсоль приложения (ошибки):");
   for (const line of consoleLog) console.log("  " + line);
+}
+const failedAny = results.some((r) => !r.ok);
+if (failedAny && globalThis.__dp163AppLog) {
+  console.log("\napp.log (хвост):\n  " + globalThis.__dp163AppLog.split("\n").slice(-25).join("\n  "));
 }
 const failed = results.filter((r) => !r.ok);
 console.log(`\nИтог: ${results.length - failed.length}/${results.length} проверок прошло`);

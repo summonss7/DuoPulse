@@ -25,6 +25,10 @@
 // видны на строке — иначе новую группу не видно и некуда перетаскивать);
 // drag&drop закладки работает и ЧЕРЕЗ webview-границу (строка ↔ панель
 // папки): свой MIME-тип несёт url + группу-источник, text/plain — фолбэк.
+// duopulse-163: папке в меню добавлено «Удалить группу» (group_remove — с
+// подгруппами, закладки остаются, как на странице управления); позиция
+// нативного меню — клиентская точка окна (фикс «на три сантиметра ниже
+// клика» — chrome_menu.rs раньше передавал экранные координаты).
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
@@ -460,9 +464,10 @@ export function initBmBar(): void {
   });
 
   // --- переименование (duopulse-149) / удаление и новая группа (duopulse-160) ---
-  // правый клик по чипу/папке — нативное меню «Переименовать…» («Удалить» —
-  // закладке, адрес/ид группы кодируется в id пункта, снапшот не нужен);
-  // правый клик по пустому месту строки — «Новая группа…»
+  // правый клик по чипу/папке — нативное меню «Переименовать…» + «Удалить»
+  // (закладке — «Удалить», папке — «Удалить группу», duopulse-163; адрес/ид
+  // группы кодируется в id пункта, снапшот не нужен); правый клик по пустому
+  // месту строки — «Новая группа…»
   bar().addEventListener("contextmenu", (e) => {
     if ((e.target as HTMLElement).closest("input")) return;
     const item = (e.target as HTMLElement).closest<HTMLElement>(".bm-item");
@@ -488,6 +493,8 @@ export function initBmBar(): void {
       deleteChip(a.url);
     else if (a.menu === "bmgroup" && a.act === "rename" && typeof a.groupId === "number")
       beginFolderRename(a.groupId);
+    else if (a.menu === "bmgroup" && a.act === "delete" && typeof a.groupId === "number")
+      deleteFolder(a.groupId);
     else if (a.menu === "bmbar" && a.act === "newgroup") createGroupFromBar();
   });
 
@@ -690,6 +697,24 @@ async function moveChipToFolder(
 function deleteChip(url: string): void {
   void bridge.history
     .bookmarkRemove({ url })
+    .then(refreshBmBar)
+    .catch((e) => {
+      err(e);
+      void refreshBmBar();
+    });
+}
+
+/** Удалить группу-папку строки (menu-action bmgroup:delete, duopulse-163):
+ *  Core сносит группу с подгруппами, закладки остаются без членства — как
+ *  «Удалить группу (с подгруппами)» страницы управления. Открытую панель
+ *  этой папки закрываем — её данные устарели в момент удаления. */
+function deleteFolder(id: number): void {
+  if (openFolderPanelId === id) {
+    openFolderPanelId = null;
+    closePanel();
+  }
+  void bridge.history
+    .groupRemove({ id })
     .then(refreshBmBar)
     .catch((e) => {
       err(e);
