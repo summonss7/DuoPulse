@@ -6556,3 +6556,35 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   погас, кнопка осталась. Версия не собиралась и не поднималась — build: false
   (aila-418).
 - Коммит: f786a36 — feat(downloads): duopulse-158 — индикатор файловых загрузок (filedl.*, кнопка-пульс «↓», секция «Файлы» панели, см. запись выше).
+
+## 16.11.2026, 05:30 — Субтитры на видео с несколькими озвучками: язык оригинала по аудиотреку плеера (duopulse-159)
+- Начало работы: 16.11.2026, 04:31
+- Окончание работы: 16.11.2026, 05:30
+- Что сделано: по жалобе «на видео https://www.youtube.com/watch?v=Rc-AVTv5nMI не видит субтитры,
+  но они есть» диагностика на живом YouTube (CDP-стенды: свежий профиль, копия профиля пользователя,
+  SPA-навигация из поиска) показала: список дорожек добывается и загрузка работает, дефект — в выборе
+  «оригинала» на МУЛЬТИ-ДАБ видео (две озвучки: ru.4 + en-US.10, канал RU): asr-фолбэк originalLangsOf
+  помечал «оригиналом» КАЖДУЮ asr-дорожку, в т.ч. en-asr английского ДУБА (перевода), а дефолт-набор
+  (duo-кнопка/Alt+D, у Артёма defaultTranslationLang=ru) берёт ПЕРВУЮ помеченную → en-asr: пользователь
+  получал английский автоперевод русской речи вместо существующих русских субтитров. Фикс
+  (content/adapters/youtube.ts, originalLangsOf): новый ярус — renderer.audioTracks[].originalLanguage
+  (задел duopulse-070) / audioTrackId первого аудиотрека («ru.4» → ru; на мульти-даб видео оригинальная
+  озвучка идёт первой — живые пробы Rc-AVTv5nMI при hl=en и hl=ro); при наличии аудио-маркеров asr-фолбэк
+  НЕ применяется (asr-дорожки есть у каждого дубля). Одиночные видео audioTrackId не несут (живые пробы
+  Gangnam 9bZkp7q19f0 и TED iG9CE55wbtY — только captionTrackIndices) → идут прежним путём, без
+  регрессий. Мобильная ветка (src/mobile/duo/session.ts) использует те же чистые функции — фикс общий.
+  Дефолт-набор на Милане теперь [yt:ru:asr, en] (рус. база + англ. перевод), а не [yt:en:asr, ru].
+  Фикстура e2e/fixtures/youtube/playerResponses/Rc-AVTv5nMI.json (живой ответ 16.11.2026) + 3 юнит-теста;
+  README — строка о мульти-даб в разделе субтитров. Релизы 0.1.54 (карточка без build:false): десктоп —
+  оба канала (GitHub Pages stable/canary) + канал Aila + хаб «Скачать» + локальная копия C:\DuoPulse;
+  Android — подписанный APK в канал Aila (манифест с APK-ассетом, 14.6 МБ).
+- Как проверено: vitest 536 ok (+4: фикстурный прогон Rc-AVTv5nMI, оригинал ru/audioTrackId-приоритет/
+  asr-фолбэк без маркеров), typecheck чист, cargo test зелёный (все наборы, exit 0), cargo build — из
+  src-tauri (ловля: из корня не подхватывается .cargo/config.toml c exclude-all-symbols → «export ordinal
+  too large»). Живой CDP-смоук debug-сборки на КОПИИ профиля пользователя (SPA из поиска, как в сценарии
+  жалобы): tracksInfo — ru:asr original=true / en:asr original=false; после включения duo — timedtext
+  lang=ru + tlang=en, движок 2 дорожки, плашка показывает русский текст видео («Ищите людей.» + англ.
+  перевод), скриншот e2e/subtitles/shot-159-milan-ru-base.png — ALL PASS 4/4. Каналы: Aila latest.json
+  0.1.54, manifest.json — APK-ассет 0.1.54.
+- Коммит: eeb227c — fix(subtitles): duopulse-159 — язык оригинала на мульти-даб видео (Rc-AVTv5nMI
+  ru+en-US): originalLangsOf выучил renderer.audioTracks[].audioTrackId, asr-фолбэк гейтится; релиз 0.1.54
