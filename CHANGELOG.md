@@ -7244,3 +7244,14 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   (0.1.64), README/ROADMAP не менялись (задача внутри цепочки duopulse-162).
 
 Коммит: 185efe5.
+
+## 17.11.2026, 23:05 — duopulse-180: видео не включало субтитры само при включённом duo (watch?v=ha3Aw8Ynids)
+- Начало работы: 17.11.2026, 19:59
+- Окончание работы: 17.11.2026, 23:05
+- Что сделано:
+  - Диагностика жалобы «не видит субтитры, но они там есть» (Holy Molly — Rugăciunea ta): YouTube отдаёт 1 asr-дорожку ro + 156 переводов; список дорожек находится и Alt+D работает во всех проверенных сценариях (холодный старт, списки блокировщика, SPA из поиска с hl=ru, shorts-страница).
+  - Воспроизведён сценарий жалобы: при включённом глобально duo (subtitlesLastEnabled=true) новое видео оставалось выключенным. Корень: ветка video-auto (duopulse-128, autопоказ на новых видео) мертва со времён релиза 0.1.30 — setMemory.get() для нового videoKey возвращает undefined, а условие сравнивало с null (undefined === null → false). Автопоказ не работал ни для одного видео/сайта.
+  - Фикс: content/duopulse-content.ts — нормализация `setMemory.get(...) ?? null` (+коммент о ловушке).
+  - Новый постоянный стенд e2e/subtitles/video-auto.mjs (5 проверок: дефолты доходят, enabled поднимается сам, дефолт-набор грузится, оверлей рисует реплики, set-state «вкл via video-auto»); артефакты video-auto-last-run.json/.png в .gitignore.
+- Как проверено: стенд e2e 5/5 на живом YouTube (yt:ro:asr 49 cues, оверлей «[cântat]…»); typecheck чист; vitest 632/632; cargo test 35+416 (1 ignored — прежний). Версия не поднималась (build:false, aila-418).
+- Коммит: b38dd0a fix(subtitles): duopulse-180 — видео не включало субтитры само при включённом глобально duo (ветка video-auto duopulse-128 была мёртвой: undefined === null)
