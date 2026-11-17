@@ -571,7 +571,10 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
         // для возврата к тому же видео. Детект до loadedmetadata приходит с
         // ключом без длительности — память по уточнённому ключу не стёрта,
         // уточнённый детект следом её поднимет.
-        const mem = setMemory.get(video.videoKey);
+        // ?? null обязателен: Map.get от отсутствующего ключа — undefined, и
+        // проверка mem === null ниже (ветка video-auto duopulse-128) оставалась
+        // мёртвой — новые видео не включались сами (duopulse-180).
+        const mem = setMemory.get(video.videoKey) ?? null;
         platformTracks = mem ? mem.platform : [];
         asrTracks = mem ? mem.asr : [];
         translateTracks = mem ? mem.translate : [];
