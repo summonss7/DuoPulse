@@ -153,8 +153,10 @@ export function toB64(buf: Uint8Array): string {
 
 let dlSeq = 0;
 
-/** Проверить, что dl-fetcher в iframe жив (рукопожатие ping→pong). */
-async function pingFetcher(transport: DlTransport, timeoutMs: number): Promise<void> {
+/** Проверить, что dl-fetcher в iframe жив (рукопожатие ping→pong).
+ * Экспортирован для ASR-конвейера duo (duopulse-167): фетчер — общий
+ * транспорт медиа-байтов googlevideo внутри embed-iframe. */
+export async function pingFetcher(transport: DlTransport, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       unsubscribe();

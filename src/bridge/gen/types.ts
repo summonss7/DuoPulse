@@ -2021,6 +2021,9 @@ export interface UiLangChanged {
    */
   lang: string;
 }
+/**
+ * Событие subtitles:asr_progress — панель показывает «Распознавание…» по фазам: model (скачивание модели, done/total — байты), audio (скачивание аудио, байты), decode (без счётчиков), transcribe (done/total — чанки), done, error. Мобильная ветка шлёт ту же форму (videoId вместо tabId).
+ */
 export interface SubtitlesAsrProgress {
   done: number;
   /**
@@ -2036,6 +2039,9 @@ export interface SubtitlesAsrProgress {
    * model | audio | decode | transcribe | done | error.
    */
   phase: string;
+  /**
+   * Десктоп — id вкладки, мобильная ветка — videoId (вкладок Core не знает).
+   */
   tabId: string;
   total: number;
   videoKey: string;

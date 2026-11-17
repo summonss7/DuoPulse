@@ -412,6 +412,74 @@
   color: var(--text-muted);
   margin: 0;
 }
+/* ── ASR (duopulse-167): строка «Распознать речь» + настройки облака ────── */
+.m-duo-asr-actions {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.m-duo-asr-actions button {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(189, 254, 79, 0.2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.m-duo-asr-actions .m-duo-asr-run,
+.m-duo-asr-actions .m-duo-asr-save {
+  color: var(--accent-neon);
+}
+.m-duo-asr-actions .m-duo-asr-gear {
+  padding: 0 10px;
+  margin-left: auto;
+}
+.m-duo-asr-actions button[disabled] {
+  opacity: 0.5;
+}
+.m-duo-asr-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(189, 254, 79, 0.25);
+  background: var(--bg-base);
+}
+.m-duo-asr-setup[hidden] {
+  display: none;
+}
+.m-duo-field input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(189, 254, 79, 0.2);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.m-duo-asr-setup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.m-duo-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.m-duo-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-neon);
+}
 
 /* ── OTA-баннер обновления (этап 3, duopulse-083) ────────────────────── */
 .m-update {

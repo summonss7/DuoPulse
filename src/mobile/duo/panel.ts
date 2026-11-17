@@ -3,15 +3,26 @@
 // + Google gtx), кегль, позиция, сдвиг. Мобильная вёрстка/тач: крупные
 // контролы, селекты нативные. Панель не знает о загрузке — изменения уходят
 // колбэком контроллеру, статус приходит в setStatus.
+//
+// ASR (duopulse-167, паритет 4/8): строка «Распознать речь» для видео без
+// дорожек — облачный провайдер; ⚙ раскрывает настройки (адрес API, модель,
+// ключ — хранится в Android Keystore), «Отмена» видна, пока конвейер занят.
 
 import { t } from "../../i18n";
 import { GTX_TARGET_LANGS, parseTranslationChoice, type DuoMobileSettings } from "./state";
 import type { MobileTrackList } from "./session";
+import type { MobileAsrSettings, MobileAsrSettingsPatch } from "./asr";
 import type { DuoStatus } from "./index";
 
 export interface DuoPanelCallbacks {
   onUpdate(patch: Partial<DuoMobileSettings>): void;
   onClose(): void;
+  /** «Распознать речь» (кэш/скачивание/облако — решает контроллер). */
+  onAsrRun(): void;
+  /** «Отмена» активного распознавания. */
+  onAsrCancel(): void;
+  /** Сохранить настройки облака (ключ — только в Keystore). */
+  onAsrSaveSettings(patch: MobileAsrSettingsPatch): Promise<MobileAsrSettings>;
 }
 
 /** Отображаемое имя дорожки: имя платформы или язык+тип. */
@@ -30,6 +41,13 @@ export class DuoPanel {
   private readonly toggleBtn: HTMLButtonElement;
   private readonly posBottom: HTMLButtonElement;
   private readonly posTop: HTMLButtonElement;
+  private readonly asrRunBtn: HTMLButtonElement;
+  private readonly asrCancelBtn: HTMLButtonElement;
+  private readonly asrSetupEl: HTMLElement;
+  private readonly asrUrlInput: HTMLInputElement;
+  private readonly asrModelInput: HTMLInputElement;
+  private readonly asrKeyInput: HTMLInputElement;
+  private readonly asrEnabledBox: HTMLInputElement;
   private suppressChange = false;
   private lastList: MobileTrackList | null = null;
   private builtForOriginal: string | null | undefined;
@@ -38,6 +56,10 @@ export class DuoPanel {
     private readonly callbacks: DuoPanelCallbacks,
     private readonly settings: () => DuoMobileSettings,
     list: () => MobileTrackList | null,
+    /** Есть ли открытое видео (кнопка ASR без него бессмысленна). */
+    private readonly hasVideo: () => boolean = () => true,
+    /** Настройки ASR (null — ещё не загружены: ключ не проверяем). */
+    private readonly asrSettings: () => MobileAsrSettings | null = () => null,
   ) {
     this.root = document.createElement("div");
     this.root.className = "m-duo-panel";
@@ -77,6 +99,36 @@ export class DuoPanel {
           <button class="m-duo-offset-plus" aria-label="${t("Позже")}">${t("+0,5 с")}</button>
         </div>
       </div>
+      <div class="m-duo-set m-duo-asr">
+        <span>ASR</span>
+        <div class="m-duo-asr-actions">
+          <button class="m-duo-asr-run">${t("Распознать речь (ASR)…")}</button>
+          <button class="m-duo-asr-cancel" hidden>${t("Отмена")}</button>
+          <button class="m-duo-asr-gear" title="${t("Настройки ASR")}" aria-label="${t("Настройки ASR")}">⚙</button>
+        </div>
+      </div>
+      <div class="m-duo-asr-setup" hidden>
+        <label class="m-duo-set m-duo-field">
+          <span>${t("Адрес API (OpenAI-совместимый)")}</span>
+          <input class="m-duo-asr-url" type="url" inputmode="url" autocomplete="off">
+        </label>
+        <label class="m-duo-set m-duo-field">
+          <span>${t("Модель")}</span>
+          <input class="m-duo-asr-model" autocomplete="off">
+        </label>
+        <label class="m-duo-set m-duo-field">
+          <span>${t("Ключ API")}</span>
+          <input class="m-duo-asr-key" type="password" autocomplete="off">
+        </label>
+        <div class="m-duo-set m-duo-asr-setup-row">
+          <label class="m-duo-check">
+            <input type="checkbox" class="m-duo-asr-enabled">
+            <span>${t("ASR включён")}</span>
+          </label>
+          <button class="m-duo-asr-save">${t("Сохранить")}</button>
+        </div>
+        <p class="m-duo-note">${t("Ключ хранится в системном хранилище устройства (Android Keystore); аудио уходит только выбранному провайдеру.")}</p>
+      </div>
       <div class="m-duo-status" hidden></div>
       <p class="m-duo-note">${t("Перевод Google работает без ключей; готовые дорожки — переводы самого видео. Провайдеры (DeepL/Google API/Libre) — десктоп.")}</p>
     `;
@@ -87,6 +139,13 @@ export class DuoPanel {
     this.offsetVal = this.root.querySelector<HTMLElement>(".m-duo-offset-val")!;
     this.posBottom = this.root.querySelector<HTMLButtonElement>(".m-duo-pos-bottom")!;
     this.posTop = this.root.querySelector<HTMLButtonElement>(".m-duo-pos-top")!;
+    this.asrRunBtn = this.root.querySelector<HTMLButtonElement>(".m-duo-asr-run")!;
+    this.asrCancelBtn = this.root.querySelector<HTMLButtonElement>(".m-duo-asr-cancel")!;
+    this.asrSetupEl = this.root.querySelector<HTMLElement>(".m-duo-asr-setup")!;
+    this.asrUrlInput = this.root.querySelector<HTMLInputElement>(".m-duo-asr-url")!;
+    this.asrModelInput = this.root.querySelector<HTMLInputElement>(".m-duo-asr-model")!;
+    this.asrKeyInput = this.root.querySelector<HTMLInputElement>(".m-duo-asr-key")!;
+    this.asrEnabledBox = this.root.querySelector<HTMLInputElement>(".m-duo-asr-enabled")!;
     this.statusEl = this.root.querySelector<HTMLElement>(".m-duo-status")!;
 
     this.root.querySelector(".m-duo-close")!.addEventListener("click", () => this.callbacks.onClose());
@@ -98,6 +157,22 @@ export class DuoPanel {
     this.posBottom.addEventListener("click", () => this.callbacks.onUpdate({ position: "bottom" }));
     this.posTop.addEventListener("click", () => this.callbacks.onUpdate({ position: "top" }));
 
+    // ASR (duopulse-167): без ключа первый тап раскрывает настройки (статус
+    // подскажет), с ключом — запуск; ⚙ — настройки, «Отмена» — прервать.
+    this.asrRunBtn.addEventListener("click", () => {
+      const s = this.asrSettings();
+      if (s && !s.hasApiKey) {
+        this.showSetup(true, t("Сохраните ключ API облака в настройках ASR"));
+        return;
+      }
+      this.callbacks.onAsrRun();
+    });
+    this.asrCancelBtn.addEventListener("click", () => this.callbacks.onAsrCancel());
+    this.root.querySelector(".m-duo-asr-gear")!.addEventListener("click", () => {
+      this.showSetup(this.asrSetupEl.hidden);
+    });
+    this.root.querySelector(".m-duo-asr-save")!.addEventListener("click", () => void this.saveAsrSettings());
+
     this.originalSel.addEventListener("change", () => {
       if (!this.suppressChange) this.callbacks.onUpdate({ originalId: this.originalSel.value || null });
     });
@@ -106,6 +181,7 @@ export class DuoPanel {
     });
     this.rebuildSelects(list());
     this.sync();
+    this.setAsrBusy(false);
   }
 
   /** Перестроить селекты под список дорожек видео (вызов при новой сессии). */
@@ -179,6 +255,53 @@ export class DuoPanel {
     // ошибка — явный флаг статуса (duopulse-138): переведённый текст
     // префиксом «duo: перев» уже не опишешь
     this.statusEl.classList.toggle("m-err", st.error === true && !!st.text);
+  }
+
+  /** Занятость ASR-конвейера: «Распознать» ↔ «Отмена» (прогресс — статусом). */
+  setAsrBusy(busy: boolean): void {
+    this.asrRunBtn.hidden = busy;
+    this.asrCancelBtn.hidden = !busy;
+    this.asrRunBtn.disabled = !this.hasVideo() && !busy;
+  }
+
+  /** Раскрыть/скрыть блок настроек облака; значения — из текущего снапшота
+   * (пустой ключ — не менять; placeholder подскажет, что ключ сохранён). */
+  private showSetup(show: boolean, hint?: string): void {
+    this.asrSetupEl.hidden = !show;
+    if (show) {
+      const s = this.asrSettings();
+      this.asrUrlInput.value = s?.openaiBaseUrl ?? "https://api.openai.com/v1";
+      this.asrModelInput.value = s?.openaiModel ?? "whisper-1";
+      this.asrEnabledBox.checked = s?.enabled ?? true;
+      this.asrKeyInput.value = "";
+      this.asrKeyInput.placeholder = s?.hasApiKey ? t("Ключ API") + " · ✓" : t("Ключ API");
+    }
+    if (hint) this.setStatus({ text: hint, busy: false });
+  }
+
+  /** Собрать поля и сохранить (ключ пуст — не менять). */
+  private async saveAsrSettings(): Promise<void> {
+    const patch: MobileAsrSettingsPatch = {
+      enabled: this.asrEnabledBox.checked,
+      openaiBaseUrl: this.asrUrlInput.value.trim(),
+      openaiModel: this.asrModelInput.value.trim() || "whisper-1",
+      ...(this.asrKeyInput.value.trim() ? { apiKey: this.asrKeyInput.value.trim() } : {}),
+    };
+    try {
+      const s = await this.callbacks.onAsrSaveSettings(patch);
+      this.showSetup(false);
+      this.setStatus({
+        text: s.hasApiKey ? t("Настройки ASR сохранены") : t("Сохраните ключ API облака в настройках ASR"),
+        busy: false,
+        error: !s.hasApiKey,
+      });
+    } catch (e) {
+      this.setStatus({
+        text: t("duo: {message}", { message: e instanceof Error ? e.message : String(e) }),
+        busy: false,
+        error: true,
+      });
+    }
   }
 
   remove(): void {

@@ -89,6 +89,13 @@ fn fmt_bitrate(f: &serde_json::Value) -> u64 {
 /// плеерами и медиатеками), (3) максимальный битрейт (обычно itag 140
 /// ~129 kbps); без m4a — любой аудио-формат (webm/opus).
 pub fn pick_audio_format(player: &serde_json::Value) -> Option<(String, String)> {
+    pick_audio_format_full(player).map(|(url, mime, _)| (url, mime))
+}
+
+/// Тот же выбор + размер дорожки в байтах (contentLength ответа или clen
+/// из url; 0 — неизвестен). Размер нужен ASR мобильной ветки (duopulse-167):
+/// UI гонит скачивание закрытыми диапазонами и рисует прогресс от total.
+pub fn pick_audio_format_full(player: &serde_json::Value) -> Option<(String, String, u64)> {
     let formats = player
         .pointer("/streamingData/adaptiveFormats")?
         .as_array()?;
@@ -113,7 +120,14 @@ pub fn pick_audio_format(player: &serde_json::Value) -> Option<(String, String)>
         .iter()
         .filter_map(audio)
         .max_by_key(|(primary, mp4, bitrate, _, _)| (*primary, *mp4, *bitrate))
-        .map(|(_, _, _, url, mime)| (url, mime))
+        .map(|(_, _, _, url, mime)| {
+            let f = formats
+                .iter()
+                .find(|f| f.get("url").and_then(|u| u.as_str()) == Some(url.as_str()))
+                .expect("формат взят из того же массива");
+            let size = fmt_size(f, &url);
+            (url, mime, size)
+        })
 }
 
 /// Расширение файла по mimeType дорожки.
@@ -137,7 +151,7 @@ fn quality_height(label: &str) -> u64 {
 /// Размер дорожки в байтах: contentLength из ответа, а если клиент его не
 /// положил (VISIONOS/ANDROID часто отдают только в подписанном url) —
 /// параметр clen query-строки.
-fn fmt_size(f: &serde_json::Value, url: &str) -> u64 {
+pub(crate) fn fmt_size(f: &serde_json::Value, url: &str) -> u64 {
     if let Some(s) = f.get("contentLength").and_then(|s| s.as_u64()) {
         return s;
     }
@@ -773,7 +787,7 @@ pub(crate) mod cmd {
     /// Текущий signatureTimestamp плеера YouTube (yt-dlp fad7e4e9, окт.2026).
     const SIG_TIMESTAMP: u64 = 20760;    /// Player-ответ innertube клиентом VISIONOS — прямые url дорожек без
     /// n-параметра. Кэш общий с субтитрами (ключ с префиксом «dl:», TTL 1 ч).
-    fn visionos_player_response(
+    pub(crate) fn visionos_player_response(
         video_id: &str,
         state: &State<'_, DuoManaged>,
     ) -> Result<serde_json::Value, String> {

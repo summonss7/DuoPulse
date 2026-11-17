@@ -7178,3 +7178,67 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   цепочки duopulse-162, план не менялся).
 
 Коммит: 6f53146.
+
+## 2026-11-17 17:46 — 19:25 — duopulse-167 — Паритет-мобайл 4/8: ASR-субтитры, облачный провайдер (OpenAI-совместимый)
+
+- Что сделано (этап 4/8 доработки duopulse-162, аудит duopulse-156): ASR-фолбэк
+  субтитров для видео без дорожек на мобильной ветке — облачный OpenAI-совместимый
+  провайдер (локальный whisper.exe — этап 5/8, здесь облако):
+  - Rust: чистое ядро asr/core.rs (AsrJobs-поколения, SubtitlesAsrProgress,
+    transcribe_pcm + тесты — вынесено из pipeline.rs, переэкспорт для десктопа);
+    engine.rs — собственные HttpResponse/TransportError (мобильная либа не
+    компилирует translate/http); config.rs — settings_view без server.rs на
+    мобильных таргетах; модули asr/ включены в либу (lib.rs cfg, server.rs/
+    pipeline.rs — только десктоп); symphonia в Cargo.toml (портативный декодер
+    как у десктопа). Мобильный конвейер mobile_asr.rs: команды asr_get/
+    set_settings (ключ — Android Keystore через secrets.rs, в settings.json
+    только URL/модель), subtitles_asr_start (кэш asr_tracks → готовые cues
+    с событием done fromCache; промах → URL/размер аудио из VISIONOS-ответа),
+    subtitles_asr_audio_append (буфер с потолком 250 МБ + событие прогресса
+    audio байты), subtitles_asr_audio_finish (decode → PCM 16 кГц моно → чанки
+    ≤5 мин → облако POST /v1/audio/transcriptions (ureq+rustls, Bearer) →
+    кэш; прогресс decode/transcribe/done, ошибки 401/429/5xx — AsrError),
+    subtitles_asr_cancel (поколение + буфер); mobile_download.rs —
+    pick_audio_format_full (+размер) и visionos_player_response pub(crate).
+  - TS: мобильный ASR-контроллер src/mobile/duo/asr.ts (start → кэш|фетчер
+    iframe dl-fetcher диапазонами → append → finish; отмена guard'ом ДО
+    первого await — синхронный cancel после старта больше не no-op; подписка
+    subscribeAsrProgress) + тесты asr.test.ts (кэш-хит/полный цикл/429/отмена/
+    настройки/тексты статусов — 6); duo/index.ts — recognizeSpeech/cancelAsr/
+    loadSettings/saveSettings, дорожка asr:<lang> в списке и показе (source
+    "asr", cues из памяти), ФИКС: у видео без дорожек duo.open выходил до
+    wireClock — часы подключаются при появлении ASR-дорожки, иначе реплики не
+    рисовались бы; panel.ts — строка ASR (Распознать речь/Отмена/⚙), блок
+    настроек облака (адрес/модель/ключ/вкл), без ключа первый тап раскрывает
+    настройки; mobile.ts — подписка прогресса, кнопки панели, статус занятости;
+    download.ts — pingFetcher export; mobile.css (.m-duo-asr-*), i18n +9×5.
+  - e2e/mobile/asr-cloud-smoke.mjs — постоянный стенд (19 проверок): сам
+    поднимает whisper-server (e2e/asr/.cache) + OpenAI-совместимый прокси
+    (этот билд whisper.cpp не имеет /v1/…; режим hang для детерминированной
+    отмены); сценарий: видео без captionTracks → настройки → полный прогон
+    (фазы audio/decode/transcribe/done, дорожка asr:en, реплики в оверлее) →
+    ключ не в файлах (run-as grep, Keystore) → отмена через hang 12 с →
+    airplane mode → повтор из кэша (done fromCache, 0 хитов прокси). Прогон
+    на эмуляторе duopulse36, pm clear на старте; скриншоты %TEMP%/duopulse-167-*.
+  - Доработано по итогам смоука: гонка отмены в asr.ts; событие прогресса
+    audio и кэш-done в mobile_asr.rs; wireClock-фикс; i18n предыдущего сеанса
+    расчищен от обёрток ['…'] в 5 словарях (значения показывались бы со
+    скобками); выбор видео для стенда: часть googlevideo-URL не фетчится из
+    iframe (webm/251 и m4a/140 оба встречаются, дело не в формате —
+    J1q4ZrQzGEg «Failed to fetch», IY7WMldMdjo/6m_vsxvPTiE качаются); то же
+    семейство ограничений, что у загрузок музыки (duopulse-122).
+- Как проверено: typecheck чист; vitest 60 файлов / 632 ok (6 новых asr);
+  cargo test 35+416 ok / 4 ignored (+2 asr/core: поколения, транскрипция
+  чанков с mock-транспортом; +1 append_chunk); bridge-контракт регенерирован
+  (v15, gen:bridge) и зелёный; живой смоук на эмуляторе debug-сборкой 0.1.64
+  без публикации (build:false, aila-418): 19/19 — видео без субтитров →
+  «Распознать речь» → дорожка asr:en в селекте и движке (6 cues), прогресс
+  фазами виден, реплики рендерятся в оверлее (activeRows=2, на скриншоте
+  распознанная реплика поверх играющего видео), «Отмена» видна и гасит
+  конвейер («duo: распознавание отменено»), airplane mode → повтор из кэша
+  без сети (событие done fromCache, прокси-хитов 0), ключ только в Android
+  Keystore (grep файлов приложения чист, hasApiKey true). Бэкап backup.bat
+  до правок (backups/backup_2026-11-17_17-58-26); эмулятор остановлен,
+  временные файлы %TEMP% удалены (скриншоты стенда оставлены), whisper-server
+  и прокси стенда гасятся самим стендом. Релизы/версия: без изменений
+  (0.1.64), README/ROADMAP не менялись (задача внутри цепочки duopulse-162).

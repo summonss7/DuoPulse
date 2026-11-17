@@ -23,7 +23,14 @@
 
 pub mod cache;
 pub mod config;
+/// Чистое ядро (duopulse-167): общее для десктопа и мобильной либы.
+pub mod core;
 pub mod decode;
 pub mod engine;
+// pipeline/server — десктопные (WebMessage asr-begin, SOCKS-роутер,
+// whisper-server.exe); мобильная ветка (duopulse-167) включает только
+// облачного провайдера — её конвейер в mobile_asr.rs.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod pipeline;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod server;

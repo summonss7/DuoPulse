@@ -219,6 +219,19 @@ hkdf = "0.12"
 # schemars — производные JsonSchema контрактных типов history/contract.rs.
 rusqlite = { version = "0.31", features = ["bundled"] }
 schemars = "0.8"
+# Декодирование аудио ASR мобильной ветки (duopulse-167): тот же symphonia,
+# что у десктопа (asr/decode.rs — m4a/AAC основной путь YouTube, mp3, wav,
+# ogg/vorbis, flac → PCM 16 кГц моно); чистый Rust — без ffmpeg в поставке.
+symphonia = { version = "0.5", default-features = false, features = [
+    "aac",
+    "isomp4",
+    "ogg",
+    "pcm",
+    "wav",
+    "mp3",
+    "vorbis",
+    "flac",
+] }
 
 [dev-dependencies]
 # Loopback-стенд WireGuard для маршрутных тестов (задача 6.6, карточка

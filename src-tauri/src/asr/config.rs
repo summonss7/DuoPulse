@@ -180,12 +180,21 @@ pub fn has_api_key(dir: &Path) -> bool {
     secrets::exists(&api_key_path(dir))
 }
 
-/// Снапшот настроек для UI (asr.get_settings).
+/// Снапшот настроек для UI (asr.get_settings). Мобильная ветка (duopulse-167)
+/// локального whisper-server не знает (server.rs — десктопный) — поля движка
+/// всегда false: провайдер один, облако.
 pub fn settings_view(dir: &Path) -> AsrSettings {
     let cfg = load_config(dir);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let (engine_found, model_downloaded) = (
+        super::server::engine_exe_path(dir, &cfg).is_some(),
+        super::server::model_path(dir, cfg.local_model).is_file(),
+    );
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let (engine_found, model_downloaded) = (false, false);
     AsrSettings {
-        engine_found: super::server::engine_exe_path(dir, &cfg).is_some(),
-        model_downloaded: super::server::model_path(dir, cfg.local_model).is_file(),
+        engine_found,
+        model_downloaded,
         enabled: cfg.enabled,
         provider: cfg.provider,
         local_model: cfg.local_model,

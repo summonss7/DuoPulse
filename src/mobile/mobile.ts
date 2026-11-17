@@ -31,6 +31,7 @@ import {
   type MobileEngineId,
 } from "./platform";
 import { MobileDuo, type DuoStatus } from "./duo";
+import { subscribeAsrProgress } from "./duo/asr";
 import { MobileBookmarks } from "./bookmarks";
 import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
 import { MobileHistory } from "./history";
@@ -432,11 +433,14 @@ let duoPanel: import("./duo/panel").DuoPanel | null = null;
 let videoOpen = false;
 const duo = new MobileDuo(content, () => tabs.activeFrame, (s: DuoStatus) => {
   duoPanel?.setStatus(s);
+  duoPanel?.setAsrBusy(duo.isAsrBusy);
   // Панель закрыта — статус duo виден в общей строке (панель открыта — только в ней).
   if (!duoPanel) {
     note(s.text ?? (videoOpen ? t("Плеер YouTube. Нажмите «duo» для субтитров и перевода.") : ""));
   }
 });
+// ASR (duopulse-167): прогресс конвейера (событие Core) — в статус duo
+subscribeAsrProgress((p) => duo.onAsrProgress(p));
 duoBtn.addEventListener("click", () => {
   if (duoPanel) {
     duoPanel.remove();
@@ -445,6 +449,9 @@ duoBtn.addEventListener("click", () => {
   }
   void (async () => {
     const { DuoPanel } = await import("./duo/panel");
+    // настройки ASR подтягиваем до панели: первый тап без ключа раскроет
+    // настройки, а не молчаливый отказ конвейера
+    await duo.loadAsrSettings();
     duoPanel = new DuoPanel(
       {
         onUpdate: (patch) => {
@@ -455,9 +462,19 @@ duoBtn.addEventListener("click", () => {
           duoPanel?.remove();
           duoPanel = null;
         },
+        onAsrRun: () => {
+          void duo.recognizeSpeech().then(() => {
+            duoPanel?.refreshList(duo.trackList);
+            duoPanel?.sync();
+          });
+        },
+        onAsrCancel: () => duo.cancelAsr(),
+        onAsrSaveSettings: (patch) => duo.saveAsrSettings(patch),
       },
       () => duo.currentSettings,
       () => duo.trackList,
+      () => duo.currentVideoId !== null,
+      () => duo.asrSettingsView,
     );
     content.appendChild(duoPanel.root);
     duoPanel.refreshList(duo.trackList);

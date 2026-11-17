@@ -94,6 +94,14 @@ pub mod mobile_account;
 // у десктопного бара) → событие UI; чистое ядро — в passwords/prompts.rs.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod mobile_pass;
+// ASR-субтитры мобильной ветки (duopulse-167, паритет 4/8): облачный
+// OpenAI-совместимый провайдер для видео без дорожек — модули asr/ (engine/
+// decode/cache/config/core) общие с десктопом, конвейер мобильный (аудио
+// качает фетчер iframe, чанки приходят командой; прогресс — событием).
+// Десктопные pipeline/server (whisper.exe, SOCKS-роутер) сюда не входят.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod asr;
+pub mod mobile_asr;
 // Парсеры cue — мобильным таргетам (duopulse-082): parse_auto для duo_fetch_
 // cues. На десктопе либа их не компилирует: оставалась бы тонкой (cdylib
 // Windows/MinGW не тянет экспорт тяжёлых деревьев — quick-xml, ср. рецепт
@@ -175,6 +183,13 @@ fn mobile_run() {
                 passwords::PasswordStore::open(&dir).map_err(|e| format!("открыть пароли: {e}"))?,
             );
             let account = Arc::new(aila::AilaAccount::new(&dir));
+            // Кэш ASR-дорожек (duopulse-167): та же таблица asr_tracks в
+            // duopulse.db, что на десктопе — повторный просмотр видео без
+            // сети (airplane mode) получает дорожку из кэша.
+            let asr_cache = Arc::new(
+                asr::cache::AsrCache::open(&dir)
+                    .map_err(|e| format!("открыть кэш ASR: {e}"))?,
+            );
             // Пароли из форм web-оверлея (duopulse-165): состояние бара —
             // общий PasswordPrompts; статика mobile_pass даёт JNI-вызовам
             // (MobilePassNative) тот же стор и эмиттер событий UI.
@@ -188,6 +203,8 @@ fn mobile_run() {
             app.manage(history);
             app.manage(passwords);
             app.manage(account);
+            app.manage(asr_cache);
+            app.manage(Arc::new(mobile_asr::cmd::AsrManaged::default()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -244,6 +261,14 @@ fn mobile_run() {
             mobile_pass::mobile_password_incognito,
             mobile_pass::mobile_password_candidate,
             mobile_pass::mobile_password_resolve,
+            // ASR-субтитры (duopulse-167): настройки облака (ключ — Keystore)
+            // и конвейер распознавания (start/append/finish/cancel).
+            mobile_asr::cmd::asr_get_settings,
+            mobile_asr::cmd::asr_set_settings,
+            mobile_asr::cmd::subtitles_asr_start,
+            mobile_asr::cmd::subtitles_asr_audio_append,
+            mobile_asr::cmd::subtitles_asr_audio_finish,
+            mobile_asr::cmd::subtitles_asr_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить DuoPulse (мобильная ветка)");

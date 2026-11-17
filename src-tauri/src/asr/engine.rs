@@ -14,7 +14,16 @@
 
 use std::time::Duration;
 
-use crate::translate::http::{HttpResponse, TransportError};
+/// Минимальный ответ, нужный ASR-движку: статус + тело (duopulse-167 —
+/// собственные типы вместо translate/http.rs: мобильная либа модуль перевода
+/// не включает, а ASR-конвейер компилируется на обеих ветках).
+pub struct HttpResponse {
+    pub status: u16,
+    pub body: String,
+}
+
+/// Ошибка транспорта (сеть/DNS/таймаут).
+pub struct TransportError(pub String);
 
 /// Ошибка транскрипции. `retryable()` — повторять ли запрос.
 #[derive(Debug, Clone, PartialEq, Eq)]

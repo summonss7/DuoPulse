@@ -6568,6 +6568,7 @@
     "subtitles:asr_progress": {
       "payload": {
         "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Событие subtitles:asr_progress — панель показывает «Распознавание…» по фазам: model (скачивание модели, done/total — байты), audio (скачивание аудио, байты), decode (без счётчиков), transcribe (done/total — чанки), done, error. Мобильная ветка шлёт ту же форму (videoId вместо tabId).",
         "properties": {
           "done": {
             "format": "uint32",
@@ -6593,6 +6594,7 @@
             "type": "string"
           },
           "tabId": {
+            "description": "Десктоп — id вкладки, мобильная ветка — videoId (вкладок Core не знает).",
             "type": "string"
           },
           "total": {

@@ -6,7 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../../i18n";
-import type { Track } from "../../../content/types";
+import type { Cue, Track } from "../../../content/types";
 import { SubtitlesEngine } from "../../../content/engine/subtitles-engine";
 import { DuoOverlay } from "./overlay";
 import { YtClock } from "./clock";
@@ -21,6 +21,14 @@ import {
 } from "./session";
 import { loadDuoSettings, saveDuoSettings, type DuoMobileSettings } from "./state";
 import { parseTranslationChoice } from "./state";
+import {
+  asrProgressText,
+  createMobileAsr,
+  type AsrProgressEvent,
+  type AsrRunResult,
+  type MobileAsr,
+  type MobileAsrSettings,
+} from "./asr";
 
 export interface DuoStatus {
   /** Сообщение для строки статуса панели (null — убрать). */
@@ -43,6 +51,12 @@ export class MobileDuo {
   private seq = 0;
   private readonly engine = new SubtitlesEngine({ onRowsChange: (rows) => this.overlay.setRows(rows) });
   private readonly overlay: DuoOverlay;
+  /** ASR-контроллер (duopulse-167) и его дорожки: asr:<lang> → cues. */
+  private readonly asr: MobileAsr;
+  private readonly asrCues = new Map<string, Cue[]>();
+  private asrBusy = false;
+  /** Последний снимок настроек ASR (панель спрашивает при открытии). */
+  private asrSettingsSnap: MobileAsrSettings | null = null;
 
   constructor(
     private readonly contentEl: HTMLElement,
@@ -53,6 +67,9 @@ export class MobileDuo {
   ) {
     this.overlay = new DuoOverlay(contentEl);
     this.overlay.applySettings(this.settings);
+    // ASR (duopulse-167): контроллер конвейера — тот же транспорт фетчера
+    // iframe, что у загрузок музыки; порты подменяются в тестах.
+    this.asr = createMobileAsr({ getFrame, doInvoke });
     // Тест-хук смоука (как окно page e2e-стенда десктопа): состояние движка/часов.
     (window as unknown as { __duoDebug?: () => unknown }).__duoDebug = () => ({
       videoId: this.videoId,
@@ -60,6 +77,8 @@ export class MobileDuo {
       engine: this.engine.state(),
       settings: this.settings,
       baseCount: this.list?.base.length ?? 0,
+      asr: this.asr.stateSnapshot(),
+      asrTracks: [...this.asrCues.keys()],
     });
   }
 
@@ -80,6 +99,106 @@ export class MobileDuo {
    *  собирают из него watch-url. */
   get currentVideoId(): string | null {
     return this.videoId;
+  }
+
+  /** ASR-конвейер занят (кнопка ↔ отмена в панели). */
+  get isAsrBusy(): boolean {
+    return this.asrBusy;
+  }
+
+  /** Настройки ASR для панели (снимок обновляет loadAsrSettings). */
+  get asrSettingsView(): MobileAsrSettings | null {
+    return this.asrSettingsSnap;
+  }
+
+  /** Подтянуть настройки ASR из Core (панель зовёт при открытии). */
+  async loadAsrSettings(): Promise<MobileAsrSettings | null> {
+    try {
+      this.asrSettingsSnap = await this.asr.loadSettings();
+    } catch {
+      this.asrSettingsSnap = null; // Core недоступен — панель покажет дефолты
+    }
+    return this.asrSettingsSnap;
+  }
+
+  /** Сохранить настройки облака (панель) + обновить снимок. */
+  async saveAsrSettings(patch: Parameters<MobileAsr["saveSettings"]>[0]): Promise<MobileAsrSettings> {
+    const s = await this.asr.saveSettings(patch);
+    this.asrSettingsSnap = s;
+    return s;
+  }
+
+  /** Событие прогресса конвейера (subtitles:asr_progress; tabId = videoId):
+   * статус панели — той же строкой, что на десктопе. */
+  onAsrProgress(p: AsrProgressEvent): void {
+    if (!this.videoId || (p.tabId && p.tabId !== this.videoId)) return;
+    const text = asrProgressText(p);
+    if (!text) return;
+    this.onStatus({
+      text,
+      busy: p.phase !== "done" && p.phase !== "error",
+      error: p.phase === "error",
+    });
+  }
+
+  /** «Распознать речь» (duopulse-167): конвейер Core (кэш → аудио фетчером
+   * iframe → облако) → дорожка asr:<lang> в списке и показе. Повторный тап
+   * при занятом конвейере игнорируется (отмена — отдельной кнопкой). */
+  async recognizeSpeech(): Promise<void> {
+    const videoId = this.videoId;
+    if (!videoId || this.asrBusy) return;
+    this.asrBusy = true;
+    this.onStatus({ text: t("Распознавание запущено…"), busy: true });
+    try {
+      const r: AsrRunResult = await this.asr.recognize(videoId, "");
+      const lang = r.lang || "auto";
+      const trackId = `asr:${lang}`;
+      this.asrCues.set(trackId, r.cues);
+      if (!this.list) {
+        this.list = {
+          videoId,
+          title: this.title,
+          base: [],
+          translations: [],
+          urls: new Map(),
+          originalLangs: new Set(),
+        };
+      }
+      this.list.base = [
+        ...this.list.base.filter((x) => x.id !== trackId),
+        {
+          id: trackId,
+          lang,
+          name: lang === "auto" ? "ASR" : `ASR · ${lang}`,
+          kind: "asr",
+          vssId: "",
+          translatable: false,
+          original: true,
+        },
+      ];
+      this.settings.originalId = trackId;
+      this.settings.enabled = true;
+      saveDuoSettings(this.settings);
+      // Видео без дорожек не подключало часы (open выходит до wireClock —
+      // «нет субтитров»): дорожка ASR появилась, а реплики не рисуются.
+      // YT.Player поверх живого iframe работает и поздним подключением.
+      if (!this.clock) this.wireClock();
+      await this.applySet(++this.seq);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === t("распознавание отменено")) {
+        this.onStatus({ text: t("duo: распознавание отменено"), busy: false });
+      } else {
+        this.onStatus({ text: t("duo: {message}", { message: msg }), busy: false, error: true });
+      }
+    } finally {
+      this.asrBusy = false;
+    }
+  }
+
+  /** «Отмена» панели: поколение в Core + флаг транспорта фетчера. */
+  cancelAsr(): void {
+    if (this.videoId) this.asr.cancel(this.videoId);
   }
 
   /** Открылось YouTube-видео (embed). Загружает список дорожек и набор. */
@@ -114,6 +233,7 @@ export class MobileDuo {
 
   /** Видео закрыто/сменилось (full — выгрузить и панель). */
   close(full = true): void {
+    this.cancelAsr(); // конвейер ASR этого видео больше не актуален
     this.seq++;
     this.engine.detach();
     this.engine.setTracks([]);
@@ -122,6 +242,8 @@ export class MobileDuo {
     this.videoId = null;
     this.list = null;
     this.title = "";
+    this.asrCues.clear();
+    this.asrBusy = false;
     this.onStatus({ text: null, busy: false });
     if (full) void 0;
   }
@@ -203,7 +325,10 @@ export class MobileDuo {
     }
     const original = list.base.find((tr) => tr.id === this.settings.originalId);
     const baseUrl = original ? list.urls.get(original.id) : undefined;
-    if (!original || !baseUrl) {
+    // Дорожка ASR (duopulse-167): cues уже в памяти (кэш Core/конвейер), URL
+    // у неё нет — скачивать нечего.
+    const asrCues = original ? this.asrCues.get(original.id) : undefined;
+    if (!original || (!baseUrl && !asrCues)) {
       this.onStatus({ text: t("duo: дорожка оригинала недоступна"), busy: false, error: true });
       return;
     }
@@ -215,12 +340,19 @@ export class MobileDuo {
     };
     this.onStatus({ text: t("duo: грузю субтитры…"), busy: true });
     try {
-      const cues = await loadCuesByUrl(this.doInvoke, baseUrl, signal);
+      const cues = asrCues ?? (await loadCuesByUrl(this.doInvoke, baseUrl!, signal));
       if (signal.aborted) return;
       // Оригинал — сразу: перевод добирается в фоне, сбой перевода не роняет
       // показ (честная деградация сообщением, критерий этапа 2).
       const tracks: Track[] = [
-        { id: original.id, source: "youtube", lang: original.lang, role: "original", cues },
+        {
+          id: original.id,
+          // Дорожка ASR — свой источник (кэш/конвейер, не платформа)
+          source: original.id.startsWith("asr:") ? "asr" : "youtube",
+          lang: original.lang,
+          role: "original",
+          cues,
+        },
       ];
       this.engine.setTracks(tracks);
       const choice = parseTranslationChoice(this.settings.translation);
