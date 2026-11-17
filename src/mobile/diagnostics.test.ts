@@ -15,6 +15,7 @@ const snap = (over: Partial<DiagSnapshot> = {}): DiagSnapshot => ({
   historyEntries: 12,
   bookmarks: 4,
   passwords: 2,
+  passAutofill: true,
   adblock: { enabled: true, ready: true, blockedTotal: 50, seenTotal: 200 },
   lastUpdateCheckMs: null,
   nowMs: new Date(2026, 10, 17, 13, 45).getTime(),
@@ -44,13 +45,23 @@ describe("diagSections", () => {
     expect(s[0].rows).toContain("Канал обновлений: aila.skillcoin.pp.ua");
     expect(s[0].rows).toContain("Сеанс: 6 мин");
     expect(s[0].rows).toContain("Память процесса: 236 МБ"); // 241152 кБ ≈ 235,5 → 236
-    expect(s[1].rows).toEqual(["Открыто вкладок: 3", "История: 12", "Закладки: 4", "Пароли: 2"]);
+    expect(s[1].rows).toEqual([
+      "Открыто вкладок: 3",
+      "История: 12",
+      "Закладки: 4",
+      "Пароли: 2",
+      "Автозаполнение паролей: включено",
+    ]);
     expect(s[2].rows).toContain("Адблок: заблокировано 50 из 200 запросов");
     expect(s[2].rows).toContain("списки готовы");
   });
   it("память недоступна — прочерк", () => {
     const s = diagSections(snap({ rssKb: null }), { lastCheckMs: null, availableVersion: null });
     expect(s[0].rows).toContain("Память процесса: —");
+  });
+  it("инкогнито — автозаполнение паролей выключено (duopulse-166)", () => {
+    const s = diagSections(snap({ passAutofill: false }), { lastCheckMs: null, availableVersion: null });
+    expect(s[1].rows).toContain("Автозаполнение паролей: выключено (инкогнито)");
   });
   it("адблок выключен — одна строка без счётчиков; недоступен — честная строка", () => {
     const off = diagSections(

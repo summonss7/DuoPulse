@@ -25,6 +25,8 @@ export interface DiagSnapshot {
   historyEntries: number;
   bookmarks: number;
   passwords: number;
+  /** Автозаполнение паролей доступно (false — инкогнито, duopulse-166). */
+  passAutofill: boolean;
   adblock: { enabled: boolean; ready: boolean; blockedTotal: number; seenTotal: number } | null;
   lastUpdateCheckMs: number | null;
   nowMs: number;
@@ -90,6 +92,10 @@ export function diagSections(snap: DiagSnapshot, upd: DiagUpdate): DiagSection[]
       t("История: {n}", { n: snap.historyEntries }),
       t("Закладки: {n}", { n: snap.bookmarks }),
       t("Пароли: {n}", { n: snap.passwords }),
+      // duopulse-166: автозаполнение выключено ровно в инкогнито
+      snap.passAutofill
+        ? t("Автозаполнение паролей: включено")
+        : t("Автозаполнение паролей: выключено (инкогнито)"),
     ],
   };
   const ad: DiagSection = { title: t("Блокировщик рекламы"), rows: [] };

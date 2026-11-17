@@ -7119,3 +7119,62 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   цепочки duopulse-162, план не менялся).
 
 Коммит: f0fc226.
+
+## 2026-11-17 15:32 — 15:58 · duopulse-166 — Паритет-мобайл 3/8: автозаполнение паролей в web-оверлее
+
+- Что изменено: автозаполнение сохранённых паролей в формах web-оверлея
+  мобильной ветки (порт content/passwords-fill.ts, паритет с десктопом; после
+  захвата duopulse-165). Версия НЕ поднималась и НЕ публиковалась — флажок
+  Артёма build:false (aila-418).
+  - src-tauri/src/passwords/autofill.rs (новый) — чистое ядро: accounts_for_url
+    (логины сайта, БЕЗ паролей) и credential_for_url (reveal по факту выбора),
+    оба по origin из URL вкладки (origin_of общего PasswordStore), инкогнито
+    выключает оба, битый URL — тихо пусто; 4 хост-теста (подключён в
+    passwords/mod.rs);
+  - mobile_pass.rs — FILL_SCRIPT (include_str! mobile_pass_fill.js),
+    accounts_for_overlay/credential_for_overlay, is_incognito (для диагностики);
+    JNI +3: fillScript, accountsFor (JSON-массив имён), credentialFor
+    (null = нет/инкогнито/сбой); пароль не логируется;
+  - src-tauri/src/mobile_pass_fill.js (новый пейлоад) — сканер форм логина
+    (MutationObserver — SPA), DuopulseFill.ready() один раз на документ,
+    window.__dpPassAccounts — иконки-ключи 🔑 у полей пароля (fixed, едут за
+    полями на scroll/resize, исчезнувшие поля теряют иконку, пустой список —
+    иконок нет), тап по иконке → DuopulseFill.pick() с парой-целью,
+    window.__dpPassFill — заполнение нативными сеттерами (input/change для
+    React/Vue); пароль живёт аргументом вызова мгновение, в JS не хранится;
+  - Kotlin: MobilePassNative.kt +3 external/обёртки; MobileWebHelper.kt —
+    инжекция пейлоада onPageFinished (после capture), JS-интерфейс
+    DuopulseFill (ready/pick с UI-нити, доверенный URL — странице не верим),
+    fillUsername (credential → evaluateJavascript точечно в поля),
+    нативный нижний лист выбора аккаунта (m-sheet стиль: elevated-фон
+    #1d282b, скругление сверху, акцентная рамка, ТОЛЬКО имена — паролей в
+    листе нет), один аккаунт — заполнение сразу без листа, dismiss листа в
+    teardown оверлея;
+  - диагностика (duopulse-164): DiagSnapshot.passAutofill (мобильная команда
+    diag_snapshot) + строка «Автозаполнение паролей: включено / выключено
+    (инкогнито)» в листе «Диагностика» (src/mobile/diagnostics.ts); i18n +2
+    ключа ×5 словарей (en/uk/ro/sk/ar);
+  - e2e/mobile/pass-capture-smoke.mjs продлён до 22 проверок: перезагрузка
+    страницы → иконка-ключ → тап → заполнение одним аккаунтом; второй
+    аккаунт → нативный лист (uiautomator dump + input tap в физических
+    пикселях) → выбор → поля заполнены; инкогнито — иконки нет; logcat
+    прогона не содержит значений паролей; заодно починен shot() стенда
+    (utf8-энкодинг портил бинарный PNG — скриншоты были битые);
+  - AGENTS.md: описание стенда дополнено сценариями автозаполнения.
+- Как проверено: typecheck чист; vitest 59 файлов / 626 ok (+12: 11 пейлоада
+  автозаполнения в happy-dom + 1 диагностики); cargo test 416 ok / 4 ignored
+  (+4 autofill); debug-APK 0.1.64 собран scripts/android-build.sh debug в
+  builds/duopulse_0.1.64_android_debug/ (пересобран с правками, НЕ
+  опубликован — build:false); живой смоук на эмуляторе duopulse36 — 22/22:
+  иконка-ключ появляется у поля пароля с сохранённым аккаунтом, тап
+  заполняет логин+пароль (значения в полях проверены DOM-ом), два аккаунта —
+  нативный лист с именами обоих (uiautomator: паролей в листе нет), выбор
+  тапом заполняет форму, инкогнито — иконки нет и бара нет, logcat без
+  паролей; визуально проверены скриншоты fill-key (иконка на правом краю
+  поля) и fill-sheet (лист: тёмный фон, скругление сверху, крупные пункты).
+  Бэкап backup.bat до правок (backups/backup_2026-11-17_15-36-02); эмулятор
+  остановлен, временные файлы %TEMP% стенда пересоздаются прогонами.
+  Релизы/версия: без изменений (0.1.64), ROADMAP не менялся (задача внутри
+  цепочки duopulse-162, план не менялся).
+
+Коммит: —

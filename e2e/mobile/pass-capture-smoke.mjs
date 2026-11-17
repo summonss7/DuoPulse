@@ -1,16 +1,23 @@
-// E2E-смоук захвата паролей из форм web-оверлея (карточка duopulse-165,
-// паритет 2/8): debug-сборка на эмуляторе (у релиза нет CDP-сокета
-// webview_devtools_remote, конвенция смоука duopulse-144 — порт 9223).
-// Сценарий (страница dp165-login.html на 10.0.2.2:8901 из эмулятора):
+// E2E-смоук паролей web-оверлея: захват из форм (карточка duopulse-165,
+// паритет 2/8) и автозаполнение (duopulse-166, паритет 3/8): debug-сборка
+// на эмуляторе (у релиза нет CDP-сокета webview_devtools_remote, конвенция
+// смоука duopulse-144 — порт 9223). Сценарий (страница dp165-login.html на
+// 10.0.2.2:8901 из эмулятора):
 //   1) оверлей открываем invoke'ом mobile_web_open из UI-webview (без тапов),
 //     CDP-цель страницы оверлея ищем по URL (мёртвые цели висят в /json);
 //   2) сабмит формы в оверлее → мобильный лист «Сохранить пароль?»
 //     (хук __duopulseMobilePassSave) → «Сохранить» → запись в списке паролей
 //     (mobile_passwords_list) и пароль по reveal;
 //   3) смена пароля → бар «Обновить» → сохранить → reveal видит новый;
+//   3b) автозаполнение (166): перезагрузка страницы → иконка-ключ у поля
+//     пароля → тап → один аккаунт — заполнение сразу (логин+пароль в полях);
+//     второй аккаунт → тап → нативный нижний лист имён (uiautomator dump,
+//     тап в физических пикселях) → выбор → поля заполнены вторым; logcat
+//     весь прогон не содержит паролей;
 //   4) «Никогда для этого сайта» → повторный сабмит бара НЕ даёт;
 //   5) инкогнито (кнопка mPrivate: Core-флаг + оверлей закрыт) → повторное
-//     открытие и сабмит — бара нет, кандидат Core пуст.
+//     открытие: иконки-ключа НЕТ (автозаполнение выключено), сабмит — бара
+//     нет, кандидат Core пуст.
 // Запуск (APK установлен, эмулятор поднят): node e2e/mobile/pass-capture-smoke.mjs
 // Результат — e2e/mobile/pass-capture-smoke-last-run.json (gitignore,
 // рантайм-артефакт). Скриншоты — %TEMP%/duopulse-165-*.png.
@@ -42,8 +49,9 @@ const adb = (...args) =>
   });
 const shot = (name) => {
   const p = join(tmpdir(), `duopulse-165-${name}.png`);
-  const buf = adb("exec-out", "screencap", "-p");
-  writeFileSync(p, Buffer.from(buf, "binary"));
+  // Buffer без encoding: utf8-строка портила бинарные байты PNG (0x89→0xFD).
+  // exec-out (не shell) переводы строк не конвертит — байты пишем как есть.
+  writeFileSync(p, execFileSync("adb", ["-s", SERIAL, "exec-out", "screencap", "-p"]));
   console.log(`скриншот: ${p}`);
 };
 
@@ -145,8 +153,68 @@ const submit = (ov, user, pass) =>
 const bar = (ui) => ui.evalJs("JSON.stringify(window.__duopulseMobilePassSave())")
   .then((s) => JSON.parse(s));
 
+/** Ждать истинности выражения в оверлее (навигация роняет контекст —
+ *  ловим и продолжаем опрос); null — не дождались. */
+async function waitFor(ov, expr, ms = 15000) {
+  for (let i = 0; i < ms / 250; i++) {
+    try {
+      if (await ov.evalJs(expr)) return true;
+    } catch { /* контекст меняется навигацией — опрос продолжается */ }
+    await sleep(250);
+  }
+  return false;
+}
+
+/** Перезагрузить страницу стенда и дождаться пейлоадов (новый документ —
+ *  свежие маркеры __dpPassWatch/__dpPassFillWatch). */
+async function reloadStand(ov) {
+  try { await ov.evalJs("location.reload()"); } catch { /* контекст умер — норм */ }
+  const ok = await waitFor(ov, "window.__dpPassFillWatch === 1", 15000);
+  if (!ok) throw new Error("пейлоад автозаполнения не поднялся после reload");
+  await sleep(500); // ready() → Core → __dpPassAccounts → иконки
+}
+
+/** Тап по иконке-ключу у поля пароля (duopulse-166); false — иконки нет. */
+const tapKey = (ov) =>
+  ov.evalJs(`(function(){
+    var ic = document.querySelector("[data-duopulse-passkey]");
+    if (!ic) return false;
+    ic.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true}));
+    return true;
+  })()`);
+
+/** Значения полей формы [логин, пароль]. */
+const fieldValues = (ov) =>
+  ov.evalJs(`JSON.stringify([document.getElementById("u").value,
+    document.getElementById("p").value])`).then((s) => JSON.parse(s));
+
+/** Иконка-ключ в DOM оверлея (null — нет). */
+const hasKey = (ov) => ov.evalJs(`!!document.querySelector("[data-duopulse-passkey]")`)
+  .catch(() => false);
+
+/** Нативный нижний лист выбора аккаунта: uiautomator dump → узлы с текстом.
+ *  Возвращает Map текст → центр (физические пиксели для input tap). */
+function sheetRows() {
+  for (let a = 0; a < 6; a++) {
+    try {
+      adb("shell", "uiautomator", "dump", "/sdcard/uidump.xml");
+      const xml = adb("shell", "cat", "/sdcard/uidump.xml").replace(/\r/g, "");
+      const rows = new Map();
+      for (const m of xml.matchAll(/<node[^>]*text="([^"]+)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g)) {
+        const [, text, x1, y1, x2, y2] = m;
+        if (text && !rows.has(text))
+          rows.set(text, [Math.round((+x1 + +x2) / 2), Math.round((+y1 + +y2) / 2)]);
+      }
+      if (rows.size) return rows;
+    } catch { /* dump гонится за анимацией — повтор */ }
+    sleep(400);
+  }
+  return new Map();
+}
+
 try {
   adb("shell", "am", "force-stop", PKG);
+  adb("shell", "logcat", "-c"); // чистый буфер: проверка «паролей в logcat нет»
   await sleep(800);
   adb("shell", "am", "start", "-n", `${PKG}/dev.duopulse.mobile.MainActivity`);
   await sleep(2500); // окно и webview поднимаются не мгновенно
@@ -199,6 +267,51 @@ try {
     check("пароль записи обновился", rev2 === "pass-two");
   }
 
+  // 3b) автозаполнение (duopulse-166): перезагрузка → иконка-ключ → тап →
+  //     один аккаунт заполняет форму сразу (логин+пароль в полях)
+  await reloadStand(ov);
+  const keyed = await waitFor(ov,
+    `!!document.querySelector("[data-duopulse-passkey]")`, 8000);
+  check("автозаполнение: иконка-ключ у поля пароля", keyed === true);
+  shot("fill-key");
+  check("автозаполнение: тап по иконке (один аккаунт)", (await tapKey(ov)) === true);
+  await sleep(1200); // pick() → Core credential → __dpPassFill
+  let vals = await fieldValues(ov);
+  check("автозаполнение: один аккаунт заполнил логин+пароль",
+    vals[0] === USER && vals[1] === "pass-two", JSON.stringify(vals));
+
+  //     второй аккаунт сайта → тап по иконке → нативный лист имён (БЕЗ
+  //     паролей) → выбор → поля заполнены вторым
+  const USER2 = `alya${(Date.now() % 1e7).toString(36)}`;
+  await submit(ov, USER2, "pass-b");
+  await sleep(1200);
+  b = await bar(ui);
+  check("второй аккаунт: бар «Сохранить» показан",
+    b.open === true && b.view?.updated === false, b.view?.username || "");
+  await ui.evalJs(`document.querySelector(".m-pass-save").click()`);
+  await sleep(900);
+  await reloadStand(ov);
+  await waitFor(ov, `!!document.querySelector("[data-duopulse-passkey]")`, 8000);
+  check("второй аккаунт: тап по иконке (лист выбора)", (await tapKey(ov)) === true);
+  await sleep(900); // нативный лист поднимается
+  shot("fill-sheet");
+  const rows = sheetRows();
+  const pt = rows.get(USER2);
+  check("лист выбора: имена обоих аккаунтов (паролей в листе нет)",
+    rows.has(USER) && !!pt, [...rows.keys()].filter((k) => k.length < 30).join(", "));
+  if (pt) {
+    adb("shell", "input", "tap", String(pt[0]), String(pt[1]));
+    await sleep(1200);
+    vals = await fieldValues(ov);
+    check("лист выбора: выбранный аккаунт заполнил форму",
+      vals[0] === USER2 && vals[1] === "pass-b", JSON.stringify(vals));
+  }
+
+  //     пароли не светятся в logcat (захвата, автозаполнения и листа)
+  const log = adb("logcat", "-d").replace(/\r/g, "");
+  check("logcat прогона не содержит паролей",
+    !["pass-one", "pass-two", "pass-b"].some((p) => log.includes(p)));
+
   // 3) «Никогда для этого сайта» → повторный сабмит бара НЕ даёт
   await submit(ov, USER, "pass-three");
   await sleep(1200);
@@ -217,6 +330,12 @@ try {
   await ui.evalJs(`document.getElementById("mPrivate").click()`);
   await sleep(1200);
   const ov2 = await overlayPage(ui, `http://10.0.2.2:${HTTP_PORT}/`);
+  // автозаполнение в инкогнито выключено (duopulse-166): пейлоад поднялся,
+  // но Core ответил пустым списком — иконки-ключа нет; тап-«фантом» нечем
+  await waitFor(ov2, "window.__dpPassFillWatch === 1", 10000);
+  await sleep(1500);
+  check("инкогнито: иконки-ключа нет (автозаполнение выключено)",
+    (await hasKey(ov2)) === false);
   await submit(ov2, USER, "pass-incognito");
   await sleep(1500);
   b = await bar(ui);

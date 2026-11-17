@@ -1,9 +1,11 @@
-//! DuoPulse — захват паролей из форм web-оверлея мобильной ветки (карточка
-//! duopulse-165, паритет 2/8 аудита duopulse-156). Хранилище на Android уже
-//! общее с десктопом (passwords/mod.rs, ключ под Android Keystore), нет
-//! только детекта формы логина: контент-бандл в нативный WebView Android не
-//! инжектируется (канал WebMessage — WebView2). Здесь замыкается цепочка:
+//! DuoPulse — пароли web-оверлея мобильной ветки: захват из форм (карточка
+//! duopulse-165, паритет 2/8 аудита duopulse-156) и автозаполнение
+//! (duopulse-166, паритет 3/8). Хранилище на Android уже общее с десктопом
+//! (passwords/mod.rs, ключ под Android Keystore), нет только контент-слоя:
+//! контент-бандл в нативный WebView Android не инжектируется (канал
+//! WebMessage — WebView2). Здесь замыкаются цепочки:
 //!
+//! ЗАХВАТ:
 //!   пейлоад mobile_pass_capture.js (порт детекта content/passwords-fill.ts,
 //!   инжекция evaluateJavascript из MobileWebHelper, источник —
 //!   include_str! ниже, тест — src/mobile/pass-capture.test.ts в happy-dom)
@@ -16,17 +18,31 @@
 //!     → mobile_password_resolve: save (upsert PasswordStore по (origin,
 //!       username), как на десктопе) / never (denylist) / dismiss.
 //!
+//! АВТОЗАПОЛНЕНИЕ (duopulse-166):
+//!   пейлоад mobile_pass_fill.js (порт автозаполнения passwords-fill.ts,
+//!   тест — src/mobile/pass-fill.test.ts) нашёл форму логина
+//!     → DuopulseFill.ready() → accounts_for_overlay (логины сайта БЕЗ
+//!       паролей, чистое ядро passwords/autofill.rs; инкогнито — пусто)
+//!     → __dpPassAccounts([...]) в страницу → иконка-ключ у поля пароля
+//!     → тап → DuopulseFill.pick() → один аккаунт: сразу заполнение;
+//!       несколько: нативный лист (имена без паролей)
+//!     → credential_for_overlay (reveal по факту выбора)
+//!     → __dpPassFill(логин, пароль) — пароль живёт в памяти мгновение
+//!       и не логируется нигде (консоль/logcat/Kotlin-Log).
+//!
 //! URL страницы и origin считает Kotlin по webView.url — странице не верим
 //! (интерфейс доступен любому JS загруженного сайта). Пароль не логируется:
 //! eprintln светит только логин@origin (паттерн main.rs десктопа) и не
 //! касается ни пейлоада, ни хранилища. Инкогнито: фронт мобильной ветки
 //! ставит флаг (mobile_password_incognito) — кандидат отвергается до
-//! запоминания. Сброс кандидата — reset() из teardown оверлея (мобильный
-//! аналог on_tabs_changed: поверхность сабмита исчезла).
+//! запоминания, автозаполнение выключено (только ручной ввод). Сброс
+//! кандидата — reset() из teardown оверлея (мобильный аналог
+//! on_tabs_changed: поверхность сабмита исчезла).
 //!
 //! Модуль — только мобильным таргетам либы (нужен crate::passwords, см.
-//! развилку lib.rs); чистое ядро (offer_overlay/clear) живёт в
-//! passwords/prompts.rs и тестируется на хосте вместе с десктопом.
+//! развилку lib.rs); чистые ядра (offer_overlay/clear — passwords/prompts.rs,
+//! accounts_for_url/credential_for_url — passwords/autofill.rs) живут
+//! рядом с общим хранилищем и тестируются на хосте вместе с десктопом.
 
 use std::sync::{Arc, OnceLock};
 
@@ -38,6 +54,10 @@ use crate::passwords::{PasswordPrompts, PasswordStore, PasswordsCandidateView};
 /// JS-пейлоад детекта формы логина (см. шапку); Kotlin берёт его JNI-вызовом
 /// captureScript и подаёт evaluateJavascript на каждой странице оверлея.
 pub const CAPTURE_SCRIPT: &str = include_str!("mobile_pass_capture.js");
+
+/// JS-пейлоад автозаполнения (duopulse-166, см. шапку); JNI-вызов fillScript,
+/// подаётся после CAPTURE_SCRIPT (маркер __dpPassFillWatch — идемпотентность).
+pub const FILL_SCRIPT: &str = include_str!("mobile_pass_fill.js");
 
 /// tab_id оверлея в кандидате: мобильных вкладок Core не знает, промпт один
 /// на приложение; on_tabs_changed на мобильной ветке не зовётся (модуль tabs
@@ -76,6 +96,32 @@ pub fn set_incognito(on: bool) {
     if let Some(st) = STATE.get() {
         st.incognito.store(on, std::sync::atomic::Ordering::Relaxed);
     }
+}
+
+/// Инкогнито сейчас (лист «Диагностика»: автозаполнение паролей вкл/выкл).
+pub fn is_incognito() -> bool {
+    STATE
+        .get()
+        .map(|st| st.incognito.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(false)
+}
+
+/// Логины сайта для автозаполнения (duopulse-166): usernames без паролей,
+/// origin — по URL вкладки (считает чистое ядро passwords/autofill.rs);
+/// инкогнито и недоступное Core — пусто (иконки-ключа не будет).
+pub fn accounts_for_overlay(url: &str) -> Vec<String> {
+    match STATE.get() {
+        Some(st) => crate::passwords::autofill::accounts_for_url(&st.store, is_incognito(), url),
+        None => Vec::new(),
+    }
+}
+
+/// Пароль выбранного логина сайта (reveal по факту выбора в листе):
+/// инкогнито/чужой логин/сбой — None. Кроме evaluateJavascript заполнения
+/// полей пароль никуда не уходит и не логируется.
+pub fn credential_for_overlay(url: &str, username: &str) -> Option<String> {
+    let st = STATE.get()?;
+    crate::passwords::autofill::credential_for_url(&st.store, is_incognito(), url, username)
 }
 
 /// mobile_password_incognito: фронт ставит флаг при переключении приватного
@@ -153,12 +199,21 @@ mod jni {
     use jni::sys::jstring;
     use jni::JNIEnv;
 
-    use super::{report_candidate, reset, CAPTURE_SCRIPT};
+    use super::{accounts_for_overlay, credential_for_overlay, report_candidate, reset,
+                CAPTURE_SCRIPT, FILL_SCRIPT};
 
     /// java.lang.String → Option<String> (пустая — «значения нет»).
     fn opt_str(env: &mut JNIEnv, s: JString) -> Option<String> {
         let raw = env.get_string(&s).ok()?.to_string_lossy().into_owned();
         (!raw.is_empty()).then_some(raw)
+    }
+
+    /// String → jstring (null при недоступной JVM — Kotlin читает как «нет»).
+    fn to_jstring(env: &mut JNIEnv, s: &str) -> jstring {
+        match env.new_string(s) {
+            Ok(js) => js.as_raw(),
+            Err(_) => JObject::null().as_raw() as jstring,
+        }
     }
 
     /// JS-пейлоад детекта для evaluateJavascript (инжекция onPageFinished).
@@ -169,10 +224,54 @@ mod jni {
     ) -> jstring {
         let script =
             std::panic::catch_unwind(|| CAPTURE_SCRIPT.to_string()).unwrap_or_default();
-        match env.new_string(&script) {
-            Ok(js) => js.as_raw(),
-            // JVM недоступна — нулевая ссылка (Kotlin читает null как «нет пейлоада»)
-            Err(_) => JObject::null().as_raw() as jstring,
+        to_jstring(&mut env, &script)
+    }
+
+    /// JS-пейлоад автозаполнения (duopulse-166; инжекция после captureScript).
+    #[unsafe(no_mangle)]
+    pub extern "C" fn Java_dev_duopulse_mobile_MobilePassNative_fillScript(
+        mut env: JNIEnv,
+        _class: JClass,
+    ) -> jstring {
+        let script = std::panic::catch_unwind(|| FILL_SCRIPT.to_string()).unwrap_or_default();
+        to_jstring(&mut env, &script)
+    }
+
+    /// Логины сайта (duopulse-166): JSON-массив usernames без паролей —
+    /// пустой массив «[]» и на инкогнито, и на недоступном Core (иконок нет).
+    #[unsafe(no_mangle)]
+    pub extern "C" fn Java_dev_duopulse_mobile_MobilePassNative_accountsFor(
+        mut env: JNIEnv,
+        _class: JClass,
+        url: JString,
+    ) -> jstring {
+        let url = opt_str(&mut env, url).unwrap_or_default();
+        let accounts = std::panic::catch_unwind(|| {
+            serde_json::to_string(&accounts_for_overlay(&url)).unwrap_or_else(|_| "[]".into())
+        })
+        .unwrap_or_else(|_| "[]".to_string());
+        to_jstring(&mut env, &accounts)
+    }
+
+    /// Пароль выбранного логина (reveal по факту выбора в листе): null —
+    /// нет логина/инкогнито/сбой. Значение не логируется и кроме
+    /// evaluateJavascript заполнения полей никуда не уходит.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn Java_dev_duopulse_mobile_MobilePassNative_credentialFor(
+        mut env: JNIEnv,
+        _class: JClass,
+        url: JString,
+        username: JString,
+    ) -> jstring {
+        let url = opt_str(&mut env, url);
+        let username = opt_str(&mut env, username);
+        let credential = std::panic::catch_unwind(|| {
+            credential_for_overlay(url.as_deref().unwrap_or(""), username.as_deref().unwrap_or(""))
+        })
+        .unwrap_or(None);
+        match credential {
+            Some(pass) => to_jstring(&mut env, &pass),
+            None => JObject::null().as_raw() as jstring,
         }
     }
 

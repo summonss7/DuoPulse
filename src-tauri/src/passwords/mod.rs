@@ -24,6 +24,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod autofill;
 pub mod prompts;
 pub use prompts::{PasswordPrompts, PasswordsCandidateView};
 

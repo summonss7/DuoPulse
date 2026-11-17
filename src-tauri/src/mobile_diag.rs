@@ -107,6 +107,9 @@ pub struct DiagSnapshot {
     pub bookmarks: u64,
     /// Сохранённых логинов.
     pub passwords: u64,
+    /// Автозаполнение паролей доступно (false — инкогнито: только ручной
+    /// ввод; duopulse-166).
+    pub pass_autofill: bool,
     /// Счётчики адблока за сеанс (None — движок недоступен).
     pub adblock: Option<DiagAdblock>,
     /// Последняя проверка обновлений, unix-ms (None — не проверяли; метка
@@ -158,6 +161,7 @@ pub fn diag_snapshot(
         history_entries: history_total as u64,
         bookmarks: bookmark_total as u64,
         passwords: pw_total,
+        pass_autofill: !crate::mobile_pass::is_incognito(),
         adblock,
         last_update_check_ms,
         now_ms: now_ms(),
@@ -204,6 +208,7 @@ mod tests {
             history_entries: 12,
             bookmarks: 4,
             passwords: 2,
+            pass_autofill: true,
             adblock: Some(DiagAdblock {
                 enabled: true,
                 ready: false,
@@ -216,6 +221,7 @@ mod tests {
         let v = serde_json::to_value(&snap).unwrap();
         assert_eq!(v["appVersion"], "0.1.64");
         assert_eq!(v["sessionSecs"], 75);
+        assert_eq!(v["passAutofill"], true);
         assert_eq!(v["lastUpdateCheckMs"].as_i64(), Some(1_700_000_000_000));
         assert_eq!(v["adblock"]["blockedTotal"], 7);
         assert!(v.get("app_version").is_none());

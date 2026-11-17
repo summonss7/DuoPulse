@@ -821,6 +821,8 @@ export const dict: Record<string, string> = {
   "История: {n}": "Istoric: {n}",
   "Закладки: {n}": "Marcaje: {n}",
   "Пароли: {n}": "Parole: {n}",
+  "Автозаполнение паролей: включено": "Auto completare parole: activată",
+  "Автозаполнение паролей: выключено (инкогнито)": "Auto completare parole: dezactivată (incognito)",
   "Блокировщик рекламы": "Blocant de reclame",
   "Адблок: заблокировано {b} из {s} запросов": "Adblock: {b} din {s} cereri blocate",
   "Адблок: выключен": "Adblock: dezactivat",

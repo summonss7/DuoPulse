@@ -88,6 +88,13 @@ import java.io.ByteArrayInputStream
  * инжектируется onPageFinished; сабмит уходит JS-интерфейсом DuopulsePass →
  * MobilePassNative (JNI, Core) — пароль минует консоль/logcat и UI-webview,
  * бар «Сохранить пароль?» решает Core (событие), запись — только «Сохранить».
+ *
+ * duopulse-166 (паритет 3/8 — автозаполнение): следом инжектируется пейлоад
+ * mobile_pass_fill.js — иконка-ключ 🔑 у поля пароля (когда Core знает логины
+ * сайта), тап → один аккаунт: заполнение сразу; несколько: этот нативный
+ * нижний лист имён (БЕЗ паролей) → выбор → reveal по id в Core →
+ * evaluateJavascript заполняет логин+пароль точечно (пароль живёт в памяти
+ * мгновение). Инкогнито: Core отдаёт пустой список — иконок и заполнения нет.
  */
 object MobileWebHelper {
   private const val TAG = "DuoPulseWeb"
@@ -116,6 +123,10 @@ object MobileWebHelper {
 
   /** Открытое меню «⋮» шапки (закрыть при teardown, duopulse-145). */
   private var menu: PopupWindow? = null
+
+  /** Нижний лист выбора аккаунта автозаполнения (duopulse-166; закрыть при
+   *  teardown — поверхность выбора исчезла вместе с оверлеем). */
+  private var accountSheet: PopupWindow? = null
 
   /** Оверлей спрятан за встроенным плеером (видео открыто из выдачи,
    *  duopulse-139): WebView жив, системный «назад» возвращает к выдаче. */
@@ -434,6 +445,8 @@ object MobileWebHelper {
     MobilePassNative.resetPending()
     menu?.dismiss()
     menu = null
+    accountSheet?.dismiss()
+    accountSheet = null
     backCallback.isEnabled = false
     backCallback.remove()
     val wv = webView
@@ -689,6 +702,9 @@ object MobileWebHelper {
         // захват паролей из форм (duopulse-165): пейлоад идемпотентен
         // (маркер __dpPassWatch), повтор на том же документе — тишина
         injectPassCapture(view)
+        // автозаполнение (duopulse-166): пейлоад зовёт DuopulseFill.ready(),
+        // логины сайта вернутся в страницу __dpPassAccounts (без паролей)
+        injectPassFill(view)
         // повтор — на случай холодного движка (пустой пейлоад на старте);
         // дубли исключены сравнением с последним применённым скриптом
         injectCosmetic(view, url)
@@ -735,6 +751,10 @@ object MobileWebHelper {
     // напрямую в Kotlin (addJavascriptInterface — пароль не идёт через
     // консоль-хук, как DPURL); MobilePassNative уносит его в Core.
     wv.addJavascriptInterface(PassReport, "DuopulsePass")
+    // Автозаполнение (duopulse-166): пейлоад mobile_pass_fill.js спрашивает
+    // логины сайта (ready) и выбор пользователя (pick) — Core решает по
+    // доверенному URL; пароль приходит только credential-заполнением.
+    wv.addJavascriptInterface(PassFill, "DuopulseFill")
     // Файловые загрузки (duopulse-156): клик по ссылке на файл качает
     // системный DownloadManager (куки/UA сессии, прогресс в шторке), сбой —
     // фолбэк внешним браузером; прежде клик просто молчал.
@@ -786,6 +806,140 @@ object MobileWebHelper {
     val js = MobilePassNative.script() ?: return
     if (js.isEmpty()) return
     wv.evaluateJavascript(js, null)
+  }
+
+  /** Инжекция пейлоада автозаполнения (duopulse-166): источник — Core
+   *  (include_str! mobile_pass_fill.js); идемпотентность — маркер
+   *  __dpPassFillWatch. Порядок не важен: мосты независимы. */
+  private fun injectPassFill(wv: WebView) {
+    val js = MobilePassNative.fill() ?: return
+    if (js.isEmpty()) return
+    wv.evaluateJavascript(js, null)
+  }
+
+  /** Заполнить форму выбранным логином (duopulse-166): reveal по факту
+   *  выбора → пароль сразу уходит evaluateJavascript'ом в поля страницы
+   *  (__dpPassFill) — нигде не хранится и не логируется. Битый/пустой
+   *  ответ Core — тихо (страница не страдает). */
+  private fun fillUsername(username: String) {
+    val wv = webView ?: return
+    val url = trustedUrl(wv) ?: return
+    val pass = MobilePassNative.credential(url, username) ?: return
+    // jsonStr экранирует значения: литералы не ломаются переводами строк
+    wv.evaluateJavascript(
+      "window.__dpPassFill && window.__dpPassFill(${jsonStr(username)}, ${jsonStr(pass)})",
+      null)
+  }
+
+  /** Доверенный URL текущей страницы (SPA-хук держит pageUrl свежее wv.url,
+   *  геттеры WebView — только UI-нить); не-http — null. */
+  private fun trustedUrl(wv: WebView): String? {
+    val url = if (pageUrl.startsWith("http")) pageUrl else (wv.url ?: "")
+    return if (url.startsWith("http")) url else null
+  }
+
+  /** Нативный нижний лист выбора аккаунта (duopulse-166): имена логинов
+   *  сайта БЕЗ паролей (reveal — только по факту выбора), стиль — m-sheet
+   *  мобильной ветки (elevated-фон, скругление сверху, акцентная рамка).
+   *  Один аккаунт сюда не попадает — заполнение сразу в pick(). */
+  private fun showAccountSheet(act: MainActivity, usernames: List<String>) {
+    val wv = webView ?: return
+    accountSheet?.dismiss()
+    val dp = { v: Int -> (v * act.resources.displayMetrics.density).toInt() }
+    val ripple = TypedValue().let {
+      act.theme.resolveAttribute(android.R.attr.selectableItemBackground, it, true)
+      it.resourceId
+    }
+
+    val list = LinearLayout(act)
+    list.orientation = LinearLayout.VERTICAL
+    list.setPadding(dp(8), dp(10), dp(8), dp(12))
+    list.background = GradientDrawable().apply {
+      cornerRadii = floatArrayOf(
+        dp(16).toFloat(), dp(16).toFloat(), dp(16).toFloat(), dp(16).toFloat(),
+        0f, 0f, 0f, 0f) // скругление только сверху — лист у нижней кромки
+      setColor(Color.parseColor("#1d282b")) // --bg-elevated
+      setStroke(dp(1), Color.argb(64, 189, 254, 79))
+    }
+
+    val head = TextView(act)
+    head.text = "Выберите аккаунт"
+    head.setTextColor(Color.parseColor("#8a94a6")) // --text-secondary
+    head.textSize = 13f
+    head.setPadding(dp(12), dp(4), dp(12), dp(6))
+    list.addView(head, LinearLayout.LayoutParams(
+      LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+    for (name in usernames) {
+      val row = TextView(act)
+      row.text = name
+      row.setTextColor(Color.parseColor("#F2F7EE")) // --text-primary
+      row.textSize = 16f
+      row.gravity = Gravity.CENTER_VERTICAL
+      row.setPadding(dp(12), dp(13), dp(12), dp(13))
+      row.setBackgroundResource(ripple)
+      row.isClickable = true
+      row.setOnClickListener {
+        accountSheet?.dismiss()
+        fillUsername(name)
+      }
+      list.addView(row, LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+    }
+
+    val popup = PopupWindow(list, LinearLayout.LayoutParams.MATCH_PARENT,
+      LinearLayout.LayoutParams.WRAP_CONTENT, true)
+    popup.setBackgroundDrawable(ColorDrawable())
+    popup.isOutsideTouchable = true
+    popup.elevation = dp(12).toFloat()
+    popup.setOnDismissListener { accountSheet = null }
+    accountSheet = popup
+    popup.showAtLocation(wv, Gravity.BOTTOM, 0, 0)
+  }
+
+  /** Мост «страница → Core» автозаполнения (duopulse-166): пейлоад нашёл
+   *  форму логина (ready — прислать логины сайта в __dpPassAccounts) либо
+   *  пользователь тапнул иконку-ключ (pick — один аккаунт: заполнить сразу,
+   *  несколько: лист выбора). Вызовы идут с нити JavaBridge — webView.url
+   *  читаем только на UI-ните; URL берём свой, странице не верим. Инкогнито
+   *  решает Core (пустой список — ни иконок, ни заполнения). */
+  private object PassFill {
+    @android.webkit.JavascriptInterface
+    fun ready() {
+      val act = MainActivity.current ?: return
+      act.runOnUiThread {
+        val wv = webView ?: return@runOnUiThread
+        val url = trustedUrl(wv) ?: return@runOnUiThread
+        // JSON-массив логинов (без паролей) — как есть в страницу; пустой
+        // список честен: снимет иконки после SPA-перехода на чужой сайт
+        val accounts = MobilePassNative.accounts(url) ?: return@runOnUiThread
+        if (webView !== wv) return@runOnUiThread
+        wv.evaluateJavascript(
+          "window.__dpPassAccounts && window.__dpPassAccounts($accounts)", null)
+      }
+    }
+
+    @android.webkit.JavascriptInterface
+    fun pick() {
+      val act = MainActivity.current ?: return
+      act.runOnUiThread {
+        val wv = webView ?: return@runOnUiThread
+        val url = trustedUrl(wv) ?: return@runOnUiThread
+        // список свежий (мог измениться сохранением после загрузки страницы)
+        val names = try {
+          org.json.JSONArray(MobilePassNative.accounts(url) ?: "[]").let { ja ->
+            List(ja.length()) { i -> ja.optString(i, "") }.filter { it.isNotEmpty() }
+          }
+        } catch (e: Exception) {
+          emptyList()
+        }
+        when (names.size) {
+          0 -> {} // сохранённых нет (или инкогнито) — тап тихо пропадает
+          1 -> fillUsername(names[0])
+          else -> showAccountSheet(act, names)
+        }
+      }
+    }
   }
 
   /** Мост «страница → Core» захвата паролей (duopulse-165): пейлоад нашёл
