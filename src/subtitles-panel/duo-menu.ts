@@ -45,9 +45,32 @@ export interface DuoMenuPayload {
   defLang: string;
   defLangs: { code: string; name: string }[];
   /** Формат плашки: позиция/размер/совпавший пресет вида (null — «Свои»). */
-  style: { position: string; fontScalePct: number; look: string | null };
+  style: { position: string; fontScalePct: number; look: string | null; swapRows: boolean; fontFamily: string; originalColor: string; translationColor: string };
   lookPresets: { id: string; label: string }[];
+  /** Гарнитуры для подменю «Шрифт плашки» (duopulse-181). */
+  fonts: { id: string; label: string }[];
+  /** Быстрая палитра цветов строк (duopulse-181). */
+  colorPalette: { hex: string; label: string }[];
 }
+
+/** Гарнитуры подменю «Шрифт плашки» (duopulse-181; список — как в панели:
+ * Inter, JetBrains Mono, системная). */
+export const DUO_MENU_FONTS: { id: string; label: string }[] = [
+  { id: "Inter", label: "Inter" },
+  { id: "JetBrains Mono", label: "JetBrains Mono" },
+  { id: "system", label: t("Системный") },
+];
+
+/** Быстрая палитра цветов строк (duopulse-181): читаемые на тёмной подложке;
+ * точная пипетка — полная панель duo. */
+export const DUO_MENU_COLORS: { hex: string; label: string }[] = [
+  { hex: "#ffffff", label: t("Белый") },
+  { hex: "#bdfe4f", label: t("Лайм") },
+  { hex: "#ffd54d", label: t("Жёлтый") },
+  { hex: "#7fd7ff", label: t("Голубой") },
+  { hex: "#ff9ecb", label: t("Розовый") },
+  { hex: "#e8edf2", label: t("Светло-серый") },
+];
 
 /** Сборка payload меню по снапшоту вкладки и дефолтному языку настроек.
  * «Язык видео» — эффективный список (duopulse-177): на локальном видео
@@ -99,8 +122,14 @@ export function buildDuoMenuPayload(state: DuoMenuState, defaultTranslationLang:
       position: state.style.position,
       fontScalePct: state.style.fontScalePct,
       look: look?.id ?? null,
+      swapRows: state.style.swapRows ?? false,
+      fontFamily: state.style.fontFamily,
+      originalColor: state.style.originalColor,
+      translationColor: state.style.translationColor,
     },
     lookPresets: LOOK_PRESETS.map((p) => ({ id: p.id, label: p.label })),
+    fonts: DUO_MENU_FONTS,
+    colorPalette: DUO_MENU_COLORS,
   };
 }
 

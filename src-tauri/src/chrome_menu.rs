@@ -319,9 +319,19 @@ fn build_duo_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
         )?)?;
     }
 
-    // --- формат плашки: позиция, размер, вид (пресеты)
+    // --- формат плашки: перестановка строк, позиция, размер, вид, шрифт,
+    // --- палитры цветов (duopulse-181: быстрые правки, эффект сразу на видео)
     append(&separator(app)?)?;
     let style = payload.get("style").cloned().unwrap_or_default();
+    append(&check(
+        app,
+        "duo:swap",
+        "Оригинал и перевод местами",
+        style
+            .get("swapRows")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    )?)?;
     let position = style
         .get("position")
         .and_then(Value::as_str)
@@ -382,6 +392,62 @@ fn build_duo_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
     let look_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
         look_items.iter().map(|i| i as _).collect();
     append(&submenu(app, "duo-look", "Вид плашки", &look_refs)?)?;
+
+    // Гарнитура (duopulse-181): список — payload fonts, текущая — ✓.
+    let font = style
+        .get("fontFamily")
+        .and_then(Value::as_str)
+        .unwrap_or("Inter");
+    let mut font_items: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
+    for f in payload
+        .get("fonts")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        let id = f.get("id").and_then(Value::as_str).unwrap_or("");
+        let label = f.get("label").and_then(Value::as_str).unwrap_or(id);
+        font_items.push(check(app, &format!("duo:font:{id}"), label, id == font)?);
+    }
+    if !font_items.is_empty() {
+        let font_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            font_items.iter().map(|i| i as _).collect();
+        append(&submenu(app, "duo-font", "Шрифт плашки", &font_refs)?)?;
+    }
+
+    // Палитры цветов строк (duopulse-181): быстрая смена цвета оригинала/
+    // перевода без похода в настройки; точная пипетка — полная панель duo.
+    let palette: Vec<Value> = payload
+        .get("colorPalette")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if !palette.is_empty() {
+        for (field, title) in [("orig", "Цвет оригинала"), ("tr", "Цвет перевода")] {
+            let current = style
+                .get(if field == "orig" {
+                    "originalColor"
+                } else {
+                    "translationColor"
+                })
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let mut items: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
+            for c in &palette {
+                let hex = c.get("hex").and_then(Value::as_str).unwrap_or("");
+                let label = c.get("label").and_then(Value::as_str).unwrap_or(hex);
+                items.push(check(
+                    app,
+                    &format!("duo:color:{field}:{hex}"),
+                    label,
+                    hex == current,
+                )?);
+            }
+            let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+                items.iter().map(|i| i as _).collect();
+            append(&submenu(app, &format!("duo-color-{field}"), title, &refs)?)?;
+        }
+    }
 
     // --- синхронизация: шаг слайдера панели 100 мс, здесь по 0,5 с
     let mut off_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
@@ -544,6 +610,14 @@ pub fn emit_action(app: &AppHandle, id: &str) {
                 "pct": param.parse::<i32>().unwrap_or(100),
             }),
             "look" => serde_json::json!({ "menu": "duo", "act": "look", "look": param }),
+            // duopulse-181: перестановка строк, гарнитура, быстрые цвета
+            "swap" => serde_json::json!({ "menu": "duo", "act": "swap" }),
+            "font" => serde_json::json!({ "menu": "duo", "act": "font", "family": param }),
+            "color" => {
+                // param: "<orig|tr>:#rrggbb"
+                let (fld, hex) = param.split_once(':').unwrap_or(("", ""));
+                serde_json::json!({ "menu": "duo", "act": "color", "field": fld, "value": hex })
+            }
             "offset" => serde_json::json!({
                 "menu": "duo", "act": "offset",
                 "deltaMs": param.parse::<i64>().unwrap_or(0),

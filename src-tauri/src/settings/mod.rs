@@ -247,6 +247,8 @@ pub struct SubtitlesStyleDefaults {
     pub plate_color: String,
     /// Тёмная обводка строк для читаемости на светлом видео.
     pub text_stroke: bool,
+    /// Перевернуть порядок строк: перевод выше оригинала (duopulse-181).
+    pub swap_rows: bool,
 }
 
 /// hex #rgb/#rrggbb → канонический #rrggbb ( lowercase); прочее — None.
@@ -279,6 +281,7 @@ impl Default for SubtitlesStyleDefaults {
             muted_color: "#ffffff".into(),
             plate_color: "#0a0e17".into(),
             text_stroke: true,
+            swap_rows: false,
         }
     }
 }
@@ -383,6 +386,7 @@ pub fn content_defaults_script(dir: &Path) -> String {
                 "mutedColor": subs.style.muted_color,
                 "plateColor": subs.style.plate_color,
                 "textStroke": subs.style.text_stroke,
+                "swapRows": subs.style.swap_rows,
             },
         },
     });
@@ -758,6 +762,7 @@ mod tests {
                 muted_color: "#fC3".into(),
                 plate_color: "#000".into(),
                 text_stroke: false,
+                swap_rows: true,
             },
         }
         .normalized();
@@ -778,6 +783,7 @@ mod tests {
         assert_eq!(cfg.style.muted_color, "#ffcc33", "#RGB разворачивается");
         assert_eq!(cfg.style.plate_color, "#000000");
         assert!(!cfg.style.text_stroke);
+        assert!(cfg.style.swap_rows, "перестановка строк (duopulse-181) проходит");
         // неизвестная позиция и пустой язык — к дефолтам
         let cfg = SubtitlesConfig {
             default_translation_lang: String::new(),
@@ -836,6 +842,7 @@ mod tests {
                     muted_color: "#ffdd33".into(),
                     plate_color: "#000000".into(),
                     text_stroke: false,
+                    swap_rows: true,
                 },
             },
         )
@@ -846,6 +853,7 @@ mod tests {
         let json = &js[";(window.__DUOPULSE_DEFAULTS__=".len()..js.len() - 2];
         let parsed: serde_json::Value = serde_json::from_str(json).expect("JSON-литерал валиден");
         assert_eq!(parsed["subtitles"]["defaultTranslationLang"], "uk");
+        assert_eq!(parsed["subtitles"]["style"]["swapRows"], true, "duopulse-181");
         // duopulse-128: без переключений lastEnabled нет (null — прежнее
         // поведение новых окон); после сохранения — в литерале и чтении.
         assert!(parsed["subtitles"]["lastEnabled"].is_null());

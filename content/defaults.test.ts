@@ -65,6 +65,7 @@ describe("baseStyle (задача 5.1)", () => {
       mutedColor: "#ffffff",
       plateColor: "#000000",
       textStroke: false,
+      swapRows: false,
     });
   });
 

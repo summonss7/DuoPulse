@@ -1219,6 +1219,8 @@ fn parse_set_state(value: &serde_json::Value) -> subtitles::service::TabSubtitle
                 }
             },
             text_stroke: style["textStroke"].as_bool().unwrap_or(true),
+            // Перестановка строк (duopulse-181): старые бандлы не шлют — false.
+            swap_rows: style["swapRows"].as_bool().unwrap_or(false),
         };
         if st.style.original_color.is_empty() {
             st.style.original_color = defaults.original_color;

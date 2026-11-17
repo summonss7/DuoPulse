@@ -15,6 +15,7 @@ const style: SubtitlesStyleInfo = {
   mutedColor: "#ffffff",
   plateColor: "#0a0e17",
   textStroke: true,
+  swapRows: false,
 };
 
 const base: BaseTrackInfo[] = [
@@ -76,12 +77,24 @@ describe("buildDuoMenuPayload", () => {
 
   it("стиль: позиция/размер и совпавший пресет вида", () => {
     const p = buildDuoMenuPayload(state, "ru");
-    expect(p.style).toEqual({ position: "bottom", fontScalePct: 100, look: "brand" });
+    expect(p.style).toMatchObject({ position: "bottom", fontScalePct: 100, look: "brand" });
     const custom = buildDuoMenuPayload(
       { ...state, style: { ...style, plateOpacity: 0.5 } },
       "ru",
     );
     expect(custom.style.look).toBeNull();
+  });
+
+  it("duopulse-181: перестановка строк, гарнитура и палитра цветов — в payload", () => {
+    const p = buildDuoMenuPayload(state, "ru");
+    expect(p.style.swapRows).toBe(false);
+    expect(p.fonts.map((f) => f.id)).toEqual(["Inter", "JetBrains Mono", "system"]);
+    expect(p.colorPalette.length).toBeGreaterThanOrEqual(4);
+    const swapped = buildDuoMenuPayload(
+      { ...state, style: { ...style, swapRows: true } },
+      "ru",
+    );
+    expect(swapped.style.swapRows).toBe(true);
   });
 
   it("без видео — флаг hasVideo гасит пункты файла/ASR (сборка в rust)", () => {

@@ -60,6 +60,8 @@ e2e/subtitles/altd-timeline.log
 # Рантайм-артефакты стенда duopulse-180 (e2e/subtitles/video-auto.mjs)
 e2e/subtitles/video-auto-last-run.json
 e2e/subtitles/video-auto-last-run.png
+e2e/subtitles/swap-rows-last-run.json
+e2e/subtitles/swap-rows-last-run.png
 
 # Кэш ASR-движка и модели whisper (e2e/asr/prepare.mjs, карточка duopulse-091)
 e2e/asr/.cache/

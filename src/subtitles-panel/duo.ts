@@ -114,6 +114,7 @@ const state: DuoState = {
     mutedColor: "#ffffff",
     plateColor: "#0a0e17",
     textStroke: true,
+    swapRows: false,
   },
 };
 
@@ -381,6 +382,12 @@ function renderStyle(): void {
   for (const b of (document.getElementById("duoPosition") as HTMLElement).children) {
     (b as HTMLElement).dataset.on = String((b as HTMLElement).dataset.pos === state.style.position);
   }
+  // Порядок строк (duopulse-181): перевод сверху = swapRows.
+  for (const b of (document.getElementById("duoSwap") as HTMLElement).children) {
+    (b as HTMLElement).dataset.on = String(
+      (b as HTMLElement).dataset.swap === (state.style.swapRows ? "on" : "off"),
+    );
+  }
   renderLook();
 }
 
@@ -575,6 +582,21 @@ const runMenuAction = (a: Record<string, unknown>): void => {
   if (act === "look") {
     const preset = LOOK_PRESETS.find((p) => p.id === a.look);
     if (preset) void bridge.subtitles.setStyle({ style: { ...preset.patch } }).catch(err);
+    return;
+  }
+  // duopulse-181: перестановка строк (лёгкий тумблер) и быстрые правки вида
+  // (гарнитура/цвет строки) — эффект сразу на плашке, без страницы настроек.
+  if (act === "swap") {
+    void bridge.subtitles.setStyle({ style: { swapRows: !state.style.swapRows } }).catch(err);
+    return;
+  }
+  if (act === "font") {
+    void bridge.subtitles.setStyle({ style: { fontFamily: String(a.family ?? "") } }).catch(err);
+    return;
+  }
+  if (act === "color") {
+    const field = a.field === "tr" ? "translationColor" : "originalColor";
+    void bridge.subtitles.setStyle({ style: { [field]: String(a.value ?? "") } }).catch(err);
     return;
   }
   if (act === "offset") {
@@ -825,6 +847,13 @@ export function initDuo(): void {
   (document.getElementById("duoPosition") as HTMLElement).addEventListener("click", (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>("[data-pos]");
     if (b?.dataset.pos) void bridge.subtitles.setStyle({ style: { position: b.dataset.pos } }).catch(err);
+  });
+  // Порядок строк (duopulse-181): кнопки «Оригинал/Перевод сверху» — тот же
+  // set_style, оверлей переставляет строки на месте (цвета остаются ролевыми).
+  (document.getElementById("duoSwap") as HTMLElement).addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-swap]");
+    if (b?.dataset.swap)
+      void bridge.subtitles.setStyle({ style: { swapRows: b.dataset.swap === "on" } }).catch(err);
   });
 
   // Вид плашки (карточка 059): пресеты — одним патчем всех полей вида,

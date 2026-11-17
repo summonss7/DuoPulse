@@ -24,6 +24,7 @@ import {
   MARGIN_MAX_PCT,
   PLATE_MAX_SHARE,
   cssFontFamily,
+  displayOrder,
   fitStepPct,
   plateBackground,
   plateFontSizeCss,
@@ -62,6 +63,14 @@ export class SubtitlesOverlay {
   private style: SubtitleStyle = baseStyle();
   /** Строки последнего рендера: дифф-обновление текста на месте. */
   private rows: ActiveRow[] = [];
+  /** Роль каждой строки основной плашки: индекс дорожки в порядке движка
+   *  (стиль строки привязан к роли — оригинал/перевод, а не к месту на
+   *  плашке; при swapRows строки меняются местами, цвета остаются своими,
+   *  duopulse-181). Параллельно детям rowsEl. */
+  private rowRoleIdx: number[] = [];
+  /** Прошлый отображаемый список основной плашки (диф текста; при swapRows
+   *  отличается от порядка движка — duopulse-181). */
+  private bottomDisplay: ActiveRow[] = [];
   /** Эффективный кегль: ручной масштаб, при переполнении авто-уменьшенный
    *  под потолок доли видео (карточка 046); всегда ≤ style.fontScalePct.
    *  В styleInfo наружу отдаётся только ручной — авто-подгон преходящ,
@@ -124,7 +133,11 @@ export class SubtitlesOverlay {
     this.autoPct = this.style.fontScalePct;
     this.fitDirty = true;
     if (this.plate) this.applyPlateStyle();
-    if (lookChanged) this.applyRowStyles();
+    // Перестановка строк (duopulse-181): порядок на плашке меняется —
+    // пересобираем список (цвета строк при этом остаются ролевыми).
+    const orderChanged = patch.swapRows !== undefined;
+    if (orderChanged) this.renderRows(this.rows);
+    else if (lookChanged) this.applyRowStyles();
     if (this.container && this.video && this.visible) this.positionOver(this.video);
     this.opts.onStyleChange?.(this.styleInfo());
   }
@@ -133,13 +146,27 @@ export class SubtitlesOverlay {
    * обновляется только текст — элементы строк живут, пока набор не сменился;
    * контейнер не пересоздаётся никогда (без миганий, docs/03 §5). Строки
    * верхнего расположения (duopulse-178) рендерятся в плашку-верх тем же
-   * диффом, отдельным списком. */
+   * диффом, отдельным списком. Основная плашка при swapRows (duopulse-181)
+   * показывает строки в обратном порядке: стиль каждой строки — по её роли
+   * (индексу в порядке движка), а не по месту на плашке. */
   private renderRows(rows: ActiveRow[]): void {
     if (!this.rowsEl) return;
-    this.renderRowsInto(rows.filter((r) => !r.top), this.rowsEl, this.rows.filter((r) => !r.top));
+    const bottom = rows.filter((r) => !r.top);
+    // Порядок показа (duopulse-181): displayOrder даёт индексы ролей —
+    // цвет/вес строки берутся по роли дорожки, а не по месту на плашке.
+    const order = displayOrder(bottom.length, this.style.swapRows);
+    const display = order.map((i) => bottom[i]);
+    this.rowRoleIdx = order;
+    this.renderRowsInto(display, this.rowRoleIdx, this.rowsEl, this.bottomDisplay);
+    this.bottomDisplay = display;
     if (this.topRowsEl) {
       const topRows = rows.filter((r) => r.top);
-      this.renderRowsInto(topRows, this.topRowsEl, this.rows.filter((r) => r.top));
+      this.renderRowsInto(
+        topRows,
+        topRows.map((_, i) => i),
+        this.topRowsEl,
+        this.rows.filter((r) => r.top),
+      );
       if (this.topPlate) this.topPlate.style.display = topRows.length > 0 ? "" : "none";
     }
     this.rows = rows;
@@ -147,8 +174,14 @@ export class SubtitlesOverlay {
   }
 
   /** Дифф одного списка строк (плашка = любая): sameShape — те же дорожки в
-   * том же порядке, обновляется только текст. */
-  private renderRowsInto(rows: ActiveRow[], rowsEl: HTMLDivElement, prev: ActiveRow[]): void {
+   * том же порядке, обновляется только текст. roleIdx — ролевой индекс каждой
+   * строки (для основной плашки — до перестановки swapRows). */
+  private renderRowsInto(
+    rows: ActiveRow[],
+    roleIdx: number[],
+    rowsEl: HTMLDivElement,
+    prev: ActiveRow[],
+  ): void {
     const sameShape =
       rows.length === prev.length && rows.every((r, i) => r.trackId === prev[i].trackId);
     if (sameShape) {
@@ -163,7 +196,7 @@ export class SubtitlesOverlay {
           el.className = "duopulse-subtitles-row";
           el.dataset.trackId = row.trackId;
           el.textContent = row.text;
-          this.applyRowStyle(el, i);
+          this.applyRowStyle(el, roleIdx[i] ?? i);
           return el;
         }),
       );
@@ -183,11 +216,12 @@ export class SubtitlesOverlay {
   }
 
   /** Перекрасить живые строки после смены вида (карточка 059): без
-   * пересоздания узлов — контейнер/строки живут, fade не перезапускается. */
+   * пересоздания узлов — контейнер/строки живут, fade не перезапускается.
+   * Ролевой индекс каждой строки — rowRoleIdx (swapRows не меняет цвета). */
   private applyRowStyles(): void {
     if (!this.rowsEl) return;
     for (let i = 0; i < this.rowsEl.children.length; i++) {
-      this.applyRowStyle(this.rowsEl.children[i] as HTMLElement, i);
+      this.applyRowStyle(this.rowsEl.children[i] as HTMLElement, this.rowRoleIdx[i] ?? i);
     }
     this.fitDirty = true; // обводка меняет метрики строк слабо, но честно
   }

@@ -86,6 +86,8 @@ pub struct SubtitlesStyleInfo {
     pub plate_color: String,
     /// Тёмная обводка строк (читаемость на светлом видео).
     pub text_stroke: bool,
+    /// Перевернуть порядок строк: перевод выше оригинала (duopulse-181).
+    pub swap_rows: bool,
 }
 
 impl Default for SubtitlesStyleInfo {
@@ -101,6 +103,7 @@ impl Default for SubtitlesStyleInfo {
             muted_color: "#ffffff".to_string(),
             plate_color: "#0a0e17".to_string(),
             text_stroke: true,
+            swap_rows: false,
         }
     }
 }

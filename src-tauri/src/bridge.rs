@@ -729,6 +729,9 @@ pub struct SubtitlesStylePatch {
     pub plate_color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text_stroke: Option<bool>,
+    /// Перевернуть порядок строк: перевод выше оригинала (duopulse-181).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swap_rows: Option<bool>,
 }
 
 /// subtitles.set_style: стиль плашки активной вкладки (размер/позиция
@@ -2217,13 +2220,42 @@ fn settings_get_all(
 /// интерфейса нормализуются до записи; смена языка (duopulse-136) эмитит
 /// settings:ui_lang_changed — все webview перезагружаются на новый язык.
 #[tauri::command]
-fn settings_apply(app: tauri::AppHandle, params: SettingsPatch) -> Result<(), String> {
+fn settings_apply(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: SettingsPatch,
+) -> Result<(), String> {
     let dir = proxy::profile_dir();
     if let Some(search) = params.search {
         crate::settings::save_search(&dir, &search)?;
     }
     if let Some(subtitles) = params.subtitles {
-        crate::settings::save_subtitles(&dir, &subtitles.normalized())?;
+        let cfg = subtitles.normalized();
+        crate::settings::save_subtitles(&dir, &cfg)?;
+        // duopulse-181: сохранённый стиль — живьём во все открытые вкладки
+        // (duopulse-set-style): плашки перекрашиваются/переставляются сразу,
+        // не только у новых вкладок.
+        let s = &cfg.style;
+        eval_all_tabs_event(
+            &app,
+            &manager,
+            "duopulse-set-style",
+            &serde_json::json!({
+                "style": {
+                    "fontScalePct": s.font_scale_pct,
+                    "fontFamily": s.font_family,
+                    "position": s.position,
+                    "marginPct": s.margin_pct,
+                    "plateOpacity": s.plate_opacity,
+                    "originalColor": s.original_color,
+                    "translationColor": s.translation_color,
+                    "mutedColor": s.muted_color,
+                    "plateColor": s.plate_color,
+                    "textStroke": s.text_stroke,
+                    "swapRows": s.swap_rows,
+                }
+            }),
+        );
     }
     if let Some(privacy) = params.privacy {
         crate::settings::save_privacy(&dir, &privacy)?;
@@ -3014,6 +3046,33 @@ fn eval_active_event(
         None if manager.active_is_lazy() => Ok(()),
         None => Err("активной вкладки нет".to_string()),
         Some(wv) => wv.eval(&js).map_err(|e| format!("eval: {e}")),
+    }
+}
+
+/// Диспатч document-события во ВСЕ контентные вкладки (duopulse-181): стиль
+/// плашки, сохранённый на странице настроек, применяется и к уже открытым
+/// видео — раньше дефолт подхватывали только новые вкладки, правка на
+/// странице настроек была «вслепую» (пожелание duopulse-181). Ошибки eval
+/// отдельных вкладок (ленивые/спящие) тихо пропускаем — дефолт они возьмут
+/// из __DUOPULSE_DEFAULTS__ при следующей загрузке.
+fn eval_all_tabs_event(
+    app: &AppHandle,
+    manager: &tauri::State<'_, crate::tabs::TabManager>,
+    event: &str,
+    detail: &serde_json::Value,
+) {
+    let Ok(detail_json) = serde_json::to_string(detail) else {
+        return;
+    };
+    let mut js = String::from("document.dispatchEvent(new CustomEvent('");
+    js.push_str(event);
+    js.push_str("',{detail:");
+    js.push_str(&detail_json);
+    js.push_str("}))");
+    for tab in manager.snapshot().tabs {
+        if let Some(wv) = app.get_webview(&tab.id) {
+            let _ = wv.eval(&js);
+        }
     }
 }
 

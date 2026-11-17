@@ -48,6 +48,7 @@ interface SubtitlesForm {
   mutedColor: string;
   plateColor: string;
   textStroke: boolean;
+  swapRows: boolean;
 }
 
 const el = (tag: string, cls?: string): HTMLElement => {
@@ -227,6 +228,12 @@ export function initSettingsPage(): void {
   strokeCheck.type = "checkbox";
   const strokeLabel = el("label", "set-check");
   strokeLabel.append(strokeCheck, Object.assign(el("span"), { textContent: t(" Обводка текста (читаемость на светлом видео)") }));
+  // Порядок строк (duopulse-181): перевод выше оригинала; быстрая кнопка —
+  // в нативном меню «duo» и полной панели, здесь — дефолт.
+  const swapCheck = document.createElement("input");
+  swapCheck.type = "checkbox";
+  const swapLabel = el("label", "set-check");
+  swapLabel.append(swapCheck, Object.assign(el("span"), { textContent: t(" Перевод сверху (поменять строки местами)") }));
   const lookForm = (): LookSource => ({
     originalColor: lookColors.originalColor.value,
     translationColor: lookColors.translationColor.value,
@@ -281,6 +288,7 @@ export function initSettingsPage(): void {
     field(t("Цвет третьих строк"), lookColors.mutedColor),
     field(t("Цвет подложки"), lookColors.plateColor),
     strokeLabel,
+    swapLabel,
   );
   const subsRow = el("div", "set-row");
   subsRow.append(subsSave, subsStatus);
@@ -296,6 +304,7 @@ export function initSettingsPage(): void {
     position: posTop.classList.contains("on") ? "top" : "bottom",
     marginPct: Number(margin.value),
     ...lookForm(),
+    swapRows: swapCheck.checked,
   });
   subsSave.addEventListener("click", () => {
     const form = subsForm();
@@ -318,11 +327,12 @@ export function initSettingsPage(): void {
             mutedColor: form.mutedColor,
             plateColor: form.plateColor,
             textStroke: form.textStroke,
+            swapRows: form.swapRows,
           },
         },
       })
       .then(() => {
-        subsStatus.textContent = t("Сохранено — новые вкладки подхватят.");
+        subsStatus.textContent = t("Сохранено — применено к открытым видео и новым вкладкам.");
       })
       .catch((e) => (subsStatus.textContent = String(e)));
   });
@@ -1402,6 +1412,7 @@ export function initSettingsPage(): void {
       lookColors.mutedColor.value = st.mutedColor ?? "#ffffff";
       lookColors.plateColor.value = st.plateColor ?? "#0a0e17";
       strokeCheck.checked = st.textStroke ?? true;
+      swapCheck.checked = st.swapRows ?? false;
       markLookChip();
       clearHist.checked = all.privacy.clearHistoryOnExit ?? false;
       m0Badge.checked = all.diagnostics.m0Badge ?? false;

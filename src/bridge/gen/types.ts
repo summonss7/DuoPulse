@@ -1152,6 +1152,10 @@ export interface SubtitlesStyleDefaults {
    */
   position?: string;
   /**
+   * Перевернуть порядок строк: перевод выше оригинала (duopulse-181).
+   */
+  swapRows?: boolean;
+  /**
    * Тёмная обводка строк для читаемости на светлом видео.
    */
   textStroke?: boolean;
@@ -1448,6 +1452,10 @@ export interface SubtitlesStyleInfo {
    */
   position: string;
   /**
+   * Перевернуть порядок строк: перевод выше оригинала (duopulse-181).
+   */
+  swapRows: boolean;
+  /**
    * Тёмная обводка строк (читаемость на светлом видео).
    */
   textStroke: boolean;
@@ -1544,6 +1552,10 @@ export interface SubtitlesStylePatch {
   plateColor?: string | null;
   plateOpacity?: number | null;
   position?: string | null;
+  /**
+   * Перевернуть порядок строк: перевод выше оригинала (duopulse-181).
+   */
+  swapRows?: boolean | null;
   textStroke?: boolean | null;
   translationColor?: string | null;
 }

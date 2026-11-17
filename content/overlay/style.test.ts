@@ -12,6 +12,7 @@ import {
   SCALE_MIN_PCT,
   clampColor,
   cssFontFamily,
+  displayOrder,
   fitStepPct,
   hexToRgba,
   mergeStyle,
@@ -34,6 +35,7 @@ describe("mergeStyle — настройки отображения с кламп
       mutedColor: "#ffffff",
       plateColor: "#0a0e17",
       textStroke: true,
+      swapRows: false,
     });
   });
 
@@ -240,5 +242,24 @@ describe("подложка и кегль", () => {
   it("базовый кегль = clamp от ширины видео × масштаб пользователя", () => {
     expect(plateFontSizeCss(100)).toBe("calc(clamp(14px, 2.6cqw, 34px) * 1.00)");
     expect(plateFontSizeCss(175)).toBe("calc(clamp(14px, 2.6cqw, 34px) * 1.75)");
+  });
+});
+
+// duopulse-181: перестановка строк (перевод сверху) — патч и порядок показа.
+describe("swapRows (duopulse-181)", () => {
+  it("дефолт false, патч bool, мусор игнорируется", () => {
+    expect(DEFAULT_SUBTITLE_STYLE.swapRows).toBe(false);
+    expect(mergeStyle(DEFAULT_SUBTITLE_STYLE, { swapRows: true }).swapRows).toBe(true);
+    expect(mergeStyle({ ...DEFAULT_SUBTITLE_STYLE, swapRows: true }, {}).swapRows).toBe(true);
+    expect(
+      mergeStyle(DEFAULT_SUBTITLE_STYLE, { swapRows: "yes" as unknown as boolean }).swapRows,
+    ).toBe(false);
+  });
+
+  it("displayOrder: без перестановки — порядок дорожек, с ней — обратный", () => {
+    expect(displayOrder(2, false)).toEqual([0, 1]);
+    expect(displayOrder(3, true)).toEqual([2, 1, 0]);
+    expect(displayOrder(1, true)).toEqual([0]);
+    expect(displayOrder(0, true)).toEqual([]);
   });
 });

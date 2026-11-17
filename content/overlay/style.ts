@@ -35,6 +35,9 @@ export interface SubtitleStyle {
   plateColor: string;
   /** Тёмная обводка строк для читаемости на светлом видео (гайд 06 §6). */
   textStroke: boolean;
+  /** Перевернуть порядок строк: перевод выше оригинала (duopulse-181 —
+   * быстрый обмен местами; цвета/веса остаются привязаны к ролям дорожек). */
+  swapRows: boolean;
 }
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
@@ -48,6 +51,7 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   mutedColor: "#ffffff",
   plateColor: "#0a0e17",
   textStroke: true,
+  swapRows: false,
 };
 
 export const SCALE_MIN_PCT = 75;
@@ -111,7 +115,17 @@ export function mergeStyle(base: SubtitleStyle, patch: Partial<SubtitleStyle>): 
     mutedColor: clampColor(patch.mutedColor, base.mutedColor),
     plateColor: clampColor(patch.plateColor, base.plateColor),
     textStroke: typeof patch.textStroke === "boolean" ? patch.textStroke : base.textStroke,
+    swapRows: typeof patch.swapRows === "boolean" ? patch.swapRows : base.swapRows,
   };
+}
+
+/** Порядок показа строк основной плашки (duopulse-181): false — порядок
+ * дорожек (оригинал сверху), true — обратный (перевод сверху). Возвращает
+ * индексы исходного массива строк: стиль строки берётся по её роли —
+ * map-элемент параллелен отображаемому списку. */
+export function displayOrder(count: number, swap: boolean): number[] {
+  const idx = Array.from({ length: count }, (_, i) => i);
+  return swap ? idx.reverse() : idx;
 }
 
 /** Шаг масштаба колесом: direction > 0 — крупнее; границы 75–300 (docs/03 §5). */
