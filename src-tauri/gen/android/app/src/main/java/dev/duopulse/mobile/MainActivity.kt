@@ -21,6 +21,8 @@ class MainActivity : TauriActivity() {
     current = this
     // duopulse-119: PDF из «Открыть с помощью» (ACTION_VIEW) — холодный старт
     MobilePdfHelper.handle(this, intent)
+    // duopulse-179: видео из «Открыть с помощью» (ACTION_VIEW video/*)
+    MobileVideoHelper.handle(this, intent)
   }
 
   override fun onDestroy() {
@@ -49,6 +51,9 @@ class MainActivity : TauriActivity() {
     // RustWebChromeClient гасит fullscreen-view; подменяем наследником с поддержкой
     webView.webChromeClient =
       MobileFullscreen.tauriChromeClient(this, (webView as RustWebView).id, webView)
+    // duopulse-179: автовоспроизведение <video> без жеста ВНУТРИ WebView —
+    // тап «Открыть с помощью» в файловом менеджере и так жест пользователя
+    webView.settings.mediaPlaybackRequiresUserGesture = false
     // duopulse-122: document-start скрипт youtube-фреймов — загрузчик качает
     // медиа fetch'ем внутри youtube-документа (см. MobileDownloadHelper)
     MobileDownloadHelper.registerFetcher(webView)
@@ -58,5 +63,7 @@ class MainActivity : TauriActivity() {
     super.onNewIntent(intent)
     // duopulse-119: launchMode=singleTask — файл при живом приложении
     MobilePdfHelper.handle(this, intent)
+    // duopulse-179: видео при живом приложении — так же
+    MobileVideoHelper.handle(this, intent)
   }
 }

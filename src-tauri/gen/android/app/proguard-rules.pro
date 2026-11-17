@@ -51,3 +51,7 @@
 # Та же грабля, что 083/102/126: без Java-ссылок из generated-кода R8
 # переименует класс и каждый external-вызов упадёт UnsatisfiedLinkError.
 -keep class dev.duopulse.mobile.MobileAdblockNative { *; }
+# duopulse-179: JNI-хелпер приёма видео из «Открыть с помощью»
+# (MobileVideoHelper.take) — та же грабля, что 083/102/119: без Java-ссылок
+# R8 вырезает метод в release.
+-keep class dev.duopulse.mobile.MobileVideoHelper { *; }

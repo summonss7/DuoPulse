@@ -66,6 +66,10 @@ pub mod mobile_download;
 // MobilePdfHelper + команды mobile_pdf_take/mobile_pdf_chunk (просмотрщик
 // pdf.js во фронтенде); валидатор пути — чистый, тесты на хосте.
 pub mod mobile_pdf;
+// Приём видео из «Открыть с помощью» (карточка duopulse-179): Kotlin-хелпер
+// MobileVideoHelper + команда mobile_video_take и протокол mobilevideo
+// (Range/206-куски cache/video для <video> во фронтенде).
+pub mod mobile_video;
 // Секреты мобильной ветки (duopulse-112): Android-бэкенд тех же save/load,
 // что DPAPI десктопа (синоним по вызову — crate::secrets).
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -130,6 +134,11 @@ fn mobile_run() {
         // У окон из конфига init-скрипта нет, этот хук Builder-а уходит во
         // все webview (main-frame initialization_scripts, tauri-2.12).
         .append_invoke_initialization_script(mobile_settings::ui_lang_init_script())
+        // Видео из «Открыть с помощью» (duopulse-179): файлы cache/video
+        // отдаёт <video> фронтенда с поддержкой перемотки (Range → 206);
+        // на Android URL вида http://mobilevideo.localhost/… (wry-маппинг
+        // кастомных протоколов), хендлер получает mobilevideo://localhost/…
+        .register_uri_scheme_protocol("mobilevideo", mobile_video::serve)
         .manage(duo_mobile::DuoManaged::default())
         // Хранилище закладок (duopulse-104): SQLite в filesDir/profile —
         // открыть до старта окна; недоступный каталог/диск роняют запуск с
@@ -188,6 +197,7 @@ fn mobile_run() {
             mobile_download::cmd::duo_download_subtitle,
             mobile_pdf::mobile_pdf_take,
             mobile_pdf::mobile_pdf_chunk,
+            mobile_video::mobile_video_take,
             #[cfg(debug_assertions)]
             mobile_download::cmd::duo_debug_save_music,
             mobile_history::history_bookmark_add,

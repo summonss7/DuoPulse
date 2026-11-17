@@ -6973,3 +6973,54 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   Артефакты стенда — gitignore. Бэкап backup.bat сделан до правок.
 
 Версия 0.1.63. Коммит: 366f7d8.
+
+## 17.11.2026, 07:10–08:20 — duopulse-179: Android — видео из «Открыть с помощью» (VIEW intent video/*)
+
+Десктоп-часть видео-ассоциаций (duopulse-176) приехала и на телефон: DuoPulse
+появляется в системном «Открыть с помощью» видеофайлов, файл играет
+экраном-проигрывателем в мобильной ветке.
+
+- Конфиг: tauri.android.conf.json — видео-ассоциации mp4+m4v (video/mp4),
+  mkv (video/x-matroska), webm (video/webm) ОТДЕЛЬНЫМИ записями: tauri-build
+  генерирует intent-фильтр по ОДНОМУ mimeType на ассоциацию — унаследованный
+  с десктопа список (один video/mp4 на четыре расширения) не поймал бы
+  video/x-matroska и video/webm от файловых менеджеров. PDF-фильтр цел
+  (проверено pm query-activities + живым открытием).
+- Kotlin: MobileVideoHelper (паттерн MobilePdfHelper 119/141): копирование
+  контентного URI в cache/video фоновой нитью, маркеры busy/noperm/error,
+  чистка старых копий (держим 4 свежие — видео тяжёлые), logcat-тег
+  DuoPulseVideo; MainActivity — handle в onCreate/onNewIntent и
+  mediaPlaybackRequiresUserGesture=false (тап «Открыть с помощью» и есть
+  жест пользователя); proguard-keep против R8 (грабля 083/102/119).
+- Core: src-tauri/src/mobile_video.rs — команда mobile_video_take (JNI) и
+  кастомный протокол mobilevideo (register_uri_scheme_protocol): wry на
+  Android мапит его на http://mobilevideo.localhost и сам держит
+  Chromium-обход для 206; отдаёт куски cache/video с Range → 206 +
+  Content-Range (потолок куска 8 МиБ на открытые «bytes=N-»), 416 за
+  концом, путь валидируется is_video_cache_path (произвольное чтение
+  отсечено). Range-разбор/валидаторы — чистые функции.
+- Фронтенд: src/mobile/video.ts — контроллер-проигрыватель (паттерн pdf.ts):
+  poll на старте/фокусе, <video controls playsinline autoplay> экраном
+  поверх вкладок, имя в omnibox, подсказки busy/noperm (общие маркеры с
+  PDF), ошибка «формат не поддержан» по MediaError; интеграция в mobile.ts
+  (закрытие из «домой»/при открытии YouTube-видео, __duopulseMobileVideo);
+  i18n — 4 строки в 5 словарях; mobile.css — m-video.
+- Тесты: cargo — 6 новых (пути, Range-разбор/потолок, mime, percent-decode),
+  всего 29 ok либы; vitest 55 файлов / 586 ok (video.test.ts — URL
+  протокола и маркеры); typecheck ok.
+- Смоук релиза (R8/JNI) e2e/mobile/video-release-smoke.mjs — 19/19:
+  DuoPulse в обработчиках VIEW (mp4/mkv/webm/pdf), mp4 с кириллическим
+  именем играет (кадры меняются, в logcat копия хелпера + 206 протокола),
+  mkv/webm открываются, без grant — подсказка «нет доступа» без краха,
+  PDF-просмотрщик цел, bmgr backup→uninstall→install(restore)→живой старт.
+  Скриншоты проверены: бар с ✕ и именем, тестовый кадр с идущим таймкодом.
+  Грабли стенда: грантить documents-URI из shell нельзя (SecurityException
+  у отправителя) — MediaStore content://media/… грантит; «вкладка» из
+  карточки — экран-проигрыватель поверх вкладок (паттерн PDF): мобильные
+  вкладки — YouTube-iframe модель, файловая вкладка потребовала бы
+  переделки модели вкладок.
+- Релизы: Android 0.1.64 (universal aarch64+x86_64, подписан, канал Aila +
+  хаб «Скачать»), десктоп 0.1.64 (NSIS, оба канала + GitHub Pages +
+  C:\DuoPulse — src/ менялся, правило duopulse-120). Версия 0.1.64.
+- README (строка «Локальное видео») и ROADMAP (Изменения плана) обновлены.
+  Бэкап backup.bat сделан до сборок.

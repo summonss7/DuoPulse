@@ -42,6 +42,7 @@ import {
   installMobileSelectionTranslate,
 } from "./selection-translate";
 import { createMobilePdf } from "./pdf";
+import { createMobileVideo } from "./video";
 
 const chromeRoot = document.getElementById("app");
 // DOM десктоп-хрома не трогаем, просто прячем: не [hidden] — стили десктопа
@@ -453,15 +454,40 @@ const selectionTranslate = installMobileSelectionTranslate(
   createSelectionPorts(invoke, () => incognito),
 );
 
-// ── Просмотрщик PDF (карточка duopulse-119): DuoPulse — системный
-// просмотрщик application/pdf (intent-filter); файл из «Открыть с
-// помощью» рисуется pdf.js (WebView Android PDF не рендерит). poll — на
-// старте (холодный запуск с файлом) и по возврату фокуса (onNewIntent при
-// живом приложении; visibilitychange срабатывает надёжно focus-события
-// WebView). Десктоп ветки не касается: там PDF показывает WebView2.
+// ── Просмотрщик PDF (карточка duopulse-119) и проигрыватель видео из
+// системы (duopulse-179): DuoPulse — кандидат «Открыть с помощью» для
+// application/pdf и video/* (intent-filter'ы); PDF рисуется pdf.js (WebView
+// Android PDF не рендерит), видео играет сам <video> через протокол
+// mobilevideo (Range/206 — перемотка). poll — на старте (холодный запуск с
+// файлом) и по возврату фокуса (onNewIntent при живом приложении;
+// visibilitychange срабатывает надёжнее focus-события WebView). Десктоп
+// ветки не касается: там PDF показывает WebView2, видео открывает вкладкой
+// file:// (duopulse-176).
+let videoView: ReturnType<typeof createMobileVideo> | null = null;
 const pdfView = createMobilePdf({
   note,
   host: content,
+  hideContent: () => {
+    start.hidden = true;
+    tabs.setVisible(false);
+    videoView?.close();
+  },
+  restoreContent: () => {
+    tabs.setVisible(true);
+    start.hidden = tabs.active !== null;
+  },
+  showInOmnibox: (text) => {
+    omnibox.value = text;
+  },
+  setVideoButtons: (visible) => {
+    duoBtn.hidden = !visible;
+    musicBtn.hidden = !visible;
+  },
+});
+const video = createMobileVideo({
+  note,
+  host: content,
+  closeOthers: () => pdfView.close(),
   hideContent: () => {
     start.hidden = true;
     tabs.setVisible(false);
@@ -478,14 +504,21 @@ const pdfView = createMobilePdf({
     musicBtn.hidden = !visible;
   },
 });
-void pdfView.poll();
-window.addEventListener("focus", () => void pdfView.poll());
+videoView = video;
+const pollFiles = () => {
+  void pdfView.poll();
+  void video.poll();
+};
+pollFiles();
+window.addEventListener("focus", pollFiles);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") void pdfView.poll();
+  if (document.visibilityState === "visible") pollFiles();
 });
 // диагностика стендов (как __duopulseMobileTranslate/__duopulseMobileMusic)
 (window as { __duopulseMobilePdf?: () => unknown }).__duopulseMobilePdf = () =>
   pdfView.snapshot();
+(window as { __duopulseMobileVideo?: () => unknown }).__duopulseMobileVideo = () =>
+  video.snapshot();
 // диагностика стендов (e2e/selection/mobile.mjs)
 (window as { __duopulseMobileTranslate?: () => unknown }).__duopulseMobileTranslate = () =>
   selectionTranslate.stateSnapshot();
@@ -607,6 +640,7 @@ async function navigate(input: string, newTab = false): Promise<void> {
   const videoId = res.kind === "url" ? videoIdOfEmbed(res.url) : null;
   if (videoId) {
     pdfView.close();
+    video.close();
     tabs.open(videoId, "", newTab); // доводку хрома делает onTabActive
     return;
   }
@@ -622,6 +656,7 @@ async function navigate(input: string, newTab = false): Promise<void> {
 (window as { __duopulseOpenVideo?: (id: string) => void }).__duopulseOpenVideo = (id: string) => {
   if (!/^[\w-]{6,20}$/.test(id)) return; // id из evaluateJavascript — проверяем
   pdfView.close();
+  video.close();
   tabs.open(id, "", true);
 };
 
@@ -654,6 +689,7 @@ function goFromOmnibox(): void {
 function goHome(): void {
   setMenu(false);
   pdfView.close();
+  video.close();
   // web-оверлей тоже закрываем: «домой» — стартовый экран, не страница
   void invoke<string>("mobile_web_close").catch(() => {});
   tabs.newTab();

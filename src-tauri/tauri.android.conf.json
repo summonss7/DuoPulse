@@ -11,6 +11,34 @@
         "description": "PDF-документ",
         "mimeType": "application/pdf",
         "role": "Viewer"
+      },
+      {
+        "ext": [
+          "mp4",
+          "m4v"
+        ],
+        "name": "DuoPulse Video MP4",
+        "description": "Видеофайл MP4",
+        "mimeType": "video/mp4",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "mkv"
+        ],
+        "name": "DuoPulse Video MKV",
+        "description": "Видеофайл Matroska",
+        "mimeType": "video/x-matroska",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "webm"
+        ],
+        "name": "DuoPulse Video WebM",
+        "description": "Видеофайл WebM",
+        "mimeType": "video/webm",
+        "role": "Viewer"
       }
     ]
   },

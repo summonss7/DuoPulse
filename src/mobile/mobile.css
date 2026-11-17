@@ -1315,6 +1315,63 @@ body.m-bm-dragging {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
 }
 
+/* ── Проигрыватель видео из системы (карточка duopulse-179) ─────────────
+   Экран поверх вкладок (как просмотрщик PDF): тулбар (закрыть/имя) +
+   <video> с родными контролами; файл кормит протокол mobilevideo
+   (Range/206 — работает перемотка). */
+.m-video {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+
+.m-video-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-soft, transparent);
+  flex: none;
+}
+
+.m-video-bar .m-video-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.m-video-bar button {
+  flex: none;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.m-video-bar button:active {
+  background: var(--bg-base);
+}
+
+.m-video-el {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
 /* ── Вкладки (duopulse-123): кнопка-переключатель в шапке с бейджем
    количества и лист вкладок (общий нижний шит m-sheet-*). Каждая вкладка —
    iframe .m-tab (стиль выше, был у единственного плеера). */
