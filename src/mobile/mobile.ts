@@ -34,8 +34,9 @@ import { MobileDuo, type DuoStatus } from "./duo";
 import { MobileBookmarks } from "./bookmarks";
 import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
 import { MobileHistory } from "./history";
+import { MobileDiagnostics } from "./diagnostics";
 import { installMobileAccount } from "./account";
-import { createMobileUpdater, mb, type UpdaterUi } from "./updater";
+import { createMobileUpdater, mb, readLastCheck, type UpdaterUi } from "./updater";
 import { createMusicDownloader } from "./download";
 import {
   createSelectionPorts,
@@ -107,6 +108,7 @@ root.innerHTML = `
         <button id="mHistory" class="m-check-update" data-i18n="История">История</button>
         <button id="mReopen" class="m-check-update" data-i18n="Восстановить вкладку" hidden>Восстановить вкладку</button>
         <button id="mTranslate" class="m-check-update" data-i18n="Перевести текст…">Перевести текст…</button>
+        <button id="mDiag" class="m-check-update" data-i18n="Диагностика">Диагностика</button>
         <button id="mCheckUpdate" class="m-check-update" data-i18n="Проверить обновления">Проверить обновления</button>
         <p class="m-menu-version" id="mVersionMenu"></p>
       </div>
@@ -123,6 +125,7 @@ const home = root.querySelector<HTMLButtonElement>("#mHome")!;
 const menuBtn = root.querySelector<HTMLButtonElement>("#mMenu")!;
 const menuWrap = root.querySelector<HTMLElement>("#mMenuWrap")!;
 const historyBtn = root.querySelector<HTMLButtonElement>("#mHistory")!;
+const diagBtn = root.querySelector<HTMLButtonElement>("#mDiag")!;
 const reopenBtn = root.querySelector<HTMLButtonElement>("#mReopen")!;
 const privateBtn = root.querySelector<HTMLButtonElement>("#mPrivate")!;
 const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
@@ -225,8 +228,13 @@ privateBtn.addEventListener("click", () => setIncognito(!incognito));
 // ── OTA-обновления из центра Aila (этап 3, duopulse-083) ───────────────
 const updateBanner = root.querySelector<HTMLElement>("#mUpdate")!;
 
+// Последнее состояние контроллера обновлений — листу «Диагностика»
+// (duopulse-164): строка «доступна версия» без новой проверки сети.
+let lastUpdateUi: UpdaterUi = { kind: "idle" };
+
 /** Перерисовка баннера обновления по состоянию контроллера (updater.ts). */
 function renderUpdate(ui: UpdaterUi): void {
+  lastUpdateUi = ui;
   updateBanner.innerHTML = "";
   updateBanner.hidden = ui.kind === "idle";
   if (ui.kind === "idle") return;
@@ -372,6 +380,23 @@ reopenBtn.addEventListener("click", () => {
   setMenu(false);
   const reopened = tabs.reopenLast();
   note(reopened ? t("Вкладка восстановлена") : "");
+});
+
+// ── Диагностика (duopulse-164, паритет 1/8): лист из меню «⋮» — лёгкий
+// снимок состояния (версия/канал, сеанс, память, счётчики сторов и адблока,
+// обновления); десктопные метрики P-01..P-08 не переносятся (бюджеты
+// десктопа). Вкладки и метка последней проверки — состояние фронта.
+const diagnostics = new MobileDiagnostics({
+  content,
+  note,
+  tabsCount: () => tabs.count,
+  lastUpdateCheckMs: () => readLastCheck(),
+  updateAvailableVersion: () =>
+    lastUpdateUi.kind === "available" ? lastUpdateUi.version : null,
+});
+diagBtn.addEventListener("click", () => {
+  setMenu(false);
+  diagnostics.setSheet(true);
 });
 
 // ── Аккаунт Aila (этап 6 duopulse-112): блок в меню «⋮», листы входа и

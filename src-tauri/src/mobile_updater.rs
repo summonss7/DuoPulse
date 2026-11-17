@@ -43,17 +43,22 @@ use std::path::PathBuf;
 #[cfg(target_os = "android")]
 use tauri::{AppHandle, Emitter};
 
-/// Тот же канал и то же окружение-переопределение, что у десктопного
-/// updater.rs (DUOPULSE_UPDATE_BASE — база канала; живая проверка подменяет
-/// манифест, форма адреса — /manifest.json).
-#[cfg(target_os = "android")]
-fn manifest_url() -> String {
-    let base = std::env::var("DUOPULSE_UPDATE_BASE")
+/// База канала обновлений (без /manifest.json): живое переопределение
+/// DUOPULSE_UPDATE_BASE или стандартный канал Aila (тот же канал, что у
+/// десктопного updater.rs). Чистая — её показывает и диагностика мобильной
+/// ветки (mobile_diag::channel_label).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn update_base() -> String {
+    std::env::var("DUOPULSE_UPDATE_BASE")
         .ok()
         .map(|v| v.trim().trim_end_matches('/').to_string())
         .filter(|v| !v.is_empty() && !v.contains(' '))
-        .unwrap_or_else(|| "https://aila.skillcoin.pp.ua/updates/duopulse".into());
-    format!("{base}/manifest.json")
+        .unwrap_or_else(|| "https://aila.skillcoin.pp.ua/updates/duopulse".into())
+}
+
+#[cfg(target_os = "android")]
+fn manifest_url() -> String {
+    format!("{}/manifest.json", update_base())
 }
 
 #[derive(Deserialize, Serialize, Clone)]

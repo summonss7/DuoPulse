@@ -1494,3 +1494,23 @@ body.m-bm-dragging {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* ── Диагностика (duopulse-164): лист из меню «⋮» — каркас m-sheet, секции
+   с заголовками и строками-значениями (значения уже внутри строк — переводы
+   цельными фразами), внизу «Скопировать отчёт». */
+.m-diag-list {
+  gap: 0;
+}
+
+.m-diag-sec {
+  padding: 10px 14px 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.m-diag-row {
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--text-primary);
+}

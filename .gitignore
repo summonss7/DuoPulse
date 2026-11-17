@@ -63,3 +63,4 @@ e2e/asr/.cache/
 promt.txt
 promt_done.txt
 CARDS/
+src-tauri/gen/android/.idea/

@@ -70,6 +70,11 @@ pub mod mobile_pdf;
 // MobileVideoHelper + команда mobile_video_take и протокол mobilevideo
 // (Range/206-куски cache/video для <video> во фронтенде).
 pub mod mobile_video;
+// Диагностика мобильной ветки (duopulse-164, паритет 1/8): команда
+// diag_snapshot для листа «Диагностика» в меню «⋮» — версия/канал, сеанс,
+// RSS, счётчики сторов и адблока. Чистые функции — везде (тесты на хосте),
+// команда — мобильным таргетам (как mobile_open).
+pub mod mobile_diag;
 // Секреты мобильной ветки (duopulse-112): Android-бэкенд тех же save/load,
 // что DPAPI десктопа (синоним по вызову — crate::secrets).
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -147,6 +152,9 @@ fn mobile_run() {
             use std::sync::Arc;
             use tauri::Manager;
             let dir = mobile_history::profile_dir()?;
+            // Диагностика (duopulse-164): старт сеанса — до открытия окна,
+            // «время сеанса» снимка честное с самого запуска.
+            mobile_diag::init();
             // Полный адблок оверлея (duopulse-144): движок из кэша прошлой
             // сессии публикуется сразу, списки досматривает фоновая нить;
             // JNI-вызовы MobileAdblockNative падают в этот же синглтон
@@ -198,6 +206,7 @@ fn mobile_run() {
             mobile_pdf::mobile_pdf_take,
             mobile_pdf::mobile_pdf_chunk,
             mobile_video::mobile_video_take,
+            mobile_diag::diag_snapshot,
             #[cfg(debug_assertions)]
             mobile_download::cmd::duo_debug_save_music,
             mobile_history::history_bookmark_add,
