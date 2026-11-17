@@ -109,7 +109,7 @@ pub fn parse_xml(input: &str) -> ParsedCues {
         cues.push(finished_cue(t, &raw));
     }
     let cues = finalize_cues(cues, &mut warnings);
-    ParsedCues { cues, warnings }
+    ParsedCues { cues, warnings, top_cue_starts: Vec::new() }
 }
 
 /// Элемент-строка субтитра: `text` (современный формат) или `p` (старый).
@@ -186,6 +186,7 @@ pub fn parse_json3(input: &str) -> ParsedCues {
             return ParsedCues {
                 cues: Vec::new(),
                 warnings,
+                top_cue_starts: Vec::new(),
             };
         }
     };
@@ -197,6 +198,7 @@ pub fn parse_json3(input: &str) -> ParsedCues {
         return ParsedCues {
             cues: Vec::new(),
             warnings,
+            top_cue_starts: Vec::new(),
         };
     };
     // Контентные события: текст + тайминги; служебные (без segs) пропускаются.
@@ -244,7 +246,7 @@ pub fn parse_json3(input: &str) -> ParsedCues {
             .collect()
     };
     let cues = finalize_cues(cues, &mut warnings);
-    ParsedCues { cues, warnings }
+    ParsedCues { cues, warnings, top_cue_starts: Vec::new() }
 }
 
 /// Контентное событие JSON3 (текст события = склейка utf8 его segs).

@@ -51,6 +51,8 @@ e2e/perf/p08-trace-last.json
 
 # Рантайм-артефакт стенда памяти вкладок (e2e/tabs/mem-hang-probe.mjs, duopulse-115)
 e2e/tabs/mem-hang-last-run.json
+e2e/subtitles/ass-last-run.json
+e2e/subtitles/ass-last-run.png
 
 # Рантайм-артефакт стенда duopulse-066 (e2e/subtitles/altd-default.mjs)
 e2e/subtitles/altd-timeline.log

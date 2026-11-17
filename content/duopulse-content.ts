@@ -814,7 +814,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   // drop; дроп/панель замещают файловую часть набора целиком (replaceFileTracks
   // — карточка duopulse-177: снимает файловый cloud-перевод, решает автоперевод).
   document.addEventListener("duopulse-file-track", (e) => {
-    const detail = (e as CustomEvent<{ name?: unknown; cues?: unknown }>).detail;
+    const detail = (e as CustomEvent<{ name?: unknown; cues?: unknown; topStarts?: unknown }>).detail;
     if (!detail || typeof detail !== "object" || !Array.isArray(detail.cues)) return;
     const cues: Cue[] = [];
     for (const c of detail.cues) {
@@ -824,8 +824,12 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       cues.push({ startMs: cue["startMs"], endMs: cue["endMs"], text: String(cue["text"] ?? "") });
     }
     if (cues.length === 0) return;
+    // Верхние реплики .ass (duopulse-178): Core прикладывает список startMs.
+    const topStarts = Array.isArray(detail.topStarts)
+      ? detail.topStarts.filter((n): n is number => typeof n === "number")
+      : undefined;
     const name = typeof detail.name === "string" && detail.name ? detail.name : "субтитры.srt";
-    replaceFileTracks([fileTrackFrom(name, langOfFileName(name), cues)], "load_file");
+    replaceFileTracks([fileTrackFrom(name, langOfFileName(name), cues, undefined, topStarts)], "load_file");
     postToCore({
       duopulse: "file-tracks",
       videoKey: currentVideo?.videoKey ?? "",
@@ -870,7 +874,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       dropHintVisible: boolean;
       asrTracks: { id: string; lang: string; cues: number }[];
       translateTracks: { id: string; lang: string; cues: number }[];
-      fileTracks: { id: string; lang: string; cues: number }[];
+      fileTracks: { id: string; lang: string; cues: number; topStarts?: number[] }[];
       setMemory: { key: string; enabled: boolean; tracks: number }[];
       cloud: ReturnType<typeof cloudTranslateStatus>;
       asr: ReturnType<typeof asrStatus>;
@@ -889,7 +893,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
         dropHintVisible: dropzone.hintVisible(),
         asrTracks: asrTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
         translateTracks: translateTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
-        fileTracks: fileTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length })),
+        fileTracks: fileTracks.map((t) => ({ id: t.id, lang: t.lang, cues: t.cues.length, topStarts: t.topStarts })),
         setMemory: [...setMemory.entries()].map(([key, m]) => ({
           key,
           enabled: m.enabled,

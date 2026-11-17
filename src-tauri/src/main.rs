@@ -745,17 +745,25 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                         Some(subtitles::parse_auto(payload))
                     };
                     let reply = match parsed_cues {
-                        Some(out) => serde_json::json!({
-                            "duopulse": "subtitles-parsed",
-                            "reqId": req_id,
-                            "ok": true,
-                            "cues": out.cues.iter().map(|c| serde_json::json!({
-                                "startMs": c.start_ms, "endMs": c.end_ms, "text": c.text,
-                            })).collect::<Vec<_>>(),
-                            "warnings": out.warnings.iter()
-                                .map(|w| format!("строка {}: {}", w.line, w.message))
-                                .collect::<Vec<_>>(),
-                        }),
+                        Some(out) => {
+                            let mut r = serde_json::json!({
+                                "duopulse": "subtitles-parsed",
+                                "reqId": req_id,
+                                "ok": true,
+                                "cues": out.cues.iter().map(|c| serde_json::json!({
+                                    "startMs": c.start_ms, "endMs": c.end_ms, "text": c.text,
+                                })).collect::<Vec<_>>(),
+                                "warnings": out.warnings.iter()
+                                    .map(|w| format!("строка {}: {}", w.line, w.message))
+                                    .collect::<Vec<_>>(),
+                            });
+                            // Реплики верхнего расположения (.ass \an7/8/9, карточка
+                            // duopulse-178): боковой канал — startMs, Cue не меняется.
+                            if !out.top_cue_starts.is_empty() {
+                                r["topStarts"] = serde_json::json!(out.top_cue_starts);
+                            }
+                            r
+                        }
                         None => serde_json::json!({
                             "duopulse": "subtitles-parsed",
                             "reqId": req_id,

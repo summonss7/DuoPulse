@@ -26,6 +26,7 @@ pub mod fonts;
 // lib его не тянет (duopulse-082); парсеры ниже — общие.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod service;
+pub mod ass;
 pub mod srt;
 pub mod timedtext;
 pub mod vtt;
@@ -35,13 +36,20 @@ use serde::{Deserialize, Serialize};
 /// Автодетект формата по содержимому (задача 3.3: YouTube-адаптер присылает
 /// тела timedtext/json3; формат выбирает платформа, разбирает Core — единый
 /// источник логики): `{` — JSON3 timedtext, `<` — XML timedtext, `WEBVTT` —
-/// WebVTT, остальное — SubRip.
+/// WebVTT, `[Script Info]` — Advanced SubStation (.ass/.ssa, карточка
+/// duopulse-178), остальное — SubRip.
 pub fn parse_auto(input: &str) -> ParsedCues {
     let t = input.trim_start();
     if t.starts_with('{') || t.starts_with('<') {
         timedtext::parse(input)
     } else if normalize(input).starts_with("WEBVTT") {
         vtt::parse(input)
+    } else if normalize(input)
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .is_some_and(|l| l.trim().eq_ignore_ascii_case("[script info]"))
+    {
+        ass::parse(input)
     } else {
         srt::parse(input)
     }
@@ -50,12 +58,14 @@ pub fn parse_auto(input: &str) -> ParsedCues {
 // --- задача 3.6: ручные файлы .srt/.vtt (docs/03 §3.2) ------------------------
 
 /// Ручной файл субтитров, прочитанный с диска: имя (без каталога — его видит
-/// пользователь в панели/диагностике) + итог канонического разбора.
+/// пользователь в панели/диагностике) + итог канонического разбора
+/// (top_cue_starts — реплики верхнего расположения .ass, duopulse-178).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManualFileTrack {
     pub name: String,
     pub cues: Vec<Cue>,
     pub warnings: Vec<ParseWarning>,
+    pub top_cue_starts: Vec<i64>,
 }
 
 /// Лимит размера файла — тот же, что у WebMessage-разбора дорожек (main.rs).
@@ -63,8 +73,9 @@ const MANUAL_FILE_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Прочитать и разобрать ручной файл субтитров (панельный путь задачи 3.6,
 /// IPC `subtitles.load_file`): чтение UTF-8 с диска (Windows-1251 — v1.1,
-/// docs/03 §3.2), разбор — канонический `parse_auto` (задача 3.1). Ошибки —
-/// текстом для панели (файл недоступен/не UTF-8/слишком большой).
+/// docs/03 §3.2), разбор — канонический `parse_auto` (задача 3.1; форматы —
+/// .srt/.vtt/.ass/.ssa, карточка duopulse-178). Ошибки — текстом для панели
+/// (файл недоступен/не UTF-8/слишком большой).
 pub fn read_manual_file(path: &std::path::Path) -> Result<ManualFileTrack, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("файл недоступен: {e}"))?;
     if !meta.is_file() {
@@ -84,6 +95,7 @@ pub fn read_manual_file(path: &std::path::Path) -> Result<ManualFileTrack, Strin
         name,
         cues: parsed.cues,
         warnings: parsed.warnings,
+        top_cue_starts: parsed.top_cue_starts,
     })
 }
 
@@ -111,6 +123,12 @@ pub struct ParseWarning {
 pub struct ParsedCues {
     pub cues: Vec<Cue>,
     pub warnings: Vec<ParseWarning>,
+    /// Реплики верхнего расположения (карточка duopulse-178: .ass `\an7/8/9`,
+    /// SSA `\a5/6/7` — знаки/комменты поверх кадра): их startMs. Ключ
+    /// стартом, а не индексом — finalize сортирует и выбрасывает cue, а
+    /// коллизии «одинаковый старт, разное расположение» экзотичны (слои SSA).
+    /// Пусто у всех парсеров, кроме ass.
+    pub top_cue_starts: Vec<i64>,
 }
 
 /// BOM и переводы Windows → LF до разбора (все парсеры).

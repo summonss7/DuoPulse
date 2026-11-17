@@ -23,10 +23,13 @@ export const SEEK_JUMP_MS = 250;
 /** Предел сдвига пользователя (docs/03 §4: ±10 с). */
 export const OFFSET_LIMIT_MS = 10_000;
 
-/** Строка плашки = активный cue дорожки; порядок = порядок дорожек набора. */
+/** Строка плашки = активный cue дорожки; порядок = порядок дорожек набора.
+ * top — реплика верхнего расположения (.ass \an7/8/9, duopulse-178): оверлей
+ * рисует такие строки в плашке-верху, обычные — в основной. */
 export interface ActiveRow {
   trackId: string;
   text: string;
+  top?: boolean;
 }
 
 export interface SubtitlesEngineEvents {
@@ -41,6 +44,8 @@ interface BoundTrack {
   /** Cue, скрытый правилом 150 мс при последнем скачке: непрерывный показ не
    * «вспыхивает» его обратно на оставшиеся миллисекунды (docs/03 §4). */
   suppressed: Cue | null;
+  /** startMs верхних реплик (.ass \an7/8/9, duopulse-178) — сет для O(1). */
+  topStarts: Set<number>;
 }
 
 /** Минимальный видео-интерфейс движка (упрощает тесты без DOM). */
@@ -71,7 +76,12 @@ export class SubtitlesEngine {
 
   /** Набор дорожек (1–3 в v1, порядок = порядок строк на плашке). */
   setTracks(tracks: Track[]): void {
-    this.tracks = tracks.map((track) => ({ track, timeline: CueTimeline.build(track.cues), suppressed: null }));
+    this.tracks = tracks.map((track) => ({
+      track,
+      timeline: CueTimeline.build(track.cues),
+      suppressed: null,
+      topStarts: new Set(track.topStarts ?? []),
+    }));
     this.tick(true);
   }
 
@@ -159,7 +169,7 @@ export class SubtitlesEngine {
         bound.suppressed = cue.endMs - shifted < MIN_REMAINING_AFTER_SEEK_MS ? cue : null;
       }
       if (!cue || cue === bound.suppressed || !cue.text) continue;
-      rows.push({ trackId: bound.track.id, text: cue.text });
+      rows.push({ trackId: bound.track.id, text: cue.text, top: bound.topStarts.has(cue.startMs) || undefined });
     }
     this.setRows(rows);
   }

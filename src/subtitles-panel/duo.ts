@@ -501,9 +501,9 @@ const pickSubtitlesFile = (): void => {
     try {
       const path = await invoke<string | null>("plugin:dialog|open", {
         options: {
-          title: t("Свои субтитры (.srt / .vtt)"),
+          title: t("Свои субтитры (.srt / .vtt / .ass)"),
           multiple: false,
-          filters: [{ name: t("Субтитры"), extensions: ["srt", "vtt"] }],
+          filters: [{ name: t("Субтитры"), extensions: ["srt", "vtt", "ass", "ssa"] }],
         },
       });
       if (!path) return;

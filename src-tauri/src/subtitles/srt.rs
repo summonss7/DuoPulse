@@ -46,7 +46,7 @@ pub fn parse(input: &str) -> ParsedCues {
     }
     parse_block(&block, &mut cues, &mut warnings);
     let cues = finalize_cues(cues, &mut warnings);
-    ParsedCues { cues, warnings }
+    ParsedCues { cues, warnings, top_cue_starts: Vec::new() }
 }
 
 /// Один блок файла: строки `(номер, текст)` до первой пустой.

@@ -347,3 +347,38 @@ describe("autoTranslateFileDecision", () => {
     ).toBe(false);
   });
 });
+
+// --- .ass/.ssa (карточка duopulse-178) -----------------------------------------
+
+describe("расширения .ass/.ssa (duopulse-178)", () => {
+  it("langOfFileName и fileTrackFrom понимают .ass/.ssa", () => {
+    expect(langOfFileName("anime.ru.ass")).toBe("ru");
+    expect(langOfFileName("fansub.ssa")).toBe("");
+    const t = fileTrackFrom("Знак_школы.ass", "", cues(2));
+    expect(t.id).toBe("file:Знак_школы"); // без языка — слаг имени без расширения
+  });
+
+  it("pickSubtitleFiles отбирает .ass/.ssa вместе с .srt/.vtt", () => {
+    const mk = (name: string) => ({ name, text: () => Promise.resolve("") });
+    const picked = pickSubtitleFiles([mk("a.srt"), mk("b.ass"), mk("c.ssa"), mk("d.exe")]);
+    expect(picked.map((p) => p.name)).toEqual(["a.srt", "b.ass", "c.ssa"]);
+  });
+
+  it("buildFileTracks: topStarts парсера уезжает в дорожку", async () => {
+    const parser: SubtitlesParser = {
+      parse: () =>
+        Promise.resolve({ cues: cues(3), warnings: [], topStarts: [0, 2000] }),
+    };
+    const res = await buildFileTracks([fakeFile("signs.en.ass", "n:3")], { parser });
+    expect(res.tracks).toHaveLength(1);
+    expect(res.tracks[0].topStarts).toEqual([0, 2000]);
+    // без topStarts (srt/vtt) поле не появляется
+    const plain = await buildFileTracks([fakeFile("m.ru.srt", "n:2")], { parser: fakeParser() });
+    expect(plain.tracks[0].topStarts).toBeUndefined();
+  });
+
+  it("fileTrackFrom без topStarts — поле не ставится, пустой список — тоже", () => {
+    expect(fileTrackFrom("a.ass", "ru", cues(1)).topStarts).toBeUndefined();
+    expect(fileTrackFrom("a.ass", "ru", cues(1), undefined, []).topStarts).toBeUndefined();
+  });
+});

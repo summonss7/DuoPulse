@@ -13,7 +13,7 @@ import type { Cue } from "../types";
 const PARSE_TIMEOUT_MS = 20_000;
 
 interface PendingParse {
-  resolve: (value: { cues: Cue[]; warnings: string[] }) => void;
+  resolve: (value: { cues: Cue[]; warnings: string[]; topStarts?: number[] }) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -43,7 +43,12 @@ function ensureSubscription(): boolean {
       const warnings = Array.isArray(message["warnings"])
         ? message["warnings"].filter((w): w is string => typeof w === "string")
         : [];
-      entry.resolve({ cues, warnings });
+      // Верхние реплики .ass (duopulse-178): Core прикладывает список startMs;
+      // отсутствует/пуст — обычный формат.
+      const topStarts = Array.isArray(message["topStarts"])
+        ? message["topStarts"].filter((n): n is number => typeof n === "number")
+        : undefined;
+      entry.resolve({ cues, warnings, topStarts });
     } else {
       entry.reject(new Error(String(message["error"] ?? "Core не смог разобрать payload")));
     }
@@ -55,7 +60,7 @@ function ensureSubscription(): boolean {
 /** Парсер поверх WebMessage-канала до Core (строгая очередь reqId). */
 export function createCoreParser(): SubtitlesParser {
   return {
-    parse(payload: string): Promise<{ cues: Cue[]; warnings: string[] }> {
+    parse(payload: string): Promise<{ cues: Cue[]; warnings: string[]; topStarts?: number[] }> {
       if (!ensureSubscription()) {
         return Promise.reject(new Error("канал до Core недоступен"));
       }

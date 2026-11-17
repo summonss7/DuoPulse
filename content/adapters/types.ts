@@ -63,9 +63,11 @@ export interface LoadedTracks {
 }
 
 /** Порт разбора payload → cues. Канонические парсеры — в Core (задача 3.1);
- * транспорт — WebMessage; тесты подменяют реализацией на фикстурах. */
+ * транспорт — WebMessage; тесты подменяют реализацией на фикстурах.
+ * topStarts — реплики верхнего расположения .ass (duopulse-178); прочие
+ * форматы поле не возвращают. */
 export interface SubtitlesParser {
-  parse(payload: string): Promise<{ cues: Cue[]; warnings: string[] }>;
+  parse(payload: string): Promise<{ cues: Cue[]; warnings: string[]; topStarts?: number[] }>;
 }
 
 /** Порты загрузки (все знания о странице/DOM — в реализации по умолчанию;

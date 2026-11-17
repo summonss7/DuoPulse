@@ -18,6 +18,7 @@
 | `timedtext-asr.json3` | YouTube JSON3, ASR | пословный режим автосубтитров (duopulse-094/113): слово в момент речи, всегда одна строка — набираемая, завершённая держится лишь до следующей, cue без смены текста продлеваются |
 | `timedtext-broken.xml` | YouTube XML | негативный: нет start/dur, битые атрибуты, незакрытый элемент |
 | `timedtext-broken.json3` | YouTube JSON3 | негативный: обрезанный JSON |
+| `sample.ass` | Advanced SubStation Alpha | «лёгкий» аниме-релиз (duopulse-178): знаки `\an8`/`\pos`, караоке `\k`, рисунок `\p`, Comment, nbsp `\h`, перенос `\N` |
 
 YouTube-фикстуры ручные, по структуре ответов `api/timedtext` (`fmt` без
 параметра — XML, `fmt=json3` — JSON3); снапшоты реальных player-ответов —

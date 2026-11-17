@@ -416,7 +416,7 @@ fn build_duo_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
         &MenuItem::with_id(
             app,
             "duo:file",
-            "Свои субтитры… (.srt / .vtt)",
+            "Свои субтитры… (.srt / .vtt / .ass)",
             has_video,
             None::<&str>,
         )

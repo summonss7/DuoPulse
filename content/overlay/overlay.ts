@@ -51,6 +51,11 @@ export class SubtitlesOverlay {
   private container: HTMLDivElement | null = null;
   private plate: HTMLDivElement | null = null;
   private rowsEl: HTMLDivElement | null = null;
+  /** Плашка-верх (duopulse-178): реплики верхнего расположения .ass
+   * (\an7/8/9 — знаки/заголовки) отдельной плашкой у верхнего края видео;
+   * обычный набор её не занимает (display:none). */
+  private topPlate: HTMLDivElement | null = null;
+  private topRowsEl: HTMLDivElement | null = null;
   private video: HTMLVideoElement | null = null;
   /** Базовый стиль — дефолты content-слоя + настройки профиля задачи 5.1
    *  (window.__DUOPULSE_DEFAULTS__ от Core; клампы — в baseStyle). */
@@ -126,18 +131,33 @@ export class SubtitlesOverlay {
 
   /** Дифф-обновление строк: при том же составе дорожек (порядок = положение)
    * обновляется только текст — элементы строк живут, пока набор не сменился;
-   * контейнер не пересоздаётся никогда (без миганий, docs/03 §5). */
+   * контейнер не пересоздаётся никогда (без миганий, docs/03 §5). Строки
+   * верхнего расположения (duopulse-178) рендерятся в плашку-верх тем же
+   * диффом, отдельным списком. */
   private renderRows(rows: ActiveRow[]): void {
     if (!this.rowsEl) return;
+    this.renderRowsInto(rows.filter((r) => !r.top), this.rowsEl, this.rows.filter((r) => !r.top));
+    if (this.topRowsEl) {
+      const topRows = rows.filter((r) => r.top);
+      this.renderRowsInto(topRows, this.topRowsEl, this.rows.filter((r) => r.top));
+      if (this.topPlate) this.topPlate.style.display = topRows.length > 0 ? "" : "none";
+    }
+    this.rows = rows;
+    this.fitDirty = true; // текст сменился — высота могла измениться
+  }
+
+  /** Дифф одного списка строк (плашка = любая): sameShape — те же дорожки в
+   * том же порядке, обновляется только текст. */
+  private renderRowsInto(rows: ActiveRow[], rowsEl: HTMLDivElement, prev: ActiveRow[]): void {
     const sameShape =
-      rows.length === this.rows.length && rows.every((r, i) => r.trackId === this.rows[i].trackId);
+      rows.length === prev.length && rows.every((r, i) => r.trackId === prev[i].trackId);
     if (sameShape) {
       rows.forEach((row, i) => {
-        const el = this.rowsEl?.children[i] as HTMLElement | undefined;
+        const el = rowsEl.children[i] as HTMLElement | undefined;
         if (el && el.textContent !== row.text) el.textContent = row.text;
       });
     } else {
-      this.rowsEl.replaceChildren(
+      rowsEl.replaceChildren(
         ...rows.map((row, i) => {
           const el = document.createElement("div");
           el.className = "duopulse-subtitles-row";
@@ -148,8 +168,6 @@ export class SubtitlesOverlay {
         }),
       );
     }
-    this.rows = rows;
-    this.fitDirty = true; // текст сменился — высота могла измениться
   }
 
   /** Стиль одного элемента строки по номеру дорожки (цвета — из this.style,
@@ -175,7 +193,9 @@ export class SubtitlesOverlay {
   }
 
   /** Плашка по прямоугольнику видео (fixed): низ/верх по центру, отступ
-   * marginPct % высоты видео; максимум 80% ширины видео (гайд 06 §6). */
+   * marginPct % высоты видео; максимум 80% ширины видео (гайд 06 §6).
+   * Плашка-верх (duopulse-178) всегда у верхнего края с тем же отступом —
+   * независим от настройки position основной. */
   private positionOver(video: HTMLVideoElement): void {
     if (!this.container || !this.plate) return;
     const r = video.getBoundingClientRect();
@@ -194,6 +214,7 @@ export class SubtitlesOverlay {
     s.alignItems = this.style.position === "top" ? "flex-start" : "flex-end";
     this.plate.style.marginTop = this.style.position === "top" ? `${margin}px` : "";
     this.plate.style.marginBottom = this.style.position === "bottom" ? `${margin}px` : "";
+    if (this.topPlate) this.topPlate.style.top = `${margin}px`;
     this.fit(r.width, r.height);
   }
 
@@ -213,7 +234,14 @@ export class SubtitlesOverlay {
     this.autoPct = this.style.fontScalePct;
     this.applyPlateStyle();
     for (let i = 0; i < 4; i++) {
-      const plateH = this.plate.getBoundingClientRect().height;
+      // Потолок — для каждой плашки своя (общий кегль): верхняя и основная
+      // не обязаны переполняться одновременно (duopulse-178).
+      const plateH = Math.max(
+        this.plate.getBoundingClientRect().height,
+        this.topPlate && this.topPlate.style.display !== "none"
+          ? this.topPlate.getBoundingClientRect().height
+          : 0,
+      );
       const next = fitStepPct(plateH, maxH, this.autoPct);
       if (next >= this.autoPct - 0.05) break; // влезает или достигнут кламп читаемости
       this.autoPct = next;
@@ -223,10 +251,13 @@ export class SubtitlesOverlay {
 
   private applyPlateStyle(): void {
     if (!this.plate) return;
-    const p = this.plate.style;
-    p.fontSize = plateFontSizeCss(this.autoPct);
-    p.fontFamily = cssFontFamily(this.style.fontFamily);
-    p.background = plateBackground(this.style.plateOpacity, this.style.plateColor);
+    for (const p of [this.plate, this.topPlate]) {
+      if (!p) continue;
+      const st = p.style;
+      st.fontSize = plateFontSizeCss(this.autoPct);
+      st.fontFamily = cssFontFamily(this.style.fontFamily);
+      st.background = plateBackground(this.style.plateOpacity, this.style.plateColor);
+    }
     // Гарнитура (карточка 068): именные сабсеты в контексте страницы не
     // загружены — попросить Core (один запрос на гарнитуру, дальше Set).
     ensureFontFamilyLoaded(this.style.fontFamily);
@@ -248,13 +279,17 @@ export class SubtitlesOverlay {
     s.containerType = "size"; // кегль в cqw: плашка масштабируется с плеером
     const plate = document.createElement("div");
     const p = plate.style;
-    p.maxWidth = "80%"; // гайд 06 §6
-    p.padding = "8px 16px";
-    p.borderRadius = "6px"; // гайд 06 §6
-    p.backdropFilter = "blur(2px)"; // гайд 06 §6
-    p.textAlign = "center";
-    p.whiteSpace = "pre-wrap"; // многострочные cue
-    p.lineHeight = "1.3";
+    // Базовая геометрия плашки — общая с плашкой-верх (duopulse-178).
+    const base = (st: CSSStyleDeclaration): void => {
+      st.maxWidth = "80%"; // гайд 06 §6
+      st.padding = "8px 16px";
+      st.borderRadius = "6px"; // гайд 06 §6
+      st.backdropFilter = "blur(2px)"; // гайд 06 §6
+      st.textAlign = "center";
+      st.whiteSpace = "pre-wrap"; // многострочные cue
+      st.lineHeight = "1.3";
+    };
+    base(p);
     const rows = document.createElement("div");
     const r = rows.style;
     r.display = "flex";
@@ -262,10 +297,29 @@ export class SubtitlesOverlay {
     r.gap = "0.22em"; // разделитель строк набора (гайд 06 §6 разделителей не задаёт)
     plate.appendChild(rows);
     container.appendChild(plate);
+    // Плашка-верх (duopulse-178): та же геометрия/стиль, абсолютное
+    // позиционирование у верхнего края контейнера (скрыта до первых строк).
+    const topPlate = document.createElement("div");
+    base(topPlate.style);
+    const tp = topPlate.style;
+    tp.position = "absolute";
+    tp.left = "50%";
+    tp.transform = "translateX(-50%)";
+    tp.top = "0px"; // позицию обновляет positionOver (отступ marginPct)
+    tp.display = "none";
+    const topRows = document.createElement("div");
+    const tr = topRows.style;
+    tr.display = "flex";
+    tr.flexDirection = "column";
+    tr.gap = "0.22em";
+    topPlate.appendChild(topRows);
+    container.appendChild(topPlate);
     document.documentElement.appendChild(container);
     this.container = container;
     this.plate = plate;
     this.rowsEl = rows;
+    this.topPlate = topPlate;
+    this.topRowsEl = topRows;
     this.applyPlateStyle();
     this.bindReposition();
     this.bindWheel();

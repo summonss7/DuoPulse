@@ -2946,7 +2946,7 @@ async fn subtitles_load_file(
             .map_err(|e| e.to_string())?? // join-ошибка, затем отказ чтения файла
     };
     // JSON — валидный JS-объектный литерал: вкладывается как detail события.
-    let detail = serde_json::json!({
+    let mut detail = serde_json::json!({
         "name": track.name,
         "cues": track.cues.iter().map(|c| serde_json::json!({
             "startMs": c.start_ms, "endMs": c.end_ms, "text": c.text,
@@ -2955,6 +2955,11 @@ async fn subtitles_load_file(
             .map(|w| format!("строка {}: {}", w.line, w.message))
             .collect::<Vec<_>>(),
     });
+    // Реплики верхнего расположения (.ass \an7/8/9, карточка duopulse-178):
+    // боковой канал topStarts — тот же, что у WebMessage-разбора parse-subtitles.
+    if !track.top_cue_starts.is_empty() {
+        detail["topStarts"] = serde_json::json!(track.top_cue_starts);
+    }
     // Склейка без format!: тройные экранирования скобок однажды уже дали
     // SyntaxError в eval (тихий Ok у ExecuteScript — e2e 3.6 ловил час).
     let detail_json =

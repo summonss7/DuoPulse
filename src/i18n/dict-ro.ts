@@ -542,7 +542,7 @@ export const dict: Record<string, string> = {
   "Сайт не открылся": "Siteul nu s-a deschis",
   "Сброс": "Resetare",
   "Сведений об ошибке нет.": "Nu există detalii despre eroare.",
-  "Свои субтитры (.srt / .vtt)": "Subtitrări proprii (.srt / .vtt)",
+  "Свои субтитры (.srt / .vtt / .ass)": "Subtitrări proprii (.srt / .vtt / .ass)",
   "Свои субтитры": "Subtitrări proprii",
   "Свои": "Personalizat",
   "Сгенерировать субтитры распознаванием речи — для видео без дорожек": "Generează subtitrări prin recunoașterea vorbirii — pentru videoclipuri fără piste",

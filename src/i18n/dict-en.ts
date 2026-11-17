@@ -556,7 +556,7 @@ export const dict: Record<string, string> = {
   "Сайт не открылся": "The site didn't open",
   "Сброс": "Reset",
   "Сведений об ошибке нет.": "No error details.",
-  "Свои субтитры (.srt / .vtt)": "Custom subtitles (.srt / .vtt)",
+  "Свои субтитры (.srt / .vtt / .ass)": "Custom subtitles (.srt / .vtt / .ass)",
   "Свои субтитры": "Custom subtitles",
   "Свои": "Custom",
   "Сгенерировать субтитры распознаванием речи — для видео без дорожек": "Generate subtitles with speech recognition — for videos without tracks",
