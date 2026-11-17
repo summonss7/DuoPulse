@@ -91,6 +91,13 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   контролы m.youtube показывает только реальный тач; поворот user_rotation;
   «назад» keyevent 4); CDP цеплять к конкретной цели оверлея — мёртвые цели
   прошлых сессий висят в /json вечно. Скриншоты — %TEMP%/duopulse-134-*.png.
+- `e2e/mobile/pass-capture-smoke.mjs` + `dp165-login.html` — стенд захвата
+  паролей web-оверлея (карточка 165): debug-APK, CDP webview_devtools_remote
+  (порт 9223); оверлей открывает invoke'ом из UI-webview (без тапов), сабмит
+  формы → бар «Сохранить пароль?» → save/update/never/инкогнито проверяются
+  хуком __duopulseMobilePassSave и mobile_passwords_list; логин и порт
+  уникальны на прогон («Никогда» держит denylist в сторе эмулятора). Результат —
+  e2e/mobile/pass-capture-smoke-last-run.json (gitignore, рантайм-артефакт).
 
 Новые временные файлы в корне не накапливать: одноразовое — `%TEMP%`, постоянное — `e2e/`.
 <!-- /E2E-ИНСТРУМЕНТЫ -->

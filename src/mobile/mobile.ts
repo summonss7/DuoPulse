@@ -35,6 +35,7 @@ import { MobileBookmarks } from "./bookmarks";
 import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
 import { MobileHistory } from "./history";
 import { MobileDiagnostics } from "./diagnostics";
+import { MobilePassSave } from "./pass-save";
 import { installMobileAccount } from "./account";
 import { createMobileUpdater, mb, readLastCheck, type UpdaterUi } from "./updater";
 import { createMusicDownloader } from "./download";
@@ -188,6 +189,9 @@ function setIncognito(on: boolean): void {
   incognito = on;
   // web-оверлей — на системном профиле WebView: в инкогнито его закрываем
   void invoke<string>("mobile_web_close").catch(() => {});
+  // захват паролей (duopulse-165): контент-слой оверлея о режиме не знает —
+  // флаг ставит Core, кандидаты из форм не запоминаются и бар не выходит
+  void invoke("mobile_password_incognito", { on }).catch(() => {});
   privateBtn.classList.toggle("on", on);
   privateBtn.setAttribute("aria-pressed", String(on));
   privateBtn.title = on
@@ -413,6 +417,15 @@ const account = installMobileAccount(
   },
   root.querySelector<HTMLElement>("#mAila")!,
 );
+
+// ── Бар «Сохранить пароль?» (duopulse-165, паритет 2/8): сабмит формы
+// логина в web-оверлее → кандидат в памяти Core (пароль наружу не выходит)
+// → событие passwords:save_prompt → нижний лист. Кнопки решают командой
+// mobile_password_resolve (save/never/dismiss) — запись видна в листе
+// паролей выше. Инкогнито: оверлей закрывается, Core-флаг ставит
+// setIncognito — предложений нет. Лист одноразовый (reconcile десктопного
+// бара duopulse-142 мобильной ветке не нужен).
+new MobilePassSave({ content, note });
 
 // ── duo: субтитры и перевод (этап 2) ───────────────────────────────────
 let duoPanel: import("./duo/panel").DuoPanel | null = null;

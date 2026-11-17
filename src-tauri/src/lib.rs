@@ -89,6 +89,11 @@ pub mod passwords;
 pub mod aila;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod mobile_account;
+// Захват паролей из форм web-оверлея (duopulse-165, паритет 2/8): пейлоад
+// детекта → Kotlin (MobilePassNative) → PasswordPrompts (тот же Core, что
+// у десктопного бара) → событие UI; чистое ядро — в passwords/prompts.rs.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod mobile_pass;
 // Парсеры cue — мобильным таргетам (duopulse-082): parse_auto для duo_fetch_
 // cues. На десктопе либа их не компилирует: оставалась бы тонкой (cdylib
 // Windows/MinGW не тянет экспорт тяжёлых деревьев — quick-xml, ср. рецепт
@@ -170,6 +175,10 @@ fn mobile_run() {
                 passwords::PasswordStore::open(&dir).map_err(|e| format!("открыть пароли: {e}"))?,
             );
             let account = Arc::new(aila::AilaAccount::new(&dir));
+            // Пароли из форм web-оверлея (duopulse-165): состояние бара —
+            // общий PasswordPrompts; статика mobile_pass даёт JNI-вызовам
+            // (MobilePassNative) тот же стор и эмиттер событий UI.
+            mobile_pass::init(app.handle().clone(), Arc::clone(&passwords));
             // восстановленный вход — первый синк сразу (как main.rs этапа 4):
             // протухшая сессия всплывёт первым же кругом (401 → ошибка статуса)
             if account.restore() {
@@ -232,6 +241,9 @@ fn mobile_run() {
             mobile_account::mobile_passwords_list,
             mobile_account::mobile_passwords_reveal,
             mobile_account::mobile_clipboard_copy,
+            mobile_pass::mobile_password_incognito,
+            mobile_pass::mobile_password_candidate,
+            mobile_pass::mobile_password_resolve,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить DuoPulse (мобильная ветка)");

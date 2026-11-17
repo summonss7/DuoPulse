@@ -828,4 +828,8 @@ export const dict: Record<string, string> = {
   "Обновления: проверялись {d}": "Actualizări: verificat {d}",
   "Обновления: ещё не проверялись": "Actualizări: încă neverificate",
   "Обновления: доступна версия {v}": "Actualizări: versiunea {v} disponibilă",
+  "Пароль сохранён": "Parolă salvată",
+  "Пароль обновлён": "Parolă actualizată",
+  "Сайт добавлен в «никогда не сохранять»": "Site adăugat la „nu salva niciodată”",
+  "Не удалось сохранить пароль": "Nu am putut salva parola",
 };

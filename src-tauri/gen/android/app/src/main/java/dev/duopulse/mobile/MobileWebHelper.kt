@@ -82,6 +82,12 @@ import java.io.ByteArrayInputStream
  *    как auth.rs десктопа; прежде запрос молча падал;
  *  - onPageFinished репортит визит (window.__duopulseVisit в UI-webview
  *    Tauri → history.visit SQLite) — история посещений мобильной ветки.
+ *
+ * duopulse-165 (паритет 2/8 — пароли из форм): пейлоад детекта формы логина
+ * (мобильный перенос content/passwords-fill.ts, источник — Rust include_str!)
+ * инжектируется onPageFinished; сабмит уходит JS-интерфейсом DuopulsePass →
+ * MobilePassNative (JNI, Core) — пароль минует консоль/logcat и UI-webview,
+ * бар «Сохранить пароль?» решает Core (событие), запись — только «Сохранить».
  */
 object MobileWebHelper {
   private const val TAG = "DuoPulseWeb"
@@ -423,6 +429,9 @@ object MobileWebHelper {
 
   private fun teardown(act: MainActivity?, ov: FrameLayout) {
     MobileFullscreen.dismiss()
+    // оверлей закрылся — ожидающий кандидат пароля больше не актуален
+    // (мобильный аналог on_tabs_changed десктопа, duopulse-165)
+    MobilePassNative.resetPending()
     menu?.dismiss()
     menu = null
     backCallback.isEnabled = false
@@ -677,6 +686,9 @@ object MobileWebHelper {
         Log.d(TAG, "overlay-loaded: $url")
         syncChrome(url)
         installUrlWatch(view)
+        // захват паролей из форм (duopulse-165): пейлоад идемпотентен
+        // (маркер __dpPassWatch), повтор на том же документе — тишина
+        injectPassCapture(view)
         // повтор — на случай холодного движка (пустой пейлоад на старте);
         // дубли исключены сравнением с последним применённым скриптом
         injectCosmetic(view, url)
@@ -719,6 +731,10 @@ object MobileWebHelper {
           .show()
       }
     }
+    // Захват паролей из форм (duopulse-165): страница отдаёт кандидата
+    // напрямую в Kotlin (addJavascriptInterface — пароль не идёт через
+    // консоль-хук, как DPURL); MobilePassNative уносит его в Core.
+    wv.addJavascriptInterface(PassReport, "DuopulsePass")
     // Файловые загрузки (duopulse-156): клик по ссылке на файл качает
     // системный DownloadManager (куки/UA сессии, прогресс в шторке), сбой —
     // фолбэк внешним браузером; прежде клик просто молчал.
@@ -761,6 +777,48 @@ object MobileWebHelper {
     act.onBackPressedDispatcher.addCallback(act, backCallback)
     overlay = ov
     return ov
+  }
+
+  /** Инжекция пейлоада детекта формы логина (duopulse-165): источник — Core
+   *  (include_str! mobile_pass_capture.js), подаётся evaluateJavascript на
+   *  каждой странице; идемпотентность — маркер __dpPassWatch в пейлоаде. */
+  private fun injectPassCapture(wv: WebView) {
+    val js = MobilePassNative.script() ?: return
+    if (js.isEmpty()) return
+    wv.evaluateJavascript(js, null)
+  }
+
+  /** Мост «страница → Core» захвата паролей (duopulse-165): пейлоад нашёл
+   *  сабмит формы логина и принёс пару {username, password} (JSON со
+   *  страницы — парсим, длинам верим с потолком). Вызовы идут с нити
+   *  JavaBridge — webView.url/title читаем только на UI-ните (геттеры с
+   *  фоновых нитей роняют процесс); URL берём свой (pageUrl свежее SPA-хука,
+   *  fallback — wv.url), странице не верим. Инкогнито/denylist решает Core. */
+  private object PassReport {
+    /** Потолки длин (пароль из менеджера бывает длинным, но не мегабайт). */
+    private const val MAX_USER = 256
+    private const val MAX_PASS = 512
+
+    @android.webkit.JavascriptInterface
+    fun report(json: String) {
+      val act = MainActivity.current ?: return
+      act.runOnUiThread {
+        val wv = webView ?: return@runOnUiThread
+        try {
+          val o = org.json.JSONObject(json)
+          val u = o.optString("username", "")
+          val p = o.optString("password", "")
+          if (u.isEmpty() || p.isEmpty()) return@runOnUiThread
+          if (u.length > MAX_USER || p.length > MAX_PASS) return@runOnUiThread
+          // доверенный URL: SPA-хук держит pageUrl свежее wv.url
+          val url = if (pageUrl.startsWith("http")) pageUrl else (wv.url ?: "")
+          if (!url.startsWith("http")) return@runOnUiThread
+          MobilePassNative.report(u, p, url, wv.title ?: "")
+        } catch (e: Exception) {
+          // битый JSON с чужой страницы — тихо, страница не страдает
+        }
+      }
+    }
   }
 
   /** Консоль-хук URL (duopulse-139): SPA-навигации m.youtube (Navigation

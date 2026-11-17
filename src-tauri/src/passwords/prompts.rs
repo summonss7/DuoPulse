@@ -109,6 +109,33 @@ impl PasswordPrompts {
         Ok(view)
     }
 
+    /// Захват из форм мобильного web-оверлея (карточка duopulse-165): тот же
+    /// offer, но инкогнито решает Core — контент-слой в нативном WebView
+    /// Android о режиме не знает (маркера __DUOPULSE_INCOGNITO__ там нет),
+    /// фронт мобильной ветки ставит флаг (mobile_password_incognito). В
+    /// инкогнито кандидата не запоминаем вовсе — не предлагаем и не пишем.
+    pub fn offer_overlay(
+        &self,
+        store: &PasswordStore,
+        incognito: bool,
+        tab_id: &str,
+        tab_url: &str,
+        title: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Option<PasswordsCandidateView>, String> {
+        if incognito {
+            return Ok(None);
+        }
+        self.offer(store, tab_id, tab_url, title, username, password)
+    }
+
+    /// Забыть кандидата без решения (закрылся web-оверлей — мобильный аналог
+    /// on_tabs_changed: поверхность, на которой сабмитили, исчезла).
+    pub fn clear(&self) {
+        *self.current.lock().unwrap() = None;
+    }
+
     /// Текущий кандидат без пароля (панель pwsave при загрузке; null — бара нет).
     pub fn view(&self) -> Option<PasswordsCandidateView> {
         self.current
@@ -286,5 +313,38 @@ mod tests {
             .unwrap();
         p.on_tabs_changed(&["tab-2"]);
         assert!(p.view().is_some());
+    }
+
+    #[test]
+    fn overlay_offer_incognito_gated() {
+        let s = store();
+        let p = prompts();
+        // инкогнито (duopulse-165): новый логин заслужил бы бар, но кандидат
+        // не запоминаем вовсе — не предлагаем и не пишем
+        assert!(p
+            .offer_overlay(&s, true, "web-overlay", "https://example.com/", "", "a", "p")
+            .unwrap()
+            .is_none());
+        assert!(p.view().is_none());
+        // обычный режим — тот же путь, что у десктопного offer
+        let v = p
+            .offer_overlay(&s, false, "web-overlay", "https://example.com/", "", "a", "p")
+            .unwrap()
+            .expect("новый логин заслуживает бар");
+        assert_eq!((v.origin.as_str(), v.tab_id.as_str()), ("https://example.com", "web-overlay"));
+        // clear (закрылся web-оверлей): кандидат забыт, решать нечего
+        p.clear();
+        assert!(p.view().is_none());
+        assert!(!p.resolve(&s, "save").unwrap());
+        // denylist работает и через оверлейный путь: never → предложений нет
+        p.offer_overlay(&s, false, "web-overlay", "https://example.com/", "", "a", "p2")
+            .unwrap()
+            .unwrap();
+        assert!(p.resolve(&s, "never").unwrap());
+        assert!(s.is_denied("https://example.com"));
+        assert!(p
+            .offer_overlay(&s, false, "web-overlay", "https://example.com/", "", "a", "p3")
+            .unwrap()
+            .is_none());
     }
 }

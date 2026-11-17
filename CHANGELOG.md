@@ -7068,3 +7068,52 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   (0.1.64), README/ROADMAP не менялись.
 
 Версия 0.1.64 (без изменений). Коммит: b757e07.
+
+## 17.11.2026, duopulse-165 — Паритет-мобайл 2/8: пароли — захват из форм web-оверлея + бар сохранения
+
+- Начата 17.11.2026 в 14:47, окончена 17.11.2026 в 17.11.2026 15:28:15.
+- Что изменено: мобильный захват кандидата пароля из форм web-оверлея (паритет
+  с десктопным этапом 2 duopulse-108; контент-бандл в нативный WebView Android
+  не инжектируется — канал WebMessage есть только у WebView2, видео-вкладки
+  /embed контента тоже не несут, этап покрывает ровно web-оверлей):
+  - src-tauri/src/mobile_pass_capture.js — JS-пейлоад детекта формы логина
+    (порт content/passwords-fill.ts: пара логин+пароль, сабмит/Enter/кнопка
+    SPA-формы, дедуп; отличие — тап по самому полю кандидатом НЕ считается:
+    на тач-экране это правка ввода);
+  - src-tauri/src/mobile_pass.rs — Core-контур: include_str! пейлоада,
+    команды mobile_password_incognito/candidate/resolve, JNI-экспорты
+    MobilePassNative (captureScript/reportCandidate/reset), событие
+    passwords:save_prompt (без пароля, контракт десктопа); кандидат с паролем
+    живёт только в памяти Core (PasswordPrompts), eprintln светит лишь
+    логин@origin;
+  - passwords/prompts.rs — offer_overlay (инкогнито-гейт: кандидат не
+    запоминается вовсе) + clear (аналог on_tabs_changed для закрытия оверлея)
+    + хост-тест overlay_offer_incognito_gated;
+  - Kotlin: MobilePassNative.kt (JNI-обёртки), MobileWebHelper.kt —
+    addJavascriptInterface DuopulsePass (пароль минует консоль/logcat и
+    UI-webview), инжекция пейлоада onPageFinished, reset в teardown; URL и
+    origin считает Kotlin по webView.url (странице не верим), потолки длин
+    256/512;
+  - lib.rs — модуль mobile_pass, init в setup, регистрация 3 команд;
+  - src/mobile/pass-save.ts — одноразовый нижний лист m-sheet «Сохранить
+    пароль?» (Сохранить/Обновить, «Никогда для этого сайта», Закрыть/фон =
+    dismiss → mobile_password_resolve), e2e-хук __duopulseMobilePassSave;
+    проводка в mobile.ts + Core-флаг инкогнито из setIncognito;
+  - mobile.css (.m-pass-*), i18n +4 ключа ×5 словарей (en/uk/ro/sk/ar);
+  - e2e/mobile/pass-capture-smoke.mjs + dp165-login.html — постоянный стенд
+    смоука (CDP webview_devtools_remote, порт 9223; уникальные логин/порт на
+    прогон — «Никогда» держит denylist в сторе эмулятора).
+- Как проверено: typecheck чист; vitest 58 файлов / 614 ok (19 новых:
+  11 пейлоада в happy-dom + 8 листа); cargo test 412 ok / 4 ignored (новый
+  тест prompts); живой смоук на эмуляторе duopulse36 (debug-сборка 0.1.64 —
+  версию НЕ поднимал и ничего не публиковал, флажок Артёма build:false/
+  aila-418): 13/13 — сабмит в оверлее открывает бар (origin/логин верные),
+  «Сохранить» кладёт запись в лист паролей (mobile_passwords_list +
+  reveal), смена пароля — бар «Обновить» и upsert по (origin, username)
+  (запись одна, пароль новый), «Никогда» — повторный сабмит бара не даёт,
+  инкогнито — бара нет и кандидат Core пуст; logcat не содержит значений
+  паролей (grep по всем тестовым паролям — 0). Бэкап backup.bat до правок
+  (backups/backup_2026-11-17_14-54-34); временные файлы %TEMP% удалены
+  (скриншоты стенда оставлены в %TEMP%), эмулятор остановлен. Релизы/версия:
+  без изменений (0.1.64), README/ROADMAP не менялись (задача внутри этапа
+  цепочки duopulse-162, план не менялся).

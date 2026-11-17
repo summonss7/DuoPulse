@@ -1514,3 +1514,26 @@ body.m-bm-dragging {
   font-size: 14px;
   color: var(--text-primary);
 }
+
+/* ── Бар «Сохранить пароль?» (duopulse-165, паритет 2/8): одноразовый нижний
+   лист по событию Core (кандидат из формы логина web-оверлея). Каркас — общий
+   m-sheet-*; здесь — вопрос с переносом (логин/сайт бывают длинными) и
+   акцентная кнопка «Сохранить». */
+.m-pass-sheet {
+  padding: 10px 6px 6px;
+}
+
+.m-pass-text {
+  display: block;
+  padding: 2px 12px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.m-pass-save {
+  color: var(--accent-neon);
+  font-weight: 600;
+}
