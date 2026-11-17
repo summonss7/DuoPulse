@@ -1,6 +1,19 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "identifier": "dev.duopulse.mobile",
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": [
+          "pdf"
+        ],
+        "name": "DuoPulse PDF",
+        "description": "PDF-документ",
+        "mimeType": "application/pdf",
+        "role": "Viewer"
+      }
+    ]
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [

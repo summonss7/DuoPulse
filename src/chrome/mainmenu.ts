@@ -13,6 +13,7 @@ import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { AdblockBlockedCount, AdblockStatusResult, UpdaterCheckResult } from "../bridge/gen/types";
 import { t, uiLocale } from "../i18n";
+import { pickVideoUrl } from "./open-video";
 import { updateBadgeState, updateBadgeTitle } from "./update-badge";
 import { anchorPanel, closePanel, currentPanel, openPanel, panelKind } from "./panel-window";
 
@@ -58,6 +59,14 @@ menu.addEventListener("click", (e) => {
       break;
     case "reopen":
       void bridge.tabs.reopen().catch(err);
+      break;
+    case "openvideo":
+      // «Открыть видео…» (duopulse-176): нативный диалог → file://-вкладка,
+      // играет встроенный плеер WebView2 (субтитры .srt — дропом/Alt+D).
+      void (async () => {
+        const url = await pickVideoUrl(t("Открыть видео…"), t("Видеофайлы"));
+        if (url) await bridge.tabs.open({ url });
+      })().catch(err);
       break;
     case "history":
       void bridge.tabs.open({ url: "duopulse://history" }).catch(err);

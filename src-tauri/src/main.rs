@@ -1517,8 +1517,9 @@ fn main() {
         .on_menu_event(|app, event| {
             chrome_menu::emit_action(app, &event.id.0);
         });
-    // Одиночный экземпляр (карточка duopulse-119): PDF, открытый из
-    // проводника при живом DuoPulse, не должен поднимать второй процесс
+    // Одиночный экземпляр (карточка duopulse-119): файл (PDF, с duopulse-176 —
+    // видео), открытый из проводника при живом DuoPulse, не должен поднимать
+    // второй процесс
     // (профиль/SQLite/session.json не переживают двух владельцев) —
     // второй старт форвардит argv первому и гаснет. Регистрируется
     // ПЕРВЫМ плагином (требование документации Tauri).
@@ -1532,12 +1533,12 @@ fn main() {
             builder
         } else {
             builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-                if let Some(url) = pdf_arg_url(&argv, &cwd) {
+                if let Some(url) = shell_arg_url(&argv, &cwd) {
                     let app = app.clone();
                     tauri::async_runtime::spawn(async move {
                         let manager = app.state::<tabs::TabManager>();
                         if let Err(e) = manager.open(&app, Some(url.to_string()), None, false) {
-                            eprintln!("[pdf] открыть из второго экземпляра: {e}");
+                            eprintln!("[shell-open] открыть из второго экземпляра: {e}");
                         }
                     });
                 }
@@ -1661,6 +1662,31 @@ fn main() {
             // DragEvent в e2e этого не видели. Выключаем перехватчик: событие
             // окна onDragDrop не используется (файлы ловит контент HTML5-дропом).
             .disable_drag_drop_handler()
+            // Дроп файла на хром (duopulse-176): WebView2 «открывает»
+            // сброшенный файл навигацией webview — дроп .mkv на строку
+            // вкладок уводил бы UI-webview с index.html на file:// и сносил
+            // весь хром. Единственная file://-навигация UI-webview — такой
+            // дроп: отменяем её и открываем файл вкладкой (дроп на страницу
+            // сайта идёт навигацией самой вкладки — её не трогаем).
+            .on_navigation({
+                let ui_app = app.handle().clone();
+                move |url| {
+                    if url.scheme() != "file" {
+                        return true;
+                    }
+                    let url = url.to_string();
+                    // создание webview — блокирующий round-trip, нельзя на
+                    // потоке цикла событий: уводим в таску (как single-instance)
+                    let app = ui_app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let manager = app.state::<tabs::TabManager>();
+                        if let Err(e) = manager.open(&app, Some(url), None, false) {
+                            eprintln!("[shell-open] дроп на хром: открыть вкладкой: {e}");
+                        }
+                    });
+                    false
+                }
+            })
             // Язык интерфейса (duopulse-136): до скриптов UI — src/i18n читает
             // window.__DUOPULSE_UI_LANG__ при загрузке модуля.
             .initialization_script(crate::settings::ui_lang_script(
@@ -1674,10 +1700,10 @@ fn main() {
                 app.get_window("main").expect("окно main создано выше");
             // Первая вкладка (стартовый URL / DUOPULSE_START_URL) — задача 1.2;
             // ленивая постановка + материализация по Ready — задача 2.4. Старт
-            // с PDF из argv (duopulse-119) подменяет новый таб файлом (при
-            // живой сессии — доп. активной вкладкой).
-            let start_pdf = pdf_arg_url(&std::env::args().collect::<Vec<_>>(), "");
-            app.state::<tabs::TabManager>().init(&app, start_pdf.map(|u| u.to_string()))?;
+            // с файлом из argv (PDF — duopulse-119, видео — duopulse-176)
+            // подменяет новый таб файлом (при живой сессии — доп. вкладкой).
+            let start_file = shell_arg_url(&std::env::args().collect::<Vec<_>>(), "");
+            app.state::<tabs::TabManager>().init(&app, start_file.map(|u| u.to_string()))?;
             startup_mark("tab-init");
 
             // Все вкладки растягиваются при изменении размера окна (в т.ч.
@@ -1764,25 +1790,35 @@ fn build_unix_stamp() -> u64 {
     env!("DUOPULSE_BUILD_UNIX").parse::<u64>().unwrap_or(0)
 }
 
-/// Ассоциация PDF (карточка duopulse-119): вытащить из argv путь к .pdf —
-/// так Windows shell запускает «Открыть с помощью → DuoPulse» и двойной
-/// клик (duopulse.exe "C:\Docs\file.pdf"). Флаги и прочие аргументы
-/// (в т.ч. флаги dev-стенда) игнорируются; расширение — без учёта регистра.
-fn pdf_arg_candidate<I: IntoIterator<Item = String>>(args: I) -> Option<std::path::PathBuf> {
+/// Расширения ассоциированных файлов (duopulse-119 — PDF; duopulse-176 —
+/// видео, играющее встроенным плеером WebView2: mp4/m4v/mkv/webm; avi
+/// движок не открывает — в ассоциации не даём).
+const SHELL_OPEN_EXTENSIONS: &[&str] = &["pdf", "mp4", "m4v", "mkv", "webm"];
+
+/// Ассоциации файлов (карточка duopulse-119 — PDF, duopulse-176 — видео):
+/// вытащить из argv путь к ассоциированному файлу — так Windows shell
+/// запускает «Открыть с помощью → DuoPulse» и двойной клик
+/// (duopulse.exe "C:\Docs\file.pdf", duopulse.exe "D:\Фильмы\фильм.mkv").
+/// Флаги и прочие аргументы (в т.ч. флаги dev-стенда) игнорируются;
+/// расширение — без учёта регистра.
+fn shell_arg_candidate<I: IntoIterator<Item = String>>(args: I) -> Option<std::path::PathBuf> {
     args.into_iter()
         .skip(1)
         .map(std::path::PathBuf::from)
         .find(|p| {
             !p.starts_with("-")
-                && p.extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+                && p.extension().is_some_and(|e| {
+                    SHELL_OPEN_EXTENSIONS
+                        .iter()
+                        .any(|x| e.eq_ignore_ascii_case(x))
+                })
         })
 }
 
 /// Кандидат из argv → file://-URL существующего файла (относительный путь
 /// достраивается от cwd — argv второго экземпляра приходит с cwd плагина).
-fn pdf_arg_url(args: &[String], cwd: &str) -> Option<tauri::Url> {
-    let mut path = pdf_arg_candidate(args.iter().cloned())?;
+fn shell_arg_url(args: &[String], cwd: &str) -> Option<tauri::Url> {
+    let mut path = shell_arg_candidate(args.iter().cloned())?;
     if path.is_relative() && !cwd.is_empty() {
         path = std::path::Path::new(cwd).join(path);
     }
@@ -1815,19 +1851,19 @@ fn window_title(version: &str, build_unix: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_unix_stamp, pdf_arg_candidate, pdf_arg_url, window_title};
+    use super::{build_unix_stamp, shell_arg_candidate, shell_arg_url, window_title};
     use chrono::TimeZone;
 
     #[test]
-    fn pdf_arg_candidate_filters_flags_and_other_exts() {
+    fn shell_arg_candidate_filters_flags_and_other_exts() {
         let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        // флаги стендов/путей без .pdf пропускаются, регистр не важен
+        // флаги стендов/путей без ассоциации пропускаются, регистр не важен
         assert_eq!(
-            pdf_arg_candidate(args(&["duopulse.exe", "--DUOPULSE_SLEEP_AFTER_SECS=0"])),
+            shell_arg_candidate(args(&["duopulse.exe", "--DUOPULSE_SLEEP_AFTER_SECS=0"])),
             None
         );
         assert_eq!(
-            pdf_arg_candidate(args(&[
+            shell_arg_candidate(args(&[
                 "duopulse.exe",
                 "C:\\Docs\\readme.md",
                 "D:/Docs/report.PDF"
@@ -1835,16 +1871,26 @@ mod tests {
             .map(|p| p.to_string_lossy().into_owned()),
             Some("D:/Docs/report.PDF".into())
         );
+        // видео из ассоциаций duopulse-176; avi движок не играет — мимо
+        assert_eq!(
+            shell_arg_candidate(args(&[
+                "duopulse.exe",
+                "D:\\Фильмы\\клип.mkv",
+                "E:\\old.avi"
+            ]))
+            .map(|p| p.to_string_lossy().into_owned()),
+            Some("D:\\Фильмы\\клип.mkv".into())
+        );
     }
 
     #[test]
-    fn pdf_arg_url_only_existing_file() {
+    fn shell_arg_url_only_existing_file() {
         let dir = std::env::temp_dir().join("duopulse-pdf-arg-test");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("документ.pdf"); // кириллица/пробелы — как из shell
         std::fs::write(&file, b"%PDF-1.4").unwrap();
         let argv = vec!["duopulse.exe".to_string(), file.to_string_lossy().into_owned()];
-        let url = pdf_arg_url(&argv, "").expect("существующий .pdf — URL");
+        let url = shell_arg_url(&argv, "").expect("существующий .pdf — URL");
         assert_eq!(url.scheme(), "file");
         assert!(url
             .to_string()
@@ -1855,7 +1901,13 @@ mod tests {
             "duopulse.exe".to_string(),
             dir.join("нет такого.pdf").to_string_lossy().into_owned(),
         ];
-        assert!(pdf_arg_url(&gone, "").is_none());
+        assert!(shell_arg_url(&gone, "").is_none());
+        // видео из argv — тот же путь (duopulse-176)
+        let clip = dir.join("фильм.MKV");
+        std::fs::write(&clip, b"0").unwrap();
+        let argv = vec!["duopulse.exe".to_string(), clip.to_string_lossy().into_owned()];
+        let url = shell_arg_url(&argv, "").expect("существующий .mkv — URL");
+        assert_eq!(url.scheme(), "file");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
