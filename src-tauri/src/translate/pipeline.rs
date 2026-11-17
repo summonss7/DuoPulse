@@ -663,4 +663,42 @@ mod tests {
         assert_eq!(out.cues[0].start_ms, 9_999);
         assert_eq!(out.cues[0].text, "⟪ru⟫hi");
     }
+
+    /// Карточка duopulse-177: файловые дорожки несут в trackId хеш контента
+    /// (file:en#a1b2c3d4 — его считает content-слой): разные версии .srt —
+    /// независимые записи кэша, заменившийся файл не получает перевод прежней
+    /// версии; тот же trackId — кэш-хит без сети.
+    #[test]
+    fn file_track_content_hash_gives_distinct_cache_entries() {
+        let provider = LibreProvider::new("http://libre.test", None);
+        let cache = TranslationsCache::open_in_memory().unwrap();
+        let mut v1 = req(vec![cue("hello", 0)]);
+        v1.video_key = "file:movie.mkv".into();
+        v1.track_id = "file:en#11111111".into();
+        let mut v2 = req(vec![cue("hello there", 0)]);
+        v2.video_key = "file:movie.mkv".into();
+        v2.track_id = "file:en#22222222".into();
+
+        let first = MockTransport::new();
+        first.push_ok(200, &libre_reply(&["hello"]));
+        let out1 = translate_track(&provider, &first, &cache, &v1, &zero_policy(), &mut |_| {})
+            .unwrap();
+        assert_eq!(out1.cues[0].text, "⟪ru⟫hello");
+
+        // другая версия файла — другой ключ, сеть обязательна (свежий ответ),
+        // а не перевод v1 из кэша
+        let second = MockTransport::new();
+        second.push_ok(200, &libre_reply(&["hello there"]));
+        let out2 = translate_track(&provider, &second, &cache, &v2, &zero_policy(), &mut |_| {})
+            .unwrap();
+        assert!(!out2.from_cache);
+        assert_eq!(out2.cues[0].text, "⟪ru⟫hello there");
+
+        // тот же ключ повторно — кэш-хит без сети (повторный просмотр фильма)
+        let third = MockTransport::new(); // пустая очередь: сеть бы паниковала mock
+        let out3 = translate_track(&provider, &third, &cache, &v1, &zero_policy(), &mut |_| {})
+            .unwrap();
+        assert!(out3.from_cache);
+        assert_eq!(out3.cues[0].text, "⟪ru⟫hello");
+    }
 }

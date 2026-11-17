@@ -6886,3 +6886,60 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   manifest.json v2 с 5 ассетами включая APK), хаб «Скачать» обновлён,
   локальная копия C:\DuoPulse обновлена.
 - Коммит: 2948eda — feat(video): duopulse-176 — локальное видео как в плеере: меню «Открыть видео…», дроп файла в окно (перехват file://-навигации UI), ассоциации .mp4/.m4v/.mkv/.webm; Android-манифест удержан на PDF (карточка 179). Версия 0.1.61
+
+## 2026-11-17 03:00–03:45 — duopulse-177: перевод субтитров локального видео на лету (фильм + .srt = сразу перевод)
+
+- **Что изменено**: файловая дорожка (.srt/.vtt из дропа или «Свои субтитры») —
+  полноценный источник облачного перевода, тем же конвейером, что дорожки
+  платформ (кэш SQLite, пачки ≤ 2 КБ, щадящие ретраи/429 — src/translate/
+  pipeline.rs). content-слой: startTrackTranslation — общий путь панели и
+  автозапуска; кэш-ключ файловой дорожки — trackId с хешем контента
+  (file:en#6385569c, content/adapters/file.ts fileCacheId): разные версии .srt
+  не делят запись кэша (заменил файл — не получишь перевод прежней версии из
+  кэша), тот же контент — кэш-хит без сети; замена файловой части (дроп/
+  load_file) снимает cloud-перевод файлового происхождения (replaceFileTracks).
+  Автозапуск «фильм + .srt = сразу перевод» (autoTranslateFileDecision): язык
+  файла — из имени (фильм.en.srt)/заголовка VTT, цель — язык перевода из
+  настроек (defaultTranslationLang, дефолт ru — язык интерфейса); запуск
+  ТОЛЬКО при помненном согласии duo (lastDuoEnabled=true, та же логика, что на
+  YouTube — duopulse-128), сценарий «плеер» (платформенных дорожек нет),
+  язык≠цели и перевода ещё нет; снятие строки перевода — отказ за это видео
+  (повторный дроп не навязывается). Панель «duo» на локальном видео не
+  отличается от платформенного: строка «Языки» живая — файловая дорожка с
+  языком становится оригиналом (langs-row.ts effectiveBase, помечена kind:file
+  — set_tracks не шлётся), перевод — «+ перевод в… (облако)»/«Нет»; то же — в
+  нативном меню кнопки (duo-menu.ts). Телеметрия Core: WebMessage
+  «auto-translate-file» в журнал [subtitles].
+- **Файлы**: content/adapters/file.ts (+fileCacheId, autoTranslateFileDecision,
+  fileBaseLang), content/duopulse-content.ts (startTrackTranslation,
+  maybeAutoTranslateFileTrack, replaceFileTracks, fileSourcedCloudIds/
+  declinedAutoTranslate, память набора + fileCloudIds), content/defaults.ts
+  (+interfaceTranslationLang), src/subtitles-panel/langs-row.ts (effectiveBase,
+  langRowState файловый оригинал, fromChange/toChange без set для файла),
+  src/subtitles-panel/duo.ts + duo-menu.ts (эффективный список «Язык видео»),
+  src-tauri/src/main.rs (журнал auto-translate-file),
+  src-tauri/src/translate/pipeline.rs (тест кэш-ключей).
+- **Как проверено**: vitest 578 passed / 0 failed (16 новых: fileCacheId,
+  autoTranslateFileDecision ×4, interfaceTranslationLang ×2, effectiveBase ×3,
+  langRowState+файл ×2, fromChange/toChange+файл ×3, duo-menu ×2); cargo test
+  397+24 passed (новый file_track_content_hash_gives_distinct_cache_entries);
+  typecheck чистый. Живой CDP-стенд debug-exe (изолированный APPDATA,
+  мок-LibreTranslate :5000, ролики ffmpeg) — 6/6 PASS: (1) дроп movie.en.srt
+  при lastEnabled=true → автоперевод en→ru, в наборе file:en + cloud:ru
+  («LibreTranslate → ru»), журнал Core «auto-translate-file … en → ru (3 cue)»,
+  запрос конвейера с хеш-ключом file:en#6385569c; (2) снятие cloud:ru →
+  повторный дроп того же файла НЕ запускает автоперевод (отказ за видео);
+  (3) замена файла другой версией: старый cloud снят мгновенно, перевод новой
+  версии ушёл в сеть (кэш версии не подсунул), каждая версия — свой хеш-ключ;
+  (4) lastEnabled не задан (согласия нет) → файл показывается, автоперевод
+  молча не стартует (0 событий); (5) новое видео (другой videoKey) —
+  автоперевод снова предлагается; (6) оверлей показывает строку файла
+  (activeRows), state() отражает весь набор. Стенд и %TEMP%\duopulse-177
+  разобраны.
+- **Релизы 0.1.62**: android-build.sh — APK подписан и опубликован в канал
+  Aila; release.mjs — NSIS-установщик в оба канала (GitHub stable/canary +
+  зеркало Aila manifest v2: 5 ассетов, включая exe+sig+APK), хаб «Скачать»
+  обновлён, локальная копия C:\DuoPulse обновлена. README (строки фич
+  «Локальное видео как в плеере» и «Свои субтитры») и ROADMAP (журнал)
+  дополнены.
+- Коммит: <hash> — feat(subtitles): duopulse-177 — перевод субтитров локального видео на лету: файловая дорожка — источник облачного конвейера (кэш-ключ с хешем контента), автозапуск при помненном согласии duo, панель «Языки» с файлом-оригиналом. Версия 0.1.62

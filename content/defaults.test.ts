@@ -1,7 +1,13 @@
 // Тесты чтения дефолтов субтитров из window.__DUOPULSE_DEFAULTS__ (задача 5.1):
 // чистые функции на объекте-холдере, без DOM.
 import { describe, expect, it } from "vitest";
-import { baseStyle, lastDuoEnabled, preferredLangs, type DefaultsHolder } from "./defaults";
+import {
+  baseStyle,
+  interfaceTranslationLang,
+  lastDuoEnabled,
+  preferredLangs,
+  type DefaultsHolder,
+} from "./defaults";
 import { DEFAULT_SUBTITLE_STYLE } from "./overlay/style";
 
 const win = (value: unknown): DefaultsHolder => ({ __DUOPULSE_DEFAULTS__: value });
@@ -97,5 +103,24 @@ describe("lastDuoEnabled (duopulse-128)", () => {
     expect(lastDuoEnabled(win({}))).toBeNull();
     expect(lastDuoEnabled(win({ subtitles: {} }))).toBeNull();
     expect(lastDuoEnabled(win({ subtitles: { lastEnabled: "on" } }))).toBeNull();
+  });
+});
+
+describe("interfaceTranslationLang (карточка duopulse-177)", () => {
+  it("язык перевода из настроек — цель автоперевода файла", () => {
+    expect(
+      interfaceTranslationLang(win({ subtitles: { defaultTranslationLang: "es" } })),
+    ).toBe("es");
+    expect(
+      interfaceTranslationLang(win({ subtitles: { defaultTranslationLang: " PT-BR " } })),
+    ).toBe("pt-br");
+  });
+
+  it("нет/битые настройки — «ru» (язык интерфейса, дефолт настроек Core)", () => {
+    // в отличие от preferredLangs (первый «en») автоперевод целится в язык
+    // интерфейса, а не в порядок предпочитаемых
+    expect(interfaceTranslationLang(win(undefined))).toBe("ru");
+    expect(interfaceTranslationLang(win({}))).toBe("ru");
+    expect(interfaceTranslationLang(win({ subtitles: { defaultTranslationLang: 42 } }))).toBe("ru");
   });
 });

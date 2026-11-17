@@ -53,6 +53,12 @@
 // (content/adapters/cloud.ts), переведённая дорожка (source "translate")
 // входит в набор после платформенных строк; повторный просмотр отдаётся
 // кэшем — сети нет (DoD 4.2).
+//
+// Перевод файловой дорожки (карточка duopulse-177: «фильм + .srt = сразу
+// перевод»): файл — полноценный источник перевода (startTrackTranslation,
+// кэш-ключ — с хешем контента файла); автозапуск на предпочитаемый язык —
+// при помненном согласии (lastDuoEnabled, как на YouTube), замена файла
+// снимает файловый cloud-перевод, снятие строки — отказ за это видео.
 
 import { VideoDetector, type DetectedVideo } from "./detector";
 import { SubtitlesEngine, type ActiveRow } from "./engine/subtitles-engine";
@@ -71,8 +77,10 @@ import {
 import type { AdapterTrackList } from "./adapters/types";
 import {
   FileDropZone,
+  autoTranslateFileDecision,
   buildFileTracks,
   combinedTracks,
+  fileCacheId,
   fileTrackFrom,
   langOfFileName,
   type FileLoadResult,
@@ -82,7 +90,7 @@ import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import { installSelectionTranslate } from "./translate-select";
 import { installPasswordFill } from "./passwords-fill";
 import { installSubsDownload } from "./download-subs";
-import { lastDuoEnabled, preferredLangs } from "./defaults";
+import { interfaceTranslationLang, lastDuoEnabled, preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
 
@@ -171,9 +179,24 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   let asrTracks: Track[] = [];
   let translateTracks: Track[] = [];
   let fileTracks: Track[] = [];
+  // Облачные дорожки, чей источник — файловая часть набора (duopulse-177):
+  // замена файла снимает их — перевод прежней версии .srt больше не
+  // соответствует показываемому файлу.
+  let fileSourcedCloudIds = new Set<string>();
+  // Видео, где пользователь снял автоперевод файловой дорожки (duopulse-177):
+  // согласие не навязываем — повторный дроп того же файла не запустит перевод
+  // заново; новое видео (другой videoKey) — снова предложит.
+  const declinedAutoTranslate = new Set<string>();
   const setMemory = new Map<
     string,
-    { platform: Track[]; asr: Track[]; translate: Track[]; files: Track[]; enabled: boolean }
+    {
+      platform: Track[];
+      asr: Track[];
+      translate: Track[];
+      files: Track[];
+      fileCloudIds: string[];
+      enabled: boolean;
+    }
   >();
   const SET_MEMORY_LIMIT = 8;
 
@@ -189,6 +212,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       asr: asrTracks,
       translate: translateTracks,
       files: fileTracks,
+      fileCloudIds: [...fileSourcedCloudIds],
       enabled,
     });
     while (setMemory.size > SET_MEMORY_LIMIT) {
@@ -286,6 +310,79 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     applyTracks(enabled ? tracks : []);
     rememberSetState();
     reportSetState(via);
+  };
+
+  /** Запустить облачный перевод дорожки (общий путь панели и автозапуска,
+   * задача 4.2 + карточка duopulse-177): cues — здесь, конвейер — в Core
+   * (кэш → пачки → провайдер → кэш), ответ — событием duopulse-translate-track.
+   * Файловая дорожка идёт с trackId-хешем контента (fileCacheId) — кэш
+   * различает версии .srt; fromFile — помнит происхождение cloud-строки
+   * (снимается заменой файла). Смена видео за время перевода — результат
+   * не применяем (набор привязан к videoKey, docs/03 §6). */
+  const startTrackTranslation = (source: Track, targetLang: string, fromFile: boolean): void => {
+    if (source.cues.length === 0) return;
+    const sourceLang = source.lang && source.lang !== "und" ? source.lang : "";
+    const trackId = fromFile ? fileCacheId(source) : source.id;
+    const videoKeyAtRequest = currentVideo?.videoKey ?? "";
+    void requestCloudTranslation(document, { post: postToCore }, {
+      videoKey: videoKeyAtRequest,
+      trackId,
+      sourceLang,
+      targetLang,
+      cues: source.cues,
+    }).then((reply) => {
+      if (!reply.ok) return;
+      const track = cloudTrackFrom(targetLang, typeof reply.name === "string" ? reply.name : "", reply.cues ?? []);
+      if (!track) return;
+      if (currentVideo?.videoKey !== videoKeyAtRequest) return; // видео сменилось
+      if (fromFile) fileSourcedCloudIds.add(track.id);
+      // Повтор того же языка — замена, разные языки — разные строки набора.
+      translateTracks = [...translateTracks.filter((t) => t.id !== track.id), track];
+      applySet("translate");
+    });
+  };
+
+  /** Автоперевод файловой дорожки (карточка duopulse-177: «фильм + .srt =
+   * сразу перевод»): после применения файловой части — решение чистой
+   * autoTranslateFileDecision (согласие lastDuoEnabled — та же логика, что
+   * на YouTube, автоперевод не молча: прогресс и строка набора видны в
+   * панели; снял строку — за это видео больше не предлагаем). */
+  const maybeAutoTranslateFileTrack = (): void => {
+    const decision = autoTranslateFileDecision({
+      fileTracks,
+      platformTracks,
+      translateTracks,
+      targetLang: interfaceTranslationLang(),
+      consent: lastDuoEnabled() === true,
+      declined: currentVideo ? declinedAutoTranslate.has(currentVideo.videoKey) : false,
+    });
+    if (decision.run && decision.source) {
+      const source = decision.source;
+      const target = interfaceTranslationLang();
+      const videoKey = currentVideo?.videoKey ?? "";
+      postToCore({
+        duopulse: "auto-translate-file",
+        videoKey,
+        sourceLang: source.lang,
+        targetLang: target,
+        cues: source.cues.length,
+      });
+      startTrackTranslation(source, target, true);
+    }
+  };
+
+  /** Применить новую файловую часть набора (дроп или subtitles.load_file,
+   * карточка duopulse-177): замещает прежнюю целиком; облачные переводы
+   * файлового происхождения снимаются (перевод прежней версии .srt не
+   * соответствует новому файлу), затем — решение об автопереводе. */
+  const replaceFileTracks = (tracks: Track[], via: string): void => {
+    if (fileSourcedCloudIds.size > 0) {
+      translateTracks = translateTracks.filter((t) => !fileSourcedCloudIds.has(t.id));
+      fileSourcedCloudIds = new Set();
+    }
+    fileTracks = tracks;
+    applySet(via);
+    maybeAutoTranslateFileTrack();
   };
 
   /** Выключить показ (docs/03 §8 п.2): погасить, состав набора помним —
@@ -479,6 +576,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
         asrTracks = mem ? mem.asr : [];
         translateTracks = mem ? mem.translate : [];
         fileTracks = mem ? mem.files : [];
+        fileSourcedCloudIds = new Set(mem ? mem.fileCloudIds : []);
         // Список дорожек принадлежит прошлому видео — сброс до свежего
         // (придёт с onYouTubeVideo; дефолт-набор Alt+D не соберётся по чужому).
         trackList = null;
@@ -532,6 +630,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       asrTracks = [];
       translateTracks = [];
       fileTracks = [];
+      fileSourcedCloudIds = new Set();
       applySet("test");
       return;
     }
@@ -611,6 +710,8 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
 
   // Снять дорожку из набора (панель 3.7: subtitles.remove_track → Core eval):
   // файловую, облачный перевод или платформенную — остальные без перезагрузки.
+  // Снятие автоперевода файловой дорожки — отказ за это видео (duopulse-177:
+  // не навязываемся повторным дропом того же файла).
   document.addEventListener("duopulse-remove-track", (e) => {
     const id = (e as CustomEvent<{ id?: unknown }>).detail?.id;
     if (typeof id !== "string" || !id) return;
@@ -618,6 +719,10 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       fileTracks = fileTracks.filter((t) => t.id !== id);
       applySet("remove");
     } else if (id.startsWith("cloud:")) {
+      if (fileSourcedCloudIds.has(id) && currentVideo) {
+        declinedAutoTranslate.add(currentVideo.videoKey);
+        fileSourcedCloudIds.delete(id);
+      }
       translateTracks = translateTracks.filter((t) => t.id !== id);
       applySet("remove");
     } else if (id.startsWith("asr:")) {
@@ -632,8 +737,8 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   // Облачный перевод дорожки (задача 4.2: панель → subtitles.translate_track
   // → Core eval). Cues — здесь, конвейер — в Core (кэш → пачки → провайдер →
   // кэш); ответ придёт событием duopulse-translate-track (content/adapters/
-  // cloud.ts). Перевод длинной дорожки — минуты: смена видео за это время —
-  // результат не применяем (набор привязан к videoKey, docs/03 §6).
+  // cloud.ts). Общий путь — startTrackTranslation (карточка duopulse-177:
+  // файловая дорожка — полноценный источник, с кэш-хешем контента).
   document.addEventListener("duopulse-translate-request", (e) => {
     const detail = (e as CustomEvent<{ trackId?: unknown; targetLang?: unknown }>).detail;
     const targetLang = typeof detail?.targetLang === "string" ? detail.targetLang.trim() : "";
@@ -646,23 +751,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       fileTracks[0] ??
       null;
     if (!source || source.cues.length === 0) return; // устаревший снапшот — Core валидировал состав
-    const sourceLang = source.lang && source.lang !== "und" ? source.lang : "";
-    const videoKeyAtRequest = currentVideo?.videoKey ?? "";
-    void requestCloudTranslation(document, { post: postToCore }, {
-      videoKey: videoKeyAtRequest,
-      trackId: source.id,
-      sourceLang,
-      targetLang,
-      cues: source.cues,
-    }).then((reply) => {
-      if (!reply.ok) return;
-      const track = cloudTrackFrom(targetLang, typeof reply.name === "string" ? reply.name : "", reply.cues ?? []);
-      if (!track) return;
-      if (currentVideo?.videoKey !== videoKeyAtRequest) return; // видео сменилось
-      // Повтор того же языка — замена, разные языки — разные строки набора.
-      translateTracks = [...translateTracks.filter((t) => t.id !== track.id), track];
-      applySet("translate");
-    });
+    startTrackTranslation(source, targetLang, source.source === "file");
   });
 
   // Распознать речь видео (карточка duopulse-060: панель → subtitles.asr_start
@@ -722,7 +811,8 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   // Панельный путь задачи 3.6: Core прочитал файл с диска (subtitles.load_file)
   // и доставил cue этим событием (eval активной вкладки — паттерн
   // subtitles.set_offset). Дорожка строится тем же fileTrackFrom, что и после
-  // drop; дроп/панель замещают файловую часть набора целиком.
+  // drop; дроп/панель замещают файловую часть набора целиком (replaceFileTracks
+  // — карточка duopulse-177: снимает файловый cloud-перевод, решает автоперевод).
   document.addEventListener("duopulse-file-track", (e) => {
     const detail = (e as CustomEvent<{ name?: unknown; cues?: unknown }>).detail;
     if (!detail || typeof detail !== "object" || !Array.isArray(detail.cues)) return;
@@ -735,8 +825,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     }
     if (cues.length === 0) return;
     const name = typeof detail.name === "string" && detail.name ? detail.name : "субтитры.srt";
-    fileTracks = [fileTrackFrom(name, langOfFileName(name), cues)];
-    applySet("load_file");
+    replaceFileTracks([fileTrackFrom(name, langOfFileName(name), cues)], "load_file");
     postToCore({
       duopulse: "file-tracks",
       videoKey: currentVideo?.videoKey ?? "",
@@ -753,8 +842,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     parser,
     hasVideo: () => currentVideo !== null,
     onApply(result: FileLoadResult): void {
-      fileTracks = result.tracks;
-      applySet("drop");
+      replaceFileTracks(result.tracks, "drop");
       postToCore({
         duopulse: "file-tracks",
         videoKey: currentVideo?.videoKey ?? "",
@@ -845,14 +933,14 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     /** Убрать файловые дорожки набора (панель/e2e): платформенные остаются. */
     clearFiles(): void {
       fileTracks = [];
+      fileSourcedCloudIds = new Set();
       applySet("clear");
     },
     /** Применить файловые дорожки как после дропа (диагностика стенда 3.6):
      * чтение+разбор — тем же путём, что и реальный drop. */
     async addFiles(files: readonly { name: string; text: () => Promise<string> }[]): Promise<FileLoadResult> {
       const result = await buildFileTracks(files, { parser });
-      fileTracks = result.tracks;
-      applySet("test");
+      replaceFileTracks(result.tracks, "test");
       return result;
     },
   };

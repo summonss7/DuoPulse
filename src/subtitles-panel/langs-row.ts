@@ -3,9 +3,14 @@
 // субтитры»). Чистые функции без DOM — юнит-тесты; рендер и IPC — duo.ts.
 // Оригинал — базовая дорожка платформы; перевод — бесплатный tlang платформы
 // (приоритетнее облака, docs/03 §7) или облачный (значение с префиксом cloud:).
-// Строка управляет дуо-парой «оригинал + перевод»; полный набор до 3 строк —
+// Строка управляет дуго-парой «оригинал + перевод»; полный набор до 3 строк —
 // секцией «Набор» ниже, файлы/ASR строкой не трогаются (set_tracks меняет
 // только платформенную часть).
+//
+// Карточка duopulse-177: на локальном видео (файл + .srt) платформенных
+// дорожек нет — файловая дорожка с языком становится «оригиналом» строки
+// (effectiveBase/langRowState): панель ведёт себя как на платформе, перевод —
+// облачный, источник — файл (set_tracks не шлётся, файловая часть — своя).
 
 import type { AppliedTrackInfo, BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
 import { t } from "../i18n";
@@ -26,12 +31,36 @@ export interface LangRowState {
 const isPlatform = (t: AppliedTrackInfo): boolean =>
   t.source !== "file" && t.source !== "translate" && t.source !== "asr" && t.source !== "test";
 
+/** Эффективный список «Язык видео» (duopulse-177): базовые дорожки платформы;
+ * на локальном видео их нет — файловая дорожка с языком (имя вида фильм.en.srt)
+ * становится оригиналом. Псевдо-база помечается kind:"file" — toChange/
+ * fromChange не шлют set_tracks (файловая часть набора живёт своей, дроп/
+ * «Свои субтитры» её замещают). */
+export function effectiveBase(
+  base: BaseTrackInfo[],
+  tracks: AppliedTrackInfo[],
+): BaseTrackInfo[] {
+  if (base.length > 0) return base;
+  return tracks
+    .filter((t) => t.source === "file" && t.lang !== "und" && t.lang !== "")
+    .map((t) => ({
+      id: t.id,
+      kind: "file",
+      lang: t.lang,
+      name: t.name || t.id.replace(/^file:/, ""),
+      original: true,
+      translatable: true,
+    }));
+}
+
 /** Выбор строки по набору: оригинал — платформенная строка с role=original
- * (нет — первая платформенная); перевод — первая строка-перевод: платформенная
- * «yt:en+ru» (язык по нормализации id) или облачная «cloud:xx». */
+ * (нет — первая платформенная; на локальном видео — файловая с языком,
+ * duopulse-177); перевод — первая строка-перевод: платформенная «yt:en+ru»
+ * (язык по нормализации id) или облачная «cloud:xx». */
 export function langRowState(tracks: AppliedTrackInfo[]): LangRowState {
   const platform = tracks.filter(isPlatform);
-  const original = platform.find((t) => t.role === "original") ?? platform[0] ?? null;
+  const file = tracks.find((t) => t.source === "file" && t.lang !== "und" && t.lang !== "");
+  const original = platform.find((t) => t.role === "original") ?? platform[0] ?? file ?? null;
   const platformTo = platform.find((t) => t.id.includes("+"));
   if (platformTo) return { fromId: original?.id ?? null, to: { kind: "platform", lang: normalizeTrackId(platformTo.id) } };
   const cloud = tracks.find((t) => t.id.startsWith("cloud:"));
@@ -82,7 +111,8 @@ export type LangAction =
 
 /** Смена оригинала: новый id первым, платформенные переводы приживаются к нему
  * (голый код перевода резолвится базой-оригиналом, задача 3.3), непереводимый
- * оригинал остаётся один; облачная строка живёт своей частью — не трогаем. */
+ * оригинал остаётся один; облачная строка живёт своей частью — не трогаем.
+ * Файловый «оригинал» (duopulse-177) один и несменяем — действий нет. */
 export function fromChange(
   tracks: AppliedTrackInfo[],
   base: BaseTrackInfo[],
@@ -90,6 +120,7 @@ export function fromChange(
 ): LangAction[] {
   const target = base.find((b) => b.id === newFromId);
   if (!target) return [];
+  if (target.kind === "file") return [];
   const { fromId, to } = langRowState(tracks);
   const ids = [target.id];
   if (to.kind === "platform" && target.translatable && baseLang(to.lang) !== baseLang(target.lang)) {
@@ -100,7 +131,9 @@ export function fromChange(
 
 /** Смена перевода: «нет» — гасим и платформенный перевод, и облачную строку;
  * tlang — дуо «оригинал + перевод»; облако — оригинал как источник и запуск
- * конвейера (прежнюю облачную строку снимаем — строка держит одну пару). */
+ * конвейера (прежнюю облачную строку снимаем — строка держит одну пару).
+ * Файловый оригинал (duopulse-177): set_tracks не шлём — файловая часть набора
+ * живёт своей (дроп/«Свои субтитры»), меняем только облачную строку. */
 export function toChange(
   tracks: AppliedTrackInfo[],
   base: BaseTrackInfo[],
@@ -109,15 +142,16 @@ export function toChange(
   const { fromId } = langRowState(tracks);
   const original = base.find((b) => b.id === fromId) ?? base.find((b) => b.original) ?? base[0];
   if (!original) return [];
+  const fileOriginal = original.kind === "file";
   const actions: LangAction[] = [];
   const cloud = tracks.find((t) => t.id.startsWith("cloud:"));
   if (cloud && value !== `cloud:${baseLang(cloud.lang)}`) actions.push({ type: "remove", id: cloud.id });
   if (value === "") {
-    actions.push({ type: "set", ids: [original.id] });
+    if (!fileOriginal) actions.push({ type: "set", ids: [original.id] });
     return actions;
   }
   if (value.startsWith("cloud:")) {
-    actions.push({ type: "set", ids: [original.id] });
+    if (!fileOriginal) actions.push({ type: "set", ids: [original.id] });
     actions.push({ type: "translate", lang: value.slice("cloud:".length) });
     return actions;
   }

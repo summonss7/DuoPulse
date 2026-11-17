@@ -550,6 +550,8 @@ unsafe fn referer_of(
 ///   сервис состояния + событие subtitles:set_applied (кнопка «duo»/панель);
 /// - «file-tracks» — файловые дорожки применились к набору (задача 3.6:
 ///   drag&drop или subtitles.load_file); журнал [subtitles];
+/// - «auto-translate-file» — автоперевод файловой дорожки запущен (карточка
+///   duopulse-177): телеметрия решения; сам конвейер — «translate-track»;
 /// - «parse-subtitles» — разбор payload дорожки каноническими парсерами
 ///   src/subtitles (задача 3.1) по запросу content-слоя (задача 3.3):
 ///   ответ {duopulse:"subtitles-parsed", reqId, ok, cues, warnings} приходит
@@ -714,6 +716,19 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 eprintln!(
                     "[subtitles] file-tracks: применено {applied}, отказов {failures}, сверх набора {dropped} ({via}, tab {tab_id})"
                 );
+            } else if parsed["duopulse"] == "auto-translate-file" {
+                // Автоперевод файловой дорожки запущен (карточка duopulse-177):
+                // телеметрия решения (сам перевод — конвейер «translate-track»,
+                // его прогресс — события subtitles:translate_progress).
+                if let (Some(video_key), Some(target)) =
+                    (parsed["videoKey"].as_str(), parsed["targetLang"].as_str())
+                {
+                    let source = parsed["sourceLang"].as_str().unwrap_or("?");
+                    let cues = parsed["cues"].as_u64().unwrap_or(0);
+                    eprintln!(
+                        "[subtitles] auto-translate-file: {video_key} {source} → {target} ({cues} cue, tab {tab_id})"
+                    );
+                }
             } else if parsed["duopulse"] == "parse-subtitles" {
                 // Разбор payload дорожки в Core (задача 3.3): канонические
                 // парсеры задачи 3.1, формат — автодетект по содержимому.

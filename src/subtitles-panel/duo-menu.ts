@@ -18,7 +18,7 @@ import type {
   TranslationLangInfo,
 } from "../bridge/gen/types";
 import { t } from "../i18n";
-import { fromOptions, langRowState, toOptions } from "./langs-row";
+import { effectiveBase, fromOptions, langRowState, toOptions } from "./langs-row";
 import { CLOUD_LANGS } from "./cloud-langs";
 import { LOOK_PRESETS, matchLookPreset } from "./look-presets";
 
@@ -49,17 +49,20 @@ export interface DuoMenuPayload {
   lookPresets: { id: string; label: string }[];
 }
 
-/** Сборка payload меню по снапшоту вкладки и дефолтному языку настроек. */
+/** Сборка payload меню по снапшоту вкладки и дефолтному языку настроек.
+ * «Язык видео» — эффективный список (duopulse-177): на локальном видео
+ * оригиналом становится файловая дорожка с языком. */
 export function buildDuoMenuPayload(state: DuoMenuState, defaultTranslationLang: string): DuoMenuPayload {
   const row = langRowState(state.tracks);
-  const fromTrack = state.base.find((b) => b.id === row.fromId) ?? null;
-  const from = fromOptions(state.base).map((o) => ({ ...o, current: o.id === row.fromId }));
+  const base = effectiveBase(state.base, state.tracks);
+  const fromTrack = base.find((b) => b.id === row.fromId) ?? null;
+  const from = fromOptions(base).map((o) => ({ ...o, current: o.id === row.fromId }));
   const currentTo =
     row.to.kind === "none" ? "" : row.to.kind === "platform" ? row.to.lang : `cloud:${row.to.lang}`;
   const to: DuoMenuPayload["to"] = [
     {
       value: "",
-      name: state.base.length ? t("Нет (только оригинал)") : "—",
+      name: base.length ? t("Нет (только оригинал)") : "—",
       group: "none",
       current: currentTo === "",
     },

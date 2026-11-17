@@ -54,6 +54,7 @@ import {
 import { t, uiLocale } from "../i18n";
 import { presetSets, normalizeTrackId } from "./presets";
 import {
+  effectiveBase,
   fromChange,
   fromOptions,
   langRowState,
@@ -176,14 +177,16 @@ function renderPanel(): void {
 }
 
 /** Строка «Языки: с какого → на какой» (карточка duopulse-079): селект
- * оригинала (базовые дорожки) и селект перевода (нет / tlang платформы /
- * облако) — выбор применяется сразу, рендер восстанавливается по набору. */
+ * оригинала (базовые дорожки; на локальном видео — файловая дорожка,
+ * duopulse-177) и селект перевода (нет / tlang платформы / облако) — выбор
+ * применяется сразу, рендер восстанавливается по набору. */
 function renderLangs(): void {
   const fromSel = document.getElementById("duoLangFrom") as HTMLSelectElement;
   const toSel = document.getElementById("duoLangTo") as HTMLSelectElement;
   const row = langRowState(state.tracks);
+  const ebase = effectiveBase(state.base, state.tracks);
   fromSel.replaceChildren();
-  const fos = fromOptions(state.base);
+  const fos = fromOptions(ebase);
   for (const o of fos) {
     const opt = document.createElement("option");
     opt.value = o.id;
@@ -193,11 +196,10 @@ function renderLangs(): void {
   fromSel.disabled = fos.length === 0;
   if (row.fromId) fromSel.value = row.fromId;
 
-  const fromTrack = state.base.find((b) => b.id === row.fromId) ?? null;
+  const fromTrack = ebase.find((b) => b.id === row.fromId) ?? null;
   toSel.replaceChildren();
   const none = document.createElement("option");
-  none.value = "";
-  none.textContent = state.base.length ? t("Нет (только оригинал)") : "—";
+  none.textContent = ebase.length ? t("Нет (только оригинал)") : "—";
   toSel.append(none);
   const opts = toOptions(
     state.translations,
@@ -544,12 +546,16 @@ const runMenuAction = (a: Record<string, unknown>): void => {
   }
   if (act === "from" && menuPayload) {
     const id = menuFromId(menuPayload, Number(a.index));
-    if (id) for (const x of fromChange(state.tracks, state.base, id)) runLangAction(x);
+    if (id)
+      for (const x of fromChange(state.tracks, effectiveBase(state.base, state.tracks), id))
+        runLangAction(x);
     return;
   }
   if (act === "to" && menuPayload) {
     const value = menuToValue(menuPayload, Number(a.index));
-    if (value !== null) for (const x of toChange(state.tracks, state.base, value)) runLangAction(x);
+    if (value !== null)
+      for (const x of toChange(state.tracks, effectiveBase(state.base, state.tracks), value))
+        runLangAction(x);
     return;
   }
   if (act === "deflang") {
@@ -647,14 +653,17 @@ export function initDuo(): void {
   });
 
   // Строка «Языки: с какого → на какой» (карточка duopulse-079): выбор
-  // применяется сразу (набор/облако), ссылка — страница настроек субтитров.
+  // применяется сразу (набор/облако; на локальном видео оригинал — файловая
+  // дорожка, duopulse-177), ссылка — страница настроек субтитров.
   (document.getElementById("duoLangFrom") as HTMLSelectElement).addEventListener("change", (e) => {
     const sel = e.target as HTMLSelectElement;
-    for (const a of fromChange(state.tracks, state.base, sel.value)) runLangAction(a);
+    for (const a of fromChange(state.tracks, effectiveBase(state.base, state.tracks), sel.value))
+      runLangAction(a);
   });
   (document.getElementById("duoLangTo") as HTMLSelectElement).addEventListener("change", (e) => {
     const sel = e.target as HTMLSelectElement;
-    for (const a of toChange(state.tracks, state.base, sel.value)) runLangAction(a);
+    for (const a of toChange(state.tracks, effectiveBase(state.base, state.tracks), sel.value))
+      runLangAction(a);
   });
   document.getElementById("duoLangSettings")?.addEventListener("click", () => {
     void bridge.tabs.open({ url: "duopulse://settings" }).catch(err);

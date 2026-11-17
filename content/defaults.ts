@@ -65,3 +65,19 @@ export function baseStyle(holder: DefaultsHolder = window as unknown as Defaults
   }
   return { ...DEFAULT_SUBTITLE_STYLE };
 }
+
+/** Целевой язык автоперевода файловой дорожки (карточка duopulse-177):
+ * язык перевода из настроек (defaultTranslationLang — дефолт настроек Core
+ * «ru», т.е. язык интерфейса хозяина); битый/отсутствующий — «ru».
+ * preferredLangs() не годится: без настроек он начинается с «en», а
+ * автоперевод должен целиться в язык интерфейса. */
+export function interfaceTranslationLang(
+  holder: DefaultsHolder = window as unknown as DefaultsHolder,
+): string {
+  const lang = rawDefaults(holder)?.subtitles?.defaultTranslationLang;
+  if (typeof lang === "string") {
+    const code = lang.trim().toLowerCase();
+    if (isLangCode(code)) return code;
+  }
+  return "ru";
+}

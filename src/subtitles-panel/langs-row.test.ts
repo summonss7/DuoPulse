@@ -2,7 +2,14 @@
 // duopulse-079): выбор по применённому набору, варианты селекта «Перевод»,
 // действия смены оригинала/перевода (набор, облачная строка, конвейер).
 import { describe, expect, it } from "vitest";
-import { fromChange, fromOptions, langRowState, toChange, toOptions } from "./langs-row";
+import {
+  effectiveBase,
+  fromChange,
+  fromOptions,
+  langRowState,
+  toChange,
+  toOptions,
+} from "./langs-row";
 import type { AppliedTrackInfo, BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
 
 const base = (over: Partial<BaseTrackInfo> = {}): BaseTrackInfo => ({
@@ -162,5 +169,81 @@ describe("toChange", () => {
 
   it("без оригинала в наборе — оригинал списка как источник", () => {
     expect(toChange([], baseList, "ru")).toEqual([{ type: "set", ids: ["yt:en", "ru"] }]);
+  });
+});
+
+// --- файловая дорожка как оригинал (карточка duopulse-177) ---------------------
+
+const fileApplied = (lang: string): AppliedTrackInfo =>
+  applied({ id: `file:${lang}`, lang, source: "file", name: `movie.${lang}.srt` });
+
+describe("effectiveBase (duopulse-177)", () => {
+  it("платформенный список не пуст — файловые не добавляются", () => {
+    const platformBase = [base()];
+    expect(effectiveBase(platformBase, [fileApplied("ru")])).toBe(platformBase);
+  });
+
+  it("локальное видео: файловая дорожка с языком — оригинал (kind file)", () => {
+    const b = effectiveBase([], [fileApplied("en")]);
+    expect(b).toEqual([
+      {
+        id: "file:en",
+        kind: "file",
+        lang: "en",
+        name: "movie.en.srt",
+        original: true,
+        translatable: true,
+      },
+    ]);
+  });
+
+  it("файл без языка (und) — оригиналом не становится", () => {
+    expect(effectiveBase([], [fileApplied("und")])).toEqual([]);
+  });
+});
+
+describe("langRowState + файл (duopulse-177)", () => {
+  it("файл — оригинал, облачный перевод — to=cloud", () => {
+    const row = langRowState([
+      fileApplied("en"),
+      applied({ id: "cloud:ru", lang: "ru", source: "translate", role: "translation" }),
+    ]);
+    expect(row).toEqual({ fromId: "file:en", to: { kind: "cloud", lang: "ru" } });
+  });
+
+  it("файл без перевода — to=none, fromId=file:en", () => {
+    expect(langRowState([fileApplied("en")])).toEqual({
+      fromId: "file:en",
+      to: { kind: "none" },
+    });
+  });
+});
+
+describe("fromChange/toChange + файл (duopulse-177)", () => {
+  const fileBase = effectiveBase([], [fileApplied("en")]);
+
+  it("смена файлового «оригинала» — нет действий (он один)", () => {
+    expect(fromChange([fileApplied("en")], fileBase, "file:en")).toEqual([]);
+  });
+
+  it("облако с файлового оригинала: без set_tracks, прежняя строка заменяется", () => {
+    const actions = toChange(
+      [fileApplied("en"), applied({ id: "cloud:es", lang: "es", source: "translate", role: "translation" })],
+      fileBase,
+      "cloud:ru",
+    );
+    expect(actions).toEqual([
+      { type: "remove", id: "cloud:es" },
+      { type: "translate", lang: "ru" },
+    ]);
+  });
+
+  it("«Нет» с файлового оригинала — снять облачную строку, без set_tracks", () => {
+    const actions = toChange(
+      [fileApplied("en"), applied({ id: "cloud:ru", lang: "ru", source: "translate", role: "translation" })],
+      fileBase,
+      "",
+    );
+    expect(actions).toEqual([{ type: "remove", id: "cloud:ru" }]);
   });
 });

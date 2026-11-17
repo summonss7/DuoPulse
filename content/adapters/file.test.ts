@@ -10,6 +10,8 @@ import {
   combinedTracks,
   fileTrackFrom,
   langOfFileName,
+  autoTranslateFileDecision,
+  fileCacheId,
   langOfVttHeader,
   pickSubtitleFiles,
   MAX_FILE_TRACKS,
@@ -234,5 +236,114 @@ describe("FileDropZone: приём на window, чужие дропы не тр�
     const { fire } = setup();
     const rec = fire("dragover", { types: ["text/plain"] });
     expect(rec.prevented).toBe(false);
+  });
+});
+
+// --- перевод файловой дорожки (карточка duopulse-177) --------------------------
+
+describe("fileCacheId", () => {
+  it("стабилен для одного контента и различает версии файла", () => {
+    const a = fileCacheId({ id: "file:en", cues: cues(3) });
+    expect(a).toBe(fileCacheId({ id: "file:en", cues: cues(3) }));
+    expect(a.startsWith("file:en#")).toBe(true);
+    // та же длина, другой первый текст — другой хеш: кэш не отдаст перевод
+    // прежней версии заменённого .srt
+    const edited: Cue[] = [...cues(3)];
+    edited[0] = { startMs: 0, endMs: 900, text: "другая реплика" };
+    expect(fileCacheId({ id: "file:en", cues: edited })).not.toBe(a);
+    // другое число cue — другой хеш
+    expect(fileCacheId({ id: "file:en", cues: cues(4) })).not.toBe(a);
+    // пустые cue — валидный ключ (решение запускать перевод принимает вызывающий)
+    expect(fileCacheId({ id: "file:und", cues: [] })).toMatch(/^file:und#[0-9a-f]{8}$/);
+  });
+});
+
+describe("autoTranslateFileDecision", () => {
+  const fileTrack = (lang: string): Track => ({ ...track("x"), id: `file:${lang}`, source: "file", lang, cues: cues(2) });
+  const cloudTrack = (lang: string): Track => ({
+    ...track("x"), id: `cloud:${lang}`, source: "translate", lang, role: "translation",
+  });
+
+  it("сценарий «плеер»: согласие + чужой язык — запуск", () => {
+    const d = autoTranslateFileDecision({
+      fileTracks: [fileTrack("en")],
+      platformTracks: [],
+      translateTracks: [],
+      targetLang: "ru",
+      consent: true,
+      declined: false,
+    });
+    expect(d.run).toBe(true);
+    expect(d.source?.id).toBe("file:en");
+  });
+
+  it("язык файла = целевому — переводить нечего (фильм.ru.srt при интерфейсе ru)", () => {
+    const d = autoTranslateFileDecision({
+      fileTracks: [fileTrack("ru")],
+      platformTracks: [],
+      translateTracks: [],
+      targetLang: "ru",
+      consent: true,
+      declined: false,
+    });
+    expect(d.run).toBe(false);
+  });
+
+  it("согласия нет (lastDuoEnabled≠true) или снял автоперевод — молча не запускаем", () => {
+    const args = {
+      fileTracks: [fileTrack("en")],
+      platformTracks: [] as Track[],
+      translateTracks: [] as Track[],
+      targetLang: "ru",
+    };
+    expect(autoTranslateFileDecision({ ...args, consent: false, declined: false }).run).toBe(false);
+    expect(autoTranslateFileDecision({ ...args, consent: true, declined: true }).run).toBe(false);
+  });
+
+  it("платформенные дорожки есть (YouTube) или перевод уже в наборе — не запускаем", () => {
+    expect(
+      autoTranslateFileDecision({
+        fileTracks: [fileTrack("en")],
+        platformTracks: [track("yt:en")],
+        translateTracks: [],
+        targetLang: "ru",
+        consent: true,
+        declined: false,
+      }).run,
+    ).toBe(false);
+    expect(
+      autoTranslateFileDecision({
+        fileTracks: [fileTrack("en")],
+        platformTracks: [],
+        translateTracks: [cloudTrack("ru")],
+        targetLang: "ru",
+        consent: true,
+        declined: false,
+      }).run,
+    ).toBe(false);
+  });
+
+  it("язык файла неизвестен (und) или подтег целевого совпадает — не запускаем", () => {
+    expect(
+      autoTranslateFileDecision({
+        fileTracks: [fileTrack("und")],
+        platformTracks: [],
+        translateTracks: [],
+        targetLang: "ru",
+        consent: true,
+        declined: false,
+      }).run,
+    ).toBe(false);
+    // файл en-US, цель en — базовые коды совпали, перевод бессмыслен
+    expect(
+      autoTranslateFileDecision({
+        fileTracks: [fileTrack("en-US")],
+        platformTracks: [],
+        translateTracks: [],
+        targetLang: "en",
+        consent: true,
+        declined: false,
+      }).run,
+    ).toBe(false);
   });
 });

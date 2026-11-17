@@ -101,3 +101,34 @@ describe("menuFromId / menuToValue", () => {
     expect(menuToValue(p, -1)).toBeNull();
   });
 });
+
+describe("buildDuoMenuPayload + файловая дорожка (duopulse-177)", () => {
+  const fileState: DuoMenuState = {
+    ...state,
+    base: [],
+    tracks: [
+      { id: "file:en", lang: "en", name: "movie.en.srt", source: "file", role: "original" },
+      { id: "cloud:ru", lang: "ru", name: "DeepL → ru", source: "translate", role: "translation" },
+    ],
+    translations: [],
+  };
+
+  it("локальное видео: файл — «Язык видео», cloud:ru — текущий перевод", () => {
+    const p = buildDuoMenuPayload(fileState, "ru");
+    expect(p.from).toEqual([
+      { id: "file:en", name: expect.stringContaining("movie.en.srt"), current: true },
+    ]);
+    const to = p.to.find((t) => t.current);
+    expect(to?.value).toBe("cloud:ru");
+    expect(to?.group).toBe("cloud");
+  });
+
+  it("«Язык видео» без файла с языком — пусто, перевод «—»", () => {
+    const p = buildDuoMenuPayload(
+      { ...fileState, tracks: [{ id: "file:subs", lang: "und", name: "subs.srt", source: "file", role: "original" }] },
+      "ru",
+    );
+    expect(p.from).toEqual([]);
+    expect(p.to.find((t) => t.group === "none")?.name).toBe("—");
+  });
+});

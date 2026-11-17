@@ -98,6 +98,81 @@ export interface FileLoadResult {
   warnings: string[];
 }
 
+// --- перевод файловой дорожки (карточка duopulse-177) --------------------------
+
+/** FNV-1a 32 бита — короткий стабильный хеш без зависимостей (content-бандл
+ * собирается в IIFE, библиотеки тащить нельзя). */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/** trackId файловой дорожки для запроса перевода: `<id>#<хеш контента>`
+ * (число cue + первый/последний текст). Кэш Core ключуется по
+ * (videoKey, trackId, lang): у разных версий .srt один и тот же показной id
+ * file:en — без хеша заменившийся файл получил бы из кэша перевод прежней
+ * версии (карточка duopulse-177). Тот же контент — тот же хеш, повторный
+ * просмотр фильма остаётся кэш-хитом. */
+export function fileCacheId(track: { id: string; cues: readonly { text: string }[] }): string {
+  const first = track.cues[0]?.text ?? "";
+  const last = track.cues[track.cues.length - 1]?.text ?? "";
+  return `${track.id}#${fnv1a(`${track.cues.length}\u0000${first}\u0000${last}`)}`;
+}
+
+/** Базовый код языка без подтега и регистра («EN-US» → «en») — сравнение
+ * языка файла с целевым языком перевода. */
+export function fileBaseLang(lang: string): string {
+  return lang.trim().toLowerCase().split("-")[0] ?? "";
+}
+
+/** Решение об автопереводе файловой дорожки (карточка duopulse-177: «фильм +
+ * .srt = сразу перевод», согласие — как на YouTube). Чистая функция —
+ * применение и телеметрия в duopulse-content.
+ *
+ * Согласие: облачный перевод не запускается молча — только если пользователь
+ * уже держал показ duo включённым (lastDuoEnabled, паттерн duopulse-128: на
+ * YouTube помненное согласие само включает субтитры с переводом на новом
+ * видео). Прочие условия: сценарий «плеер» (платформенных дорожек нет),
+ * язык файла известен и ≠ целевого, в наборе ещё нет перевода целевого
+ * языка, за это видео пользователь не снимал автоперевод. */
+export interface AutoTranslateFileArgs {
+  fileTracks: readonly Track[];
+  platformTracks: readonly Track[];
+  translateTracks: readonly Track[];
+  /** Целевой язык — язык интерфейса (defaultTranslationLang настроек). */
+  targetLang: string;
+  /** lastDuoEnabled() === true — согласие дано ранее. */
+  consent: boolean;
+  /** Автоперевод за это видео уже снимали — не навязываемся. */
+  declined: boolean;
+}
+
+export interface AutoTranslateFileDecision {
+  run: boolean;
+  /** Дорожка-источник (run=true). */
+  source: Track | null;
+}
+
+export function autoTranslateFileDecision(args: AutoTranslateFileArgs): AutoTranslateFileDecision {
+  const source = args.fileTracks[0] ?? null;
+  const target = fileBaseLang(args.targetLang);
+  const run =
+    args.consent &&
+    !args.declined &&
+    args.platformTracks.length === 0 &&
+    source !== null &&
+    source.lang !== "und" &&
+    source.lang !== "" &&
+    target !== "" &&
+    fileBaseLang(source.lang) !== target &&
+    !args.translateTracks.some((t) => fileBaseLang(t.lang) === target);
+  return { run, source: run ? source : null };
+}
+
 /** Прочитать и разобрать файлы дропа: чтение — здесь (UTF-8), разбор — в Core
  * (SubtitlesParser, WebMessage parse-subtitles); пустой файл/отказ канала —
  * отказ дорожки, остальные файлы грузятся дальше (docs/03 §9 — не «умирает»
