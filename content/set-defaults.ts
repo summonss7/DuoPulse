@@ -16,13 +16,21 @@ export const PREFERRED_TRANSLATION_LANGS: readonly string[] = ["en", "ro", "ru",
  * с original=true (язык аудио); нет такой — первая базовая. Перевод — tlang
  * из PREFERRED_TRANSLATION_LANGS по порядку, затем первый доступный; базой
  * перевода служит оригинал (голый код перевода в resolveIds). Пустой список
- * адаптера → [] (включать нечего, Alt+D просто поднимет флаг enabled). */
+ * адаптера → [] (включать нечего, Alt+D просто поднимет флаг enabled).
+ * duopulse-184: при неизвестном оригинале (все дорожки ручные — языка аудио
+ * в player-ответе нет) прежде первой берётся en-ручная: порядок captionTracks
+ * нестабилен (зависит от hl/гео сессии — у vk_xq1P7vIU первым шёл zh-Hans и
+ * дефолт включал китайскую дорожку), en — самый вероятный язык контента без
+ * другого сигнала. */
 export function defaultSetIds(
   list: AdapterTrackList | null,
   preferred: readonly string[] = PREFERRED_TRANSLATION_LANGS,
 ): string[] {
   if (!list || list.base.length === 0) return [];
-  const original = list.base.find((b) => b.original) ?? list.base[0];
+  const original =
+    list.base.find((b) => b.original) ??
+    list.base.find((b) => b.kind === "manual" && b.lang.split("-")[0] === "en") ??
+    list.base[0];
   const ids = [original.id];
   // Перевод языка оригинала бессмыслен — исключаем; предпочитаемые языки
   // по порядку, затем первый доступный из оставшихся.

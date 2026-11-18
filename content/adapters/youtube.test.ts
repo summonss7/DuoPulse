@@ -79,6 +79,7 @@ function makeWindow(opts: {
   playerResponse?: unknown;
   initialResponse?: unknown;
   textTracks?: { language?: string; kind?: string; label?: string }[];
+  uiLang?: string;
 }): PageWindow & { ytInitialPlayerResponse?: unknown } {
   const player: PlayerElement | null =
     opts.playerResponse !== undefined
@@ -88,6 +89,7 @@ function makeWindow(opts: {
     location: { href: opts.href },
     document: {
       getElementById: (id: string) => (id === "movie_player" && player ? player : null),
+      ...(opts.uiLang !== undefined ? { documentElement: { lang: opts.uiLang } } : {}),
     },
     fetch: (() => {
       throw new Error("fetch не должен зваться в этих тестах");
@@ -218,6 +220,122 @@ describe("извлечение списка из player-ответа (фикст
       audioTracks: [{ captionTrackIndices: [0], hasDefaultTrack: true, defaultCaptionTrackIndex: 0 }],
     });
     expect(originalLangsOf(response)).toEqual(new Set(["ko"]));
+  });
+
+  // duopulse-184 (Sam Smith vk_xq1P7vIU): 7 ручных дорожек без asr и без
+  // аудио-маркеров, первым в списке zh-Hans — дефолт-набор брал китайскую
+  // дорожку. Спасает п.4: defaultCaptionTrackIndex (web-ответ idx=1 → en)
+  // при языке UI, отличном от индексного.
+  const samSmithResponse = (): unknown =>
+    playerResponseOf({
+      videoId: "vk_xq1P7vIU",
+      url: "",
+      title: "",
+      captionTracks: [
+        { languageCode: "zh-Hans", vssId: ".zh-Hans" },
+        { languageCode: "en", vssId: ".en", isTranslatable: true },
+        { languageCode: "pt-BR", vssId: ".pt-BR" },
+      ],
+      translationLanguages: [{ languageCode: "ru" }, { languageCode: "en" }],
+      audioTracks: [
+        { captionTrackIndices: [0, 1, 2], hasDefaultTrack: true, defaultCaptionTrackIndex: 1 },
+      ],
+    });
+
+  it("duopulse-184: индекс ≠ язык UI — контентный фолбэк YouTube помечается оригиналом", () => {
+    expect(originalLangsOf(samSmithResponse(), "ru")).toEqual(new Set(["en"]));
+    expect(originalLangsOf(samSmithResponse(), "ro-RO")).toEqual(new Set(["en"]));
+  });
+
+  it("duopulse-184: индекс совпал с языком UI или UI неизвестен — пометки нет (неразличимо)", () => {
+    expect(originalLangsOf(samSmithResponse(), "en")).toEqual(new Set());
+    expect(originalLangsOf(samSmithResponse())).toEqual(new Set());
+    expect(originalLangsOf(samSmithResponse(), "x1")).toEqual(new Set()); // битный код UI
+  });
+
+  it("duopulse-184: asr надёжнее индекса — при asr-дорожке п.4 не применяется", () => {
+    const response = playerResponseOf({
+      videoId: "x",
+      url: "",
+      title: "",
+      captionTracks: [
+        { languageCode: "en", vssId: ".en" },
+        { languageCode: "ru", vssId: ".ru" },
+        { languageCode: "ru", kind: "asr", vssId: "a.ru" },
+      ],
+      translationLanguages: [],
+      audioTracks: [
+        { captionTrackIndices: [0, 1, 2], hasDefaultTrack: true, defaultCaptionTrackIndex: 0 },
+      ],
+    });
+    expect(originalLangsOf(response, "ro")).toEqual(new Set(["ru"]));
+  });
+
+  it("duopulse-184: индекс вне списка/без индекса — пометки нет, дефолт прежний", () => {
+    const oob = playerResponseOf({
+      videoId: "x",
+      url: "",
+      title: "",
+      captionTracks: [{ languageCode: "en", vssId: ".en" }],
+      translationLanguages: [],
+      audioTracks: [{ captionTrackIndices: [0], hasDefaultTrack: true, defaultCaptionTrackIndex: 7 }],
+    });
+    expect(originalLangsOf(oob, "ru")).toEqual(new Set());
+    const noIdx = playerResponseOf({
+      videoId: "x",
+      url: "",
+      title: "",
+      captionTracks: [{ languageCode: "en", vssId: ".en" }],
+      translationLanguages: [],
+      audioTracks: [{ captionTrackIndices: [0], hasDefaultTrack: false, defaultCaptionTrackIndex: 0 }],
+    });
+    expect(originalLangsOf(noIdx, "ru")).toEqual(new Set());
+  });
+
+  it("duopulse-184: адаптер помечает en оригиналом и дефолт-набор берёт его (не zh-Hans)", async () => {
+    const adapter = new YouTubeAdapter({
+      win: makeWindow({
+        href: "https://www.youtube.com/watch?v=vk_xq1P7vIU&list=RDvk_xq1P7vIU&start_radio=1",
+        playerResponse: samSmithResponse(),
+        uiLang: "ru",
+      }),
+    });
+    const list = await adapter.listTracks();
+    expect(list!.base.find((b) => b.id === "yt:en")!.original).toBe(true);
+    expect(list!.base.find((b) => b.id === "yt:zh-Hans")!.original).toBe(false);
+    const ids = defaultSetIds(list, ["ru", "en", "ro", "ru", "ar"]);
+    expect(ids).toEqual(["yt:en", "ru"]);
+  });
+
+  it("duopulse-184: оригинал неизвестен (живой ответ без индекса) — дефолты берут en, не первую zh-Hans", async () => {
+    // живой web-ответ анонимной сессии: renderer.audioTracks без
+    // defaultCaptionTrackIndex/originalLanguage, дорожки все ручные
+    const response = playerResponseOf({
+      videoId: "vk_xq1P7vIU",
+      url: "",
+      title: "",
+      captionTracks: [
+        { languageCode: "zh-Hans", vssId: ".zh-Hans", isTranslatable: true },
+        { languageCode: "en", vssId: ".en", isTranslatable: true },
+        { languageCode: "pt-BR", vssId: ".pt-BR", isTranslatable: true },
+      ],
+      translationLanguages: [{ languageCode: "ru" }],
+      audioTracks: [{ captionTrackIndices: [0, 1, 2] }],
+    });
+    const adapter = new YouTubeAdapter({
+      win: makeWindow({
+        href: "https://www.youtube.com/watch?v=vk_xq1P7vIU",
+        playerResponse: response,
+        uiLang: "ro-RO",
+      }),
+    });
+    const list = await adapter.listTracks();
+    expect(list!.base.every((b) => !b.original)).toBe(true); // сигнала нет
+    const ids = defaultSetIds(list, ["ru"]);
+    expect(ids).toEqual(["yt:en", "ru"]); // но дефолт — en (duopulse-184)
+    // голый код перевода цепляется к en-базе
+    const { refs } = adapter.resolveIds(["ru"]);
+    expect(refs[0]!.baseId).toBe("yt:en");
   });
 
   it("duopulse-070: renderer.audioTracks[].originalLanguage помечается (задел на web-клиент)", () => {

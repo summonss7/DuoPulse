@@ -1200,3 +1200,18 @@ vitest 657/657 (+6 vpn), cargo 434, стенд e2e/mobile/vpn-ui-smoke.mjs — 1
 Release 0.1.68 (aarch64 + universal) — android-build.sh, канал Aila. Цепочка
 паритета duopulse-164–171 (диагностика, пароли, ASR, VPN) закрыта полностью;
 план M-этапов не меняет (мобильная ветка — вне M-гейтов).
+
+### 18.11.2026: duopulse-184 — дуо-дефолт на видео без asr/дублей (клипы VEVO)
+Жалоба «не видит субтитры» на watch?v=vk_xq1P7vIU (Sam Smith, 7 ручных дорожек):
+YouTube не отдаёт язык оригинала ни в web-ответе, ни innertube ANDROID/IOS/TV
+(нет audioTracks/asr/audioTrackId), порядок captionTracks нестабилен (зависит
+от hl/гео — первым шёл zh-Hans), и дефолт Alt+D включал китайскую дорожку —
+субтитры «не те»/не появляются. Фикс: originalLangsOf п.4 — явный
+defaultCaptionTrackIndex с языком ≠ языка UI страницы (<html lang>) помечает
+контентный фолбэк YouTube (последний резерв, при asr не применяется); п.5 —
+дефолт-выбор при неизвестном оригинале берёт en-ручную прежде первой дорожки
+(defaultSetIds + defaultBase адаптера). Мобильная ветка — карточка
+duopulse-186 (нужен hl в innertube-запросе). Проверено: vitest 664/664
+(+5 кейса 184, регрессии Милан/Gangnam/TED живы), живой стенд на URL из
+задачи: дефолт en+ru, оверлей «MAYBE IT'S ALL THAT I'VE BEEN THROUGH /
+Может быть, это всё, через что я прошёл». Десктоп-релиз 0.1.68 (оба канала + хаб + C:\DuoPulse).

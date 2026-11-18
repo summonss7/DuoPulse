@@ -19,8 +19,9 @@
 //   базовые дорожки — только через программирование плеера (последовательно).
 // - Язык оригинала — originalLangsOf: audioTracks[].original (TV/ANDROID-
 //   клиенты) → renderer.audioTracks[].originalLanguage → asr-дорожка
-//   (web-клиент, duopulse-070). defaultCaptionTrackIndex — рекомендация под
-//   язык ИНТЕРФЕЙСА зрителя, не оригинал.
+//   (web-клиент, duopulse-070) → defaultCaptionTrackIndex при известном
+//   языке UI страницы (duopulse-184: индекс ≠ язык UI = контентный фолбэк
+//   YouTube; равенство — неразличимая рекомендация под зрителя, пропускаем).
 // - Переводы (duopulse-175): наш собственный fetch tlang рейт-лимитится
 //   быстро (429, квота ~45–60 мин), а программирование плеера на перевод
 //   невозможно (setOption track {languageCode:'ru'} игнорируется — плеер
@@ -124,9 +125,17 @@ export function videoIdOfResponse(response: unknown): string | null {
  *    НЕ применяется при данных п.2 — на мульти-даб видео asr-дорожка есть
  *    у каждого дубля (en-asr Милана — распознанный ДУБ), «оригиналами» все
  *    быть не могут (duopulse-159: дефолт-набор брал en-asr дуба вместо ru).
- * defaultCaptionTrackIndex НЕ использовать — это рекомендация под язык
- * ИНТЕРФЕЙСА зрителя (проба: UI ro → индекс дорожки ro), не оригинал. */
-export function originalLangsOf(response: unknown): Set<string> {
+ * П.4 (duopulse-184, последний резерв после asr): defaultCaptionTrackIndex
+ * при известном языке UI страницы. Сам по себе индекс — рекомендация под язык
+ * ИНТЕРФЕЙСА зрителя (проба: UI ro → индекс дорожки ro) и в общем случае
+ * оригиналом не является; НО когда дорожки языка UI нет, YouTube кладёт в
+ * индекс фолбэк — язык контента (пробы 18.11.2026, vk_xq1P7vIU: UI ru/ro →
+ * индекс en при отсутствии ru/ro-дорожек; UI en при en-дорожке → тоже en,
+ * неразличимо — поэтому совпадение с UI отбрасываем). Применяется только
+ * когда п.1–п.3 ничего не дали: ручные дорожки без asr (клип Sam Smith —
+ * 7 ручных, оригинал en, первым в списке шёл zh-Hans → дефолт-набор брал
+ * китайскую дорожку). */
+export function originalLangsOf(response: unknown, uiLang?: string): Set<string> {
   const out = new Set<string>();
   if (!response || typeof response !== "object") return out;
   const add = (lang: unknown): void => {
@@ -167,6 +176,24 @@ export function originalLangsOf(response: unknown): Set<string> {
   }
   for (const t of raw.captionTracks) {
     if (t.kind === "asr") add(t.languageCode);
+  }
+  // П.4: см. докблок выше — индекс ≠ язык UI означает контентный фолбэк.
+  if (out.size === 0 && uiLang) {
+    const ui = uiLang.split("-")[0]?.toLowerCase() ?? "";
+    if (/^[a-z]{2,3}$/.test(ui)) {
+      const idx = raw.audioTracks.reduce<number | null>((acc, t) => {
+        if (acc !== null || !t || typeof t !== "object") return acc;
+        const track = t as { hasDefaultTrack?: unknown; defaultCaptionTrackIndex?: unknown };
+        const isDefault = track.hasDefaultTrack !== false;
+        if (typeof track.defaultCaptionTrackIndex === "number" && isDefault) return track.defaultCaptionTrackIndex;
+        return acc;
+      }, null);
+      if (idx !== null && Number.isInteger(idx) && idx >= 0 && idx < raw.captionTracks.length) {
+        const lang = raw.captionTracks[idx]?.languageCode;
+        const primary = typeof lang === "string" ? lang.split("-")[0]?.toLowerCase() ?? "" : "";
+        if (primary && primary !== ui) out.add(lang as string);
+      }
+    }
   }
   return out;
 }
@@ -410,7 +437,7 @@ export function installTimedtextCapture(win: PageWindow): TimedtextCaptureSource
 /** Минимальный window (структурная типизация — тестируется без DOM). */
 export interface PageWindow {
   location: { href: string };
-  document: { getElementById(id: string): unknown };
+  document: { getElementById(id: string): unknown; documentElement?: { lang?: unknown } };
   fetch: typeof fetch;
   XMLHttpRequest?: {
     prototype: {
@@ -646,8 +673,16 @@ export class YouTubeAdapter implements Adapter {
       (typeof f.mimeType === "string" && f.mimeType.startsWith("audio/mp4") ? 1_000_000_000 : 0) +
       (typeof f.bitrate === "number" ? f.bitrate : 0);
     const best = audios.reduce((a, b) => (score(b) > score(a) ? b : a));
-    const langs = originalLangsOf(found.response);
+    const langs = originalLangsOf(found.response, this.uiLang());
     return { url: best.url as string, lang: langs.values().next().value ?? "" };
+  }
+
+  /** Язык UI страницы YouTube (<html lang>) — база рекомендации
+   * defaultCaptionTrackIndex (duopulse-184, п.4 originalLangsOf): страница
+   * без атрибута/нечитаемая → undefined, правило не применяется. */
+  private uiLang(): string | undefined {
+    const lang = this.opts.win.document.documentElement?.lang;
+    return typeof lang === "string" && lang ? lang : undefined;
   }
 
   private playerResponse(): { response: unknown; path: string } | null {
@@ -724,7 +759,7 @@ export class YouTubeAdapter implements Adapter {
   }
 
   private buildList(raw: RawCaptionList, usedPath: string, response: unknown): AdapterTrackList {
-    const { base, warnings } = normalizeBaseTracks(raw, originalLangsOf(response));
+    const { base, warnings } = normalizeBaseTracks(raw, originalLangsOf(response, this.uiLang()));
     return {
       adapter: "youtube",
       version: this.version,
@@ -736,12 +771,15 @@ export class YouTubeAdapter implements Adapter {
   }
 
   /** Базовая дорожка по умолчанию для голого кода перевода («ru» → yt:en+ru):
-   * язык оригинала (ручная, иначе asr), иначе первая ручная, иначе первая. */
+   * язык оригинала (ручная, иначе asr), иначе при неизвестном оригинале —
+   * en-ручная прежде первой (duopulse-184: порядок дорожек нестабилен, без
+   * сигнала en — самый вероятный язык контента), иначе первая ручная/любая. */
   private defaultBase(): BaseTrackInfo | null {
     const base = this.lastList?.base ?? [];
     return (
       base.find((t) => t.original && t.kind === "manual") ??
       base.find((t) => t.original) ??
+      base.find((t) => t.kind === "manual" && t.lang.split("-")[0] === "en") ??
       base.find((t) => t.kind === "manual") ??
       base[0] ??
       null

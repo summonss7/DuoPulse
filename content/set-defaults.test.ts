@@ -47,6 +47,18 @@ describe("defaultSetIds (Alt+D на пустом наборе)", () => {
     expect(ids).toEqual(["yt:fr", "ru"]);
   });
 
+  it("duopulse-184: оригинал неизвестен (все ручные) — en прежде первой дорожки", () => {
+    // Sam Smith vk_xq1P7vIU: первым в списке zh-Hans (порядок зависит от hl),
+    // en — фактический язык контента; дефолт обязан взять en, не китайскую
+    const ids = defaultSetIds(list([{ lang: "zh-Hans" }, { lang: "en" }, { lang: "pt-BR" }], ["ru"]));
+    expect(ids).toEqual(["yt:en", "ru"]);
+    // en-дорожки нет — прежнее поведение, первая базовая
+    expect(defaultSetIds(list([{ lang: "zh-Hans" }, { lang: "pt-BR" }], ["ru"]))).toEqual([
+      "yt:zh-Hans",
+      "ru",
+    ]);
+  });
+
   it("переводов нет — один оригинал", () => {
     expect(defaultSetIds(list([{ lang: "en", original: true }], []))).toEqual(["yt:en"]);
   });
