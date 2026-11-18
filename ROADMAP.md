@@ -1123,3 +1123,28 @@
   релиз для эмулятора — tauri --target x86_64 (abiList-условие в gradle).
   Версия не поднималась (build:false, aila-418). План M-этапов не меняет
   (мобильная ветка — вне M-гейтов).
+- 18.11.2026: duopulse-169 — паритет-мобайл 6/8: тоннель-ядро WireGuard на
+  Android — платформенно-нейтральный vpn-модуль десктопа (wg.rs: boringtun
+  0.7 + smoltcp, userspace без TUN-драйвера; router/rules/dns) компилируется
+  в мобильную либу (boringtun/smoltcp/socket2/schemars переехали в общие
+  депсы; vpn+proxy за cfg-гейтом android/ios, как adblock). Приватные ключи
+  профилей — ветка Android Keystore secrets.rs (блоб «v1:…», как
+  passwords.key; в wg-profiles.json только открытые поля). Новый
+  mobile_vpn.rs: import_profile ТЕКСТОМ .conf, list/remove/use_profiles,
+  set_enabled (мобильная семантика — тоннель активного профиля), status
+  (endpoint/handshake/rx/tx/пинг), test_connection (цель — параметром:
+  стенды; env на Android не задать); события vpn:state_changed/vpn:stats —
+  формы контракта vpn.* десктопа (camelCase, TS-клиент этапа 8
+  переиспользуется). Временная кнопка «VPN: тест» в листе «Диагностика»
+  (проба переопределяется localStorage __duopulseVpnProbe). Стенд
+  e2e/mobile/vpn-core-smoke.mjs — 23/23 на эмуляторе против живого WG-стенда
+  wg-stand на хосте (10.0.2.2): импорт/Keystore-запечатанность, handshake
+  (437 мс), проба тоннелем (DNS+HTTP видит стенд), события контракта,
+  kill-switch (до порога — таймаут тоннельного DNS, не напрямую; после
+  REJECT_AFTER_TIME 180 с — status «мёртв», fail-fast, событие), гигиена
+  off/удаления. Попутно починен негейтованный реэкспорт
+  passwords::import (ронял мобильную либу со времён duopulse-183).
+  cargo 36+428, vitest 649/649 (+3 vpnStatusLine), tsc чист, aarch64/x86_64
+  check чист; debug-APK 0.1.67 в builds/. Версия не поднималась (build:false,
+  aila-418; релиз-критерий карточки отменён Артёмом). Этапы 7 (маршрутизация
+  трафика приложения) и 8 (панель VPN) — следующие карточки цепочки 162.

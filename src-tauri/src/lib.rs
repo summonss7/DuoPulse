@@ -116,6 +116,24 @@ pub mod subtitles;
 pub mod history;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod mobile_history;
+// Конфиг внешнего прокси (задача 1.8) — мобильным таргетам либы с этапа 6
+// duopulse-169: типы ProxyConfig/ProxyState тянет vpn-модуль (роутер и DTO
+// статуса), сам внешний прокси мобильной ветке не нужен — UI его не показывает.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod proxy;
+// Тоннель-ядро WireGuard (duopulse-169, паритет 6/8): платформенно-нейтральный
+// Rust из десктоп-бина (boringtun + smoltcp, парсер .conf, профили
+// wg-profiles.json + секреты под Keystore-веткой secrets.rs, SOCKS5-роутер
+// Direct/Upstream/Wg с fail-closed, split-правила, DNS по маршруту) — как
+// mobile_adblock компилирует движок десктопа. Хост-тесты модуля гоняет бин
+// main.rs (либа на Windows их не включает — тонкий cdylib).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod vpn;
+// Команды тоннеля мобильной ветки (duopulse-169): импорт текста .conf,
+// профили, set_enabled/status/test_connection, события vpn:state_changed и
+// vpn:stats контрактом vpn.* десктопа (TS-клиент переиспользуется, этап 8).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod mobile_vpn;
 
 /// duopulse-135: tao завершает Android-цикл через std::process::exit; exit(3)
 /// гонит atexit-обработчики Chromium (WebView), которые разрушают его глобальный
@@ -233,6 +251,16 @@ fn mobile_run() {
             mobile_pdf::mobile_pdf_chunk,
             mobile_video::mobile_video_take,
             mobile_diag::diag_snapshot,
+            // Тоннель WireGuard (duopulse-169, паритет 6/8): ядро без UI —
+            // команды зеркалят контракт vpn.* десктопа для переиспользования
+            // TS-клиента (события vpn:state_changed/vpn:stats — те же).
+            mobile_vpn::mobile_vpn_import_profile,
+            mobile_vpn::mobile_vpn_list_profiles,
+            mobile_vpn::mobile_vpn_remove_profile,
+            mobile_vpn::mobile_vpn_use_profile,
+            mobile_vpn::mobile_vpn_set_enabled,
+            mobile_vpn::mobile_vpn_status,
+            mobile_vpn::mobile_vpn_test_connection,
             #[cfg(debug_assertions)]
             mobile_download::cmd::duo_debug_save_music,
             mobile_history::history_bookmark_add,

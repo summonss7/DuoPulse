@@ -73,3 +73,6 @@ e2e/mobile/pass-capture-smoke-last-run.json
 e2e/mobile/asr-cloud-smoke-last-run.json
 e2e/mobile/asr-local-smoke-last-run.json
 e2e/mobile/asr-local-release-smoke-last-run.json
+
+# Рантайм-артефакт стенда тоннель-ядра VPN (e2e/mobile/vpn-core-smoke.mjs, duopulse-169)
+e2e/mobile/vpn-core-smoke-last-run.json

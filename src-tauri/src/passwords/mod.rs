@@ -30,6 +30,9 @@ pub mod autofill;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod import;
 pub mod prompts;
+// Реэкспорт — за тем же гейтом, что модуль: негейтованный ронял мобильную
+// либу (unresolved import на aarch64-android, замечено в duopulse-169).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use import::{PasswordImportChromeParams, PasswordImportChromeResult};
 pub use prompts::{PasswordPrompts, PasswordsCandidateView};
 

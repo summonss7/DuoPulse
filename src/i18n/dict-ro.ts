@@ -836,6 +836,17 @@ export const dict: Record<string, string> = {
   "⬇ Сохранено: {message}": "⬇ Salvat: {message}",
   // Diagnostica ramurii mobile (duopulse-164): foaia din meniul «⋮» și raportul.
   "Скопировать отчёт": "Copiază raportul",
+  // VPN: test — buton temporar al foilii de diagnostic (duopulse-169, paritate 6/8).
+  "VPN: тест": "VPN: test",
+  "VPN: подключение…": "VPN: conectare…",
+  "VPN: выключен": "VPN: oprit",
+  "VPN: {state} · {ep} · {hs} · rx {rx} KB / tx {tx} KB{ping}":
+    "VPN: {state} · {ep} · {hs} · rx {rx} KO / tx {tx} KO{ping}",
+  "handshake {n} мс назад": "handshake acum {n} ms",
+  "handshake не завершён": "handshake nefinalizat",
+  "пинг {n} мс": "ping {n} ms",
+  "VPN: проба — {d}": "VPN: probă — {d}",
+  "VPN: ошибка — {d}": "VPN: eroare — {d}",
   "Отчёт скопирован": "Raport copiat",
   "Не удалось скопировать отчёт": "Nu am putut copia raportul",
   "Диагностика: не удалось прочитать": "Diagnostic: nu am putut citi",

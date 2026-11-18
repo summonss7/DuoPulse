@@ -41,6 +41,31 @@ serde_json = "1"
 # отдельно для десктопа и мобильных таргетов (рецепт NovaGrid — огромный
 # cdylib-экспорт rustls/ring на Windows MinGW не тянет, либа десктопа тонкая).
 url = "2"
+# Клиент WireGuard (задача 6.2, docs/02 §6.3-B) и TCP/IP-стек userspace —
+# общие с десктопом крейты тоннель-ядра vpn/wg.rs: с этапа 6 duopulse-169
+# модуль vpn компилирует и мобильная либа (boringtun — Noise IK handshake и
+# ChaCha20-Poly1305 userspace, без TUN-драйвера; smoltcp — medium-ip, без
+# Ethernet). Чистый Rust без системных зависимостей — тонкому cdylib
+# не мешают (UDP-сокеты на Android разрешены без привилегий).
+boringtun = "0.7"
+smoltcp = { version = "0.14", default-features = false, features = [
+    "std",
+    "medium-ip",
+    "socket-tcp",
+    "socket-udp",
+    "socket-icmp",
+    "auto-icmp-echo-reply",
+    "proto-ipv4",
+] }
+# Настройка буферов UDP-сокета туннеля (SO_RCVBUF/SO_SNDBUF, vpn/wg.rs):
+# дефолтных 64 КБ не хватает на пачки сегментов TCP-окна — потери и
+# ретрансмиссии (задача 6.2). Чистый Rust, обеим веткам.
+socket2 = "0.6"
+# JSON Schema из Rust-типов: единый источник IPC-контракта bridge (задача 1.1,
+# docs/05 §2). С duopulse-169 нужен и мобильной либе: DTO маршрутизации
+# (proxy::ProxyState, зеркала Vpn*-типов bridge в mobile_vpn.rs) держат
+# JsonSchema-derive — контракт vpn.* остаётся единым для TS-клиента веток.
+schemars = "0.8"
 
 # Десктоп-только (duopulse-081): вся логика бина main.rs — Windows/десктоп.
 # На Android/iOS бин не собирается вовсе (tauri android build → --lib), а
@@ -62,9 +87,6 @@ tauri-plugin-updater = "2"
 # втором процессе — профиль (SQLite/session.json) не переживает двух
 # владельцев. Десктоп-only: мобильной ветке не нужен.
 tauri-plugin-single-instance = "2"
-# JSON Schema из Rust-типов: единый источник IPC-контракта bridge (задача 1.1,
-# docs/05 §2) — из схем генерируются TS-типы (src/bridge/gen/types.ts).
-schemars = "0.8"
 # Прямой доступ к COM-API WebView2 (WebResourceRequested) для сетевого перехвата M0
 # и BasicAuthentication (креды прокси, задача 1.8).
 webview2-com = "0.39"
@@ -126,30 +148,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # в src/subtitles/timedtext.rs; на битых документах возвращает ошибку события,
 # а не паникует — парсер продолжает с диагностику (карточка duopulse-022).
 quick-xml = "0.36"
-# Клиент WireGuard (задача 6.2, docs/02 §6.3-B): boringtun — Noise IK
-# handshake и ChaCha20-Poly1305-шифрование пакетов userspace, без TUN-драйвера
-# и прав администратора (изоляция — src/vpn/wg.rs, смена реализации не трогает
-# остальное; план Б — системный WireGuard/Wintun, ROADMAP).
-boringtun = "0.7"
-# TCP/IP-стек userspace поверх сессии WireGuard: роутер терминирует TCP-
-# соединения WebView2 в smoltcp-сокетах, IP-пакеты ходят через туннель
-# (medium-ip, без Ethernet; UDP-сокет — DNS через маршрут). Лицензия 0BSD.
-smoltcp = { version = "0.14", default-features = false, features = [
-    "std",
-    "medium-ip",
-    "socket-tcp",
-    "socket-udp",
-    "socket-icmp",
-    # Автоответ echo reply стека: серверная сторона (тестовый WG-стенд стенда
-    # cargo-тестов) отвечает на ICMP-эхо пинга туннеля (задача 6.5) без
-    # собственного ICMP-сокета; реальные WG-серверы отвечает их ОС.
-    "auto-icmp-echo-reply",
-    "proto-ipv4",
-] }
-# Настройка буферов UDP-сокета туннеля (SO_RCVBUF): дефолтных 64 КБ Windows
-# не хватает на пачки сегментов TCP-окна — потери и ретрансмиссии (задача 6.2,
-# замер пропускной способности). Уже в дереве (транзитивно), без новых загрузок.
-socket2 = "0.6"
 # Декодирование аудио для ASR (карточка duopulse-060): самофетч-байты аудио
 # дорожки (m4a/AAC — основной путь YouTube-адаптера, mp3, wav, ogg/vorbis,
 # flac) → PCM 16 кГц моно для whisper. Чистый Rust, без ffmpeg в поставке;

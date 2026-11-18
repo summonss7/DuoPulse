@@ -850,6 +850,17 @@ export const dict: Record<string, string> = {
   "⬇ Сохранено: {message}": "⬇ Saved: {message}",
   // Диагностика мобильной ветки (duopulse-164): лист в меню «⋮» и отчёт.
   "Скопировать отчёт": "Copy report",
+  // VPN: тест — временная кнопка листа диагностики (duopulse-169, паритет 6/8).
+  "VPN: тест": "VPN: test",
+  "VPN: подключение…": "VPN: connecting…",
+  "VPN: выключен": "VPN: off",
+  "VPN: {state} · {ep} · {hs} · rx {rx} KB / tx {tx} KB{ping}":
+    "VPN: {state} · {ep} · {hs} · rx {rx} KB / tx {tx} KB{ping}",
+  "handshake {n} мс назад": "handshake {n} ms ago",
+  "handshake не завершён": "no handshake yet",
+  "пинг {n} мс": "ping {n} ms",
+  "VPN: проба — {d}": "VPN: probe — {d}",
+  "VPN: ошибка — {d}": "VPN: error — {d}",
   "Отчёт скопирован": "Report copied",
   "Не удалось скопировать отчёт": "Could not copy the report",
   "Диагностика: не удалось прочитать": "Diagnostics: could not read",

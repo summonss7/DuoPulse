@@ -140,6 +140,60 @@ export interface DiagnosticsSnapshot {
   report: string;
 }
 
+// --- VPN: тест (duopulse-169, паритет 6/8; ВРЕМЕННАЯ кнопка) -----------------
+// Ядро тоннеля WireGuard mobile_vpn.* без UI (этап 8 сделает панель): кнопка
+// в листе диагностики поднимает тоннель активного профиля и проверяет его
+// пробой. Формы DTO — зеркало bridge.rs (vpn.*): profileId/rxBytes/… —
+// camelCase, как у десктопного TS-клиента (переиспользование — этап 8).
+// Цель пробы можно переопределить localStorage «__duopulseVpnProbe»
+// («host:port») — стенд e2e шлёт свой хост из тоннеля wg-stand.
+
+/** Статус mobile_vpn_status (зеркало Rust VpnStatusResult, camelCase). */
+export interface VpnStatusDto {
+  mode: string;
+  routing: string;
+  state: string;
+  detail: string;
+  wg?: {
+    profileId: string;
+    profileName: string;
+    state: string;
+    endpoint: string;
+    lastHandshakeMs?: number | null;
+    rxBytes: number;
+    txBytes: number;
+    pingMs?: number | null;
+    sinceMs: number;
+  } | null;
+}
+
+/** Результат прогона кнопки (window.__duopulseVpnTest — e2e-хук). */
+export interface VpnTestRun {
+  at: number;
+  status: VpnStatusDto;
+  test: VpnStatusDto | null;
+}
+
+/** Строка статуса тоннеля для тоста (чистая — vitest): состояние, endpoint,
+ *  возраст handshake, счётчики rx/tx (КБ) и пинг, если тоннель поднят. */
+export function vpnStatusLine(st: VpnStatusDto): string {
+  if (st.mode !== "wg" || !st.wg) return t("VPN: выключен");
+  const w = st.wg;
+  const hs =
+    w.lastHandshakeMs != null
+      ? t("handshake {n} мс назад", { n: w.lastHandshakeMs })
+      : t("handshake не завершён");
+  const ping = w.pingMs != null ? ` · ${t("пинг {n} мс", { n: w.pingMs })}` : "";
+  return t("VPN: {state} · {ep} · {hs} · rx {rx} КБ / tx {tx} КБ{ping}", {
+    state: w.state,
+    ep: w.endpoint,
+    hs,
+    rx: Math.round(w.rxBytes / 1024),
+    tx: Math.round(w.txBytes / 1024),
+    ping,
+  });
+}
+
 /** Контекст мобильной ветки (mobile.ts). */
 export interface DiagHost {
   /** .m-content — сюда лист. */
@@ -170,12 +224,14 @@ export class MobileDiagnostics {
       <div class="m-sheet m-tabs-sheet m-diag" role="menu" aria-label="${t("Диагностика")}">
         <b class="m-tabs-head">${t("Диагностика")}</b>
         <div class="m-tabs-list m-diag-list"></div>
+        <button type="button" class="m-sheet-item m-diag-vpn">${t("VPN: тест")}</button>
         <button type="button" class="m-sheet-item m-diag-copy">${t("Скопировать отчёт")}</button>
       </div>
     `;
     host.content.append(this.wrap);
     this.listEl = this.wrap.querySelector(".m-diag-list")!;
     this.wrap.querySelector(".m-sheet-backdrop")!.addEventListener("click", () => this.close());
+    this.wrap.querySelector<HTMLButtonElement>(".m-diag-vpn")!.addEventListener("click", () => void this.vpnTest());
     this.wrap.querySelector<HTMLButtonElement>(".m-diag-copy")!.addEventListener("click", () => void this.copy());
     // Тест-хук e2e-стендов (как __duopulseMobileHistory).
     (window as unknown as { __duopulseMobileDiagnostics?: () => unknown }).__duopulseMobileDiagnostics =
@@ -237,6 +293,43 @@ export class MobileDiagnostics {
       this.host.note(t("Отчёт скопирован"));
     } catch {
       this.host.note(t("Не удалось скопировать отчёт"));
+    }
+  }
+
+  /** Временная кнопка «VPN: тест» (duopulse-169, этап 6 без панели): поднять
+   *  тоннель активного профиля → дождаться handshake (≤20 с) → проба
+   *  test_connection. Итог — тост, консоль и window.__duopulseVpnTest (e2e);
+   *  цель пробы переопределяется localStorage «__duopulseVpnProbe» (стенд). */
+  private async vpnTest(): Promise<void> {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const read = () => invoke<VpnStatusDto>("mobile_vpn_status");
+    try {
+      let st = await read();
+      if (st.mode !== "wg") {
+        this.host.note(t("VPN: подключение…"));
+        st = await invoke<VpnStatusDto>("mobile_vpn_set_enabled", { params: { on: true } });
+      }
+      const deadline = Date.now() + 20_000;
+      while (st.wg && st.wg.state === "connecting" && Date.now() < deadline) {
+        await sleep(1000);
+        st = await read();
+      }
+      let test: VpnStatusDto | null = null;
+      if (st.mode === "wg" && st.wg && st.wg.state !== "error") {
+        const probe = localStorage.getItem("__duopulseVpnProbe");
+        test = await invoke<VpnStatusDto>(
+          "mobile_vpn_test_connection",
+          probe ? { params: { probe } } : undefined,
+        );
+      }
+      const run: VpnTestRun = { at: Date.now(), status: st, test };
+      (window as unknown as { __duopulseVpnTest?: VpnTestRun }).__duopulseVpnTest = run;
+      this.host.note(test ? t("VPN: проба — {d}", { d: test.detail }) : vpnStatusLine(st));
+      console.log("[duopulse] VPN-тест", JSON.stringify(run));
+    } catch (e) {
+      // Основной случай — «нет активного профиля WireGuard» (set_enabled).
+      this.host.note(t("VPN: ошибка — {d}", { d: String(e) }));
+      console.log("[duopulse] VPN-тест: ошибка", String(e));
     }
   }
 

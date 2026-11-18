@@ -120,6 +120,18 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   whisper в APK; телефонной aarch64-сборке она не нужна). Результат —
   e2e/mobile/asr-local-release-smoke-last-run.json (gitignore,
   рантайм-артефакт).
+- `e2e/mobile/vpn-core-smoke.mjs` — стенд тоннель-ядра WireGuard мобильной
+  ветки (карточка 169): debug-APK + CDP 9223 против живого WG-сервера
+  e2e/wg-stand на хосте (эмулятор видит хост как 10.0.2.2 — endpoint в
+  .conf подменяется); 23 проверки: импорт текста .conf, Keystore-блоб
+  «v1:» без ключа в открытых файлах (run-as), handshake/endpoint/rx/tx,
+  проба test_connection целью из тоннеля (DNS+HTTP видит стенд), события
+  vpn:state_changed/vpn:stats контрактом vpn.*, кнопка «VPN: тест» листа
+  диагностики (проба — localStorage __duopulseVpnProbe), kill-switch
+  (до порога — таймаут тоннельного DNS; после REJECT_AFTER_TIME — «мёртв»,
+  fail-fast, событие), гигиена off/удаления. Сначала сносит прошлую сборку
+  (релиз подписан другим ключом). Результат —
+  e2e/mobile/vpn-core-smoke-last-run.json (gitignore, рантайм-артефакт).
 
 Новые временные файлы в корне не накапливать: одноразовое — `%TEMP%`, постоянное — `e2e/`.
 <!-- /E2E-ИНСТРУМЕНТЫ -->

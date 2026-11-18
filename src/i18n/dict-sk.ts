@@ -836,6 +836,17 @@ export const dict: Record<string, string> = {
   "⬇ Сохранено: {message}": "⬇ Uložené: {message}",
   // Diagnostika mobilnej vetvy (duopulse-164): list v menu «⋮» a správa.
   "Скопировать отчёт": "Skopírovať správu",
+  // VPN: test — dočasné tlačidlo listu diagnostiky (duopulse-169, parita 6/8).
+  "VPN: тест": "VPN: test",
+  "VPN: подключение…": "VPN: pripájam…",
+  "VPN: выключен": "VPN: vypnuté",
+  "VPN: {state} · {ep} · {hs} · rx {rx} KB / tx {tx} KB{ping}":
+    "VPN: {state} · {ep} · {hs} · rx {rx} kB / tx {tx} kB{ping}",
+  "handshake {n} мс назад": "handshake pred {n} ms",
+  "handshake не завершён": "handshake nedokončený",
+  "пинг {n} мс": "ping {n} ms",
+  "VPN: проба — {d}": "VPN: skúška — {d}",
+  "VPN: ошибка — {d}": "VPN: chyba — {d}",
   "Отчёт скопирован": "Správa skopírovaná",
   "Не удалось скопировать отчёт": "Správu sa nepodarilo skopírovať",
   "Диагностика: не удалось прочитать": "Diagnostika: nepodarilo sa prečítať",
