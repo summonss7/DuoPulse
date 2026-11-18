@@ -156,4 +156,35 @@ describe("translateCueTable", () => {
     const invoke: DuoInvoke = async () => ["одна"];
     await expect(translateCueTable(invoke, [cue(0, "a"), cue(1, "b")], "en", "ru")).rejects.toThrow("не все строки");
   });
+
+  // duopulse-182: офлайн может завесить invoke перевода без отказа — конвейер
+  // ASR не должен висеть «занятым» до конца времён
+  it("зависший invoke — таймаут вызова, а не вечное ожидание", async () => {
+    const invoke: DuoInvoke = () => new Promise(() => {}); // никогда не отвечает
+    const started = Date.now();
+    await expect(
+      translateCueTable(invoke, [cue(0, "привет")], "en", "ru", undefined, undefined, 300),
+    ).rejects.toThrow(/нет ответа .* — проверьте сеть/);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("отмена (signal) снимает зависший вызов сразу, не дожидаясь таймаута", async () => {
+    const invoke: DuoInvoke = () => new Promise(() => {});
+    const signal = { aborted: false };
+    const started = Date.now();
+    setTimeout(() => (signal.aborted = true), 120);
+    await expect(
+      translateCueTable(invoke, [cue(0, "привет")], "en", "ru", undefined, signal, 60_000),
+    ).rejects.toThrow("перевод отменён");
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("поздний ответ отброшенного вызова не роняет цикл (unhandled нет)", async () => {
+    const release: { fn: ((v: string[]) => void) | null } = { fn: null };
+    const invoke: DuoInvoke = () => new Promise((res) => { release.fn = res; });
+    const p = translateCueTable(invoke, [cue(0, "a")], "en", "ru", undefined, undefined, 200);
+    await expect(p).rejects.toThrow(/нет ответа/);
+    release.fn?.(["поздно"]); // зависший invoke ожил после таймаута — тишина
+    await new Promise((r) => setTimeout(r, 50));
+  });
 });

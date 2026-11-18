@@ -56,6 +56,14 @@ export class MobileDuo {
   private readonly asr: MobileAsr;
   private readonly asrCues = new Map<string, Cue[]>();
   private asrBusy = false;
+  /** Поколение прогона ASR (duopulse-182): «Отмена»/новый тап инвалидирует
+   *  старый — его finally/статусы не трогают флаг и строку нового прогона. */
+  private asrRun = 0;
+  /** Последний статус (duopulse-182): повторная эмуляция в finally
+   *  recognizeSpeech возвращает кнопку детерминированно — событие done Core
+   *  может прийти раньше конца цепочки applySet, и панель не узнаёт, что
+   *  конвейер освободился. */
+  private lastStatus: DuoStatus | null = null;
   /** Последний снимок настроек ASR (панель спрашивает при открытии). */
   private asrSettingsSnap: MobileAsrSettings | null = null;
 
@@ -142,26 +150,40 @@ export class MobileDuo {
   }
 
   /** Событие прогресса конвейера (subtitles:asr_progress; tabId = videoId):
-   * статус панели — той же строкой, что на десктопе. */
+   * статус панели — той же строкой, что на десктопе. Поздний done (событие
+   * Core доставляется после того, как applySet уже показал ошибку перевода —
+   * офлайн-отказ быстрее доставки) не затирает ошибку: «Субтитры из кэша»
+   * поверх «перевод недоступен» прячет причину (duopulse-182). */
   onAsrProgress(p: AsrProgressEvent): void {
     if (!this.videoId || (p.tabId && p.tabId !== this.videoId)) return;
     const text = asrProgressText(p);
     if (!text) return;
-    this.onStatus({
+    if (p.phase === "done" && this.lastStatus?.error && !this.lastStatus.busy) return;
+    this.emit({
       text,
       busy: p.phase !== "done" && p.phase !== "error",
       error: p.phase === "error",
     });
   }
 
+  /** Единственная точка исхода статусов: запоминаем последний — повторная
+   * эмуляция в finally recognizeSpeech возвращает кнопку конвейера. */
+  private emit(s: DuoStatus): void {
+    this.lastStatus = s;
+    this.onStatus(s);
+  }
+
   /** «Распознать речь» (duopulse-167): конвейер Core (кэш → аудио фетчером
    * iframe → облако) → дорожка asr:<lang> в списке и показе. Повторный тап
-   * при занятом конвейере игнорируется (отмена — отдельной кнопкой). */
+   * при занятом конвейере игнорируется (отмена — отдельной кнопкой).
+   * asrBusy держится до конца применения набора (перевод включительно) —
+   * но перевод имеет таймаут/отмену (duopulse-182), «занят вечно» невозможен. */
   async recognizeSpeech(): Promise<void> {
     const videoId = this.videoId;
     if (!videoId || this.asrBusy) return;
+    const run = ++this.asrRun;
     this.asrBusy = true;
-    this.onStatus({ text: t("Распознавание запущено…"), busy: true });
+    this.emit({ text: t("Распознавание запущено…"), busy: true });
     try {
       const r: AsrRunResult = await this.asr.recognize(videoId, "");
       const lang = r.lang || "auto";
@@ -198,20 +220,35 @@ export class MobileDuo {
       if (!this.clock) this.wireClock();
       await this.applySet(++this.seq);
     } catch (e) {
+      if (run !== this.asrRun) return; // прогон уже отменён — статусы отдаёт cancelAsr
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === t("распознавание отменено")) {
-        this.onStatus({ text: t("duo: распознавание отменено"), busy: false });
+        this.emit({ text: t("duo: распознавание отменено"), busy: false });
       } else {
-        this.onStatus({ text: t("duo: {message}", { message: msg }), busy: false, error: true });
+        this.emit({ text: t("duo: {message}", { message: msg }), busy: false, error: true });
       }
     } finally {
-      this.asrBusy = false;
+      if (run === this.asrRun) {
+        this.asrBusy = false;
+        // Кнопка возвращается здесь, а не «когда событие done Core обгонит
+        // цепочку»: повторяем последний статус — панель перечитает занятость.
+        this.emit(this.lastStatus ?? { text: null, busy: false });
+      }
     }
   }
 
-  /** «Отмена» панели: поколение в Core + флаг транспорта фетчера. */
+  /** «Отмена» панели: поколение в Core + флаг транспорта фетчера; фаза
+   * применения (перевод в applySet) гасится поколением seq — конвейер
+   * освобождается в ЛЮБОЙ фазе, а не только пока качается аудио (duopulse-182:
+   * раньше тап в фазе перевода ничего не делал — кнопка висела «Отмена»). */
   cancelAsr(): void {
-    if (this.videoId) this.asr.cancel(this.videoId);
+    if (!this.videoId) return;
+    this.asr.cancel(this.videoId);
+    if (!this.asrBusy) return;
+    this.asrRun++; // старому прогону запрет трогать флаг/статусы
+    this.seq++; // сигнал applySet: перевод бросит «перевод отменён» на границе пачки/в гонке вызова
+    this.asrBusy = false;
+    this.emit({ text: t("duo: распознавание отменено"), busy: false });
   }
 
   /** Открылось YouTube-видео (embed). Загружает список дорожек и набор. */
@@ -219,7 +256,7 @@ export class MobileDuo {
     this.close(false);
     this.videoId = videoId;
     const seq = ++this.seq;
-    this.onStatus({ text: t("duo: читаю дорожки…"), busy: true });
+    this.emit({ text: t("duo: читаю дорожки…"), busy: true });
     try {
       const response = await this.doInvoke("duo_yt_player", { videoId });
       if (seq !== this.seq) return;
@@ -227,7 +264,7 @@ export class MobileDuo {
       const list = parsePlayerResponse(videoId, response);
       if (!list) {
         this.list = null;
-        this.onStatus({ text: t("duo: у видео нет субтитров"), busy: false, error: true });
+        this.emit({ text: t("duo: у видео нет субтитров"), busy: false, error: true });
         return;
       }
       this.list = list;
@@ -240,7 +277,7 @@ export class MobileDuo {
       await this.applySet(seq);
     } catch (e) {
       if (seq !== this.seq) return;
-      this.onStatus({ text: t("duo: {message}", { message: messageOf(e) }), busy: false, error: true });
+      this.emit({ text: t("duo: {message}", { message: messageOf(e) }), busy: false, error: true });
     }
   }
 
@@ -257,7 +294,7 @@ export class MobileDuo {
     this.title = "";
     this.asrCues.clear();
     this.asrBusy = false;
-    this.onStatus({ text: null, busy: false });
+    this.emit({ text: null, busy: false });
     if (full) void 0;
   }
 
@@ -267,7 +304,7 @@ export class MobileDuo {
     if (!frame) return;
     this.clock = new YtClock(frame, window, { onFrozen: () => this.heal() });
     this.engine.attach(this.clock);
-    void this.clock.attach().catch(() => this.onStatus({ text: t("duo: плеер недоступен для синхронизации"), busy: false, error: true }));
+    void this.clock.attach().catch(() => this.emit({ text: t("duo: плеер недоступен для синхронизации"), busy: false, error: true }));
   }
 
   /** Плеер YouTube замерз после сворачивания (см. шапку clock.ts): лечим
@@ -332,7 +369,7 @@ export class MobileDuo {
     if (!list || !this.settings.enabled || !this.settings.originalId) {
       this.engine.setTracks([]);
       if (list && this.settings.enabled && !this.settings.originalId) {
-        this.onStatus({ text: t("duo: нет дорожки оригинала"), busy: false, error: true });
+        this.emit({ text: t("duo: нет дорожки оригинала"), busy: false, error: true });
       }
       return;
     }
@@ -342,7 +379,7 @@ export class MobileDuo {
     // у неё нет — скачивать нечего.
     const asrCues = original ? this.asrCues.get(original.id) : undefined;
     if (!original || (!baseUrl && !asrCues)) {
-      this.onStatus({ text: t("duo: дорожка оригинала недоступна"), busy: false, error: true });
+      this.emit({ text: t("duo: дорожка оригинала недоступна"), busy: false, error: true });
       return;
     }
     const duo = this;
@@ -351,7 +388,7 @@ export class MobileDuo {
         return seq !== duo.seq;
       },
     };
-    this.onStatus({ text: t("duo: грузю субтитры…"), busy: true });
+    this.emit({ text: t("duo: грузю субтитры…"), busy: true });
     try {
       const cues = asrCues ?? (await loadCuesByUrl(this.doInvoke, baseUrl!, signal));
       if (signal.aborted) return;
@@ -370,7 +407,7 @@ export class MobileDuo {
       this.engine.setTracks(tracks);
       const choice = parseTranslationChoice(this.settings.translation);
       if (choice.kind === "gtx" && choice.lang !== original.lang) {
-        this.onStatus({
+        this.emit({
           text: t("duo: перевожу ({from} → {to})…", { from: original.lang, to: choice.lang }),
           busy: true,
         });
@@ -381,7 +418,7 @@ export class MobileDuo {
             original.lang,
             choice.lang,
             (done, total) =>
-              this.onStatus({
+              this.emit({
                 text: t("duo: перевод {pct}%", { pct: String(Math.round((done / total) * 100)) }),
                 busy: true,
               }),
@@ -397,12 +434,15 @@ export class MobileDuo {
             name: `Google → ${choice.lang}`,
           });
           this.engine.setTracks(tracks);
-          this.onStatus({ text: null, busy: false });
+          this.emit({ text: null, busy: false });
         } catch (e) {
           if (signal.aborted) return;
-          this.onStatus({
+          this.emit({
             text: t("duo: перевод недоступен ({reason}) — показываю оригинал", { reason: messageOf(e) }),
             busy: false,
+            // duopulse-182: честная ошибка строки статуса (панель красит),
+            // а не молчаливое «занято» без конца конвейера
+            error: true,
           });
         }
       } else if (choice.kind === "track") {
@@ -419,17 +459,17 @@ export class MobileDuo {
             cues: transCues,
           });
           this.engine.setTracks(tracks);
-          this.onStatus({ text: null, busy: false });
+          this.emit({ text: null, busy: false });
         } else {
-          this.onStatus({ text: null, busy: false });
+          this.emit({ text: null, busy: false });
         }
       } else {
-        this.onStatus({ text: null, busy: false });
+        this.emit({ text: null, busy: false });
       }
     } catch (e) {
       if (signal.aborted) return;
       this.engine.setTracks([]);
-      this.onStatus({ text: t("duo: {message}", { message: messageOf(e) }), busy: false, error: true });
+      this.emit({ text: t("duo: {message}", { message: messageOf(e) }), busy: false, error: true });
     }
   }
 

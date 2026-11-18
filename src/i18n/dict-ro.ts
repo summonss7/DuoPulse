@@ -680,6 +680,7 @@ export const dict: Record<string, string> = {
   "duo: нет дорожки оригинала": "duo: nu există pista originală",
   "duo: перевод {pct}%": "duo: traducere {pct}%",
   "duo: перевод недоступен ({reason}) — показываю оригинал": "duo: traducerea nu este disponibilă ({reason}) — arăt originalul",
+  "нет ответа {sec} с — проверьте сеть": "răspuns absent de {sec} s — verificați rețeaua",
   "duo: перевожу ({from} → {to})…": "duo: traduc ({from} → {to})…",
   "duo: плеер недоступен для синхронизации": "duo: playerul nu este disponibil pentru sincronizare",
   "duo: у видео нет субтитров": "duo: videoclipul nu are subtitrări",

@@ -106,6 +106,43 @@ pub fn fetch_host_allowed(host: &str) -> bool {
 /// охотнее персонального translate.googleapis).
 pub const GTX_HOSTS: [&str; 2] = ["clients5.google.com", "translate.googleapis.com"];
 
+/// Ошибка транспорта «сети нет» (duopulse-182): DNS/unreachable-семейство из
+/// текста ureq-ошибки (get_status пакует транспорт как «сеть: {e}»). Такие
+/// отказы не ретраим и хосты не перебираем — airplane-перевод обязан упасть
+/// сразу, а не молотить таймауты/паузы минутами (кнопка ASR «занята» до
+/// конца конвейера). Таймауты/429/чужие HTTP сюда НЕ входят — им ретраи
+/// положены.
+pub fn is_offline_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    [
+        "unreachable",
+        "no route",
+        "network is down",
+        "not connected",
+        "network disabled",
+        "name resolution",
+        "name or service not known",
+        "lookup address information",
+        "temporary failure in name resolution",
+        "dns",
+    ]
+    .iter()
+    .any(|k| m.contains(k))
+}
+
+#[test]
+fn offline_error_classifier() {
+    // транспортные офлайн-семейства (ureq Display, Android/airplane)
+    assert!(is_offline_error("сеть: Network is unreachable"));
+    assert!(is_offline_error("сеть: dns error: failed to lookup address information: Temporary failure in name resolution"));
+    assert!(is_offline_error("Network is down"));
+    assert!(is_offline_error("No route to host"));
+    // НЕ офлайн: таймауты, рейт-лимиты, разрыв середины запроса
+    assert!(!is_offline_error("сеть: timed out reading response"));
+    assert!(!is_offline_error("gtx HTTP 429 (clients5.google.com)"));
+    assert!(!is_offline_error("сеть: connection closed prematurely"));
+}
+
 #[test]
 fn fetch_host_allowlist() {
     assert!(fetch_host_allowed("www.youtube.com"));
@@ -393,6 +430,11 @@ pub(crate) mod net {
                         last_err = format!("gtx HTTP {status} ({host})");
                     }
                     Err(e) => {
+                        // duopulse-182: сети нет (airplane/DNS) — ретраи и
+                        // перебор хостов бессмысленны, отказ сразу
+                        if is_offline_error(&e) {
+                            return Err(e);
+                        }
                         last_err = e;
                     }
                 }
@@ -430,6 +472,9 @@ pub(crate) mod net {
             split_joined(&j, texts.len()).ok_or_else(|| "несовпадение строк".to_string())
         }) {
             Ok(lines) => lines,
+            // duopulse-182: офлайн — построчный фолбэк лишь повторит те же
+            // сетевые отказы на каждой строке, отказываем сразу
+            Err(e) if is_offline_error(&e) => return Err(e),
             Err(_) => {
                 // Фолбэк: построчно (пачка смёржилась или профильный сбой).
                 let mut lines = Vec::with_capacity(texts.len());

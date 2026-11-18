@@ -694,6 +694,7 @@ export const dict: Record<string, string> = {
   "duo: нет дорожки оригинала": "duo: no original track",
   "duo: перевод {pct}%": "duo: translating {pct}%",
   "duo: перевод недоступен ({reason}) — показываю оригинал": "duo: translation unavailable ({reason}) — showing the original",
+  "нет ответа {sec} с — проверьте сеть": "no response for {sec} s — check the network",
   "duo: перевожу ({from} → {to})…": "duo: translating ({from} → {to})…",
   "duo: плеер недоступен для синхронизации": "duo: player unavailable for syncing",
   "duo: у видео нет субтитров": "duo: this video has no subtitles",

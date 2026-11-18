@@ -123,9 +123,45 @@ export async function loadCuesByUrl(invoke: DuoInvoke, url: string, signal?: { a
   return res.cues;
 }
 
+/** Таймаут одного вызова duo_translate_texts, мс (duopulse-182): офлайн
+ *  (airplane) может завесить ureq/DNS дольше ретраев Rust — конвейер ASR не
+ *  имеет права молча висеть «занятым»; зависший вызов отбрасываем ошибкой. */
+export const GTX_CALL_TIMEOUT_MS = 30_000;
+
+/** Гонка вызова перевода с таймаутом и абортом: плоский signal ({aborted})
+ *  событий не шлёт — опрашиваем; поздний ответ зависшего invoke гасим. */
+function raceCall<T>(p: Promise<T>, signal: { aborted: boolean } | undefined, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let poll: ReturnType<typeof setInterval> | undefined;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (poll) clearInterval(poll);
+      settle();
+    };
+    p.then(
+      (v) => finish(() => resolve(v)),
+      (e) => finish(() => reject(e)),
+    );
+    timer = setTimeout(
+      () => finish(() => reject(new Error(t("нет ответа {sec} с — проверьте сеть", { sec: String(Math.round(timeoutMs / 1000)) })))),
+      timeoutMs,
+    );
+    if (signal) {
+      poll = setInterval(() => {
+        if (signal.aborted) finish(() => reject(new Error(t("перевод отменён"))));
+      }, 150);
+    }
+  });
+}
+
 /** Перевести cue-таблицу Google gtx (Rust duo_translate_texts): пачки
  * ~1,2 КБ (лимит провайдера 2 КБ не трогаем), переносы внутри cue → пробел
- * (транспорт пачек соединяет строки \n). Прогресс — колбэком. */
+ * (транспорт пачек соединяет строки \n). Прогресс — колбэком. Таймаут
+ * вызова — duopulse-182 (зависший офлайн-транспорт не держит конвейер). */
 export async function translateCueTable(
   invoke: DuoInvoke,
   cues: Cue[],
@@ -133,6 +169,7 @@ export async function translateCueTable(
   to: string,
   onProgress?: (done: number, total: number) => void,
   signal?: { aborted: boolean },
+  timeoutMs: number = GTX_CALL_TIMEOUT_MS,
 ): Promise<Cue[]> {
   const texts = cues.map((c) => c.text.replace(/\n+/g, " ").trim());
   const batches: Array<{ from: number; to: number }> = [];
@@ -150,7 +187,7 @@ export async function translateCueTable(
   for (const b of batches) {
     if (signal?.aborted) throw new Error(t("перевод отменён"));
     const chunk = texts.slice(b.from, b.to);
-    const r = (await invoke("duo_translate_texts", { texts: chunk, from, to })) as string[];
+    const r = (await raceCall(invoke("duo_translate_texts", { texts: chunk, from, to }), signal, timeoutMs)) as string[];
     if (!Array.isArray(r) || r.length !== chunk.length) throw new Error(t("перевод вернул не все строки"));
     for (let i = 0; i < r.length; i++) out[b.from + i] = r[i];
     done += chunk.length;

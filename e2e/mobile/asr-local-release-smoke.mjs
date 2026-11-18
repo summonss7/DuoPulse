@@ -108,6 +108,18 @@ async function tapText(text, { timeout = 8000, scroll = false, exact = false } =
   return false;
 }
 
+/** Тап кнопки duo в шапке открытого видео: на свежем AVD WebView не
+ * экспонирует текст pill-кнопки в accessibility (duopulse-182) — жмём
+ * координатно от правого края «Инкогнито» (duo+⬇ правее него, до ⚙). */
+async function tapDuoHeader() {
+  const re = /(?:text|content-desc)="Инкогнито"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(dump());
+  if (!re) return false;
+  const x = Math.round((Number(re[1]) + Number(re[3])) / 2) + 115;
+  const y = Math.round((Number(re[2]) + Number(re[4])) / 2);
+  adb(["shell", "input", "tap", String(x), String(y)]);
+  return true;
+}
+
 const alive = () => {
   try { return adb(["shell", "pidof", PKG]).trim() !== ""; } catch { return false; }
 };
@@ -129,6 +141,12 @@ async function openUrl(url) {
   adb(["shell", "input", "text", url]);
   await sleep(500);
   adb(["shell", "input", "keyevent", "66"]); // ENTER (enterkeyhint=go)
+  // duopulse-182, свежий AVD: аппаратный ENTER не всегда сабмитит (IME
+  // не инициализирован) — страховка тапом по «Перейти»: кнопка #mGo читает
+  // omnibox.value, фокус поля не нужен. Кнопка duo появляется только на
+  // открытом видео (в шапке) — её отсутствие = навигации не было.
+  await sleep(4000);
+  if (!dump().includes("YouTube Video Player")) await tapText("Перейти", { timeout: 6000 });
 }
 
 try {
@@ -167,10 +185,12 @@ try {
 
   // (1) YouTube-видео без субтитров + duo-панель
   await openUrl(`https://m.youtube.com/watch?v=${VIDEO1}`);
-  check("(1) видео открылось (duo-кнопка в dump)", await waitFor("duo", { timeout: 30000 }), "кнопка #mDuo в нижнем баре");
+  // intro-текст стартового экрана тоже содержит «duo» — маркер видео
+  // берём по плееру (embed в accessibility), кнопку duo жмём координатно
+  check("(1) видео открылось (плеер в dump)", await waitFor("YouTube Video Player", { timeout: 30000 }));
   check("(1) тап duo: панель открылась", await (async () => {
-    if (!await tapText("duo", { timeout: 6000, exact: true })) return false;
-    return waitFor("Оригинал", { timeout: 6000 });
+    if (!await tapDuoHeader()) return false;
+    return waitFor("Оригинал", { timeout: 8000 });
   })());
 
   // (2) настройки: скачивание модели (gear-кнопка в accessibility — «Настройки ASR»)
@@ -203,22 +223,33 @@ try {
   shot("run-done");
   check("(4) asr-дорожка в селекте «Оригинал»", await waitFor("ASR ·", { timeout: 15000 }));
 
-  // (5) airplane-повтор из кэша убран до карточки duopulse-182: airplane на
-  // фазе авто-перевода дорожки оставляет конвейер «занятым» навсегда (кнопка
-  // «Отмена», тап не освобождает) — не баг локального ASR; кэш-повтор без
-  // сети проверен событием done fromCache в debug-смоуке asr-local-smoke.mjs
-  // (27/27). Здесь — только увераемся, что airplane не роняет приложение.
+  // (5) airplane-повтор из кэша (возвращено карточкой duopulse-182: раньше
+  // airplane на фазе авто-перевода дорожки оставлял конвейер «занятым»
+  // навсегда — кнопка «Отмена» не освобождалась; теперь офлайн-перевод —
+  // честная статус-ошибка и возврат кнопки). Перевод-пара прогона (4) грет
+  // кэш gtx Core — офлайн-отказ детерминированно ловим на ХОЛОДНОЙ паре:
+  // спиннер «Перевод» панели → Українська (сетевых обращений не было).
   adb(["shell", "cmd", "connectivity", "airplane-mode", "enable"]);
   await sleep(3000);
+  check("(5) спиннер «Перевод» открыт", await tapText("Русский", { timeout: 10000, scroll: true }));
+  check("(5) пара перевода switching: Українська", await tapText("Українська", { timeout: 8000 }));
+  check("(5) «перевод недоступен» — статус-ошибка офлайн-перевода", await waitFor("перевод недоступен", { timeout: 120000 }));
+  check("(5) «Распознать речь» снова нажата (кнопка вернулась после прогона)", await tapText("Распознать речь", { timeout: 15000, scroll: true }));
+  check("(5) после кэш-повтора: «перевод недоступен» (не «занято»)", await waitFor("перевод недоступен", { timeout: 120000 }));
+  check("(5) кнопка «Распознать речь» вернулась (нет вечного «Отмена»)", await waitFor("Распознать речь", { timeout: 30000 }));
   check("(5) airplane: приложение живо, дорожка на месте", alive() && dump().includes("ASR ·"));
   shot("airplane-cache");
   adb(["shell", "cmd", "connectivity", "airplane-mode", "disable"]);
+  adb(["shell", "svc", "wifi", "enable"]); // эмулятор не всегда поднимает сеть сам
   await sleep(3000);
 
   // (6) живость + чистый logcat
   check("(6) приложение живо", alive());
   const logs = (() => { try { return adb(["logcat", "-d"]); } catch { return ""; } })();
-  check("(6) logcat: нет FATAL/UnsatisfiedLinkError", !/FATAL EXCEPTION|UnsatisfiedLinkError/.test(logs));
+  // FATAL ищем только у ПРОЦЕССА приложения: uiautomator-шелл сам падает
+  // «UiAutomationService already registered» при гонке дампов (флейк AVD)
+  const appFatal = /FATAL EXCEPTION[\s\S]{0,600}?Process: dev\.duopulse\.mobile/.test(logs);
+  check("(6) logcat: нет FATAL/UnsatisfiedLinkError (приложение)", !appFatal && !/UnsatisfiedLinkError/.test(logs));
 } catch (e) {
   results.push({ name: "сценарий упал", ok: false, error: String(e) });
   try { adb(["shell", "cmd", "connectivity", "airplane-mode", "disable"]); } catch { /* максимум стараемся */ }

@@ -301,11 +301,15 @@ export class DuoPanel {
     }
     this.transSel.innerHTML = "";
     this.transSel.add(new Option(t("нет"), ""));
+    // gtx-цели предлагаем ВСЕГДА (duopulse-182): gtx переводит любой
+    // оригинал, включая дорожку ASR видео без субтитров — раньше при
+    // null/синтетическом списке селектор вырождался в «нет» и попытка смены
+    // языка молча обнуляла настройку перевода
+    const gtx = document.createElement("optgroup");
+    gtx.label = t("Перевод Google");
+    for (const l of GTX_TARGET_LANGS) gtx.appendChild(new Option(l.name, `gtx:${l.code}`));
+    this.transSel.append(gtx);
     if (list) {
-      const gtx = document.createElement("optgroup");
-      gtx.label = t("Перевод Google");
-      for (const l of GTX_TARGET_LANGS) gtx.appendChild(new Option(l.name, `gtx:${l.code}`));
-      this.transSel.append(gtx);
       const ready = list.base.filter((tr) => tr.id !== this.settings().originalId);
       if (ready.length) {
         const own = document.createElement("optgroup");

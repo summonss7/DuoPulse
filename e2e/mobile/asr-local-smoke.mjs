@@ -215,6 +215,37 @@ try {
   check("(3) провайдер local, модель готова", settings3?.provider === "local" && settings3?.localReady === true,
     `provider=${settings3?.provider} localReady=${settings3?.localReady}`);
 
+  // (3b) duopulse-182: «Отмена» в фазе СКАЧИВАНИЯ АУДИО (первый прогон,
+  // кэш пуст — фаза гарантированно длится секунды). Отмена перевода на
+  // живой сети недетерминирована (единственный батч летает быстрее поллинга;
+  // холодный старт греет кэш gtx) — фаза перевода покрыта юнит-тестом
+  // index.test.ts (зависший invoke: кнопка возвращается немедленно).
+  {
+    await ui.evalJs(`document.querySelector('.m-duo-asr-run').click(); 'ok'`);
+    let downloading = false;
+    for (let i = 0; i < 60 && !downloading; i++) {
+      downloading = /Скачивание аудио|Распознавание запущено/.test(await statusText());
+      if (!downloading) await sleep(120);
+    }
+    if (downloading) {
+      await ui.evalJs(`document.querySelector('.m-duo-asr-cancel').click(); 'ok'`);
+      let back = false;
+      for (let i = 0; i < 25 && !back; i++) {
+        back = (await ui.evalJs(`document.querySelector('.m-duo-asr-cancel')?.hidden === true`)) === true;
+        if (!back) await sleep(120);
+      }
+      check("(3b) «Отмена» на скачивании аудио: кнопка вернулась сразу", back === true);
+      await sleep(600);
+      const stCancel = await statusText();
+      check("(3b) статус «распознавание отменено»", /отменено/.test(stCancel), stCancel);
+      await sleep(1000); // хвосты отменённого конвейера не роняют приложение
+    } else {
+      check("(3b) «Отмена» на скачивании аудио: кнопка вернулась сразу", false, "фаза аудио не поймана");
+      check("(3b) статус «распознавание отменено»", false, "—");
+    }
+    shot("run0-cancel-audio");
+  }
+
   // (4) полный прогон локальным движком: фазы → готово → дорожка → реплики
   await ui.evalJs(`document.querySelector('.m-duo-asr-run').click(); 'ok'`);
   const phases = [];
@@ -260,12 +291,23 @@ try {
   const d4b = (await debug().catch(() => null)) ?? {};
   check("(4) дорожка работает (cues в движке)", (d4b.engine?.tracks?.[0]?.cues ?? 0) > 0, `cues=${d4b.engine?.tracks?.[0]?.cues}`);
 
-  // (5) airplane mode → повтор видео из кэша (сеть не нужна вовсе)
+  // язык ASR-дорожки (asr:<lang>) — для холодных пар перевода фазы 5
+  const asrLang = ((d4.asrTracks ?? [])[0] ?? "as:").slice(4) || "en";
+
+  // (5) airplane mode → повтор видео из кэша (сеть не нужна вовсе) +
+  // duopulse-182: офлайн-перевод — честная статус-ошибка и возврат кнопки,
+  // а не вечное «Отмена» (нашли релизным смоуком 168). Пара <asr-lang>→uk
+  // холодная — кэш gtx прогона 4 не маскирует отсутствие сети.
   adb("shell", "cmd", "connectivity", "airplane-mode", "enable");
   await sleep(3000);
   await openVideo(VIDEO1);
   await waitVideo(VIDEO1);
   await openPanel();
+  // пару для перевода переключаем ДО прогона: applySet повтора пойдёт в
+  // холодный кэш → честная сеть → офлайн-отказ (быстрый fast-fail Rust)
+  const asrLang5 = asrLang; // язык ASR-дорожки не менялся между фазами
+  const colds5 = ["en", "uk", "de"].filter((l) => l !== asrLang5);
+  await ui.evalJs(`(() => { const s = document.querySelector('.m-duo-trans'); s.value = 'gtx:${colds5[1] ?? colds5[0]}'; s.dispatchEvent(new Event('change')); })(); 'ok'`);
   const log5Before = (await asrLog()).length;
   await ui.evalJs(`document.querySelector('.m-duo-asr-run').click(); 'ok'`);
   let d5 = null;
@@ -278,7 +320,22 @@ try {
   const log5 = (await asrLog()).slice(log5Before);
   check("(5) airplane: событие done fromCache", log5.some((e) => e.phase === "done" && e.fromCache === true), log5.map((e) => `${e.phase}${e.fromCache ? "*" : ""}`).join(","));
   check("(5) дорожка из кэша работает", (d5?.engine?.tracks?.[0]?.cues ?? 0) > 0, `cues=${d5?.engine?.tracks?.[0]?.cues}`);
+  let fail2 = "";
+  for (let i = 0; i < 100 && !/перевод недоступен/.test(fail2); i++) {
+    fail2 = await statusText();
+    if (!/перевод недоступен/.test(fail2)) await sleep(300);
+  }
+  check("(5) airplane: статус-ошибка «перевод недоступен» (не «занято»)", /перевод недоступен/.test(fail2), fail2);
+  check("(5) строка статуса крашится ошибкой (m-err)",
+    (await ui.evalJs(`document.querySelector('.m-duo-status')?.classList.contains('m-err') ?? false`)) === true);
+  let btnBack = false;
+  for (let i = 0; i < 20 && !btnBack; i++) {
+    btnBack = (await ui.evalJs(`document.querySelector('.m-duo-asr-run')?.hidden === false`)) === true;
+    if (!btnBack) await sleep(250);
+  }
+  check("(5) кнопка «Распознать речь» вернулась (нет вечного «Отмена»)", btnBack === true);
   adb("shell", "cmd", "connectivity", "airplane-mode", "disable");
+  adb("shell", "svc", "wifi", "enable"); // эмулятор не всегда поднимает сеть сам
   await sleep(3000);
 
   // (6) удаление модели: файла нет, провайдер больше не предлагается.
