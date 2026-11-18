@@ -116,6 +116,7 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
     path: ["passwords", "resolveCandidate"],
     params: { action: "save" },
   },
+  "passwords.import_chrome": { path: ["passwords", "importChrome"], params: {} },
   "auth.pending": { path: ["auth", "pending"] },
   "auth.respond": {
     path: ["auth", "respond"],

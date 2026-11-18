@@ -3140,6 +3140,12 @@ html[data-panel] #suggest {
   border-color: var(--accent-neon); /* добавление — не деструктивное */
   color: var(--accent-neon);
 }
+/* Сводка «Импорт из Chrome» (duopulse-183): каркас mgr-error, тон — ок. */
+.pw .pw-report {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  border-color: var(--ok);
+  color: var(--ok);
+}
 .pw-form {
   display: flex;
   flex-wrap: wrap;

@@ -2163,6 +2163,78 @@
         "title": "Nullable_PasswordsCandidateView"
       }
     },
+    "passwords.import_chrome": {
+      "handler": "passwords_import_chrome",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "passwords.import_chrome: перенести логины из Chrome в хранилище.",
+        "properties": {
+          "sourceDir": {
+            "default": null,
+            "description": "Каталог «User Data» Chrome (подставляют тесты/e2e); по умолчанию — автопоиск (Chrome → Beta → Dev → Canary в %LOCALAPPDATA%).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "PasswordImportChromeParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Итог импорта из Chrome (кнопка показывает сводку).",
+        "properties": {
+          "added": {
+            "description": "Добавлено в хранилище.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "existing": {
+            "description": "Уже были (тот же логин на том же сайте) — не тронуты.",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "found": {
+            "description": "Годных записей в Login Data (с логином и паролем).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "profiles": {
+            "description": "Прочитанные профили Chrome («Default», «Profile 1»…).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "description": "Пропущено (пустой логин/пароль, не web-адрес).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "undecryptable": {
+            "description": "Не расшифровано (v20 app-bound или битый блоб).",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "existing",
+          "found",
+          "profiles",
+          "skipped",
+          "undecryptable"
+        ],
+        "title": "PasswordImportChromeResult",
+        "type": "object"
+      }
+    },
     "passwords.list": {
       "handler": "passwords_list",
       "params": {

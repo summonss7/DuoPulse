@@ -56,6 +56,8 @@ import type {
   NavResolveOmniboxParams,
   NavResolveOmniboxResult,
   PasswordAddParams,
+  PasswordImportChromeParams,
+  PasswordImportChromeResult,
   PasswordListParams,
   PasswordListResult,
   PasswordRevealParams,
@@ -224,6 +226,11 @@ export const bridge = {
      *  save (upsert в хранилище) | never (denylist) | dismiss. */
     resolveCandidate: (params: PasswordsResolveParams) =>
       invoke<void>("passwords_resolve_candidate", { params }),
+    /** passwords.import_chrome (duopulse-183): импорт логинов из Google
+     *  Chrome (кнопка «Импорт из Chrome» на экране «Пароли»); существующие
+     *  записи не перезаписываются — сводка в PasswordImportChromeResult. */
+    importChrome: (params: PasswordImportChromeParams) =>
+      invoke<PasswordImportChromeResult>("passwords_import_chrome", { params }),
   },
   auth: {
     /** auth.pending (duopulse-148): ожидающий запрос HTTP-авторизации сайта

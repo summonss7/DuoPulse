@@ -1,6 +1,6 @@
 [package]
 name = "duopulse"
-version = "0.1.66"
+version = "0.1.67"
 description = "DuoPulse M0 spike: Tauri 2 + WebView2 против YouTube"
 license = "GPL-3.0-only"
 edition = "2021"
@@ -112,6 +112,9 @@ ureq = { version = "2", features = ["tls", "socks-proxy", "gzip"], default-featu
 # Регексы $replace-правил перезаписи ответов (карточка duopulse-050);
 # уже в дереве транзитивно (adblock full-regex-handling).
 regex = "1"
+# Ключ os_crypt в Local State Chrome — base64 (импорт паролей, duopulse-183).
+# Уже в дереве транзитивно (ureq), отдельной загрузки не несёт.
+base64 = "0.22"
 # Разбор адресов фида обновлений (задача 5.2): url::Url требуется плагину
 # апдейтера при подстановке канала в endpoints. (Крейт объявлен в общих
 # зависимостях — с duopulse-082 его использует и мобильный Duo-движок.)

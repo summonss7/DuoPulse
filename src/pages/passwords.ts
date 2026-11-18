@@ -24,6 +24,8 @@ const ICONS = {
     '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>',
   plus:
     '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10"/></svg>',
+  import:
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 2v8M4.8 7l3.2 3 3.2-3M3 13.5h10"/></svg>',
 } as const;
 
 /** Форма добавления/правки (null — закрыта). */
@@ -49,6 +51,9 @@ let root: HTMLElement;
 let searchEl: HTMLInputElement;
 let listEl: HTMLElement;
 let errEl: HTMLElement;
+/** Сводка импорта из Chrome (duopulse-183) — зелёная строка над списком. */
+let reportEl: HTMLElement;
+let importBtn: HTMLButtonElement;
 let totalEl: HTMLElement;
 let formWrap: HTMLElement;
 let formUrl: HTMLInputElement;
@@ -93,6 +98,38 @@ async function copyText(text: string): Promise<void> {
   } finally {
     ta.remove();
   }
+}
+
+/** Импорт логинов из Google Chrome (duopulse-183): кнопка в шапке, Core
+ *  читает профиль Chrome (DPAPI-ключ этого пользователя + AES-256-GCM) и
+ *  вносит записи в наше хранилище — существующие не трогает. Дальше они
+ *  подтягиваются автозаполнением как свои. */
+async function runImport(): Promise<void> {
+  if (!importBtn || importBtn.disabled) return;
+  importBtn.disabled = true;
+  const label = importBtn.querySelector("span");
+  if (label) label.textContent = t("Импортирую из Chrome…");
+  reportEl.hidden = true;
+  try {
+    const r = await bridge.passwords.importChrome({});
+    const summary = t("Импорт из Chrome: {added} добавлено, {existing} уже были, {skipped} пропущено", {
+      added: r.added,
+      existing: r.existing,
+      skipped: r.skipped,
+    });
+    reportEl.textContent =
+      r.undecryptable > 0
+        ? `${summary}. ${t("{n} не расшифрованы (новый формат Chrome)", { n: r.undecryptable })}`
+        : summary;
+    reportEl.hidden = false;
+    errEl.hidden = true;
+  } catch (e) {
+    fail(e);
+  } finally {
+    importBtn.disabled = false;
+    if (label) label.textContent = t("Импорт из Chrome");
+  }
+  await reload();
 }
 
 async function reload(): Promise<void> {
@@ -374,11 +411,19 @@ export function initPasswordsPage(): void {
   addBtn.addEventListener("click", () =>
     openForm({ id: null, url: "", title: "", username: "" }),
   );
-  head.append(logo, title, addBtn, searchEl);
+  importBtn = document.createElement("button");
+  importBtn.type = "button";
+  importBtn.className = "mgr-clear pw-add pw-import";
+  importBtn.innerHTML = `${ICONS.import}<span>${t("Импорт из Chrome")}</span>`;
+  importBtn.addEventListener("click", () => void runImport());
+  head.append(logo, title, addBtn, importBtn, searchEl);
 
   errEl = document.createElement("div");
   errEl.className = "mgr-error";
   errEl.hidden = true;
+  reportEl = document.createElement("div");
+  reportEl.className = "mgr-error pw-report";
+  reportEl.hidden = true;
 
   listEl = document.createElement("main");
   listEl.className = "mgr-list";
@@ -389,7 +434,7 @@ export function initPasswordsPage(): void {
   totalEl.className = "mgr-total";
   foot.append(totalEl);
 
-  root.append(head, errEl, buildForm(), listEl, foot);
+  root.append(head, errEl, reportEl, buildForm(), listEl, foot);
   document.body.append(root);
 
   window.addEventListener("keydown", (e) => {

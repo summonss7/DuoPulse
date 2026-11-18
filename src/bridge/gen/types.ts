@@ -115,6 +115,8 @@ export interface DuoPulseBridgeContract {
   PasswordSaveResult: PasswordSaveResult;
   Nullable_PasswordsCandidateView: Nullable_PasswordsCandidateView;
   PasswordsCandidateView: PasswordsCandidateView;
+  PasswordImportChromeParams: PasswordImportChromeParams;
+  PasswordImportChromeResult: PasswordImportChromeResult;
   PasswordListParams: PasswordListParams;
   PasswordListResult: PasswordListResult;
   PasswordEntry: PasswordEntry;
@@ -907,6 +909,44 @@ export interface PasswordsCandidateView {
    */
   updated: boolean;
   username: string;
+}
+/**
+ * passwords.import_chrome: перенести логины из Chrome в хранилище.
+ */
+export interface PasswordImportChromeParams {
+  /**
+   * Каталог «User Data» Chrome (подставляют тесты/e2e); по умолчанию — автопоиск (Chrome → Beta → Dev → Canary в %LOCALAPPDATA%).
+   */
+  sourceDir?: string | null;
+}
+/**
+ * Итог импорта из Chrome (кнопка показывает сводку).
+ */
+export interface PasswordImportChromeResult {
+  /**
+   * Добавлено в хранилище.
+   */
+  added: number;
+  /**
+   * Уже были (тот же логин на том же сайте) — не тронуты.
+   */
+  existing: number;
+  /**
+   * Годных записей в Login Data (с логином и паролем).
+   */
+  found: number;
+  /**
+   * Прочитанные профили Chrome («Default», «Profile 1»…).
+   */
+  profiles: string[];
+  /**
+   * Пропущено (пустой логин/пароль, не web-адрес).
+   */
+  skipped: number;
+  /**
+   * Не расшифровано (v20 app-bound или битый блоб).
+   */
+  undecryptable: number;
 }
 /**
  * passwords.list: записи с фильтром (по сайту/логину/названию).

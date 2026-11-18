@@ -206,9 +206,10 @@ pub use crate::history::contract::{
     HistoryVisitParams,
 };
 pub use crate::passwords::{
-    PasswordAddParams, PasswordListParams, PasswordListResult, PasswordRemoveParams,
-    PasswordRevealParams, PasswordRevealResult, PasswordSaveResult, PasswordUpdateParams,
-    PasswordsCandidateView, PasswordsResolveParams,
+    PasswordAddParams, PasswordImportChromeParams, PasswordImportChromeResult,
+    PasswordListParams, PasswordListResult, PasswordRemoveParams, PasswordRevealParams,
+    PasswordRevealResult, PasswordSaveResult, PasswordUpdateParams, PasswordsCandidateView,
+    PasswordsResolveParams,
 };
 pub use crate::auth::{AuthChallengeView, AuthRespondParams};
 
@@ -1189,6 +1190,9 @@ pub fn contract_json() -> serde_json::Value {
             "passwords.resolve_candidate": { "handler": "passwords_resolve_candidate",
                                               "params": schema!(PasswordsResolveParams),
                                               "result": null },
+            "passwords.import_chrome": { "handler": "passwords_import_chrome",
+                                         "params": schema!(PasswordImportChromeParams),
+                                         "result": schema!(PasswordImportChromeResult) },
             "auth.pending": { "handler": "auth_pending", "params": null,
                               "result": schema!(Option<AuthChallengeView>) },
             "auth.respond": { "handler": "auth_respond", "params": schema!(AuthRespondParams),
@@ -1888,6 +1892,25 @@ fn passwords_resolve_candidate(
     prompts.resolve(&store, &params.action)?;
     aila.schedule_sync(); // save тоже правка хранилища — в облако (этап 4)
     Ok(())
+}
+
+/// passwords.import_chrome (duopulse-183): импорт логинов из Google Chrome
+/// (Local State + Login Data, DPAPI-ключ пользователя + AES-256-GCM v10) в
+/// наше хранилище — кнопка «Импорт из Chrome» на экране «Пароли». Дальше
+/// записи живут как свои: автозаполнение форм и синк Aila (телефон получает
+/// их тем же путём) — поэтому пометка на синк при успехе. Существующие
+/// записи Chrome не перезаписывает.
+#[tauri::command]
+fn passwords_import_chrome(
+    store: tauri::State<'_, std::sync::Arc<crate::passwords::PasswordStore>>,
+    aila: tauri::State<'_, std::sync::Arc<crate::aila::AilaAccount>>,
+    params: PasswordImportChromeParams,
+) -> Result<PasswordImportChromeResult, String> {
+    let res = crate::passwords::import::import_from_chrome(&store, params.source_dir.as_deref());
+    if res.is_ok() {
+        aila.schedule_sync();
+    }
+    res
 }
 
 /// history.bookmark_add: добавить закладку (upsert по url); groupId — группа
@@ -3539,6 +3562,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         passwords_reveal,
         passwords_candidate,
         passwords_resolve_candidate,
+        passwords_import_chrome,
         aila_status,
         aila_login,
         aila_logout,

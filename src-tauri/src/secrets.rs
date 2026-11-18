@@ -104,6 +104,21 @@ fn unprotect(_blob: &[u8]) -> Result<Vec<u8>, String> {
     Err("хранилище секретов доступно только на Windows/Android".into())
 }
 
+/// DPAPI-расшифровка чужого блоба (duopulse-183: импорт Login Data Chrome —
+/// его os_crypt-ключ зашит DPAPI того же пользователя). Свои секреты ходят
+/// через save/load, это — точечный выход unprotect наружу.
+#[cfg(windows)]
+pub fn unprotect_blob(blob: &[u8]) -> Result<Vec<u8>, String> {
+    unprotect(blob)
+}
+
+/// DPAPI-шифрование для тестов соседних модулей (синтетический профиль
+/// Chrome с настоящим Local State).
+#[cfg(all(test, windows))]
+pub fn protect_for_test(data: &[u8]) -> Result<Vec<u8>, String> {
+    protect(data)
+}
+
 /// Сохранить секрет по пути (шифруется DPAPI; каталог создаётся).
 pub fn save(path: &Path, secret: &str) -> Result<(), String> {
     let blob = protect(secret.as_bytes())?;

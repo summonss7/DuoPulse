@@ -25,7 +25,12 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod autofill;
+// Импорт из Chrome — десктоп-only (DPAPI/профиль Chrome в %LOCALAPPDATA%):
+// гейт как у десктоп-секции Cargo.toml, мобильные таргеты модуль не тянут.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod import;
 pub mod prompts;
+pub use import::{PasswordImportChromeParams, PasswordImportChromeResult};
 pub use prompts::{PasswordPrompts, PasswordsCandidateView};
 
 use aes_gcm::aead::{Aead, KeyInit};
@@ -589,6 +594,50 @@ impl PasswordStore {
         Ok(out)
     }
 
+    /// Пакетный импорт (duopulse-183, кнопка «Импорт из Chrome»): записи,
+    /// которых нет (пара origin+логин), добавляются с датами источника;
+    /// существующие НЕ перезаписываются — импортёр не знает, чья версия
+    /// свежее, и честно отдаёт это счётчиком existing (а не молчит дублем).
+    /// Одна транзакция: список ложится целиком либо ничего.
+    pub fn import_batch(&self, entries: &[PasswordImportEntry]) -> Result<(u64, u64), String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("начать транзакцию импорта: {e}"))?;
+        let mut seen = std::collections::HashSet::new();
+        for row in rows_of(&tx)? {
+            seen.insert((row.origin, unseal(&self.key, &row.user_enc)?));
+        }
+        let (mut added, mut existing) = (0u64, 0u64);
+        for e in entries {
+            if e.username.trim().is_empty() || e.password.is_empty() {
+                continue; // защита импортёра от самого себя
+            }
+            if seen.contains(&(e.origin.clone(), e.username.clone())) {
+                existing += 1;
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO logins (origin, url, title, user_enc, pass_enc, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?)",
+                rusqlite::params![
+                    e.origin,
+                    e.url,
+                    e.title,
+                    seal(&self.key, &e.username)?,
+                    seal(&self.key, &e.password)?,
+                    e.created_at,
+                    e.created_at
+                ],
+            )
+            .map_err(|e| format!("вставить импортируемый логин: {e}"))?;
+            seen.insert((e.origin.clone(), e.username.clone()));
+            added += 1;
+        }
+        tx.commit().map_err(|e| format!("завершить импорт: {e}"))?;
+        Ok((added, existing))
+    }
+
     /// Сайты denylist «никогда не сохранять» (синк: часть документа).
     pub fn never_save_origins(&self) -> Result<Vec<String>, String> {
         let conn = self.conn.lock().unwrap();
@@ -710,6 +759,17 @@ impl PasswordStore {
         }
         Ok(stats)
     }
+}
+
+/// Кандидат пакетного импорта (duopulse-183: перенос логинов из Chrome).
+/// origin уже посчитан импортёром (origin_of), даты — из источника.
+pub struct PasswordImportEntry {
+    pub origin: String,
+    pub url: String,
+    pub title: String,
+    pub username: String,
+    pub password: String,
+    pub created_at: i64,
 }
 
 /// Полная запись логина (синк, этап 4): пароль расшифрован — сериализуется
