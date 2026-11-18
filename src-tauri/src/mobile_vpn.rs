@@ -35,6 +35,18 @@
 //! Android 5.0+ (десерт-совместимость проверена смоуком на эмуляторе);
 //! план Б (VpnService tun) не понадобился.
 //!
+//! Панель VPN (этап 8 цепочки, карточка duopulse-171): split-правила
+//! `crate::vpn::rules` — общий стор с роутером (`RuleStore::handle`, правки
+//! IPC видны соединениям сразу), персист `vpn/split-rules.json` профиля —
+//! команды зеркалят vpn.{set_mode,get_rules,add_rule,remove_rule} десктопа;
+//! режим живёт и в статусе (`routing`). Семантика тумблера — как на десктопе:
+//! включение профиля в режиме off означает global, выключение гасит режим;
+//! `mobile_vpn_restore` поднимает сохранённый режим на старте UI (аналог
+//! apply_wg_saved; активность уже жива — JNI-прокси сработает). Импорт .conf —
+//! системный пикер SAF (Kotlin MobileVpnHelper, `mobile_vpn_pick_conf`):
+//! текст приходит фронту глобалом `__duopulseVpnConfPicked` и уходит в
+//! `mobile_vpn_import_profile` (контракт текста не менялся).
+//!
 //! Модуль — только мобильным таргетам либы (#[tauri::command] в desktop-либе
 //! быть не должно — 0xc0000139, см. шапку mobile_open.rs).
 
@@ -45,6 +57,7 @@ use tauri::{Emitter, Manager};
 
 use crate::proxy::ProxyState;
 use crate::vpn::router::{Route, Router};
+use crate::vpn::rules::{RuleAction, RuleStore, SplitMode};
 use crate::vpn::wg::{self, WgLiveState, WgLiveStatus, WgProfile, WgSession};
 
 /// Живая сессия тоннеля (None — выключен). Старт/остановка — командами,
@@ -55,13 +68,37 @@ fn tunnel_slot() -> &'static Mutex<Option<WgSession>> {
     TUNNEL.get_or_init(|| Mutex::new(None))
 }
 
+/// Стор split-правил (duopulse-171): общий с роутером (handle — тот же Arc),
+/// инициализируется lib.rs из каталога профиля на старте; команды правил и
+/// маршрутизация читают одну ручку — правки действуют на новые соединения
+/// сразу, без перезапуска.
+static RULES: OnceLock<RuleStore> = OnceLock::new();
+
+/// Загрузить стор правил из каталога профиля (lib.rs::setup до старта окна).
+pub fn init_rules(dir: &std::path::Path) {
+    let _ = RULES.set(RuleStore::load(dir));
+}
+
+fn rules_store() -> &'static RuleStore {
+    RULES.get_or_init(|| {
+        // без lib.rs::setup (тесты) — из каталога профиля сами
+        let dir = profile_dir().unwrap_or_else(|e| {
+            eprintln!("[vpn] каталог профиля недоступен: {e}");
+            std::path::PathBuf::from(".")
+        });
+        RuleStore::load(&dir)
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Маршрутизация трафика приложения (duopulse-170): роутер процесса + WebView.
 // ---------------------------------------------------------------------------
 
 /// Применить маршрутизацию приложения: роутер процесса — на сессию тоннеля
-/// (Some — Wg, fail-closed) или Direct (None), WebView — прокси HTTP-листенера
-/// роутера через JNI MobileProxyHelper (ProxyController; снятие при None).
+/// (Some — Wg, fail-closed; в split-режиме — политика правил `Policy::Split`,
+/// общий стор с IPC: правки правил действуют сразу) или Direct (None), WebView —
+/// прокси HTTP-листенера роутера через JNI MobileProxyHelper (ProxyController;
+/// снятие при None; в split прокси остаётся — роутер сам решает по домену).
 /// Ошибка JNI не валит тумблер: роутер уже переключён — фетчи Core в тоннеле,
 /// отказ прокси означает лишь прямой WebView (лог + строка в ответе команды).
 fn apply_app_routing(app: &tauri::AppHandle, session: Option<&WgSession>) {
@@ -73,9 +110,15 @@ fn apply_app_routing(app: &tauri::AppHandle, session: Option<&WgSession>) {
         return;
     };
     match session {
-        Some(session) => router.set_route(Route::Wg {
-            session: session.clone(),
-        }),
+        Some(session) => {
+            if rules_store().mode() == SplitMode::Split {
+                router.set_split(session.clone(), rules_store().handle());
+            } else {
+                router.set_route(Route::Wg {
+                    session: session.clone(),
+                });
+            }
+        }
         None => router.set_route(Route::Direct),
     }
     if let Err(e) = proxy_helper::set_webview_proxy(router.http_port(), session.is_some()) {
@@ -131,6 +174,42 @@ mod proxy_helper {
 mod proxy_helper {
     pub fn set_webview_proxy(_http_port: u16, _on: bool) -> Result<String, String> {
         Err("прокси WebView поддержан только на Android".into())
+    }
+}
+
+/// JNI-мост к MobileVpnHelper (SAF-пикер .conf): поверхность как у
+/// MobileOpenHelper — статический (Context, String) → String; выбранный текст
+/// придёт фронту асинхронно глобалом __duopulseVpnConfPicked (см. Kotlin).
+#[cfg(target_os = "android")]
+mod picker_helper {
+    use crate::mobile_jni::{app_class, jstr, with_jni};
+
+    pub fn pick_conf() -> Result<String, String> {
+        with_jni(|env, context| {
+            let helper = app_class(env, context, "dev.duopulse.mobile.MobileVpnHelper")?;
+            let jarg = jstr(env, "")?;
+            let r = env
+                .call_static_method(
+                    &helper,
+                    "pick",
+                    "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
+                    &[context.into(), (&jarg).into()],
+                )
+                .map_err(|e| format!("helper pick: {e}"))?
+                .l()
+                .map_err(|e| format!("helper pick: {e}"))?;
+            let js = jni::objects::JString::from(r);
+            env.get_string(&js)
+                .map(|s| s.to_string_lossy().into_owned())
+                .map_err(|e| format!("helper pick str: {e}"))
+        })
+    }
+}
+
+#[cfg(all(not(target_os = "android"), target_os = "ios"))]
+mod picker_helper {
+    pub fn pick_conf() -> Result<String, String> {
+        Err("файл-пикер поддержан только на Android".into())
     }
 }
 
@@ -266,6 +345,44 @@ pub struct VpnStats {
     pub last_handshake_ms: Option<u64>,
 }
 
+/// Строка split-правила — зеркало bridge::VpnRuleInfo (duopulse-171).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnRuleInfo {
+    pub domain: String,
+    /// tunnel | direct.
+    pub route: String,
+    /// Unix-ms добавления (сортировка списка в UI).
+    pub added_at: i64,
+}
+
+/// Результат команд правил — зеркало bridge::VpnRulesResult.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnRulesResult {
+    /// off | global | split.
+    pub mode: String,
+    pub rules: Vec<VpnRuleInfo>,
+}
+
+/// mobile_vpn_set_mode: off | global | split (семантика vpn.set_mode).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnSetModeParams {
+    pub mode: String,
+}
+
+/// mobile_vpn_add_rule: домен → маршрут (upsert по домену).
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnAddRuleParams {
+    pub domain: String,
+    pub route: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VpnRemoveRuleParams {
+    pub domain: String,
+}
+
 // ---------------------------------------------------------------------------
 // Сессия: старт/остановка + события.
 // ---------------------------------------------------------------------------
@@ -367,8 +484,10 @@ fn live_to_dto(s: &WgLiveStatus, id: &str, name: &str, endpoint: &str) -> VpnWgS
 }
 
 /// Снапшот VPN (общее status/событиям): тоннель поднят — mode wg + живой
-/// снапшот (имя профиля — из wg-profiles.json), иначе off.
+/// снапшот (имя профиля — из wg-profiles.json), иначе off; routing — текущий
+/// режим стора split-правил (duopulse-171, как collect_vpn_status десктопа).
 fn collect_status() -> VpnStatusResult {
+    let routing = rules_store().mode().as_str().to_string();
     let session = tunnel_slot()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -387,7 +506,7 @@ fn collect_status() -> VpnStatusResult {
                 .unwrap_or_default();
             VpnStatusResult {
                 mode: "wg".into(),
-                routing: "global".into(),
+                routing,
                 state: live_state_to_proxy(s.state),
                 detail: s.detail.clone(),
                 wg: Some(live_to_dto(
@@ -400,7 +519,7 @@ fn collect_status() -> VpnStatusResult {
         }
         None => VpnStatusResult {
             mode: "off".into(),
-            routing: "off".into(),
+            routing,
             state: ProxyState::Off,
             detail: "VPN выключен — соединения прямые".into(),
             wg: None,
@@ -462,7 +581,7 @@ pub fn mobile_vpn_list_profiles() -> Result<Vec<VpnProfileInfo>, String> {
 }
 
 /// mobile_vpn_remove_profile: удалить профиль и секрет (активный — сначала
-/// гасим тоннель и возвращаем прямой маршрут, как десктоп).
+/// гасим тоннель, возвращаем прямой маршрут и сбрасываем режим, как десктоп).
 #[tauri::command]
 pub fn mobile_vpn_remove_profile(
     app: tauri::AppHandle,
@@ -472,6 +591,7 @@ pub fn mobile_vpn_remove_profile(
     if wg::active_id(&dir).as_deref() == Some(params.id.as_str()) {
         tunnel_off(&app);
         let _ = wg::set_active(&dir, None);
+        let _ = rules_store().set_mode(SplitMode::Off);
     }
     wg::remove_profile(&dir, &params.id)?;
     Ok(())
@@ -479,15 +599,17 @@ pub fn mobile_vpn_remove_profile(
 
 /// mobile_vpn_use_profile: включить тоннель с профилем (Some — перезапуск
 /// сессии, повторное включение того же профиля применяет свежий импорт) или
-/// выключить (None — тоннель гасится, выбор профиля снимается). Включение
-/// одновременно переводит маршрутизацию приложения на тоннель (роутер + прокси
-/// WebView, duopulse-170), выключение возвращает Direct.
+/// выключить (None — тоннель гасится, выбор профиля снимается, режим — off,
+/// как vpn.use_profile десктопа). Включение переводит маршрутизацию приложения
+/// на тоннель (роутер + прокси WebView, duopulse-170) в текущем режиме правил;
+/// off + явное включение означает global (duopulse-171, как десктоп).
 #[tauri::command]
 pub fn mobile_vpn_use_profile(
     app: tauri::AppHandle,
     params: VpnUseProfileParams,
 ) -> Result<VpnStatusResult, String> {
     let dir = profile_dir()?;
+    let store = rules_store();
     stop_tunnel(&app); // маршрутизацию выставляет итоговое состояние ниже
     match params.id.as_deref() {
         Some(id) => {
@@ -503,6 +625,12 @@ pub fn mobile_vpn_use_profile(
             })();
             match started {
                 Ok(session) => {
+                    // off + явное включение = global; split остаётся (десктоп)
+                    let mode = match store.mode() {
+                        SplitMode::Off => SplitMode::Global,
+                        m => m,
+                    };
+                    store.set_mode(mode)?;
                     *tunnel_slot().lock().unwrap_or_else(|p| p.into_inner()) =
                         Some(session.clone());
                     apply_app_routing(&app, Some(&session));
@@ -516,24 +644,26 @@ pub fn mobile_vpn_use_profile(
         }
         None => {
             wg::set_active(&dir, None)?;
+            store.set_mode(SplitMode::Off)?;
             apply_app_routing(&app, None);
         }
     }
     Ok(collect_status())
 }
 
-/// mobile_vpn_set_enabled: тумблер тоннеля (у десктопа — внешний прокси;
-/// мобильной ветке прокси не нужен — включение поднимает тоннель активного
-/// профиля и переводит трафик приложения в него, выключение гасит и возвращает
-/// Direct; выбранный профиль сохраняется).
+/// mobile_vpn_set_enabled: тумблер тоннеля (включение поднимает тоннель
+/// активного профиля и переводит трафик приложения в него — в текущем режиме
+/// правил, off означает global; выключение гасит тоннель, режим — off).
 #[tauri::command]
 pub fn mobile_vpn_set_enabled(
     app: tauri::AppHandle,
     params: VpnSetEnabledParams,
 ) -> Result<VpnStatusResult, String> {
     let dir = profile_dir()?;
+    let store = rules_store();
     if !params.on {
         tunnel_off(&app);
+        store.set_mode(SplitMode::Off)?;
         return Ok(collect_status());
     }
     let already_up = tunnel_slot()
@@ -547,6 +677,11 @@ pub fn mobile_vpn_set_enabled(
         "нет активного профиля WireGuard — сначала импортируйте и выберите .conf".to_string()
     })?;
     let session = start_session(&app, &profile, private_key, psk)?;
+    let mode = match store.mode() {
+        SplitMode::Off => SplitMode::Global,
+        m => m,
+    };
+    store.set_mode(mode)?;
     *tunnel_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(session.clone());
     apply_app_routing(&app, Some(&session));
     Ok(collect_status())
@@ -621,4 +756,144 @@ pub async fn mobile_vpn_test_connection(
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Правила и режимы (duopulse-171): контракт vpn.{set_mode,get_rules,add_rule,
+// remove_rule} десктопа; стор общий с роутером — правки действуют на новые
+// соединения сразу. Импорт .conf — системный пикер SAF (MobileVpnHelper),
+// сохранённый режим на старте поднимает mobile_vpn_restore (фронт зовёт при
+// загрузке — активность уже жива, JNI-прокси сработает).
+// ---------------------------------------------------------------------------
+
+/// mobile_vpn_set_mode: режим VPN — off | global | split (семантика
+/// vpn.set_mode десктопа): off — погасить тоннель и вернуть Direct (выбранный
+/// профиль сохраняется); global/split — поднять тоннель активного профиля
+/// (уже поднят — переиспользуем сессию, global↔split без разрыва) и применить
+/// политику роутера: global — весь трафик в тоннель, split — только правила
+/// «tunnel», без правила — напрямую.
+#[tauri::command]
+pub fn mobile_vpn_set_mode(
+    app: tauri::AppHandle,
+    params: VpnSetModeParams,
+) -> Result<VpnStatusResult, String> {
+    let mode = SplitMode::parse(&params.mode)?;
+    let dir = profile_dir()?;
+    let store = rules_store();
+    match mode {
+        SplitMode::Off => {
+            tunnel_off(&app);
+            store.set_mode(SplitMode::Off)?;
+        }
+        SplitMode::Global | SplitMode::Split => {
+            // Живая сессия? — переиспользуем (и global↔split без разрыва).
+            let existing = tunnel_slot()
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+            let session = match existing {
+                Some(session) => session,
+                None => {
+                    let (profile, private_key, psk) = wg::active_profile(&dir).ok_or_else(
+                        || {
+                            "нет активного профиля WireGuard — сначала выберите профиль".to_string()
+                        },
+                    )?;
+                    let session = start_session(&app, &profile, private_key, psk)?;
+                    wg::set_active(&dir, Some(&profile.id))?;
+                    *tunnel_slot().lock().unwrap_or_else(|p| p.into_inner()) =
+                        Some(session.clone());
+                    session
+                }
+            };
+            store.set_mode(mode)?;
+            apply_app_routing(&app, Some(&session));
+        }
+    }
+    Ok(collect_status())
+}
+
+/// mobile_vpn_get_rules: режим + список split-правил (лист VPN).
+#[tauri::command]
+pub fn mobile_vpn_get_rules() -> VpnRulesResult {
+    rules_result(rules_store())
+}
+
+/// mobile_vpn_add_rule: добавить/обновить правило домен → маршрут (upsert).
+#[tauri::command]
+pub fn mobile_vpn_add_rule(params: VpnAddRuleParams) -> Result<VpnRulesResult, String> {
+    let action = RuleAction::parse(&params.route)?;
+    let store = rules_store();
+    store.add_rule(&params.domain, action)?;
+    Ok(rules_result(store))
+}
+
+/// mobile_vpn_remove_rule: удалить правило по домену (нет правила — не ошибка).
+#[tauri::command]
+pub fn mobile_vpn_remove_rule(params: VpnRemoveRuleParams) -> VpnRulesResult {
+    let store = rules_store();
+    let _ = store.remove_rule(&params.domain);
+    rules_result(store)
+}
+
+fn rules_result(store: &RuleStore) -> VpnRulesResult {
+    let snap = store.snapshot();
+    VpnRulesResult {
+        mode: snap.mode.as_str().into(),
+        rules: snap
+            .rules
+            .into_iter()
+            .map(|r| VpnRuleInfo {
+                domain: r.domain,
+                route: r.action.as_str().into(),
+                added_at: r.added_at,
+            })
+            .collect(),
+    }
+}
+
+/// mobile_vpn_pick_conf: открыть системный файл-пикер (SAF) для .conf —
+/// выбранный текст придёт фронту глобалом __duopulseVpnConfPicked
+/// (Kotlin MobileVpnHelper), дальше — mobile_vpn_import_profile.
+#[tauri::command]
+pub fn mobile_vpn_pick_conf() -> Result<String, String> {
+    picker_helper::pick_conf()
+}
+
+/// mobile_vpn_restore: применить сохранённое состояние на старте UI (аналог
+/// apply_wg_saved десктопа): режим off — ничего; global/split — поднять
+/// тоннель активного профиля и перевести маршрутизацию (роутер + прокси
+/// WebView). Зовёт фронтенд при загрузке — активность уже жива, JNI-прокси
+/// сработает; повторные вызовы идемпотентны. Ошибка поднятия — деградация
+/// в журнал (прямой маршрут), как на десктопе.
+#[tauri::command]
+pub fn mobile_vpn_restore(app: tauri::AppHandle) -> Result<VpnStatusResult, String> {
+    let mode = rules_store().mode();
+    if mode == SplitMode::Off {
+        return Ok(collect_status());
+    }
+    let existing = tunnel_slot()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    if let Some(session) = existing {
+        // тоннель уже поднят (повторный вызов) — только переприменить политику
+        apply_app_routing(&app, Some(&session));
+        return Ok(collect_status());
+    }
+    let dir = profile_dir()?;
+    let Some((profile, private_key, psk)) = wg::active_profile(&dir) else {
+        return Ok(collect_status()); // профиля нет — поднимать нечего
+    };
+    match start_session(&app, &profile, private_key, psk) {
+        Ok(session) => {
+            *tunnel_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(session.clone());
+            apply_app_routing(&app, Some(&session));
+        }
+        Err(e) => eprintln!(
+            "[vpn] автостарт тоннеля «{}» не удался: {e} — трафик прямой",
+            profile.name
+        ),
+    }
+    Ok(collect_status())
 }

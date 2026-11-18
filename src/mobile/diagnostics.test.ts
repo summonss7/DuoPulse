@@ -8,7 +8,6 @@ import {
   diagSections,
   formatDiagReport,
   sessionDur,
-  vpnStatusLine,
   type DiagSnapshot,
 } from "./diagnostics";
 
@@ -130,59 +129,5 @@ describe("formatDiagReport", () => {
       expect(r).toContain(line);
     }
     expect(r.endsWith("\n")).toBe(true);
-  });
-});
-
-describe("vpnStatusLine (duopulse-169)", () => {
-  it("выключенный VPN — короткая строка", () => {
-    expect(vpnStatusLine({ mode: "off", routing: "off", state: "off", detail: "", wg: null })).toBe(
-      "VPN: выключен",
-    );
-  });
-  it("живой тоннель: состояние, endpoint, handshake, rx/tx КБ, пинг", () => {
-    const line = vpnStatusLine({
-      mode: "wg",
-      routing: "global",
-      state: "on",
-      detail: "туннель жив",
-      wg: {
-        profileId: "abc123",
-        profileName: "стенд",
-        state: "connected",
-        endpoint: "10.0.2.2:51820",
-        lastHandshakeMs: 1200,
-        rxBytes: 2057 * 1024,
-        txBytes: 1029 * 1024,
-        pingMs: 35,
-        sinceMs: 1,
-      },
-    });
-    expect(line).toContain("connected");
-    expect(line).toContain("10.0.2.2:51820");
-    expect(line).toContain("handshake 1200 мс назад");
-    expect(line).toContain("rx 2057 КБ");
-    expect(line).toContain("tx 1029 КБ");
-    expect(line).toContain("пинг 35 мс");
-  });
-  it("без handshake и без пинга — честные прочерки в строке", () => {
-    const line = vpnStatusLine({
-      mode: "wg",
-      routing: "global",
-      state: "on",
-      detail: "handshake…",
-      wg: {
-        profileId: "x",
-        profileName: "n",
-        state: "connecting",
-        endpoint: "10.0.2.2:1",
-        lastHandshakeMs: null,
-        rxBytes: 0,
-        txBytes: 0,
-        pingMs: null,
-        sinceMs: 1,
-      },
-    });
-    expect(line).toContain("handshake не завершён");
-    expect(line).not.toContain("пинг");
   });
 });

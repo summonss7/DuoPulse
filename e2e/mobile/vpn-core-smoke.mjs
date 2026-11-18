@@ -248,25 +248,32 @@ check("событие vpn:state_changed (connected): camelCase-форма кон
 check("событие vpn:stats: rxBytes/txBytes/pingMs", ev1.stats.length >= 1 &&
   "rxBytes" in ev1.stats.at(-1) && "txBytes" in ev1.stats.at(-1), JSON.stringify(ev1.stats.at(-1) ?? null).slice(0, 120));
 
-// --- 5. кнопка «VPN: тест» листа диагностики ---------------------------------------
-await ui.evalJs(`localStorage.setItem("__duopulseVpnProbe", "blocked.tun:80"); "ok"`);
-const btnRun = await ui.evalJs(`(async () => {
+// --- 5. лист «VPN» из меню «⋮» (duopulse-171 заменил кнопку «VPN: тест») ---------
+const sheetRun = await ui.evalJs(`(async () => {
+  document.getElementById("mMenu").click();
+  await new Promise((r) => setTimeout(r, 400));
+  document.getElementById("mVpn").click();
+  await new Promise((r) => setTimeout(r, 800));
+  return window.__duopulseMobileVpn?.() ?? null;
+})()`);
+check("лист «VPN» открыт из меню ⋮: тоннель жив, статус/щит connected",
+  sheetRun?.open === true && sheetRun.tunnelOn === true &&
+  sheetRun.wgState === "connected" && sheetRun.shield === "connected",
+  JSON.stringify(sheetRun).slice(0, 140));
+check("лист «VPN»: живые rx/tx/ping из событий vpn:stats",
+  typeof sheetRun?.rx === "number" && typeof sheetRun?.tx === "number" && sheetRun.rx >= 0,
+  `rx=${sheetRun?.rx} tx=${sheetRun?.tx} ping=${sheetRun?.ping}`);
+shot("vpn-sheet");
+await ui.evalJs(`document.querySelector(".m-sheet-backdrop")?.click(); "ok"`);
+const diagSnap = await ui.evalJs(`(async () => {
   document.getElementById("mMenu").click();
   await new Promise((r) => setTimeout(r, 400));
   document.getElementById("mDiag").click();
-  await new Promise((r) => setTimeout(r, 600));
-  const btn = document.querySelector(".m-diag-vpn");
-  if (!btn) return { error: "кнопки .m-diag-vpn нет" };
-  btn.click();
-  for (let i = 0; i < 45 && !window.__duopulseVpnTest; i++) await new Promise((r) => setTimeout(r, 500));
-  return window.__duopulseVpnTest ?? { error: "итог кнопки не появился" };
-})()`);
-check("кнопка «VPN: тест»: тоннель жив, проба стенд-хостом прошла",
-  !!btnRun?.status?.wg && btnRun.status.wg.state === "connected" && btnRun.test?.state === "on" && /ответ/.test(btnRun.test?.detail ?? ""),
-  JSON.stringify(btnRun?.test ?? btnRun).slice(0, 140));
-shot("diag-button");
-const diagSnap = await ui.evalJs("JSON.stringify(window.__duopulseMobileDiagnostics?.() ?? null)").then((s) => JSON.parse(s));
-check("лист диагностики открыт с кнопкой", diagSnap?.open === true, JSON.stringify(diagSnap).slice(0, 80));
+  await new Promise((r) => setTimeout(r, 700));
+  return JSON.stringify(window.__duopulseMobileDiagnostics?.() ?? null);
+})()`).then((s2) => JSON.parse(s2));
+check("лист диагностики без dev-кнопки «VPN: тест» открывается", diagSnap?.open === true,
+  JSON.stringify(diagSnap).slice(0, 80));
 await ui.evalJs(`document.querySelector(".m-sheet-backdrop")?.click(); "ok"`);
 
 // --- 6. kill-switch: чёрная дыра, fail-closed -------------------------------------

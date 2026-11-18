@@ -1640,3 +1640,321 @@ body.m-bm-dragging {
   color: var(--accent-neon);
   font-weight: 600;
 }
+
+/* ── VPN (duopulse-171, паритет 8/8): лист из меню «⋮» — тумблер тоннеля
+   (свитч справа в строке статуса), живая статистика rx/tx/ping/handshake,
+   профили (активный — галочка, удаление — ✕), режимы off/global/split и
+   редактор split-правил (домен → туннель/напрямую сегментом). Индикатор-щит
+   в шапке — сигнальные цвета --ok/--warn/--err по data-vpn (как Navbar
+   десктопа); скрыт при выключенном тоннеле. */
+.m-vpn {
+  max-height: 78%;
+}
+
+.m-vpn-body {
+  overflow-y: auto;
+  padding: 0 4px 6px;
+}
+
+.m-vpn-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px 4px;
+}
+
+.m-vpn-state {
+  font-weight: 700;
+}
+
+.m-vpn-status[data-state="connected"] .m-vpn-state {
+  color: var(--ok);
+}
+
+.m-vpn-status[data-state="connecting"] .m-vpn-state {
+  color: var(--warn);
+}
+
+.m-vpn-status[data-state="error"] .m-vpn-state {
+  color: var(--err);
+}
+
+.m-vpn-detail {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* тумблер-свитч: без appearance, ручка скользит по :checked */
+.m-vpn-switch {
+  appearance: none;
+  margin: 0 0 0 auto;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  border: 1px solid var(--bg-warm-2);
+  background: var(--bg-base);
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.m-vpn-switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.m-vpn-switch:checked {
+  background: var(--accent-neon);
+  border-color: var(--accent-neon);
+}
+
+.m-vpn-switch:checked::before {
+  transform: translateX(18px);
+  background: var(--bg-base);
+}
+
+.m-vpn-stats {
+  display: flex;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  padding: 2px 12px 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-vpn-import {
+  color: var(--accent-neon);
+}
+
+.m-vpn-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-vpn-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.m-vpn-profile {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: start;
+}
+
+.m-vpn-profile:active {
+  background: var(--hover-neutral);
+}
+
+.m-vpn-profile.active {
+  background: var(--hover-neutral);
+}
+
+.m-vpn-profile-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.m-vpn-profile-ep {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: ltr; /* host:port — LTR и в арабском UI */
+}
+
+.m-vpn-profile-mark {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.m-vpn-profile-del {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.m-vpn-profile-del:active {
+  background: var(--hover-neutral);
+  color: var(--err);
+}
+
+.m-vpn-empty {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* режимы: сегмент из трёх кнопок (off/global/split) */
+.m-vpn-modes {
+  display: flex;
+  gap: 4px;
+  margin: 2px 8px 6px;
+}
+
+.m-vpn-modes button {
+  flex: 1;
+  padding: 9px 4px;
+  border-radius: 10px;
+  border: 1px solid var(--bg-warm-2);
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.m-vpn-modes button.on {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+}
+
+.m-vpn-rules-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 8px 4px;
+}
+
+.m-vpn-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-vpn-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+}
+
+.m-vpn-mono {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: ltr; /* домен — LTR и в арабском UI */
+}
+
+.m-vpn-seg {
+  display: flex;
+  border: 1px solid var(--bg-warm-2);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.m-vpn-seg button {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.m-vpn-seg button.on {
+  background: var(--accent-neon);
+  color: var(--bg-base);
+}
+
+.m-vpn-rule-del {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.m-vpn-rule-del:active {
+  color: var(--err);
+  background: var(--hover-neutral);
+}
+
+.m-vpn-rule-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.m-vpn-rule-domain {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--bg-warm-2);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.m-vpn-rule-btn {
+  border: 1px solid var(--bg-warm-2);
+  border-radius: 10px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  padding: 9px 10px;
+  white-space: nowrap;
+}
+
+/* индикатор-щит в шапке: сигнальные цвета по data-vpn (гайд 06 §2) */
+.m-vpn-shield[data-vpn="connecting"] {
+  color: var(--warn);
+}
+
+.m-vpn-shield[data-vpn="connected"] {
+  color: var(--ok);
+}
+
+.m-vpn-shield[data-vpn="error"] {
+  color: var(--err);
+}
+
+/* гайд-ловушка [hidden] против display-правил (как .panel десктопа,
+   duopulse-090): .m-icon — inline-flex, .m-vpn-stats/.m-vpn-rules-box —
+   flex; без этих правил атрибут hidden не прячет (поймано релизным смоуком
+   171 — щит висел в шапке при выключенном тоннеле) */
+.m-vpn-shield[hidden],
+.m-vpn-stats[hidden],
+.m-vpn-rules-box[hidden] {
+  display: none;
+}

@@ -892,4 +892,15 @@ export const dict: Record<string, string> = {
   "VPN: {state} · {ep}": "VPN: {state} · {ep}",
   "Профиль: {v}": "Profil: {v}",
   "Трафик тоннеля: rx {rx} КБ / tx {tx} КБ": "Trafic tunel: rx {rx} KB / tx {tx} KB",
+
+  // Foaia „VPN” a ramurii mobile (duopulse-171, paritate 8/8)
+  "Профили": "Profiluri",
+  "активен": "activ",
+  "пинг": "ping",
+  "handshake": "handshake",
+  "Импортировать .conf…": "Importă .conf…",
+  "домен, например example.com": "domeniu, de ex. example.com",
+  "Импорт отменён": "Import anulat",
+  "Не удалось прочитать файл": "Nu am putut citi fișierul",
+  "VPN: не удалось прочитать состояние": "VPN: nu am putut citi starea",
 };

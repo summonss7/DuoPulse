@@ -64,3 +64,8 @@
 # ProxyController, зовётся из Rust mobile_vpn.rs по имени через JNI). Та же
 # грабля, что 083/102/119: без Java-ссылок R8 вырезает/переименует методы.
 -keep class dev.duopulse.mobile.MobileProxyHelper { *; }
+# duopulse-171: JNI-хелпер SAF-пикера .conf профиля WireGuard
+# (MobileVpnHelper.pick, зовётся из Rust mobile_vpn.rs по имени через JNI).
+# Та же грабля, что 083/102/119/170: без Java-ссылок R8 вырезает/переименует
+# методы — UnsatisfiedLinkError в release.
+-keep class dev.duopulse.mobile.MobileVpnHelper { *; }

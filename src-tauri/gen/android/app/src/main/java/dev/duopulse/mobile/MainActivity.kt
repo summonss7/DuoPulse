@@ -66,4 +66,12 @@ class MainActivity : TauriActivity() {
     // duopulse-179: видео при живом приложении — так же
     MobileVideoHelper.handle(this, intent)
   }
+
+  // duopulse-171: SAF-пикер .conf профиля WireGuard (MobileVpnHelper) —
+  // onActivityResult у TauriActivity не переопределён, requestCode свой
+  @Deprecated("deprecated in AOSP; простой путь без activity-result API")
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    super.onActivityResult(requestCode, resultCode, data)
+    MobileVpnHelper.onActivityResult(requestCode, resultCode, data)
+  }
 }

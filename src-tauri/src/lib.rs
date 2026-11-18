@@ -200,6 +200,10 @@ fn mobile_run() {
             // Диагностика (duopulse-164): старт сеанса — до открытия окна,
             // «время сеанса» снимка честное с самого запуска.
             mobile_diag::init();
+            // Split-правила VPN (duopulse-171): общий стор с роутером — правки
+            // команд видны соединениям сразу; персист vpn/split-rules.json.
+            // Сохранённый режим поднимет mobile_vpn_restore на старте UI.
+            mobile_vpn::init_rules(&dir);
             // Полный адблок оверлея (duopulse-144): движок из кэша прошлой
             // сессии публикуется сразу, списки досматривает фоновая нить;
             // JNI-вызовы MobileAdblockNative падают в этот же синглтон
@@ -276,6 +280,15 @@ fn mobile_run() {
             mobile_vpn::mobile_vpn_set_enabled,
             mobile_vpn::mobile_vpn_status,
             mobile_vpn::mobile_vpn_test_connection,
+            // Правила и режимы (duopulse-171, паритет 8/8): split-правила,
+            // режимы off/global/split, SAF-пикер .conf и восстановление
+            // сохранённого тоннеля на старте UI.
+            mobile_vpn::mobile_vpn_set_mode,
+            mobile_vpn::mobile_vpn_get_rules,
+            mobile_vpn::mobile_vpn_add_rule,
+            mobile_vpn::mobile_vpn_remove_rule,
+            mobile_vpn::mobile_vpn_pick_conf,
+            mobile_vpn::mobile_vpn_restore,
             #[cfg(debug_assertions)]
             mobile_download::cmd::duo_debug_save_music,
             mobile_history::history_bookmark_add,

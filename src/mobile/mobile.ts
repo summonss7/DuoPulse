@@ -36,6 +36,7 @@ import { MobileBookmarks } from "./bookmarks";
 import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
 import { MobileHistory } from "./history";
 import { MobileDiagnostics } from "./diagnostics";
+import { MobileVpn } from "./vpn";
 import { MobilePassSave } from "./pass-save";
 import { installMobileAccount } from "./account";
 import { createMobileUpdater, mb, readLastCheck, type UpdaterUi } from "./updater";
@@ -110,6 +111,7 @@ root.innerHTML = `
         <button id="mHistory" class="m-check-update" data-i18n="История">История</button>
         <button id="mReopen" class="m-check-update" data-i18n="Восстановить вкладку" hidden>Восстановить вкладку</button>
         <button id="mTranslate" class="m-check-update" data-i18n="Перевести текст…">Перевести текст…</button>
+        <button id="mVpn" class="m-check-update" data-i18n="VPN">VPN</button>
         <button id="mDiag" class="m-check-update" data-i18n="Диагностика">Диагностика</button>
         <button id="mCheckUpdate" class="m-check-update" data-i18n="Проверить обновления">Проверить обновления</button>
         <p class="m-menu-version" id="mVersionMenu"></p>
@@ -128,6 +130,7 @@ const menuBtn = root.querySelector<HTMLButtonElement>("#mMenu")!;
 const menuWrap = root.querySelector<HTMLElement>("#mMenuWrap")!;
 const historyBtn = root.querySelector<HTMLButtonElement>("#mHistory")!;
 const diagBtn = root.querySelector<HTMLButtonElement>("#mDiag")!;
+const vpnBtn = root.querySelector<HTMLButtonElement>("#mVpn")!;
 const reopenBtn = root.querySelector<HTMLButtonElement>("#mReopen")!;
 const privateBtn = root.querySelector<HTMLButtonElement>("#mPrivate")!;
 const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
@@ -403,6 +406,24 @@ diagBtn.addEventListener("click", () => {
   setMenu(false);
   diagnostics.setSheet(true);
 });
+
+// ── VPN (duopulse-171, паритет 8/8): лист из меню «⋮» — тумблер тоннеля
+// WireGuard, живой статус (rx/tx/ping событиями vpn:stats), профили (импорт
+// .conf системным пикером SAF, удаление с ключом Keystore), режимы
+// off/global/split и редактор split-правил; индикатор-щит в шапке при
+// активном тоннеле. Восстановление сохранённого тоннеля — на старте (режим
+// из split-rules.json переживает рестарт).
+const vpn = new MobileVpn({
+  content,
+  note,
+  closeMenu: () => setMenu(false),
+  barTop: root.querySelector<HTMLElement>(".m-bar-top")!,
+});
+vpnBtn.addEventListener("click", () => {
+  setMenu(false);
+  vpn.setSheet(true);
+});
+vpn.restoreOnBoot();
 
 // ── Аккаунт Aila (этап 6 duopulse-112): блок в меню «⋮», листы входа и
 // паролей; синк паролей/закладок — общее ядро с десктопом (aila.rs). После

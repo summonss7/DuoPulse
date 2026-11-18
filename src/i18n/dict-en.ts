@@ -906,4 +906,15 @@ export const dict: Record<string, string> = {
   "VPN: {state} · {ep}": "VPN: {state} · {ep}",
   "Профиль: {v}": "Profile: {v}",
   "Трафик тоннеля: rx {rx} КБ / tx {tx} КБ": "Tunnel traffic: rx {rx} KB / tx {tx} KB",
+
+  // Лист «VPN» мобильной ветки (duopulse-171, паритет 8/8)
+  "Профили": "Profiles",
+  "активен": "active",
+  "пинг": "ping",
+  "handshake": "handshake",
+  "Импортировать .conf…": "Import .conf…",
+  "домен, например example.com": "domain, e.g. example.com",
+  "Импорт отменён": "Import cancelled",
+  "Не удалось прочитать файл": "Failed to read the file",
+  "VPN: не удалось прочитать состояние": "VPN: failed to read state",
 };
