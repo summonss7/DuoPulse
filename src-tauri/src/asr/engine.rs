@@ -11,6 +11,10 @@
 //! Транспорт изолирован за [`AsrTransport`] (тесты — подменные ответы без
 //! сети, по образцу translate/http.rs); таймаут запроса длинный — чанк
 //! 5 минут на локальном whisper считается десятки секунд.
+//!
+//! duopulse-168 (паритет 5/8): на Android вместо HTTP-процесса — нативная
+//! libwhisperjni в APK, [`local_jni`] зовёт её через MobileAsrHelper;
+//! ответ движка — тот же verbose_json, разбирается общим parse_verbose_json.
 
 use std::time::Duration;
 
@@ -81,10 +85,15 @@ pub enum AsrEndpoint {
         key: String,
         model: String,
     },
+    /// Локальная нативная библиотека whisper.cpp (Android, duopulse-168):
+    /// libwhisperjni.so через MobileAsrHelper — HTTP нет вообще, транспорт
+    /// [`local_jni`] ходит JNI-вызовами; base_url-подобная роль у model_path.
+    LocalJni { model_path: String },
 }
 
 impl AsrEndpoint {
     /// Полный URL запроса и заголовки (Content-Type проставляет транспорт).
+    /// LocalJni сюда не попадает: конвейер ведёт его мимо HTTP (core.rs).
     fn request(&self) -> (String, Vec<(&'static str, String)>) {
         match self {
             Self::LocalWhisper { base_url } => (
@@ -95,6 +104,7 @@ impl AsrEndpoint {
                 format!("{}/audio/transcriptions", base_url.trim_end_matches('/')),
                 vec![("Authorization", format!("Bearer {key}"))],
             ),
+            Self::LocalJni { model_path } => (format!("jni:whisper:{model_path}"), Vec::new()),
         }
     }
 }
@@ -442,6 +452,236 @@ pub fn transcribe(
             }
             Err(e) => return Err(e),
         }
+    }
+}
+
+// --- локальный движок через JNI (Android, duopulse-168) ------------------------
+
+/// Нативный локальный провайдер (libwhisperjni.so → MobileAsrHelper.kt):
+/// держит один загруженный whisper_context на приложение (как один
+/// whisper-server на десктопе), перезагружает при смене модели и ВЫГРУЖАЕТ
+/// после 10 минут простоя — та же семантика «простой → процесс гаснет»
+/// (server.rs), только вместо процесса — nativeFree контекста. Ответ шима —
+/// verbose_json, разбор общий [`parse_verbose_json`].
+#[cfg(target_os = "android")]
+pub mod local_jni {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    use jni::objects::JValue;
+
+    use super::{parse_verbose_json, AsrError, Transcription};
+
+    struct Running {
+        model_path: String,
+        ctx_id: i64,
+        last_used: Instant,
+    }
+
+    /// Один контекст на процесс; janitor-нить стартует при первой загрузке.
+    struct Manager {
+        running: Mutex<Option<Running>>,
+        reaper_started: std::sync::atomic::AtomicBool,
+    }
+
+    static MANAGER: OnceLock<Manager> = OnceLock::new();
+
+    fn manager() -> &'static Manager {
+        MANAGER.get_or_init(|| Manager {
+            running: Mutex::new(None),
+            reaper_started: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// Простое имя JNI-хелпера (пакет dev.duopulse.mobile).
+    const HELPER: &str = "dev.duopulse.mobile.MobileAsrHelper";
+
+    /// Потоков whisper: 4 — компромисс телефонов (big.LITTLE), как
+    /// whisper-server десктопа берёт до 8 ядер, но на устройстве перегрев
+    /// и троттлинг дороже.
+    fn threads() -> i32 {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(4) as i32
+    }
+
+    /// JNI-вызов в MobileAsrHelper (статика; ошибки JVM — строкой).
+    fn call_static_string(
+        method: &str,
+        sig: &str,
+        args: &[jni::objects::JValue],
+    ) -> Result<String, String> {
+        crate::mobile_jni::with_jni(|env, context| {
+            let class = crate::mobile_jni::app_class(env, context, HELPER)?;
+            let out = env
+                .call_static_method(&class, method, sig, args)
+                .map_err(|e| format!("{method}: {e}"))?
+                .l()
+                .map_err(|e| format!("{method}: {e}"))?;
+            let js = jni::objects::JString::from(out);
+            env.get_string(&js)
+                .map(|s| s.to_string_lossy().into_owned())
+                .map_err(|e| format!("{method}: строка: {e}"))
+        })
+    }
+
+    /// Выгрузить контекст (nativeFree; ошибки не критичны).
+    fn free_ctx(ctx_id: i64) {
+        let _ = crate::mobile_jni::with_jni(|env, context| {
+            let class = crate::mobile_jni::app_class(env, context, HELPER)?;
+            env.call_static_method(
+                &class,
+                "nativeFree",
+                "(J)V",
+                &[JValue::Long(ctx_id)],
+            )
+            .map_err(|e| e.to_string())
+            .map(|_| ())
+        });
+    }
+
+    /// Загрузить модель (nativeInit): 0 — неудача (шим вернёт "error: …").
+    fn init_ctx(model_path: &str) -> Result<i64, String> {
+        crate::mobile_jni::with_jni(|env, context| {
+            let class = crate::mobile_jni::app_class(env, context, HELPER)?;
+            let jpath = crate::mobile_jni::jstr(env, model_path)?;
+            let out = env
+                .call_static_method(
+                    &class,
+                    "nativeInit",
+                    "(Ljava/lang/String;I)J",
+                    &[(&jpath).into(), JValue::Int(threads())],
+                )
+                .map_err(|e| format!("nativeInit: {e}"))?
+                .j()
+                .map_err(|e| format!("nativeInit: {e}"))?;
+            Ok(out)
+        })
+        .and_then(|id| {
+            if id > 0 {
+                Ok(id)
+            } else {
+                Err("локальный движок whisper не смог загрузить модель".into())
+            }
+        })
+    }
+
+    /// Поднять/переиспользовать контекст для модели.
+    fn ensure_model(model_path: &str) -> Result<i64, AsrError> {
+        let m = manager();
+        let mut guard = m.running.lock().expect("asr-jni: лок не отравлен");
+        if let Some(r) = guard.as_ref() {
+            if r.model_path == model_path {
+                // touch нельзя через &ref — пересоберём запись
+                let id = r.ctx_id;
+                *guard = Some(Running {
+                    model_path: r.model_path.clone(),
+                    ctx_id: id,
+                    last_used: Instant::now(),
+                });
+                return Ok(id);
+            }
+            if let Some(old) = guard.take() {
+                free_ctx(old.ctx_id);
+            }
+        }
+        let id = init_ctx(model_path).map_err(|e| AsrError::Config(format!("локальный движок: {e}")))?;
+        // janitor: выгрузка после 10 мин простоя (как whisper-server десктопа)
+        if !m
+            .reaper_started
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            std::thread::spawn(|| loop {
+                std::thread::sleep(Duration::from_secs(60));
+                let m = manager();
+                let mut guard = m.running.lock().expect("asr-jni: лок не отравлен");
+                let expired = guard
+                    .as_ref()
+                    .is_some_and(|r| r.last_used.elapsed() > Duration::from_secs(600));
+                if expired {
+                    if let Some(old) = guard.take() {
+                        eprintln!("[asr] whisper-jni: простой 10 мин — выгружаю модель");
+                        free_ctx(old.ctx_id);
+                    }
+                }
+            });
+        }
+        *guard = Some(Running {
+            model_path: model_path.to_string(),
+            ctx_id: id,
+            last_used: Instant::now(),
+        });
+        Ok(id)
+    }
+
+    /// Загруженная сейчас модель (статус настроек/диагностика).
+    pub fn loaded_model_path() -> Option<String> {
+        manager()
+            .running
+            .lock()
+            .expect("asr-jni: лок не отравлен")
+            .as_ref()
+            .map(|r| r.model_path.clone())
+    }
+
+    /// Выгрузить модель (удаление файла модели, смена провайдера) — если
+    /// загружена именно она (или любая: файл сейчас уйдёт с диска).
+    pub fn unload() {
+        let mut guard = manager().running.lock().expect("asr-jni: лок не отравлен");
+        if let Some(old) = guard.take() {
+            free_ctx(old.ctx_id);
+        }
+    }
+
+    /// Транскрипция PCM 16 кГц моно (i16 LE → байты): шим кормит whisper_full
+    /// с таймстампами сегментов, ответ — verbose_json. Язык пустой — авто.
+    pub fn transcribe_pcm(
+        model_path: &str,
+        pcm: &[i16],
+        lang: &str,
+        prompt: Option<&str>,
+    ) -> Result<Transcription, AsrError> {
+        let ctx_id = ensure_model(model_path)?;
+        let mut bytes = Vec::with_capacity(pcm.len() * 2);
+        for s in pcm {
+            bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        let out = crate::mobile_jni::with_jni(|env, context| {
+            let class = crate::mobile_jni::app_class(env, context, HELPER)?;
+            let arr = env
+                .new_byte_array(bytes.len() as i32)
+                .map_err(|e| format!("pcm-буфер: {e}"))?;
+            let signed: Vec<i8> = bytes.iter().map(|b| *b as i8).collect();
+            env.set_byte_array_region(&arr, 0, &signed)
+                .map_err(|e| format!("pcm-буфер: {e}"))?;
+            let jlang = crate::mobile_jni::jstr(env, lang)?;
+            let jprompt = crate::mobile_jni::jstr(env, prompt.unwrap_or(""))?;
+            let out = env
+                .call_static_method(
+                    &class,
+                    "nativeTranscribe",
+                    "(J[BLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                    &[
+                        JValue::Long(ctx_id),
+                        (&arr).into(),
+                        (&jlang).into(),
+                        (&jprompt).into(),
+                    ],
+                )
+                .map_err(|e| format!("nativeTranscribe: {e}"))?
+                .l()
+                .map_err(|e| format!("nativeTranscribe: {e}"))?;
+            let js = jni::objects::JString::from(out);
+            env.get_string(&js)
+                .map(|s| s.to_string_lossy().into_owned())
+                .map_err(|e| format!("nativeTranscribe: строка: {e}"))
+        })
+        .map_err(|e| AsrError::Server(format!("локальный движок: {e}")))?;
+        if let Some(err) = out.strip_prefix("error:") {
+            return Err(AsrError::Server(format!(
+                "локальный движок: {}",
+                err.trim()
+            )));
+        }
+        parse_verbose_json(&out)
     }
 }
 

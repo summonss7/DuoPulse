@@ -1,10 +1,17 @@
 //! DuoPulse — ASR-субтитры мобильной ветки (карточка duopulse-167, паритет
-//! 4/8 аудита duopulse-156): облачный OpenAI-совместимый провайдер для видео
-//! без дорожек субтитров. Локальный whisper.exe на Android не вариант (этап
-//! 5/8 — libwhisper под NDK), поэтому провайдер один — облако; модули asr/
-//! (engine — AsrTransport над ureq+rustls, decode — symphonia portable,
-//! cache — asr_tracks в duopulse.db профиля, config) переиспользуются с
-//! десктопом, серверная часть (server.rs) не включается.
+//! 4/8 аудита duopulse-156; локальный движок — duopulse-168, 5/8): для видео
+//! без дорожек субтитров ДВА провайдера:
+//!
+//! - **облако** — OpenAI-совместимый API (ключ — Android Keystore), этап 4/8;
+//! - **локальный** — whisper.cpp нативной библиотекой libwhisperjni в APK
+//!   (engine::local_jni ← MobileAsrHelper.kt): работает офлайн, аудио не
+//!   покидает устройство; модель ggml (tiny — дефолт, base — опция) качается
+//!   в профиль с прогрессом и sha256-проверкой (asr/models.rs), движок
+//!   выгружается после 10 минут простоя — семантика whisper-server десктопа.
+//!
+//! Модули asr/ (engine, decode, cache, config, models) переиспользуются с
+//! десктопом, серверная часть (server.rs — процесс whisper-server.exe) не
+//! включается.
 //!
 //! Цепочка (канал тот же, что у загрузок mobile_download — googlevideo
 //! отдаёт медиа только браузерному окружению youtube-origin, нативный ureq
@@ -35,16 +42,45 @@
 /// Имя события прогресса (то же, что у десктопного конвейера).
 pub const ASR_PROGRESS_EVENT: &str = "subtitles:asr_progress";
 
-/// Настройки ASR мобильной ветки для UI (asr_get_settings): провайдер один —
-/// облако, локальные поля десктопа (движок/модель whisper) не показываются.
+/// Имя события менеджера моделей (duopulse-168): скачивание/проверка/удаление
+/// ggml — вне конвейера конкретного видео, отдельная форма.
+pub const ASR_MODEL_EVENT: &str = "subtitles:asr_model_progress";
+
+/// Прогресс менеджера моделей (subtitles:asr_model_progress): size — "tiny" |
+/// "base", phase — download | done | error (done/total — байты).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsrModelProgress {
+    pub size: String,
+    pub phase: String,
+    pub done: u32,
+    pub total: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Настройки ASR мобильной ветки для UI (asr_get_settings): выбранный
+/// провайдер (облако | локальный whisper), конфиг облака и статус моделей
+/// (локальный провайдер предлагается только со скачанной моделью).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MobileAsrSettings {
     pub enabled: bool,
+    /// "cloud" | "local".
+    pub provider: String,
     pub openai_base_url: String,
     pub openai_model: String,
     /// Ключ API сохранён (Android Keystore; сами ключи наружу не отдаются).
     pub has_api_key: bool,
+    /// Выбранная модель локального движка: "tiny" | "base".
+    pub local_model: String,
+    /// ggml-tiny на месте (размер сверен).
+    pub model_tiny_downloaded: bool,
+    /// ggml-base на месте.
+    pub model_base_downloaded: bool,
+    /// Локальный провайдер готов: выбранная модель скачана (движок в APK
+    /// есть всегда — libwhisperjni грузится всеми сборками).
+    pub local_ready: bool,
 }
 
 /// Приписать чанк к буферу с потолком: аудио длиннее max — честный отказ
@@ -66,44 +102,125 @@ pub fn append_chunk(buf: &mut Vec<u8>, chunk: &[u8], max: usize) -> Result<(), S
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod cmd {
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use tauri::{AppHandle, Emitter, State};
     use tauri::command;
 
     use crate::asr::cache::{now_ms, AsrCache};
-    use crate::asr::config::{self, AsrConfig, AsrProviderId};
-    use crate::asr::core::{transcribe_pcm, AsrJobs, SubtitlesAsrProgress, AUDIO_MAX_BYTES};
+    use crate::asr::config::{self, AsrConfig, AsrProviderId, LocalModelSize};
+    use crate::asr::core::{transcribe_pcm, transcribe_pcm_with, AsrJobs, SubtitlesAsrProgress, AUDIO_MAX_BYTES};
     use crate::asr::decode::{chunk_pcm, decode_to_pcm16k_mono};
     use crate::asr::engine::{self, AsrEndpoint, UreqAsrTransport};
+    use crate::asr::models;
     use crate::duo_mobile::{net::DuoManaged, DuoCue, valid_video_id};
     use crate::mobile_download::{cmd::visionos_player_response, pick_audio_format_full};
 
-    use super::{append_chunk, MobileAsrSettings, ASR_PROGRESS_EVENT};
+    use super::{append_chunk, AsrModelProgress, MobileAsrSettings, ASR_MODEL_EVENT, ASR_PROGRESS_EVENT};
 
-    /// Вид настроек мобильной ветки: конфиг + факт наличия ключа. Провайдер
-    /// принудительно облако — локального whisper на Android нет (этап 5/8).
-    pub fn mobile_settings(cfg: &AsrConfig, has_key: bool) -> MobileAsrSettings {
-        MobileAsrSettings {
-            enabled: cfg.enabled && cfg.provider == AsrProviderId::Openai,
-            openai_base_url: cfg.openai_base_url.clone(),
-            openai_model: cfg.openai_model.clone(),
-            has_api_key: has_key,
+    /// «tiny» | «base» (мобильный выбор моделей; small — десктопный).
+    fn parse_local_size(raw: &str) -> Option<LocalModelSize> {
+        match raw.trim().to_lowercase().as_str() {
+            "tiny" => Some(LocalModelSize::Tiny),
+            "base" => Some(LocalModelSize::Base),
+            _ => None,
         }
     }
 
-    /// Конфиг облака из аргументов asr_set_settings: провайдер всегда Openai,
-    /// локальные параметры — дефолты (в мобильной ветке не настраиваются).
-    /// Валидация — как у десктопа (облаку нужен http(s)-адрес и модель).
-    pub fn cloud_config(enabled: bool, base_url: &str, model: &str) -> AsrConfig {
-        AsrConfig {
+    fn size_label(size: LocalModelSize) -> &'static str {
+        match size {
+            LocalModelSize::Tiny => "tiny",
+            LocalModelSize::Base => "base",
+            LocalModelSize::Small => "small",
+        }
+    }
+
+    /// Вид настроек мобильной ветки: конфиг + статус моделей. local_ready —
+    /// выбранная модель на месте: без неё UI локальный провайдер не предлагает.
+    pub fn mobile_settings(
+        cfg: &AsrConfig,
+        has_key: bool,
+        tiny: bool,
+        base: bool,
+    ) -> MobileAsrSettings {
+        let downloaded = match cfg.local_model {
+            LocalModelSize::Tiny => tiny,
+            LocalModelSize::Base => base,
+            LocalModelSize::Small => false,
+        };
+        MobileAsrSettings {
+            enabled: cfg.enabled,
+            provider: if cfg.provider == AsrProviderId::Local { "local".into() } else { "cloud".into() },
+            openai_base_url: cfg.openai_base_url.clone(),
+            openai_model: cfg.openai_model.clone(),
+            has_api_key: has_key,
+            local_model: size_label(cfg.local_model).into(),
+            model_tiny_downloaded: tiny,
+            model_base_downloaded: base,
+            local_ready: cfg.provider == AsrProviderId::Local && downloaded,
+        }
+    }
+
+    /// Конфиг ASR мобильной ветки: десктопный дефолт (local + base — Base
+    /// выбран для ru-качества на десктопе) телефону не подходит — до первого
+    /// сохранения и для облачного провайдера предлагаем tiny (78 МБ, заметно
+    /// быстрее мобильного CPU; карточка duopulse-168). Осознанный выбор
+    /// «локальный + base» сохраняется и не переопределяется.
+    fn load_mobile_config(dir: &std::path::Path) -> AsrConfig {
+        let mut cfg = config::load_config(dir);
+        if !config::has_saved_config(dir) || cfg.provider != AsrProviderId::Local {
+            cfg.local_model = LocalModelSize::Tiny;
+        }
+        cfg
+    }
+
+    /// Снимок настроек с текущим статусом моделей (общий хвост get/set).
+    fn settings_view(dir: &std::path::Path) -> Result<MobileAsrSettings, String> {
+        let cfg = load_mobile_config(dir);
+        Ok(mobile_settings(
+            &cfg,
+            config::has_api_key(dir),
+            models::is_downloaded(dir, LocalModelSize::Tiny),
+            models::is_downloaded(dir, LocalModelSize::Base),
+        ))
+    }
+
+    /// Конфиг из аргументов asr_set_settings (duopulse-168: провайдер —
+    /// выбор). Локальному нужна скачанная модель (иначе нечего поднимать);
+    /// облаку — http(s)-адрес и модель, как у десктопа. Поля облака храним
+    /// и при локальном провайдере — переключение туда-обратно не теряет ввод.
+    pub fn config_from_args(
+        enabled: bool,
+        provider: &str,
+        local_model: &str,
+        base_url: &str,
+        model: &str,
+        dir: &std::path::Path,
+    ) -> Result<AsrConfig, String> {
+        let cloud = || AsrConfig {
             enabled,
             provider: AsrProviderId::Openai,
-            local_model: Default::default(),
+            // мобильный дефолт — tiny (см. settings_view: Base — десктопный)
+            local_model: LocalModelSize::Tiny,
             local_engine_path: String::new(),
             openai_base_url: base_url.trim().to_string(),
             openai_model: model.trim().to_string(),
+        };
+        if provider.trim().eq_ignore_ascii_case("local") {
+            let size = parse_local_size(local_model)
+                .ok_or_else(|| "модель локального движка — tiny или base".to_string())?;
+            if !models::is_downloaded(dir, size) {
+                return Err("модель локального движка не скачана — скачайте её в настройках ASR".into());
+            }
+            let mut cfg = cloud();
+            cfg.provider = AsrProviderId::Local;
+            cfg.local_model = size;
+            return Ok(cfg);
         }
+        let cfg = cloud();
+        cfg.validate()?;
+        Ok(cfg)
     }
 
     /// Ответ конвейера: cues + язык (запрошенный или определённый движком).
@@ -130,11 +247,12 @@ pub mod cmd {
 
     /// Скачанное аудио задачи: поколение (отмена) + ожидаемый размер (прогресс
     /// фазы audio) + байты (память Core — как самофетч десктопа; после
-    /// декодирования освобождаются).
+    /// декодирования освобождаются) + подпись движка для прогресса фазы audio.
     struct AsrAudio {
         gen: u64,
         expected_size: u64,
         bytes: Vec<u8>,
+        engine: String,
     }
 
     /// Состояние ASR мобильной ветки: поколения отмен + буферы аудио задач.
@@ -175,7 +293,8 @@ pub mod cmd {
         );
     }
 
-    /// Аргументы asr_set_settings (camelCase на фронте).
+    /// Аргументы asr_set_settings (camelCase на фронте; provider/local_model
+    /// — опции duopulse-168: старые вызовы без них = облако, как в 167).
     #[derive(Debug, serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct AsrSetArgs {
@@ -184,24 +303,90 @@ pub mod cmd {
         pub openai_model: String,
         /// Ключ API: None — не менять, Some("") — удалить, строка — записать.
         pub api_key: Option<String>,
+        /// "cloud" (дефолт) | "local".
+        pub provider: Option<String>,
+        /// "tiny" | "base" — для провайдера local.
+        pub local_model: Option<String>,
     }
 
-    /// asr_get_settings: конфиг облака + факт наличия ключа.
+    /// Одна загрузка модели одновременно (фоновые нити — глобальный флаг).
+    static MODEL_DOWNLOADING: AtomicBool = AtomicBool::new(false);
+
+    /// Событие менеджера моделей в UI-webview.
+    fn emit_model(app: &AppHandle, size: &str, phase: &str, done: u32, total: u32, error: Option<String>) {
+        let _ = app.emit(
+            ASR_MODEL_EVENT,
+            AsrModelProgress {
+                size: size.to_string(),
+                phase: phase.to_string(),
+                done,
+                total,
+                error,
+            },
+        );
+    }
+
+    /// asr_get_settings: конфиг + статус моделей локального движка.
     #[command]
     pub fn asr_get_settings() -> Result<MobileAsrSettings, String> {
-        let dir = profile_dir()?;
-        let cfg = config::load_config(&dir);
-        Ok(mobile_settings(&cfg, config::has_api_key(&dir)))
+        settings_view(&profile_dir()?)
     }
 
-    /// asr_set_settings: конфиг — settings.json профиля (раздел "asr",
-    /// провайдер всегда облако), ключ — Android Keystore (secrets.rs).
+    /// asr_set_settings: конфиг — settings.json профиля (раздел "asr";
+    /// провайдер local требует скачанную модель), ключ — Android Keystore.
     #[command]
     pub fn asr_set_settings(args: AsrSetArgs) -> Result<MobileAsrSettings, String> {
         let dir = profile_dir()?;
-        let cfg = cloud_config(args.enabled, &args.openai_base_url, &args.openai_model);
+        let cfg = config_from_args(
+            args.enabled,
+            args.provider.as_deref().unwrap_or("cloud"),
+            args.local_model.as_deref().unwrap_or("tiny"),
+            &args.openai_base_url,
+            &args.openai_model,
+            &dir,
+        )?;
         config::save_settings(&dir, &cfg, args.api_key.as_deref())?;
-        Ok(mobile_settings(&cfg, config::has_api_key(&dir)))
+        settings_view(&dir)
+    }
+
+    /// asr_model_download (duopulse-168): скачать ggml в профиль фоновой
+    /// нитью — прогресс событием subtitles:asr_model_progress (байты),
+    /// завершение — done (модель проверена: размер + sha256) или error.
+    /// Повторный вызов при активной загрузке — честный отказ.
+    #[command]
+    pub fn asr_model_download(app: AppHandle, size: String) -> Result<(), String> {
+        let size = parse_local_size(&size).ok_or("размер модели — tiny | base")?;
+        let dir = profile_dir()?;
+        if models::is_downloaded(&dir, size) {
+            emit_model(&app, size_label(size), "done", 0, 0, None);
+            return Ok(());
+        }
+        if MODEL_DOWNLOADING.swap(true, Ordering::SeqCst) {
+            return Err("модель уже скачивается".into());
+        }
+        std::thread::spawn(move || {
+            let label = size_label(size);
+            let res = models::download_model(&dir, size, &mut |done, total| {
+                emit_model(&app, label, "download", done as u32, total as u32, None);
+            });
+            match res {
+                Ok(_) => emit_model(&app, label, "done", 0, 0, None),
+                Err(e) => emit_model(&app, label, "error", 0, 0, Some(e)),
+            }
+            MODEL_DOWNLOADING.store(false, Ordering::SeqCst);
+        });
+        Ok(())
+    }
+
+    /// asr_model_delete: убрать модель (и .part-хвост) из профиля; загруженный
+    /// движок выгружается — контекст ссылался на этот файл.
+    #[command]
+    pub fn asr_model_delete(size: String) -> Result<MobileAsrSettings, String> {
+        let size = parse_local_size(&size).ok_or("размер модели — tiny | base")?;
+        let dir = profile_dir()?;
+        engine::local_jni::unload();
+        models::delete_model(&dir, size)?;
+        settings_view(&dir)
     }
 
     /// Эндпоинт облака по настройкам: провайдер мобильной ветки один, без
@@ -236,13 +421,24 @@ pub mod cmd {
         }
         let lang = lang.trim().to_lowercase();
         let dir = profile_dir()?;
-        let cfg = config::load_config(&dir);
-        if !cfg.enabled || cfg.provider != AsrProviderId::Openai {
+        let cfg = load_mobile_config(&dir);
+        if !cfg.enabled {
             return Err("распознавание речи выключено в настройках ASR".into());
         }
-        // ключ проверяем сразу — отказ до скачивания аудио честнее
-        cloud_endpoint(&dir, &cfg)?;
-        let engine_id = engine::engine_id(AsrProviderId::Openai, &cfg.openai_model);
+        // провайдер: локальному — модель на месте, облаку — ключ (отказ до
+        // скачивания аудио честнее, чем после)
+        let engine_id = match cfg.provider {
+            AsrProviderId::Local => {
+                if !models::is_downloaded(&dir, cfg.local_model) {
+                    return Err("модель локального движка не скачана — скачайте в настройках ASR".into());
+                }
+                engine::engine_id(AsrProviderId::Local, "")
+            }
+            AsrProviderId::Openai => {
+                cloud_endpoint(&dir, &cfg)?;
+                engine::engine_id(AsrProviderId::Openai, &cfg.openai_model)
+            }
+        };
         // кэш: повторный просмотр того же видео тем же движком — без сети
         if let Some((cues, cached_lang)) = cache.get(&video_id, &engine_id, &lang, now_ms()) {
             // событие как у десктопного конвейера: панель показывает «из кэша»
@@ -285,6 +481,7 @@ pub mod cmd {
                 gen,
                 expected_size: size,
                 bytes: Vec::new(),
+                engine: engine_id.clone(),
             });
         Ok(AsrStartOutcome::NeedAudio { url, size })
     }
@@ -306,9 +503,8 @@ pub mod cmd {
                 return Err("задача распознавания не начиналась".into());
             };
             append_chunk(&mut job.bytes, &chunk, AUDIO_MAX_BYTES)?;
-            // engine_id до старта неизвестен панели — прогресс без него
-            // не рисуется; храним конфиг-независимую подпись облака
-            ("cloud", job.bytes.len() as u32, job.expected_size as u32)
+            // подпись движка записана при старте (local:whisper / openai:…)
+            (job.engine.clone(), job.bytes.len() as u32, job.expected_size as u32)
         };
         let _ = app.emit(
             ASR_PROGRESS_EVENT,
@@ -342,11 +538,14 @@ pub mod cmd {
         }
         let lang = lang.trim().to_lowercase();
         let dir = profile_dir()?;
-        let cfg = config::load_config(&dir);
-        if !cfg.enabled || cfg.provider != AsrProviderId::Openai {
+        let cfg = load_mobile_config(&dir);
+        if !cfg.enabled {
             return Err("распознавание речи выключено в настройках ASR".into());
         }
-        let engine_id = engine::engine_id(AsrProviderId::Openai, &cfg.openai_model);
+        let engine_id = match cfg.provider {
+            AsrProviderId::Local => engine::engine_id(AsrProviderId::Local, ""),
+            AsrProviderId::Openai => engine::engine_id(AsrProviderId::Openai, &cfg.openai_model),
+        };
         let job = st
             .audio
             .lock()
@@ -369,33 +568,50 @@ pub mod cmd {
         if !current(gen) {
             return Err("распознавание отменено".into());
         }
-        // транскрипция чанками (прогресс между запросами, отмена — на стыке)
+        // транскрипция чанками (прогресс между запросами, отмена — на стыке):
+        // локальный движок — JNI (engine::local_jni, без сети вообще), облако —
+        // HTTP-транспорт; офсеты/prompt/язык чанков — общий код core.rs
         let chunks = chunk_pcm(&pcm);
         let total = chunks.len() as u32;
         emit_progress(&app, &video_id, &engine_id, "transcribe", 0, total, false, None);
-        let endpoint = cloud_endpoint(&dir, &cfg)?;
-        let transport = UreqAsrTransport::new();
         let app_for_progress = app.clone();
         let video_for_progress = video_id.clone();
         let engine_for_progress = engine_id.clone();
-        let result = transcribe_pcm(
-            &transport,
-            &endpoint,
-            &chunks,
-            &lang,
-            |done, total| {
-                emit_progress(
-                    &app_for_progress,
-                    &video_for_progress,
-                    &engine_for_progress,
-                    "transcribe",
-                    done as u32,
-                    total as u32,
-                    false,
-                    None,
-                );
-            },
-        );
+        let mut on_chunk = |done: usize, total: usize| {
+            emit_progress(
+                &app_for_progress,
+                &video_for_progress,
+                &engine_for_progress,
+                "transcribe",
+                done as u32,
+                total as u32,
+                false,
+                None,
+            );
+        };
+        let result = match cfg.provider {
+            AsrProviderId::Local => {
+                if !models::is_downloaded(&dir, cfg.local_model) {
+                    return fail("модель локального движка не скачана".into());
+                }
+                let model_path = models::model_path(&dir, cfg.local_model)
+                    .display()
+                    .to_string();
+                transcribe_pcm_with(
+                    &chunks,
+                    &lang,
+                    |pcm, lang, prompt| engine::local_jni::transcribe_pcm(&model_path, pcm, lang, prompt),
+                    |done, total| on_chunk(done, total),
+                )
+            }
+            AsrProviderId::Openai => {
+                let endpoint = cloud_endpoint(&dir, &cfg)?;
+                let transport = UreqAsrTransport::new();
+                transcribe_pcm(&transport, &endpoint, &chunks, &lang, |done, total| {
+                    on_chunk(done, total)
+                })
+            }
+        };
         let (cues, detected) = match result {
             Ok(r) => r,
             Err(e) => return fail(e.message()),

@@ -26,6 +26,7 @@ import {
   createMobileAsr,
   type AsrProgressEvent,
   type AsrRunResult,
+  type LocalModelSizeId,
   type MobileAsr,
   type MobileAsrSettings,
 } from "./asr";
@@ -121,9 +122,21 @@ export class MobileDuo {
     return this.asrSettingsSnap;
   }
 
-  /** Сохранить настройки облака (панель) + обновить снимок. */
+  /** Сохранить настройки (панель) + обновить снимок. */
   async saveAsrSettings(patch: Parameters<MobileAsr["saveSettings"]>[0]): Promise<MobileAsrSettings> {
     const s = await this.asr.saveSettings(patch);
+    this.asrSettingsSnap = s;
+    return s;
+  }
+
+  /** Скачать модель локального движка (duopulse-168; прогресс — событием). */
+  async downloadModel(size: LocalModelSizeId): Promise<void> {
+    await this.asr.downloadModel(size);
+  }
+
+  /** Удалить модель локального движка + обновить снимок настроек. */
+  async deleteModel(size: LocalModelSizeId): Promise<MobileAsrSettings> {
+    const s = await this.asr.deleteModel(size);
     this.asrSettingsSnap = s;
     return s;
   }

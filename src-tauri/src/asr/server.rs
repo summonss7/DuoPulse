@@ -18,13 +18,6 @@ use std::time::{Duration, Instant};
 use super::config::{AsrConfig, LocalModelSize};
 use super::engine::AsrTransport;
 
-/// База URL моделей ggml (env DUOPULSE_ASR_MODEL_BASE_URL перекрывает; стенды
-/// раздают локально).
-fn model_base_url() -> String {
-    std::env::var("DUOPULSE_ASR_MODEL_BASE_URL")
-        .unwrap_or_else(|_| "https://huggingface.co/ggerganov/whisper.cpp/resolve/main".into())
-}
-
 /// URL zip-движка whisper-server (env DUOPULSE_ASR_ENGINE_URL перекрывает).
 /// mingw-сборка — это exe + 5 DLL (libgcc/libstdc++/libwinpthread/libgomp/
 /// libdl), упакованы одним zip. Кладётся в публичный репозиторий фидов
@@ -42,8 +35,9 @@ fn asr_dir(profile_dir: &Path) -> PathBuf {
 }
 
 /// Путь модели заданного размера в профиле (может ещё не существовать).
+/// С duopulse-168 путь и реестр — общие с мобильной веткой (models.rs).
 pub fn model_path(profile_dir: &Path, size: LocalModelSize) -> PathBuf {
-    asr_dir(profile_dir).join("models").join(size.file_name())
+    super::models::model_path(profile_dir, size)
 }
 
 /// Путь скачиваемого движка в профиле (может ещё не существовать).
@@ -131,23 +125,15 @@ pub fn download_to_file(
     Ok(done)
 }
 
-/// Скачать модель заданного размера в профиль (с проверкой размера).
+/// Скачать модель заданного размера в профиль. С duopulse-168 — общий с
+/// мобильной веткой путь models::download_model: прогресс + размер + sha256
+/// (раньше проверялся только размер).
 pub fn download_model(
     profile_dir: &Path,
     size: LocalModelSize,
     on_progress: &mut dyn FnMut(u64, u64),
 ) -> Result<PathBuf, String> {
-    let dest = model_path(profile_dir, size);
-    if dest.is_file() {
-        return Ok(dest);
-    }
-    let url = format!(
-        "{}/{}",
-        model_base_url().trim_end_matches('/'),
-        size.file_name()
-    );
-    download_to_file(&url, &dest, Some(size.bytes()), on_progress)?;
-    Ok(dest)
+    super::models::download_model(profile_dir, size, on_progress)
 }
 
 /// Скачать движок whisper-server в профиль: zip (exe + DLL mingw-рантайма)

@@ -27,6 +27,9 @@ pub mod config;
 pub mod core;
 pub mod decode;
 pub mod engine;
+/// Локальные модели ggml: скачивание/проверка sha256 (duopulse-168) —
+/// общий для десктопа (server.rs) и мобильной либы.
+pub mod models;
 // pipeline/server — десктопные (WebMessage asr-begin, SOCKS-роутер,
 // whisper-server.exe); мобильная ветка (duopulse-167) включает только
 // облачного провайдера — её конвейер в mobile_asr.rs.

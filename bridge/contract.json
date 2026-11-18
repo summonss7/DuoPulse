@@ -595,12 +595,23 @@
             "type": "string"
           },
           "LocalModelSize": {
-            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).",
-            "enum": [
-              "base",
-              "small"
-            ],
-            "type": "string"
+            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён из ДЕСКТОПНОГО выбора — ru WER 39 % — но с 5/8 мобильного паритета (duopulse-168) tiny — дефолт телефона: 78 МБ и заметно быстрее base на мобильном CPU; список размеров/хэшей — models.rs).",
+            "oneOf": [
+              {
+                "enum": [
+                  "base",
+                  "small"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Мобильный вариант (duopulse-168): телефон по умолчанию, в выбор десктопных настроек не входит.",
+                "enum": [
+                  "tiny"
+                ],
+                "type": "string"
+              }
+            ]
           }
         },
         "description": "Значение asr.get_settings для UI: конфиг + факт наличия ключа (сами ключи наружу не отдаются) + состояние локального движка (exe/модель на месте).",
@@ -743,12 +754,23 @@
             "type": "string"
           },
           "LocalModelSize": {
-            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).",
-            "enum": [
-              "base",
-              "small"
-            ],
-            "type": "string"
+            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён из ДЕСКТОПНОГО выбора — ru WER 39 % — но с 5/8 мобильного паритета (duopulse-168) tiny — дефолт телефона: 78 МБ и заметно быстрее base на мобильном CPU; список размеров/хэшей — models.rs).",
+            "oneOf": [
+              {
+                "enum": [
+                  "base",
+                  "small"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Мобильный вариант (duopulse-168): телефон по умолчанию, в выбор десктопных настроек не входит.",
+                "enum": [
+                  "tiny"
+                ],
+                "type": "string"
+              }
+            ]
           }
         },
         "description": "asr.set_settings: value — конфиг без ключа (ключ — только DPAPI); secret — ключ API облака: None — не менять, Some(\"\") — удалить, Some(k) — перезаписать.",
@@ -3201,12 +3223,23 @@
             "type": "object"
           },
           "LocalModelSize": {
-            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).",
-            "enum": [
-              "base",
-              "small"
-            ],
-            "type": "string"
+            "description": "Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён из ДЕСКТОПНОГО выбора — ru WER 39 % — но с 5/8 мобильного паритета (duopulse-168) tiny — дефолт телефона: 78 МБ и заметно быстрее base на мобильном CPU; список размеров/хэшей — models.rs).",
+            "oneOf": [
+              {
+                "enum": [
+                  "base",
+                  "small"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Мобильный вариант (duopulse-168): телефон по умолчанию, в выбор десктопных настроек не входит.",
+                "enum": [
+                  "tiny"
+                ],
+                "type": "string"
+              }
+            ]
           },
           "PrivacyConfig": {
             "description": "Раздел \"privacy\" settings.json (задача 5.1).",

@@ -2,9 +2,9 @@
 // Источник: src-tauri/src/bridge.rs → bridge/contract.json (версия контракта 15); регенерация: npm run gen:bridge.
 
 /**
- * Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён — ru WER 39 %).
+ * Размер локальной модели whisper (спайк duopulse-060: base — компромисс скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён из ДЕСКТОПНОГО выбора — ru WER 39 % — но с 5/8 мобильного паритета (duopulse-168) tiny — дефолт телефона: 78 МБ и заметно быстрее base на мобильном CPU; список размеров/хэшей — models.rs).
  */
-export type LocalModelSize = "base" | "small";
+export type LocalModelSize = ("base" | "small") | "tiny";
 /**
  * Движок распознавания (решение автора 29.10.2026 — гибрид; выбор в настройках): локальный whisper.cpp (приватно, офлайн) или облачный OpenAI-совместимый API (OpenAI / Groq / свой whisper-server).
  */

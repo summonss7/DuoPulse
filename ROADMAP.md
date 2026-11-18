@@ -1103,3 +1103,23 @@
   mkv/webm играют, без grant подсказка, PDF цел, bmgr uninstall→restore).
   Релиз 0.1.64 (мобильный + десктоп). План M-этапов не меняет (полировка
   по пожеланиям).
+- 18.11.2026: duopulse-168 — паритет-мобайл 5/8: локальный ASR на Android —
+  whisper.cpp ревизии десктопного спайка (284029c, FetchContent-пин в
+  app/cpp/CMakeLists.txt) собирается NDK 28.2.13676358 в libwhisperjni.so
+  (externalNativeBuild, GGML_OPENMP=OFF, arm64-v8a+x86_64; debug —
+  RelWithDebInfo-флаги: whisper под Debug медленнее на порядок). JNI-шим
+  cpp/whisper_jni.cpp + MobileAsrHelper.kt (R8-keep), Rust-провайдер
+  asr/engine.rs local_jni (один контекст, выгрузка после 10 мин простоя —
+  семантика whisper-server десктопа); менеджер моделей asr/models.rs общий
+  с десктопом (tiny 78 МБ — мобильный дефолт, base — опция; скачивание с
+  прогрессом + sha256, была только размер-проверка). Мобильные фиксы по
+  прогонам: load_mobile_config (десктопный дефолт local+base протекал в
+  телефон — панель уводила селект на base после скачивания tiny), блок
+  модели видим при любом провайдере (иначе свежий пользователь не мог
+  скачать модель — «На устройстве» без модели disabled). Смоуки:
+  e2e/mobile/asr-local-smoke.mjs 27/27 (debug, CDP: модель/прогон/
+  airplane-кэш/удаление) и asr-local-release-smoke.mjs — подписанный
+  release-APK без CDP (uiautomator: R8-keep, полный прогон, кэш), x86_64-
+  релиз для эмулятора — tauri --target x86_64 (abiList-условие в gradle).
+  Версия не поднималась (build:false, aila-418). План M-этапов не меняет
+  (мобильная ветка — вне M-гейтов).

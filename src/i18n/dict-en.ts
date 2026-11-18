@@ -871,4 +871,17 @@ export const dict: Record<string, string> = {
   "Пароль обновлён": "Password updated",
   "Сайт добавлен в «никогда не сохранять»": "Site added to “never save”",
   "Не удалось сохранить пароль": "Could not save the password",
+  "Облако": "Cloud",
+  "На устройстве": "On device",
+  "Удалить": "Delete",
+  "Модель скачана": "Model downloaded",
+  "Модель не скачана": "Model not downloaded",
+  "tiny · 78 МБ": "tiny · 78 MB",
+  "base · 148 МБ": "base · 148 MB",
+  "Распознавание на устройстве: аудио не покидает телефон, работает без интернета (после скачивания модели).": "On-device recognition: audio never leaves the phone, works offline (once the model is downloaded).",
+  "Скачайте модель локального движка в настройках ASR": "Download the on-device engine model in ASR settings",
+  "Скачивание модели… {done} / {total} МБ": "Downloading model… {done} / {total} MB",
+  "Скачивание модели…": "Downloading model…",
+  "Модель скачана и проверена": "Model downloaded and verified",
+  "Модель: {e}": "Model: {e}"
 };

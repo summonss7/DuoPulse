@@ -102,6 +102,24 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   логин и порт уникальны на прогон («Никогда» держит denylist в сторе
   эмулятора). Результат —
   e2e/mobile/pass-capture-smoke-last-run.json (gitignore, рантайм-артефакт).
+- `e2e/mobile/asr-local-smoke.mjs` — стенд ЛОКАЛЬНЫХ ASR-субтитров мобильной
+  ветки (карточка 168, паритет 5/8): debug-APK + CDP 9223 (как облачный 167);
+  менеджер моделей ggml (настоящий HuggingFace: прогресс-события с байтами,
+  done — только после sha256; файл сверяется run-as stat), провайдер «На
+  устройстве», полный прогон локальным whisper (фазы audio→decode→transcribe→
+  done, движок local:whisper, дорожка asr:<lang>), airplane-mode повтор из
+  кэша asr_tracks, удаление модели кнопкой панели. Результат —
+  e2e/mobile/asr-local-smoke-last-run.json (gitignore, рантайм-артефакт).
+- `e2e/mobile/asr-local-release-smoke.mjs` — тот же сценарий в ПОДПИСАННОМ
+  release-APK без CDP (карточка 168: R8-keep JNI-хелпера): статика APK
+  (apksigner, libwhisperjni.so в packaging, dex с nativeInit/nativeTranscribe/
+  nativeFree), управление чистым adb — omnibox → input text → ENTER, тапы по
+  uiautomator-дереву (exact-матчинг: «duo» подстрокой ловит DuoPulse-лейблы);
+  x86_64-релиз для эмулятора собирается напрямую `tauri android build --apk
+  --target x86_64` (условие по -PabiList в build.gradle.kts оставляет x86_64-
+  whisper в APK; телефонной aarch64-сборке она не нужна). Результат —
+  e2e/mobile/asr-local-release-smoke-last-run.json (gitignore,
+  рантайм-артефакт).
 
 Новые временные файлы в корне не накапливать: одноразовое — `%TEMP%`, постоянное — `e2e/`.
 <!-- /E2E-ИНСТРУМЕНТЫ -->

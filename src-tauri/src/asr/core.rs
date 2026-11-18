@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use crate::subtitles::Cue;
 
 use super::decode::pcm_to_wav;
-use super::engine::{transcribe, AsrEndpoint, AsrError, AsrTransport};
+use super::engine::{transcribe, AsrEndpoint, AsrError, AsrTransport, Transcription};
 
 /// Потолок скачиваемого аудио, байт (аудио 48 кбит/с ≈ 21 МБ/час — с запасом
 /// на качество; больше — честный отказ, см. docs/03 §3.3-ASR). Общий для
@@ -86,15 +86,38 @@ pub fn transcribe_pcm(
     endpoint: &AsrEndpoint,
     chunks: &[&[i16]],
     lang: &str,
-    mut on_chunk: impl FnMut(usize, usize),
+    on_chunk: impl FnMut(usize, usize),
 ) -> Result<(Vec<Cue>, String), AsrError> {
+    transcribe_pcm_with(
+        chunks,
+        lang,
+        |pcm, lang, prompt| {
+            let wav = pcm_to_wav(pcm);
+            transcribe(transport, endpoint, &wav, lang, prompt)
+        },
+        on_chunk,
+    )
+}
+
+/// Ядро чанкового цикла над абстрактным движком (HTTP-транспорты и
+/// JNI-провайдер duopulse-168 — один код офсетов/prompt/языка):
+/// transcribe_chunk(pcm, lang, prompt) → Transcription. on_chunk — прогресс
+/// (готово чанков / всего).
+pub fn transcribe_pcm_with<F>(
+    chunks: &[&[i16]],
+    lang: &str,
+    mut transcribe_chunk: F,
+    mut on_chunk: impl FnMut(usize, usize),
+) -> Result<(Vec<Cue>, String), AsrError>
+where
+    F: FnMut(&[i16], &str, Option<&str>) -> Result<Transcription, AsrError>,
+{
     let mut cues: Vec<Cue> = Vec::new();
     let mut prompt: Option<String> = None;
     let mut detected = String::new();
     let total = chunks.len();
     for (i, chunk) in chunks.iter().enumerate() {
-        let wav = pcm_to_wav(chunk);
-        let out = transcribe(transport, endpoint, &wav, lang, prompt.as_deref())?;
+        let out = transcribe_chunk(chunk, lang, prompt.as_deref())?;
         if detected.is_empty() {
             if let Some(l) = &out.detected_lang {
                 // whisper отдаёт язык именем («english») — дорожке нужен код
@@ -131,6 +154,46 @@ pub fn transcribe_pcm(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcribe_pcm_with_offloads_engine_choice() {
+        // движок-замыкание вместо HTTP-транспорта (так JNI-провайдер
+        // duopulse-168 ходит без сети): офсеты чанков и перенос prompt —
+        // те же, что у HTTP-ветки
+        use super::super::engine::{AsrSegment, Transcription};
+        use std::sync::Mutex;
+
+        let calls: Mutex<Vec<Option<String>>> = Mutex::new(Vec::new());
+        let pcm = silence(1);
+        let chunks = vec![pcm.as_slice(), pcm.as_slice()];
+        let (cues, lang) = transcribe_pcm_with(
+            &chunks,
+            "en",
+            |_, lang, prompt| {
+                calls.lock().unwrap().push(prompt.map(str::to_string));
+                Ok(Transcription {
+                    detected_lang: Some(lang.to_string()),
+                    segments: vec![AsrSegment {
+                        start_ms: 100,
+                        end_ms: 900,
+                        text: format!("chunk-{}", calls.lock().unwrap().len()),
+                    }],
+                })
+            },
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(lang, "en", "язык первого чанка пробрасывается");
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].start_ms, 100);
+        assert_eq!(
+            cues[1].start_ms,
+            100 + super::super::decode::CHUNK_SECS as i64 * 1000
+        );
+        let calls = calls.into_inner().unwrap();
+        assert_eq!(calls[0], None, "первый чанк — без prompt");
+        assert_eq!(calls[1].as_deref(), Some("chunk-1"), "prompt — хвост первого");
+    }
 
     #[test]
     fn jobs_generations_cancel_older() {

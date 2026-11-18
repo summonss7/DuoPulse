@@ -397,6 +397,41 @@
   border-color: var(--accent-neon);
   color: var(--accent-neon);
 }
+/* duopulse-168: провайдер ASR — «На устройстве» без модели выключен */
+.m-duo-seg button[disabled] {
+  opacity: 0.45;
+}
+/* duopulse-168: строка модели локального движка (статус + скачать/удалить) */
+.m-duo-asr-modelrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.m-duo-asr-modelstat {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.m-duo-asr-modelbtns {
+  display: flex;
+  gap: 8px;
+}
+.m-duo-asr-modelbtns button {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(189, 254, 79, 0.35);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.m-duo-asr-modelbtns .m-duo-asr-dl {
+  border-color: var(--accent-neon);
+  color: var(--accent-neon);
+}
+.m-duo-asr-modelbtns button[disabled] {
+  opacity: 0.5;
+}
 .m-duo-status {
   padding: 8px 12px;
   border-radius: 10px;

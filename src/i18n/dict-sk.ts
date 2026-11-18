@@ -857,4 +857,17 @@ export const dict: Record<string, string> = {
   "Пароль обновлён": "Heslo aktualizované",
   "Сайт добавлен в «никогда не сохранять»": "Stránka pridaná do „nikdy neukladať“",
   "Не удалось сохранить пароль": "Nepodarilo sa uložiť heslo",
+  "Облако": "Cloud",
+  "На устройстве": "Na zariadení",
+  "Удалить": "Odstrániť",
+  "Модель скачана": "Model stiahnutý",
+  "Модель не скачана": "Model nie je stiahnutý",
+  "tiny · 78 МБ": "tiny · 78 MB",
+  "base · 148 МБ": "base · 148 MB",
+  "Распознавание на устройстве: аудио не покидает телефон, работает без интернета (после скачивания модели).": "Rozpoznávanie na zariadení: zvuk neopúšťa telefón, funguje offline (po stiahnutí modelu).",
+  "Скачайте модель локального движка в настройках ASR": "Stiahnite model lokálneho enginu v nastaveniach ASR",
+  "Скачивание модели… {done} / {total} МБ": "Sťahovanie modelu… {done} / {total} MB",
+  "Скачивание модели…": "Sťahovanie modelu…",
+  "Модель скачана и проверена": "Model stiahnutý a overený",
+  "Модель: {e}": "Model: {e}"
 };

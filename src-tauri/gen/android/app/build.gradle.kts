@@ -27,9 +27,23 @@ val keystoreProperties = Properties().apply {
 }
 val releaseKeystoreFile = rootProject.file(keystoreProperties.getProperty("storeFile", "duopulse-release.keystore"))
 
+// duopulse-168: release по умолчанию строит только aarch64 (scripts/
+// android-build.sh передаёт tauri --target aarch64 → -PabiList=arm64-v8a):
+// x86_64-копия whisper из universal-APK выкидывается — телефонам не нужна.
+// R8-смоук на эмуляторе собирает release под x86_64 (abiList=x86_64) — тогда
+// x86_64-библиотеку оставляем: без неё System.loadLibrary падает на старте.
+val stripX86FromRelease = when (val abi: String? = findProperty("abiList") as? String) {
+    null -> true
+    else -> abi.split(',').map(String::trim).filter { it.isNotEmpty() } == listOf("arm64-v8a")
+}
+
 android {
     compileSdk = 37
     namespace = "dev.duopulse.mobile"
+    // duopulse-168: тот же NDK, что берёт scripts/android-build.sh (новейший
+    // в $ANDROID_HOME/ndk) — whisper.cpp externalNativeBuild и Rust-либа
+    // собираются одним тулчейном; фиксация — воспроизводимость сборки.
+    ndkVersion = "28.2.13676358"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "dev.duopulse.mobile"
@@ -37,6 +51,26 @@ android {
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        // duopulse-168: локальный ASR-движок (libwhisperjni.so) — arm64-v8a
+        // (телефоны) + x86_64 (эмулятор/debug); флаги — cpp/CMakeLists.txt.
+        externalNativeBuild {
+            cmake {
+                arguments += listOf(
+                    "-DGGML_OPENMP=OFF",
+                    "-DWHISPER_BUILD_EXAMPLES=OFF",
+                    "-DWHISPER_BUILD_SERVER=OFF",
+                    "-DWHISPER_BUILD_TESTS=OFF",
+                    "-DWHISPER_BUILD_COMMON=OFF",
+                )
+                abiFilters += listOf("arm64-v8a", "x86_64")
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -44,6 +78,13 @@ android {
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
+            // whisper под Debug-макросами медленнее на порядок — движок в
+            // debug-APK тоже собираем оптимизированным (смоуки на эмуляторе)
+            externalNativeBuild {
+                cmake {
+                    arguments += "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+                }
+            }
             packaging {
                 jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
                 jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
@@ -71,6 +112,13 @@ android {
             }
             optimization {
                enable = true
+            }
+            // см. stripX86FromRelease наверху: телефонной сборке x86_64-whisper
+            // не нужна, сборке под эмулятор — обязательна
+            if (stripX86FromRelease) {
+                packaging {
+                    jniLibs.excludes.add("**/x86_64/**")
+                }
             }
             proguardFiles(
                 *fileTree(".") {

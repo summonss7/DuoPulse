@@ -261,10 +261,13 @@ fn mobile_run() {
             mobile_pass::mobile_password_incognito,
             mobile_pass::mobile_password_candidate,
             mobile_pass::mobile_password_resolve,
-            // ASR-субтитры (duopulse-167): настройки облака (ключ — Keystore)
-            // и конвейер распознавания (start/append/finish/cancel).
+            // ASR-субтитры (duopulse-167 облако; duopulse-168 локальный
+            // whisper): настройки (ключ — Keystore, провайдер local/cloud),
+            // менеджер моделей ggml и конвейер (start/append/finish/cancel).
             mobile_asr::cmd::asr_get_settings,
             mobile_asr::cmd::asr_set_settings,
+            mobile_asr::cmd::asr_model_download,
+            mobile_asr::cmd::asr_model_delete,
             mobile_asr::cmd::subtitles_asr_start,
             mobile_asr::cmd::subtitles_asr_audio_append,
             mobile_asr::cmd::subtitles_asr_audio_finish,

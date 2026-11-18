@@ -40,20 +40,71 @@ export type AsrStartResult =
   | ({ status: "done" } & AsrRunResult)
   | { status: "needAudio"; url: string; size: number };
 
-/** Настройки ASR мобильной ветки (asr_get_settings). */
+/** Настройки ASR мобильной ветки (asr_get_settings; локальный движок —
+ * duopulse-168: whisper.cpp в APK, модель ggml в профиле устройства). */
 export interface MobileAsrSettings {
   enabled: boolean;
+  /** "cloud" | "local". */
+  provider: string;
   openaiBaseUrl: string;
   openaiModel: string;
   hasApiKey: boolean;
+  /** Выбранная модель локального движка: "tiny" | "base". */
+  localModel: string;
+  /** ggml-tiny скачана (размер сверен). */
+  modelTinyDownloaded: boolean;
+  /** ggml-base скачана. */
+  modelBaseDownloaded: boolean;
+  /** Локальный провайдер готов: выбранная модель скачана. */
+  localReady: boolean;
 }
 
-/** Аргументы asr_set_settings: ключ — None не менять, "" удалить. */
+/** Аргументы asr_set_settings: ключ — None не менять, "" удалить;
+ * provider/localModel — опции локального движка (duopulse-168). */
 export interface MobileAsrSettingsPatch {
   enabled: boolean;
   openaiBaseUrl: string;
   openaiModel: string;
   apiKey?: string;
+  provider?: string;
+  localModel?: string;
+}
+
+/** Размер модели локального движка. */
+export type LocalModelSizeId = "tiny" | "base";
+
+/** Модели локального движка для UI (порядок — как в настройках). */
+export const LOCAL_MODELS: { id: LocalModelSizeId; label: string }[] = [
+  { id: "tiny", label: "tiny · 78 МБ" },
+  { id: "base", label: "base · 148 МБ" },
+];
+
+/** Payload события subtitles:asr_model_progress (менеджер моделей). */
+export interface AsrModelProgressEvent {
+  size: LocalModelSizeId;
+  /** download | done | error. */
+  phase: string;
+  done: number;
+  total: number;
+  error?: string;
+}
+
+/** Текст статуса менеджера моделей (строка настроек ASR). */
+export function asrModelProgressText(p: AsrModelProgressEvent): string {
+  const mbv = (bytes: number): string =>
+    (bytes / 1_048_576).toFixed(bytes < 10 * 1_048_576 ? 1 : 0);
+  switch (p.phase) {
+    case "download":
+      return p.total > 0
+        ? t("Скачивание модели… {done} / {total} МБ", { done: mbv(p.done), total: mbv(p.total) })
+        : t("Скачивание модели…");
+    case "done":
+      return t("Модель скачана и проверена");
+    case "error":
+      return p.error ? t("Модель: {e}", { e: p.error }) : t("ASR: ошибка");
+    default:
+      return "";
+  }
 }
 
 /** Payload события subtitles:asr_progress (мобильная ветка: tabId = videoId). */
@@ -120,6 +171,10 @@ export interface MobileAsr {
   cancel(videoId: string): void;
   loadSettings(): Promise<MobileAsrSettings>;
   saveSettings(patch: MobileAsrSettingsPatch): Promise<MobileAsrSettings>;
+  /** Скачать модель локального движка (прогресс — событием asr_model). */
+  downloadModel(size: LocalModelSizeId): Promise<void>;
+  /** Удалить модель локального движка (движок выгружается в Core). */
+  deleteModel(size: LocalModelSizeId): Promise<MobileAsrSettings>;
   /** Снимок для e2e/диагностики. */
   stateSnapshot(): { busy: boolean; videoId: string | null; lastError: string | null };
 }
@@ -194,8 +249,18 @@ export function createMobileAsr(opts: MobileAsrPorts): MobileAsr {
           openaiBaseUrl: patch.openaiBaseUrl,
           openaiModel: patch.openaiModel,
           apiKey: patch.apiKey ?? null,
+          provider: patch.provider ?? "cloud",
+          localModel: patch.localModel ?? "tiny",
         },
       })) as MobileAsrSettings;
+    },
+
+    async downloadModel(size: LocalModelSizeId): Promise<void> {
+      await doInvoke("asr_model_download", { size });
+    },
+
+    async deleteModel(size: LocalModelSizeId): Promise<MobileAsrSettings> {
+      return (await doInvoke("asr_model_delete", { size })) as MobileAsrSettings;
     },
 
     stateSnapshot() {
@@ -208,9 +273,20 @@ export function createMobileAsr(opts: MobileAsrPorts): MobileAsr {
 export function subscribeAsrProgress(
   onEvent: (p: AsrProgressEvent) => void,
 ): () => void {
+  return subscribePayload("subtitles:asr_progress", onEvent);
+}
+
+/** Подписка на прогресс менеджера моделей локального движка (duopulse-168). */
+export function subscribeAsrModelProgress(
+  onEvent: (p: AsrModelProgressEvent) => void,
+): () => void {
+  return subscribePayload("subtitles:asr_model_progress", onEvent);
+}
+
+function subscribePayload<T>(event: string, onEvent: (p: T) => void): () => void {
   let unlisten: (() => void) | null = null;
   let alive = true;
-  void listen<AsrProgressEvent>("subtitles:asr_progress", (e) => onEvent(e.payload))
+  void listen<T>(event, (e) => onEvent(e.payload))
     .then((u) => {
       if (!alive) u();
       else unlisten = u;

@@ -55,3 +55,8 @@
 # (MobileVideoHelper.take) — та же грабля, что 083/102/119: без Java-ссылок
 # R8 вырезает метод в release.
 -keep class dev.duopulse.mobile.MobileVideoHelper { *; }
+# duopulse-168: JNI-хелпер локального ASR-движка (MobileAsrHelper.external
+# nativeInit/nativeTranscribe/nativeFree — libwhisperjni.so; зовётся из Rust
+# по имени через JNI, asr/engine.rs local_jni). Та же грабля, что 083/102:
+# без Java-ссылок R8 вырезает/переименует методы — UnsatisfiedLinkError.
+-keep class dev.duopulse.mobile.MobileAsrHelper { *; }

@@ -5,6 +5,7 @@
 // прогресса (порт asr-status десктопа).
 import { describe, expect, it, vi } from "vitest";
 import {
+  asrModelProgressText,
   asrProgressText,
   createMobileAsr,
   type AsrInvoke,
@@ -52,10 +53,25 @@ const RUN: AsrRunResult = {
   engine: "openai:whisper-1",
 };
 
+/** Полные настройки облака (duopulse-168: поля провайдера/моделей). */
+const CLOUD_SETTINGS: MobileAsrSettings = {
+  enabled: true,
+  provider: "cloud",
+  openaiBaseUrl: "https://api.openai.com/v1",
+  openaiModel: "whisper-1",
+  hasApiKey: true,
+  localModel: "tiny",
+  modelTinyDownloaded: false,
+  modelBaseDownloaded: false,
+  localReady: false,
+};
+
 function fakeInvoke(script: {
   start: AsrStartResult;
   finish?: AsrRunResult | Error;
   settings?: MobileAsrSettings;
+  afterSet?: MobileAsrSettings;
+  afterDelete?: MobileAsrSettings;
 }): { invoke: AsrInvoke; calls: Array<{ cmd: string; args?: Record<string, unknown> }> } {
   const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
   const invoke: AsrInvoke = async (cmd, args) => {
@@ -67,16 +83,23 @@ function fakeInvoke(script: {
       return script.finish ?? RUN;
     }
     if (cmd === "subtitles_asr_cancel") return null;
-    if (cmd === "asr_get_settings")
-      return script.settings ?? { enabled: true, openaiBaseUrl: "https://api.openai.com/v1", openaiModel: "whisper-1", hasApiKey: true };
-    if (cmd === "asr_set_settings")
-      return { enabled: true, openaiBaseUrl: "x", openaiModel: "whisper-1", hasApiKey: true };
+    if (cmd === "asr_get_settings") return script.settings ?? CLOUD_SETTINGS;
+    if (cmd === "asr_set_settings") return script.afterSet ?? CLOUD_SETTINGS;
+    if (cmd === "asr_model_download") return null;
+    if (cmd === "asr_model_delete") return script.afterDelete ?? CLOUD_SETTINGS;
     throw new Error(`неожиданная команда: ${cmd}`);
   };
   return { invoke, calls };
 }
 
-function makeAsr(script: { start: AsrStartResult; file?: number; finish?: AsrRunResult | Error }) {
+function makeAsr(script: {
+  start: AsrStartResult;
+  file?: number;
+  finish?: AsrRunResult | Error;
+  settings?: MobileAsrSettings;
+  afterSet?: MobileAsrSettings;
+  afterDelete?: MobileAsrSettings;
+}) {
   const { invoke, calls } = fakeInvoke(script);
   const { transport, ranges } = fakeTransport({ file: script.file ?? 8 * 1024 * 1024 });
   const asr = createMobileAsr({
@@ -149,6 +172,56 @@ describe("createMobileAsr — полный конвейер", () => {
     await asr.saveSettings({ enabled: true, openaiBaseUrl: "http://127.0.0.1:8899/v1", openaiModel: "whisper-1", apiKey: "sk-test" });
     const set = calls.find((c) => c.cmd === "asr_set_settings");
     expect(set?.args?.args).toMatchObject({ enabled: true, openaiModel: "whisper-1" });
+  });
+});
+
+describe("createMobileAsr — менеджер моделей и провайдер (duopulse-168)", () => {
+  it("downloadModel/deleteModel ходят командами Core с размером модели", async () => {
+    const { asr, calls } = makeAsr({ start: { status: "done", ...RUN, fromCache: true } });
+    await asr.downloadModel("tiny");
+    await asr.deleteModel("base");
+    const dl = calls.find((c) => c.cmd === "asr_model_download");
+    const del = calls.find((c) => c.cmd === "asr_model_delete");
+    expect(dl?.args).toEqual({ size: "tiny" });
+    expect(del?.args).toEqual({ size: "base" });
+  });
+
+  it("saveSettings(local) несёт provider/localModel, ключ не отсылается", async () => {
+    const { asr, calls } = makeAsr({ start: { status: "done", ...RUN, fromCache: true } });
+    await asr.saveSettings({
+      enabled: true,
+      provider: "local",
+      localModel: "tiny",
+      openaiBaseUrl: "u",
+      openaiModel: "m",
+    });
+    const args = calls.find((c) => c.cmd === "asr_set_settings")?.args?.args as Record<string, unknown>;
+    expect(args.provider).toBe("local");
+    expect(args.localModel).toBe("tiny");
+    expect(args.apiKey).toBeNull();
+  });
+
+  it("loadSettings отдаёт провайдера и статус моделей как есть", async () => {
+    const local: MobileAsrSettings = {
+      ...CLOUD_SETTINGS,
+      provider: "local",
+      localModel: "tiny",
+      modelTinyDownloaded: true,
+      localReady: true,
+      hasApiKey: false,
+    };
+    const { asr } = makeAsr({ start: { status: "done", ...RUN, fromCache: true }, settings: local });
+    expect(await asr.loadSettings()).toEqual(local);
+  });
+});
+
+describe("asrModelProgressText — статусы менеджера моделей", () => {
+  it("фазы скачивания/готовности — человеческие строки", () => {
+    expect(asrModelProgressText({ size: "tiny", phase: "download", done: 0, total: 77_691_713 })).toContain("74");
+    expect(asrModelProgressText({ size: "tiny", phase: "download", done: 10, total: 0 })).not.toBe("");
+    expect(asrModelProgressText({ size: "tiny", phase: "done", done: 0, total: 0 })).not.toBe("");
+    expect(asrModelProgressText({ size: "tiny", phase: "error", done: 0, total: 0, error: "сеть" })).toContain("сеть");
+    expect(asrModelProgressText({ size: "tiny", phase: "?", done: 0, total: 0 })).toBe("");
   });
 });
 

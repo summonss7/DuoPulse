@@ -15,7 +15,8 @@ export default defineConfig({
     sourcemap: false,
   },
   test: {
-    // резервные копии backup.bat (backups/) — не исходный код, их тесты не гоняем
-    exclude: ["**/node_modules/**", "**/dist/**", "backups/**"],
+    // резервные копии backup.bat (backups/) — не исходный код, их тесты не гоняем;
+    // .cxx — build-каталог NDK (duopulse-168: FetchContent whisper.cpp внутри)
+    exclude: ["**/node_modules/**", "**/dist/**", "backups/**", "**/.cxx/**"],
   },
 });

@@ -857,4 +857,17 @@ export const dict: Record<string, string> = {
   "Пароль обновлён": "Parolă actualizată",
   "Сайт добавлен в «никогда не сохранять»": "Site adăugat la „nu salva niciodată”",
   "Не удалось сохранить пароль": "Nu am putut salva parola",
+  "Облако": "Cloud",
+  "На устройстве": "Pe dispozitiv",
+  "Удалить": "Șterge",
+  "Модель скачана": "Model descărcat",
+  "Модель не скачана": "Modelul nu este descărcat",
+  "tiny · 78 МБ": "tiny · 78 MB",
+  "base · 148 МБ": "base · 148 MB",
+  "Распознавание на устройстве: аудио не покидает телефон, работает без интернета (после скачивания модели).": "Recunoașterea pe dispozitiv: audio nu părăsește telefonul, funcționează offline (după descărcarea modelului).",
+  "Скачайте модель локального движка в настройках ASR": "Descarcă modelul motorului local din setările ASR",
+  "Скачивание модели… {done} / {total} МБ": "Se descarcă modelul… {done} / {total} MB",
+  "Скачивание модели…": "Se descarcă modelul…",
+  "Модель скачана и проверена": "Model descărcat și verificat",
+  "Модель: {e}": "Model: {e}"
 };

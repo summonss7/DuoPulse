@@ -31,7 +31,7 @@ import {
   type MobileEngineId,
 } from "./platform";
 import { MobileDuo, type DuoStatus } from "./duo";
-import { subscribeAsrProgress } from "./duo/asr";
+import { asrModelProgressText, subscribeAsrModelProgress, subscribeAsrProgress } from "./duo/asr";
 import { MobileBookmarks } from "./bookmarks";
 import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
 import { MobileHistory } from "./history";
@@ -441,6 +441,20 @@ const duo = new MobileDuo(content, () => tabs.activeFrame, (s: DuoStatus) => {
 });
 // ASR (duopulse-167): прогресс конвейера (событие Core) — в статус duo
 subscribeAsrProgress((p) => duo.onAsrProgress(p));
+// ASR (duopulse-168): менеджер моделей локального движка — прогресс в статус
+// (панель/общая строка), «done» обновляет снапшот и блок настроек панели
+subscribeAsrModelProgress((p) => {
+  const text = asrModelProgressText(p);
+  if (duoPanel) {
+    if (text) duoPanel.setStatus({ text, busy: p.phase === "download", error: p.phase === "error" });
+    duoPanel.onAsrModelProgress(p.phase, p.error);
+    if (p.phase === "done" || p.phase === "error") {
+      void duo.loadAsrSettings().then(() => duoPanel?.refreshAsr());
+    }
+  } else if (text) {
+    note(text);
+  }
+});
 duoBtn.addEventListener("click", () => {
   if (duoPanel) {
     duoPanel.remove();
@@ -470,6 +484,8 @@ duoBtn.addEventListener("click", () => {
         },
         onAsrCancel: () => duo.cancelAsr(),
         onAsrSaveSettings: (patch) => duo.saveAsrSettings(patch),
+        onAsrDownloadModel: (size) => duo.downloadModel(size),
+        onAsrDeleteModel: (size) => duo.deleteModel(size),
       },
       () => duo.currentSettings,
       () => duo.trackList,

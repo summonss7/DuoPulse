@@ -23,30 +23,29 @@ pub enum AsrProviderId {
 
 /// Размер локальной модели whisper (спайк duopulse-060: base — компромисс
 /// скорость/качество ru, small — лучшее качество, дольше счёт; tiny исключён
-/// — ru WER 39 %).
+/// из ДЕСКТОПНОГО выбора — ru WER 39 % — но с 5/8 мобильного паритета
+/// (duopulse-168) tiny — дефолт телефона: 78 МБ и заметно быстрее base на
+/// мобильном CPU; список размеров/хэшей — models.rs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LocalModelSize {
     #[default]
     Base,
     Small,
+    /// Мобильный вариант (duopulse-168): телефон по умолчанию, в выбор
+    /// десктопных настроек не входит.
+    Tiny,
 }
 
 impl LocalModelSize {
     /// Имя файла модели ggml (HuggingFace ggerganov/whisper.cpp).
     pub fn file_name(self) -> &'static str {
-        match self {
-            Self::Base => "ggml-base.bin",
-            Self::Small => "ggml-small.bin",
-        }
+        super::models::spec(self).file_name
     }
 
-    /// Ожидаемый размер скачивания, байт (проверка целостности по длине).
+    /// Ожидаемый размер скачивания, байт (реестр — models.rs).
     pub fn bytes(self) -> u64 {
-        match self {
-            Self::Base => 147_951_465,
-            Self::Small => 487_601_967,
-        }
+        super::models::spec(self).bytes
     }
 }
 
@@ -140,6 +139,18 @@ pub fn load_config(dir: &Path) -> AsrConfig {
         .and_then(|root| root.get("asr").cloned())
         .and_then(|a| serde_json::from_value(a).ok())
         .unwrap_or_default()
+}
+
+/// Сохранён ли раздел "asr" в settings.json (мобильная ветка отличает
+/// «дефолт десктопа» от осознанного выбора пользователя: duopulse-168 —
+/// свежему конфигу телефон предлагает tiny, а не десктопный base).
+pub fn has_saved_config(dir: &Path) -> bool {
+    let raw = std::fs::read_to_string(dir.join("settings.json")).unwrap_or_default();
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|root| root.get("asr").cloned())
+        .and_then(|a| serde_json::from_value::<AsrConfig>(a).ok())
+        .is_some()
 }
 
 /// Пишет settings.json (заменяя только ключ "asr"); предыдущая версия — .bak.
@@ -255,6 +266,19 @@ mod tests {
             "прочие ключи сохранены: {raw}"
         );
         assert!(dir.join("settings.json.bak").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn has_saved_config_distinguishes_default_from_saved() {
+        let dir = tmp_dir("saved-flag");
+        assert!(!has_saved_config(&dir), "файла нет — дефолт");
+        std::fs::write(dir.join("settings.json"), r#"{"translate":{}}"#).unwrap();
+        assert!(!has_saved_config(&dir), "раздела asr нет — дефолт");
+        save_config(&dir, &AsrConfig::default()).unwrap();
+        assert!(has_saved_config(&dir), "после сохранения — выбор пользователя");
+        std::fs::write(dir.join("settings.json"), r#"{"asr":{"bogus":1}}"#).unwrap();
+        assert!(!has_saved_config(&dir), "битый раздел — дефолт");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
