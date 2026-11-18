@@ -1148,3 +1148,32 @@
   check чист; debug-APK 0.1.67 в builds/. Версия не поднималась (build:false,
   aila-418; релиз-критерий карточки отменён Артёмом). Этапы 7 (маршрутизация
   трафика приложения) и 8 (панель VPN) — следующие карточки цепочки 162.
+- 18.11.2026: duopulse-170 — паритет-мобайл 7/8: маршрутизация трафика
+  приложения через тоннель — роутер vpn/router.rs получил ВТОРОЙ листенер
+  (HTTP: CONNECT-туннель для https-целей + absolute-form запросы для
+  http-целей с rewrite в origin-form; та же политика Direct/Upstream/Wg и
+  fail-closed, общий с SOCKS5-путём код решений). Мобильная либа поднимает
+  роутер на старте (lib.rs setup, Option<Router> state): фетчи Core (duo-
+  субтитры/перевод, ASR-облако — ureq + фича socks-proxy мобильной ветки)
+  ходят через SOCKS5-порт, WebView — через HTTP-порт androidx.webkit
+  ProxyController (ПЛАН А — VpnService-tun не понадобился: фича
+  androidx.webkit 1.14 доступна на WebView Android 5.0+, проверено смоуком;
+  выбор зафиксирован здесь и в журнале карточки). Kotlin MobileProxyHelper:
+  setProxyOverride http://127.0.0.1:<port> + bypass внутренних адресов
+  (*.localhost — asset/ipc/mobilevideo), применение/снятие — тост
+  «страницы перезагружены» + перезагрузка web-оверлея (мобильный
+  proguard-keep, как 083/102). Тумблер тоннеля (mobile_vpn use_profile/
+  set_enabled/remove_profile) атомарно переводит роутер на Wg/Direct и
+  WebView-прокси — без перезапуска приложения. Секция VPN листа
+  «Диагностика» (режим/endpoint/профиль/rx/tx; DiagVpn в diag_snapshot).
+  Попутный фикс десктопа: POST распознавания ASR-облака раньше уходил
+  напрямую мимо тоннеля (UreqAsrTransport::with_socks_port в pipeline).
+  Проверено: cargo 434 (в т.ч. 6 новых HTTP-тестов роутера), tsc чист,
+  vitest 651/651, стенд e2e/mobile/vpn-route-smoke.mjs — 20/20 на
+  эмуляторе против живого wg-stand (оверлей через тоннель absolute-form +
+  CONNECT, core-фетч DNS тоннелем, kill-switch без прямых ходов,
+  Direct-возврат и повторное включение без перезапуска, UI жив при
+  включённом прокси — bypass). Версия не поднималась (build:false,
+  aila-418): release-критерий карточки отменён флажком Артёма, смоук —
+  debug-APK 0.1.67 из builds/. План M-этапов не меняет (мобильная ветка —
+  вне M-гейтов); из цепочки duopulse-162 осталась панель VPN (этап 8).

@@ -28,6 +28,15 @@ export interface DiagSnapshot {
   /** Автозаполнение паролей доступно (false — инкогнито, duopulse-166). */
   passAutofill: boolean;
   adblock: { enabled: boolean; ready: boolean; blockedTotal: number; seenTotal: number } | null;
+  /** Тоннель WireGuard (duopulse-170: режим/endpoint/rx/tx). */
+  vpn: {
+    mode: string;
+    state: string;
+    profile: string;
+    endpoint: string;
+    rxBytes: number;
+    txBytes: number;
+  } | null;
   lastUpdateCheckMs: number | null;
   nowMs: number;
 }
@@ -119,7 +128,22 @@ export function diagSections(snap: DiagSnapshot, upd: DiagUpdate): DiagSection[]
           : t("Обновления: ещё не проверялись"),
     ],
   };
-  return [app, data, ad, updates];
+  // duopulse-170: маршрутизация трафика приложения — режим тоннеля, сервер
+  // и счётчики (выключен — одна строка, details не нужны).
+  const vpn: DiagSection = { title: t("VPN"), rows: [] };
+  const v = snap.vpn;
+  if (!v || v.mode !== "wg") vpn.rows.push(t("VPN: выключен"));
+  else {
+    vpn.rows.push(t("VPN: {state} · {ep}", { state: v.state, ep: v.endpoint }));
+    if (v.profile) vpn.rows.push(t("Профиль: {v}", { v: v.profile }));
+    vpn.rows.push(
+      t("Трафик тоннеля: rx {rx} КБ / tx {tx} КБ", {
+        rx: Math.round(v.rxBytes / 1024),
+        tx: Math.round(v.txBytes / 1024),
+      }),
+    );
+  }
+  return [app, data, ad, vpn, updates];
 }
 
 /** Полный текст отчёта (кнопка «Скопировать отчёт»): заголовок с версией

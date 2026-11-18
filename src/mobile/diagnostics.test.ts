@@ -23,6 +23,7 @@ const snap = (over: Partial<DiagSnapshot> = {}): DiagSnapshot => ({
   passwords: 2,
   passAutofill: true,
   adblock: { enabled: true, ready: true, blockedTotal: 50, seenTotal: 200 },
+  vpn: { mode: "off", state: "", profile: "", endpoint: "", rxBytes: 0, txBytes: 0 },
   lastUpdateCheckMs: null,
   nowMs: new Date(2026, 10, 17, 13, 45).getTime(),
   ...over,
@@ -41,9 +42,15 @@ describe("sessionDur", () => {
 });
 
 describe("diagSections", () => {
-  it("четыре группы: приложение, данные, блокировщик, обновления", () => {
+  it("пять групп: приложение, данные, блокировщик, VPN, обновления", () => {
     const s = diagSections(snap(), { lastCheckMs: null, availableVersion: null });
-    expect(s.map((x) => x.title)).toEqual(["Приложение", "Данные", "Блокировщик рекламы", "Обновления"]);
+    expect(s.map((x) => x.title)).toEqual([
+      "Приложение",
+      "Данные",
+      "Блокировщик рекламы",
+      "VPN",
+      "Обновления",
+    ]);
   });
   it("версия/канал/сеанс/память и счётчики с числами", () => {
     const s = diagSections(snap(), { lastCheckMs: null, availableVersion: null });
@@ -80,14 +87,38 @@ describe("diagSections", () => {
   });
   it("обновления: доступная версия важнее метки, метка важнее «не проверялись»", () => {
     const none = diagSections(snap(), { lastCheckMs: null, availableVersion: null });
-    expect(none[3].rows).toEqual(["Обновления: ещё не проверялись"]);
+    expect(none[4].rows).toEqual(["Обновления: ещё не проверялись"]);
     const checked = diagSections(snap({ lastUpdateCheckMs: 1_700_000_000_000 }), {
       lastCheckMs: 1_700_000_000_000,
       availableVersion: null,
     });
-    expect(checked[3].rows[0]).toMatch(/^Обновления: проверялись /);
+    expect(checked[4].rows[0]).toMatch(/^Обновления: проверялись /);
     const avail = diagSections(snap(), { lastCheckMs: 1_700_000_000_000, availableVersion: "0.1.65" });
-    expect(avail[3].rows).toEqual(["Обновления: доступна версия 0.1.65"]);
+    expect(avail[4].rows).toEqual(["Обновления: доступна версия 0.1.65"]);
+  });
+  it("VPN-секция (duopulse-170): выключен — одна строка", () => {
+    const s = diagSections(snap(), { lastCheckMs: null, availableVersion: null });
+    expect(s[3].rows).toEqual(["VPN: выключен"]);
+  });
+  it("VPN-секция: тоннель — режим/endpoint, профиль, трафик КБ", () => {
+    const s = diagSections(
+      snap({
+        vpn: {
+          mode: "wg",
+          state: "connected",
+          profile: "wg-stand.conf",
+          endpoint: "10.0.2.2:51820",
+          rxBytes: 2057 * 1024,
+          txBytes: 1029 * 1024,
+        },
+      }),
+      { lastCheckMs: null, availableVersion: null },
+    );
+    expect(s[3].rows).toEqual([
+      "VPN: connected · 10.0.2.2:51820",
+      "Профиль: wg-stand.conf",
+      "Трафик тоннеля: rx 2057 КБ / tx 1029 КБ",
+    ]);
   });
 });
 
@@ -95,7 +126,7 @@ describe("formatDiagReport", () => {
   it("заголовок с версией, все секции, перевод строки в конце", () => {
     const r = formatDiagReport(snap(), { lastCheckMs: null, availableVersion: null });
     expect(r.startsWith("DuoPulse 0.1.64 — ")).toBe(true);
-    for (const line of ["Приложение", "Данные", "Блокировщик рекламы", "Обновления", "Открыто вкладок: 3"]) {
+    for (const line of ["Приложение", "Данные", "Блокировщик рекламы", "VPN", "Обновления", "Открыто вкладок: 3"]) {
       expect(r).toContain(line);
     }
     expect(r.endsWith("\n")).toBe(true);

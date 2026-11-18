@@ -21,9 +21,19 @@
 //! dead_after (REJECT_AFTER_TIME 180 с) → тоннель мёртв, соединения
 //! закрываются, новые отказывают сразу, напрямую ничего не уходит.
 //!
-//! Маршрутизация трафика ПРИЛОЖЕНИЯ через тоннель (WebView оверлея на
-//! локальный роутер `crate::vpn::router`) — этап 7 цепочки duopulse-162;
-//! здесь тоннель живёт сам по себе, трафик браузера пока прямой.
+//! Маршрутизация трафика ПРИЛОЖЕНИЯ через тоннель (этап 7 цепочки
+//! duopulse-162, карточка duopulse-170): тумблер тоннеля переводит роутер
+//! процесса (`crate::vpn::router`, стартует lib.rs) на `Route::Wg`, а WebView
+//! — на HTTP-листенер роутера: androidx.webkit ProxyController ставит единый
+//! прокси `http://127.0.0.1:<http_port>` (Kotlin MobileProxyHelper, обход
+//! внутренних адресов — duopulse://UI-источники *.localhost). Прокси
+//! применяется к НОВЫМ запросам — хелпер перезагружает открытые страницы
+//! (тост в UI). Фетчи Core ходят через SOCKS-порт того же роутера
+//! (duo/ASR-облако — см. duo_mobile/asr). Выключение — симметрично:
+//! Direct + снятие прокси, без перезапуска приложения. План А (ProxyController)
+//! выбран как основной — фича androidx.webkit 1.14 доступна на WebView
+//! Android 5.0+ (десерт-совместимость проверена смоуком на эмуляторе);
+//! план Б (VpnService tun) не понадобился.
 //!
 //! Модуль — только мобильным таргетам либы (#[tauri::command] в desktop-либе
 //! быть не должно — 0xc0000139, см. шапку mobile_open.rs).
@@ -31,9 +41,10 @@
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use std::sync::{Mutex, OnceLock};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::proxy::ProxyState;
+use crate::vpn::router::{Route, Router};
 use crate::vpn::wg::{self, WgLiveState, WgLiveStatus, WgProfile, WgSession};
 
 /// Живая сессия тоннеля (None — выключен). Старт/остановка — командами,
@@ -42,6 +53,85 @@ static TUNNEL: OnceLock<Mutex<Option<WgSession>>> = OnceLock::new();
 
 fn tunnel_slot() -> &'static Mutex<Option<WgSession>> {
     TUNNEL.get_or_init(|| Mutex::new(None))
+}
+
+// ---------------------------------------------------------------------------
+// Маршрутизация трафика приложения (duopulse-170): роутер процесса + WebView.
+// ---------------------------------------------------------------------------
+
+/// Применить маршрутизацию приложения: роутер процесса — на сессию тоннеля
+/// (Some — Wg, fail-closed) или Direct (None), WebView — прокси HTTP-листенера
+/// роутера через JNI MobileProxyHelper (ProxyController; снятие при None).
+/// Ошибка JNI не валит тумблер: роутер уже переключён — фетчи Core в тоннеле,
+/// отказ прокси означает лишь прямой WebView (лог + строка в ответе команды).
+fn apply_app_routing(app: &tauri::AppHandle, session: Option<&WgSession>) {
+    let Some(router) = app
+        .try_state::<Option<Router>>()
+        .and_then(|r| r.inner().clone())
+    else {
+        eprintln!("[vpn] роутера нет — маршрутизация приложения недоступна");
+        return;
+    };
+    match session {
+        Some(session) => router.set_route(Route::Wg {
+            session: session.clone(),
+        }),
+        None => router.set_route(Route::Direct),
+    }
+    if let Err(e) = proxy_helper::set_webview_proxy(router.http_port(), session.is_some()) {
+        eprintln!("[vpn] прокси WebView: {e}");
+    }
+}
+
+/// Погасить тоннель и вернуть приложению прямой маршрут (общее «выключить»
+/// для use_profile(None)/set_enabled(false)/remove_profile активного).
+fn tunnel_off(app: &tauri::AppHandle) {
+    stop_tunnel(app);
+    apply_app_routing(app, None);
+}
+
+/// JNI-мост к MobileProxyHelper (ProxyController WebView). Поверхность — как
+/// у MobileWebHelper: статический (Context, String) → String, исключения
+/// гасятся в Kotlin и возвращаются строкой.
+#[cfg(target_os = "android")]
+mod proxy_helper {
+    use crate::mobile_jni::{app_class, jstr, with_jni};
+
+    /// apply(on=true, arg «127.0.0.1:<http_port>») / clear(on=false).
+    pub fn set_webview_proxy(http_port: u16, on: bool) -> Result<String, String> {
+        let arg = if on {
+            format!("127.0.0.1:{http_port}")
+        } else {
+            String::new()
+        };
+        let method = if on { "apply" } else { "clear" };
+        with_jni(|env, context| {
+            let helper = app_class(env, context, "dev.duopulse.mobile.MobileProxyHelper")?;
+            let jarg = jstr(env, &arg)?;
+            let r = env
+                .call_static_method(
+                    &helper,
+                    method,
+                    "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
+                    &[context.into(), (&jarg).into()],
+                )
+                .map_err(|e| format!("helper {method}: {e}"))?
+                .l()
+                .map_err(|e| format!("helper {method}: {e}"))?;
+            let js = jni::objects::JString::from(r);
+            env.get_string(&js)
+                .map(|s| s.to_string_lossy().into_owned())
+                .map_err(|e| format!("helper {method} str: {e}"))
+        })
+    }
+}
+
+/// iOS-таргет: мобильная ветка — Android; сигнатуру держим для компиляции.
+#[cfg(all(not(target_os = "android"), target_os = "ios"))]
+mod proxy_helper {
+    pub fn set_webview_proxy(_http_port: u16, _on: bool) -> Result<String, String> {
+        Err("прокси WebView поддержан только на Android".into())
+    }
 }
 
 /// Каталог профиля (filesDir/profile — общий с историей/паролями).
@@ -318,6 +408,12 @@ fn collect_status() -> VpnStatusResult {
     }
 }
 
+/// Публичный снапшот для листа «Диагностика» (mobile_diag, duopulse-170):
+/// секция VPN — режим/endpoint/rx/tx без повторного IPC-командого вызова.
+pub fn status_snapshot() -> VpnStatusResult {
+    collect_status()
+}
+
 /// WgProfile → строка списка (открытые поля; секретов нет).
 fn profile_info(p: &WgProfile, active: bool) -> VpnProfileInfo {
     VpnProfileInfo {
@@ -366,7 +462,7 @@ pub fn mobile_vpn_list_profiles() -> Result<Vec<VpnProfileInfo>, String> {
 }
 
 /// mobile_vpn_remove_profile: удалить профиль и секрет (активный — сначала
-/// гасим тоннель, как десктоп).
+/// гасим тоннель и возвращаем прямой маршрут, как десктоп).
 #[tauri::command]
 pub fn mobile_vpn_remove_profile(
     app: tauri::AppHandle,
@@ -374,7 +470,7 @@ pub fn mobile_vpn_remove_profile(
 ) -> Result<(), String> {
     let dir = profile_dir()?;
     if wg::active_id(&dir).as_deref() == Some(params.id.as_str()) {
-        stop_tunnel(&app);
+        tunnel_off(&app);
         let _ = wg::set_active(&dir, None);
     }
     wg::remove_profile(&dir, &params.id)?;
@@ -383,30 +479,53 @@ pub fn mobile_vpn_remove_profile(
 
 /// mobile_vpn_use_profile: включить тоннель с профилем (Some — перезапуск
 /// сессии, повторное включение того же профиля применяет свежий импорт) или
-/// выключить (None — тоннель гасится, выбор профиля снимается).
+/// выключить (None — тоннель гасится, выбор профиля снимается). Включение
+/// одновременно переводит маршрутизацию приложения на тоннель (роутер + прокси
+/// WebView, duopulse-170), выключение возвращает Direct.
 #[tauri::command]
 pub fn mobile_vpn_use_profile(
     app: tauri::AppHandle,
     params: VpnUseProfileParams,
 ) -> Result<VpnStatusResult, String> {
     let dir = profile_dir()?;
-    stop_tunnel(&app);
-    if let Some(id) = &params.id {
-        let (profile, private_key, psk) = wg::profile_with_keys(&dir, id).ok_or_else(|| {
-            format!("профиль {id} не найден или его ключи не читаются (импортируйте .conf заново)")
-        })?;
-        let session = start_session(&app, &profile, private_key, psk)?;
-        wg::set_active(&dir, Some(id))?;
-        *tunnel_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(session);
-    } else {
-        wg::set_active(&dir, None)?;
+    stop_tunnel(&app); // маршрутизацию выставляет итоговое состояние ниже
+    match params.id.as_deref() {
+        Some(id) => {
+            let started = (|| -> Result<WgSession, String> {
+                let (profile, private_key, psk) = wg::profile_with_keys(&dir, id).ok_or_else(|| {
+                    format!(
+                        "профиль {id} не найден или его ключи не читаются (импортируйте .conf заново)"
+                    )
+                })?;
+                let session = start_session(&app, &profile, private_key, psk)?;
+                wg::set_active(&dir, Some(id))?;
+                Ok(session)
+            })();
+            match started {
+                Ok(session) => {
+                    *tunnel_slot().lock().unwrap_or_else(|p| p.into_inner()) =
+                        Some(session.clone());
+                    apply_app_routing(&app, Some(&session));
+                }
+                Err(e) => {
+                    // старт не удался — приложению возвращаем прямой маршрут
+                    apply_app_routing(&app, None);
+                    return Err(e);
+                }
+            }
+        }
+        None => {
+            wg::set_active(&dir, None)?;
+            apply_app_routing(&app, None);
+        }
     }
     Ok(collect_status())
 }
 
 /// mobile_vpn_set_enabled: тумблер тоннеля (у десктопа — внешний прокси;
 /// мобильной ветке прокси не нужен — включение поднимает тоннель активного
-/// профиля, выключение гасит; выбранный профиль сохраняется).
+/// профиля и переводит трафик приложения в него, выключение гасит и возвращает
+/// Direct; выбранный профиль сохраняется).
 #[tauri::command]
 pub fn mobile_vpn_set_enabled(
     app: tauri::AppHandle,
@@ -414,7 +533,7 @@ pub fn mobile_vpn_set_enabled(
 ) -> Result<VpnStatusResult, String> {
     let dir = profile_dir()?;
     if !params.on {
-        stop_tunnel(&app);
+        tunnel_off(&app);
         return Ok(collect_status());
     }
     let already_up = tunnel_slot()
@@ -428,7 +547,8 @@ pub fn mobile_vpn_set_enabled(
         "нет активного профиля WireGuard — сначала импортируйте и выберите .conf".to_string()
     })?;
     let session = start_session(&app, &profile, private_key, psk)?;
-    *tunnel_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(session);
+    *tunnel_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(session.clone());
+    apply_app_routing(&app, Some(&session));
     Ok(collect_status())
 }
 

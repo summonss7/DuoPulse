@@ -606,7 +606,10 @@ pub mod cmd {
             }
             AsrProviderId::Openai => {
                 let endpoint = cloud_endpoint(&dir, &cfg)?;
-                let transport = UreqAsrTransport::new();
+                // duopulse-170: POST распознавания — через SOCKS5-порт роутера
+                // процесса (тоннель включён — облако видит его адрес).
+                let transport =
+                    UreqAsrTransport::with_socks_port(crate::vpn::router::socks_port());
                 transcribe_pcm(&transport, &endpoint, &chunks, &lang, |done, total| {
                     on_chunk(done, total)
                 })

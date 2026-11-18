@@ -1,9 +1,17 @@
-//! Локальный SOCKS5-роутер (задача 6.1, docs/02 §6.1, карточка duopulse-037).
+//! Локальный роутер приложения: SOCKS5 + HTTP CONNECT (задача 6.1,
+//! docs/02 §6.1, карточка duopulse-037; HTTP-листенер — duopulse-170).
 //!
-//! WebView2 постоянно направлен на `socks5://127.0.0.1:<port>` аргументами
-//! окружения на старте приложения — независимо от режима; режимом управляет
-//! сам роутер, поэтому тумблер прокси НЕ требует перезапуска (риск из
-//! ROADMAP снят):
+//! WebView2 (десктоп) постоянно направлен на `socks5://127.0.0.1:<port>`
+//! аргументами окружения на старте приложения — независимо от режима;
+//! режимом управляет сам роутер, поэтому тумблер прокси НЕ требует
+//! перезапуска (риск из ROADMAP снят). На Android у WebView нет SOCKS-
+//! параметра — androidx.webkit ProxyController ставит единый HTTP-прокси
+//! `http://127.0.0.1:<http_port>` (MobileProxyHelper): второй листенер
+//! говорит тем же языком маршрутов — CONNECT-туннель для https-целей и
+//! absolute-form запросы для http-целей (Chromium в HTTP-прокси не шлёт
+//! CONNECT на открытый http), режимы Direct/Upstream/Wg и fail-closed —
+//! общие с SOCKS-путём. Фетчи Core ходят через SOCKS-порт (favicon/ASR
+//! десктопа, duo/ASR-облако мобильной ветки — duopulse-170). Режимы:
 //!   - `Direct`   — напрямую (режим off; DNS — системный резолвер, как без
 //!     роутера);
 //!   - `Upstream` — через внешний прокси задачи 1.8: SOCKS5 с логином/паролем
@@ -52,6 +60,20 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tauri::Manager;
+
+/// Порты запущенного роутера процесса (socks5, http): мобильной ветке нужны
+/// без AppHandle — команды фетчей (duo_fetch_cues, ASR-облако) не принимают
+/// app-хендл, а тянуть его в сигнатуры ради одного порта — churn контракта.
+/// Десктоп читает порт через State (main.rs управляет `Option<Router>`),
+/// реестр для него просто избыточен. Один роутер на процесс — повторный
+/// `Router::start` (тесты) реестр не перезаписывает.
+static PORTS: std::sync::OnceLock<(u16, u16)> = std::sync::OnceLock::new();
+
+/// SOCKS5-порт роутера процесса (None — роутер не поднимался). Фетчи Core
+/// мобильной ветки проходят через него тем же путём, что WebView2 десктопа.
+pub fn socks_port() -> Option<u16> {
+    PORTS.get().map(|(socks, _)| *socks)
+}
 
 /// Таймаут установления соединения и рукопожатий (клиент ↔ роутер ↔ upstream).
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -116,11 +138,12 @@ impl Policy {
     }
 }
 
-/// Запущенный роутер: слушатель живёт в своей нити до конца процесса.
+/// Запущенный роутер: слушатели живут в своих нитях до конца процесса.
 /// Клонирование — это та же политика (внутри Arc), клон для управления.
 #[derive(Clone)]
 pub struct Router {
     port: u16,
+    http_port: u16,
     policy: Arc<RwLock<Policy>>,
     events: Arc<RouteEvents>,
 }
@@ -165,25 +188,42 @@ impl RouteEvents {
 }
 
 impl Router {
-    /// Поднять роутер на 127.0.0.1. Порт — из DUOPULSE_ROUTER_PORT (отладка/
-    /// стенды) или случайный свободный. Стартовая политика — Single(Direct).
+    /// Поднять роутер на 127.0.0.1: SOCKS5-листенер (WebView2 десктопа,
+    /// фетчи Core) + HTTP-листенер CONNECT/absolute-form (ProxyController
+    /// WebView Android, duopulse-170). Порты — из DUOPULSE_ROUTER_PORT /
+    /// DUOPULSE_ROUTER_HTTP_PORT (отладка/стенды) или случайные свободные.
+    /// Стартовая политика — Single(Direct).
     pub fn start() -> std::io::Result<Router> {
-        let port_env = std::env::var("DUOPULSE_ROUTER_PORT")
-            .ok()
-            .and_then(|v| v.trim().parse::<u16>().ok())
-            .filter(|p| *p > 0);
-        let listener = TcpListener::bind(("127.0.0.1", port_env.unwrap_or(0)))?;
+        let port_env = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.trim().parse::<u16>().ok())
+                .filter(|p| *p > 0)
+        };
+        let listener = TcpListener::bind(("127.0.0.1", port_env("DUOPULSE_ROUTER_PORT").unwrap_or(0)))?;
         let port = listener.local_addr()?.port();
+        let http_listener = TcpListener::bind((
+            "127.0.0.1",
+            port_env("DUOPULSE_ROUTER_HTTP_PORT").unwrap_or(0),
+        ))?;
+        let http_port = http_listener.local_addr()?.port();
         let policy = Arc::new(RwLock::new(Policy::Single(Route::Direct)));
-        let policy_loop = Arc::clone(&policy);
         let events = Arc::new(RouteEvents::default());
-        let events_loop = Arc::clone(&events);
-        std::thread::Builder::new()
-            .name("vpn-router-accept".into())
-            .spawn(move || accept_loop(listener, policy_loop, events_loop))?;
-        eprintln!("[vpn] SOCKS5-роутер слушает 127.0.0.1:{port}");
+        for (name, stream_listener, http) in [
+            ("vpn-router-accept", listener, false),
+            ("vpn-router-http-accept", http_listener, true),
+        ] {
+            let policy_loop = Arc::clone(&policy);
+            let events_loop = Arc::clone(&events);
+            std::thread::Builder::new()
+                .name(name.into())
+                .spawn(move || accept_loop(stream_listener, policy_loop, events_loop, http))?;
+        }
+        let _ = PORTS.set((port, http_port));
+        eprintln!("[vpn] роутер слушает 127.0.0.1:{port} (SOCKS5) и :{http_port} (HTTP CONNECT)");
         Ok(Router {
             port,
+            http_port,
             policy,
             events,
         })
@@ -191,6 +231,12 @@ impl Router {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Порт HTTP-листенера (CONNECT/absolute-form) — для ProxyController
+    /// WebView Android (MobileProxyHelper получает его через JNI-вызов).
+    pub fn http_port(&self) -> u16 {
+        self.http_port
     }
 
     /// Подключить подписчика маршрутных решений (vpn:route_changed, задача
@@ -267,7 +313,12 @@ pub fn apply_saved(app: &tauri::AppHandle, profile_dir: &Path) {
     }
 }
 
-fn accept_loop(listener: TcpListener, policy: Arc<RwLock<Policy>>, events: Arc<RouteEvents>) {
+fn accept_loop(
+    listener: TcpListener,
+    policy: Arc<RwLock<Policy>>,
+    events: Arc<RouteEvents>,
+    http: bool,
+) {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -280,7 +331,12 @@ fn accept_loop(listener: TcpListener, policy: Arc<RwLock<Policy>>, events: Arc<R
                             .peer_addr()
                             .map(|a| a.to_string())
                             .unwrap_or_else(|_| "?".into());
-                        if let Err(e) = serve_client(stream, &policy, &events) {
+                        let served = if http {
+                            serve_http_client(stream, &policy, &events)
+                        } else {
+                            serve_client(stream, &policy, &events)
+                        };
+                        if let Err(e) = served {
                             eprintln!("[vpn] {peer}: {e}");
                         }
                     });
@@ -361,46 +417,10 @@ fn serve_client(
         port: u16::from_be_bytes(port_be),
     };
 
-    // Маршрутизация (задача 6.3): в split-режимах решение принимается ПО
-    // ДОМЕНУ на каждое соединение — до первого DNS-запроса (Chromium прислал
-    // имя, а не адрес). Правило «tunnel»/режим global — туннель (DNS — только
-    // сервером туннеля, vpn/dns.rs), остальное — напрямую. Любой отказ —
-    // ошибка клиенту (fail-closed): в туннельных маршрутах прямой ход
-    // запрещён, в Direct отказ цели — обычная ошибка сети. (preamble —
-    // ранние данные тоннеля, приехавшие в одном сегменте с заголовками
-    // ответа HTTP-прокси.)
-    let route = match &policy {
-        Policy::Single(route) => route.clone(),
-        Policy::Split { session, rules } => match rules.match_action(&target.host) {
-            Some(RuleAction::Tunnel) => Route::Wg {
-                session: session.clone(),
-            },
-            // Умолчание split — напрямую; явное правило «direct» — то же
-            // (docs/02 §6.2: в туннель — только заблокированные домены).
-            Some(RuleAction::Direct) | None => Route::Direct,
-        },
-    };
-    // Событие маршрутного решения (задача 6.5, vpn:route_changed): панель
-    // VPN видит, как режим/правила ложатся на живые соединения. Прямой
-    // off-режим молчит — решений там нет (всё напрямую и без роутера так же).
-    let off = matches!(&policy, Policy::Single(Route::Direct));
-    if !off {
-        let label = match &route {
-            Route::Direct => "direct",
-            Route::Upstream { .. } => "proxy",
-            Route::Wg { .. } => "tunnel",
-        };
-        events.note(&target.host, label);
-    }
-    let (upstream, preamble) = match &route {
-        Route::Direct => connect_direct(&target).map(|s| (Conn::Tcp(s), Vec::new())),
-        Route::Upstream { cfg, password } => {
-            connect_upstream(cfg, password.as_deref().unwrap_or(""), &target)
-                .map(|(s, p)| (Conn::Tcp(s), p))
-        }
-        Route::Wg { session } => connect_wg(session, &target).map(|s| (Conn::Wg(s), Vec::new())),
-    }
-    .inspect_err(|e| {
+    // Маршрутизация — общая с HTTP-путём (decide_route/connect_route):
+    // решение по политике, соединение с маршрутом, дальше — труба.
+    let route = decide_route(policy, events, &target);
+    let (upstream, preamble) = connect_route(&route, &target).inspect_err(|e| {
         let _ = reply(&mut client, 0x01);
         eprintln!("[vpn] {target}: {e}");
     })?;
@@ -415,7 +435,164 @@ fn serve_client(
     // Рукопожатия окончены — тоннель живёт без таймаутов (keep-alive, стримы).
     let _ = client.set_read_timeout(None);
     let _ = client.set_write_timeout(None);
-    pipe(client, upstream);
+    pipe(client, &[], upstream);
+    Ok(())
+}
+
+/// Решение маршрута по политике (задача 6.3): в split-режимах — ПО ДОМЕНУ
+/// на каждое соединение, до первого DNS-запроса (клиент прислал имя, а не
+/// адрес). Правило «tunnel»/режим global — туннель (DNS — только сервером
+/// туннеля, vpn/dns.rs), остальное — напрямую. Общее для SOCKS5- и
+/// HTTP-клиентов роутера.
+fn decide_route(policy: &Policy, events: &RouteEvents, target: &Target) -> Route {
+    let route = match policy {
+        Policy::Single(route) => route.clone(),
+        Policy::Split { session, rules } => match rules.match_action(&target.host) {
+            Some(RuleAction::Tunnel) => Route::Wg {
+                session: session.clone(),
+            },
+            // Умолчание split — напрямую; явное правило «direct» — то же
+            // (docs/02 §6.2: в туннель — только заблокированные домены).
+            Some(RuleAction::Direct) | None => Route::Direct,
+        },
+    };
+    // Событие маршрутного решения (задача 6.5, vpn:route_changed): панель
+    // VPN видит, как режим/правила ложатся на живые соединения. Прямой
+    // off-режим молчит — решений там нет (всё напрямую и без роутера так же).
+    let off = matches!(policy, Policy::Single(Route::Direct));
+    if !off {
+        let label = match &route {
+            Route::Direct => "direct",
+            Route::Upstream { .. } => "proxy",
+            Route::Wg { .. } => "tunnel",
+        };
+        events.note(&target.host, label);
+    }
+    route
+}
+
+/// Соединение с выбранным маршрутом. Любой отказ — ошибка наверх
+/// (fail-closed): в туннельных маршрутах прямой ход запрещён, в Direct
+/// отказ цели — обычная ошибка сети. Preamble — ранние данные тоннеля,
+/// приехавшие в одном сегменте с заголовками ответа HTTP-прокси upstream.
+fn connect_route(route: &Route, target: &Target) -> Result<(Conn, Vec<u8>), String> {
+    match route {
+        Route::Direct => connect_direct(target).map(|s| (Conn::Tcp(s), Vec::new())),
+        Route::Upstream { cfg, password } => connect_upstream(
+            cfg,
+            password.as_deref().unwrap_or(""),
+            target,
+        )
+        .map(|(s, p)| (Conn::Tcp(s), p)),
+        Route::Wg { session } => connect_wg(session, target).map(|s| (Conn::Wg(s), Vec::new())),
+    }
+}
+
+/// Одно клиентское соединение HTTP-прокси → роутер (duopulse-170): WebView
+/// Android через androidx.webkit ProxyController. Говорим тем же языком
+/// маршрутов, что SOCKS-путь (decide_route/connect_route): CONNECT —
+/// тоннель (https-цели), absolute-form запросы (http-цели — Chromium в
+/// HTTP-прокси не шлёт CONNECT на открытый http) — проксируем с rewrite
+/// request-line в origin-form. Origin-form/мусор — 405: роутер не
+/// веб-сервер. Отказ маршрута — 502 и разрыв (fail-closed): напрямую,
+/// мимо выбранного маршрута, ничего не уходит.
+fn serve_http_client(
+    mut client: TcpStream,
+    policy: &Policy,
+    events: &RouteEvents,
+) -> Result<(), String> {
+    let _ = client.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+    let _ = client.set_write_timeout(Some(HANDSHAKE_TIMEOUT));
+
+    let (head, rest) = read_http_head(&mut client).map_err(|e| format!("запрос HTTP: {e}"))?;
+    let mut lines = head.split("\r\n");
+    let request_line = lines.next().unwrap_or_default().to_string();
+    let mut parts = request_line.split(' ');
+    let method = parts.next().unwrap_or_default().to_string();
+    let target_uri = parts.next().unwrap_or_default().to_string();
+    if method.is_empty() || target_uri.is_empty() {
+        let _ = client.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+        return Err(format!("битая строка запроса: {request_line:?}"));
+    }
+
+    if method == "CONNECT" {
+        // host:port (порт обязателен по семантике CONNECT; без — 443).
+        let (host, port) = match target_uri.rsplit_once(':') {
+            Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(443)),
+            None => (target_uri.clone(), 443),
+        };
+        let target = Target { host, port };
+        let route = decide_route(policy, events, &target);
+        let (upstream, preamble) = connect_route(&route, &target).inspect_err(|e| {
+            let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+            eprintln!("[vpn] {target}: {e}");
+        })?;
+        client
+            .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            .map_err(|e| format!("ответ CONNECT: {e}"))?;
+        if !preamble.is_empty() {
+            client
+                .write_all(&preamble)
+                .map_err(|e| format!("хвост ответа тоннеля: {e}"))?;
+        }
+        let _ = client.set_read_timeout(None);
+        let _ = client.set_write_timeout(None);
+        pipe(client, &rest, upstream);
+        return Ok(());
+    }
+
+    // Absolute-form: «GET http://host[:port]/path HTTP/1.1» → origin-form.
+    let parsed = match url::Url::parse(&target_uri) {
+        Ok(u) if u.scheme() == "http" || u.scheme() == "https" => u,
+        _ => {
+            let _ = client.write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n");
+            return Err(format!("не absolute-form запрос: {request_line:?}"));
+        }
+    };
+    let host = parsed.host_str().unwrap_or_default().to_string();
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let target = Target { host, port };
+    let path_and_query = match parsed.query() {
+        Some(q) => format!("{}?{}", parsed.path(), q),
+        None => parsed.path().to_string(),
+    };
+    // Переописываем голову: request-line → origin-form, hop-by-hop заголовки
+    // прокси (Proxy-Connection/Proxy-Authorization/Proxy-Authenticate) —
+    // вон: цели они не адресованы.
+    let mut forwarded = format!("{method} {path_and_query} HTTP/1.1\r\n");
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("proxy-connection:")
+            || lower.starts_with("proxy-authorization:")
+            || lower.starts_with("proxy-authenticate:")
+        {
+            continue;
+        }
+        forwarded.push_str(line);
+        forwarded.push_str("\r\n");
+    }
+    forwarded.push_str("\r\n");
+
+    let route = decide_route(policy, events, &target);
+    let (upstream, preamble) = connect_route(&route, &target).inspect_err(|e| {
+        let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+        eprintln!("[vpn] {target}: {e}");
+    })?;
+    if !preamble.is_empty() {
+        client
+            .write_all(&preamble)
+            .map_err(|e| format!("хвост ответа тоннеля: {e}"))?;
+    }
+    // Ранние байты к цели: rewritten-голова + тело, приехавшее в одном
+    // сегменте с головой клиента (pipe допишет их до старта копирования).
+    let mut early = forwarded.into_bytes();
+    early.extend_from_slice(&rest);
+    let _ = client.set_read_timeout(None);
+    let _ = client.set_write_timeout(None);
+    pipe(client, &early, upstream);
     Ok(())
 }
 
@@ -695,11 +872,16 @@ fn connect_wg(
 
 /// Двунаправленный тоннель: обе стороны до EOF; завершение любого направления
 /// закрывает соединение целиком (shutdown клонов клиента + закрытие потока
-/// маршрута), чтобы второе не висело на чтении мёртвого пира.
-fn pipe(client: TcpStream, upstream: Conn) {
+/// маршрута), чтобы второе не висело на чтении мёртвого пира. `early` —
+/// байты клиента, вычитанные вместе с головой HTTP-запроса (HTTP-путь
+/// роутера): дописываются маршруту до старта копирования.
+fn pipe(client: TcpStream, early: &[u8], upstream: Conn) {
     let Ok((mut up_read, mut up_write)) = upstream.split() else {
         return;
     };
+    if !early.is_empty() {
+        let _ = up_write.write_all(early);
+    }
     let Ok(mut client_read) = client.try_clone() else {
         return;
     };
@@ -1257,6 +1439,151 @@ mod tests {
             seen.lock().unwrap().len(),
             1,
             "повтор домена — без второго события (дедуп)"
+        );
+    }
+
+    // --- HTTP-листенер (duopulse-170): WebView Android через ---------------
+    // --- ProxyController. Те же маршруты/fail-closed, что у SOCKS-пути. ----
+
+    /// CONNECT через HTTP-порт: статус-строка ответа («200 …» / «502 …»),
+    /// при успехе — поток для обмена данными.
+    fn http_connect(router_port: u16, host: &str, port: u16) -> Result<TcpStream, String> {
+        let mut s = TcpStream::connect(("127.0.0.1", router_port)).unwrap();
+        s.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).unwrap();
+        s.write_all(format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n").as_bytes())
+            .unwrap();
+        let (head, _rest) = read_http_head(&mut s).unwrap();
+        let status = head.lines().next().unwrap_or_default().to_string();
+        if !status.starts_with("HTTP/1.1 200") {
+            return Err(status);
+        }
+        Ok(s)
+    }
+
+    /// Absolute-form GET через HTTP-порт: ответ (голова+хвост) строкой.
+    fn http_get_absolute(router_port: u16, url: &str) -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", router_port)).unwrap();
+        s.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).unwrap();
+        s.write_all(format!("GET {url} HTTP/1.1\r\nHost: example\r\n\r\n").as_bytes())
+            .unwrap();
+        let mut buf = Vec::new();
+        let _ = s.read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    #[test]
+    fn http_direct_connect_flows() {
+        let router = Router::start().unwrap();
+        assert!(router.http_port() > 0, "HTTP-листенер поднялся");
+        let (port, hits, _t) = echo_target();
+
+        let s = http_connect(router.http_port(), "127.0.0.1", port).expect("200 на CONNECT");
+        assert_eq!(exchange(s, "ping"), "ping", "эхо через HTTP CONNECT (direct)");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn http_absolute_form_rewrites_and_flows() {
+        let router = Router::start().unwrap();
+        let (port, hits, _t) = echo_target();
+
+        let reply = http_get_absolute(
+            router.http_port(),
+            &format!("http://127.0.0.1:{port}/path?q=1"),
+        );
+        // Эхо-цель возвращает первый принятый чанк — rewritten-голову:
+        // request-line обязана стать origin-form (абсолютного URL цели нет).
+        assert!(
+            reply.starts_with("GET /path?q=1 HTTP/1.1\r\n"),
+            "голова переписана в origin-form: {reply:?}"
+        );
+        assert!(!reply.contains("http://127.0.0.1"), "absolute-form ушёл: {reply:?}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// Absolute-form с hop-by-hop заголовками прокси: Proxy-* вырезаются,
+    /// остальные строки головы доходят до цели как есть.
+    #[test]
+    fn http_absolute_form_strips_proxy_headers() {
+        let router = Router::start().unwrap();
+        let (port, _hits, _t) = echo_target();
+
+        let mut s = TcpStream::connect(("127.0.0.1", router.http_port())).unwrap();
+        s.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).unwrap();
+        s.write_all(
+            format!(
+                "GET http://127.0.0.1:{port}/ HTTP/1.1\r\nHost: h\r\nProxy-Connection: keep-alive\r\nX-Keep: yes\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let reply = {
+            let mut buf = Vec::new();
+            let _ = s.read_to_end(&mut buf);
+            String::from_utf8_lossy(&buf).into_owned()
+        };
+        assert!(reply.contains("x-keep: yes") || reply.contains("X-Keep: yes"), "{reply:?}");
+        assert!(
+            !reply.to_ascii_lowercase().contains("proxy-connection"),
+            "hop-by-hop прокси-заголовки вырезаны: {reply:?}"
+        );
+    }
+
+    /// Fail-closed: отказ маршрута (мёртвый upstream) — 502, напрямую к цели
+    /// роутер не ходит (критерий карточки: в Wg-режиме мимо тоннеля ничего).
+    #[test]
+    fn http_fail_closed_dead_upstream() {
+        let router = Router::start().unwrap();
+        let (target_port, hits, _t) = echo_target();
+        router.set_route(Route::Upstream {
+            cfg: proxy_cfg(ProxyProto::Socks5, "127.0.0.1", dead_port(), None),
+            password: None,
+        });
+
+        let err = http_connect(router.http_port(), "127.0.0.1", target_port).unwrap_err();
+        assert!(err.starts_with("HTTP/1.1 502"), "отказ — 502: {err}");
+        let reply = http_get_absolute(
+            router.http_port(),
+            &format!("http://127.0.0.1:{target_port}/x"),
+        );
+        assert!(reply.starts_with("HTTP/1.1 502"), "absolute-form тоже 502: {reply}");
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "напрямую к цели не ходили");
+    }
+
+    /// Смена маршрута без перезапуска на HTTP-порту (тот же роутер, что у
+    /// SOCKS-пути — тумблер VPN переключает оба листенера разом).
+    #[test]
+    fn http_mode_switches_without_restart() {
+        let router = Router::start().unwrap();
+        let (port, hits, _t) = echo_target();
+
+        let s = http_connect(router.http_port(), "127.0.0.1", port).expect("direct работает");
+        exchange(s, "a");
+        wait_hits(&hits, 1);
+
+        router.set_route(Route::Upstream {
+            cfg: proxy_cfg(ProxyProto::Socks5, "127.0.0.1", dead_port(), None),
+            password: None,
+        });
+        assert!(http_connect(router.http_port(), "127.0.0.1", port).is_err());
+
+        router.set_route(Route::Direct);
+        let s = http_connect(router.http_port(), "127.0.0.1", port).expect("direct после откл");
+        exchange(s, "b");
+        wait_hits(&hits, 2);
+    }
+
+    /// Origin-form («GET / …») через прокси-порт — 405: роутер не веб-сервер.
+    #[test]
+    fn http_origin_form_rejected() {
+        let router = Router::start().unwrap();
+        let mut s = TcpStream::connect(("127.0.0.1", router.http_port())).unwrap();
+        s.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).unwrap();
+        s.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        let (head, _) = read_http_head(&mut s).unwrap();
+        assert!(
+            head.starts_with("HTTP/1.1 405"),
+            "origin-form отклонён: {head}"
         );
     }
 }

@@ -307,7 +307,9 @@ fn run_job(
             }),
         );
     };
-    let transport = UreqAsrTransport::new();
+    // duopulse-170: POST распознавания — через роутер приложения (раньше
+    // уходил напрямую даже при включённом тоннеле — утечка мимо VPN).
+    let transport = UreqAsrTransport::with_socks_port(router_port(&app));
     let cfg = super::config::load_config(&profile_dir(&app));
     let endpoint = match build_endpoint(&app, &cfg, &transport, &ctx) {
         Ok(e) => e,

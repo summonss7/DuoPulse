@@ -885,5 +885,11 @@ export const dict: Record<string, string> = {
   "Скачивание модели… {done} / {total} МБ": "Sťahovanie modelu… {done} / {total} MB",
   "Скачивание модели…": "Sťahovanie modelu…",
   "Модель скачана и проверена": "Model stiahnutý a overený",
-  "Модель: {e}": "Model: {e}"
+  "Модель: {e}": "Model: {e}",
+
+  // VPN-секция листа диагностики (duopulse-170, паритет 7/8)
+  "VPN": "VPN",
+  "VPN: {state} · {ep}": "VPN: {state} · {ep}",
+  "Профиль: {v}": "Profil: {v}",
+  "Трафик тоннеля: rx {rx} КБ / tx {tx} КБ": "Tunelový prenos: rx {rx} KB / tx {tx} KB",
 };

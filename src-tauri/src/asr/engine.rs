@@ -257,6 +257,27 @@ impl UreqAsrTransport {
                 .build(),
         }
     }
+
+    /// Транспорт через SOCKS5-порт роутера приложения (duopulse-170): POST
+    /// распознавания идёт тем же маршрутом, что WebView и остальные фетчи
+    /// Core — при включённом тоннеле у приложения не остаётся прямого
+    /// сетевого пути. Порта нет (роутер не поднимался) — как `new()`,
+    /// напрямую.
+    pub fn with_socks_port(socks_port: Option<u16>) -> Self {
+        let Some(port) = socks_port else {
+            return Self::new();
+        };
+        let Ok(proxy) = ureq::Proxy::new(format!("socks5://127.0.0.1:{port}")) else {
+            return Self::new();
+        };
+        Self {
+            agent: ureq::AgentBuilder::new()
+                .timeout_connect(Duration::from_secs(10))
+                .timeout(Duration::from_secs(15 * 60))
+                .proxy(proxy)
+                .build(),
+        }
+    }
 }
 
 impl Default for UreqAsrTransport {

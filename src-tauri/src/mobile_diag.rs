@@ -89,6 +89,23 @@ pub struct DiagAdblock {
     pub seen_total: u64,
 }
 
+/// VPN в снимке (duopulse-170, секция листа «Диагностика»): режим/endpoint/
+/// счётчики тоннеля — срез mobile_vpn::status_snapshot.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagVpn {
+    /// off | wg.
+    pub mode: String,
+    /// connecting | connected | error (пусто при off).
+    pub state: String,
+    /// Имя профиля (пусто при off).
+    pub profile: String,
+    /// «host:port» сервера (пусто при off).
+    pub endpoint: String,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+}
+
 /// Ответ diag_snapshot (зеркало — DiagSnapshot в src/mobile/diagnostics.ts).
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,11 +129,39 @@ pub struct DiagSnapshot {
     pub pass_autofill: bool,
     /// Счётчики адблока за сеанс (None — движок недоступен).
     pub adblock: Option<DiagAdblock>,
+    /// Тоннель WireGuard (duopulse-170: режим/endpoint/rx/tx).
+    pub vpn: Option<DiagVpn>,
     /// Последняя проверка обновлений, unix-ms (None — не проверяли; метка
     /// localStorage фронта — updater.ts, тоже параметр).
     pub last_update_check_ms: Option<i64>,
     /// Время снимка, unix-ms.
     pub now_ms: i64,
+}
+
+/// Срез статуса тоннеля для снимка (wg-режим → Some; off → Some с mode=off —
+/// секция листа показывает режим и выключенным, пустых строк меньше).
+/// Тоннель — модуль мобильных таргетов, на хосте функции нет (как rss_kb).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn vpn_slice() -> DiagVpn {
+    let st = crate::mobile_vpn::status_snapshot();
+    match st.wg {
+        Some(w) => DiagVpn {
+            mode: st.mode,
+            state: w.state,
+            profile: w.profile_name,
+            endpoint: w.endpoint,
+            rx_bytes: w.rx_bytes,
+            tx_bytes: w.tx_bytes,
+        },
+        None => DiagVpn {
+            mode: st.mode,
+            state: String::new(),
+            profile: String::new(),
+            endpoint: String::new(),
+            rx_bytes: 0,
+            tx_bytes: 0,
+        },
+    }
 }
 
 /// Время снимка; вызывает только мобильная команда (гейт — как rss_kb).
@@ -163,6 +208,7 @@ pub fn diag_snapshot(
         passwords: pw_total,
         pass_autofill: !crate::mobile_pass::is_incognito(),
         adblock,
+        vpn: Some(vpn_slice()),
         last_update_check_ms,
         now_ms: now_ms(),
     })
@@ -215,6 +261,14 @@ mod tests {
                 blocked_total: 7,
                 seen_total: 90,
             }),
+            vpn: Some(DiagVpn {
+                mode: "wg".into(),
+                state: "connected".into(),
+                profile: "wg-stand.conf".into(),
+                endpoint: "10.0.2.2:51820".into(),
+                rx_bytes: 2048,
+                tx_bytes: 1024,
+            }),
             last_update_check_ms: Some(1_700_000_000_000),
             now_ms: 1_700_000_060_000,
         };
@@ -224,6 +278,10 @@ mod tests {
         assert_eq!(v["passAutofill"], true);
         assert_eq!(v["lastUpdateCheckMs"].as_i64(), Some(1_700_000_000_000));
         assert_eq!(v["adblock"]["blockedTotal"], 7);
+        // duopulse-170: секция VPN листа диагностики
+        assert_eq!(v["vpn"]["mode"], "wg");
+        assert_eq!(v["vpn"]["endpoint"], "10.0.2.2:51820");
+        assert_eq!(v["vpn"]["rxBytes"], 2048);
         assert!(v.get("app_version").is_none());
     }
 

@@ -361,11 +361,20 @@ pub(crate) mod net {
         pub gtx_cache: Mutex<HashMap<String, Vec<String>>>,
     }
 
+    /// Агент фетчей: через SOCKS5-порт роутера процесса (duopulse-170), если
+    /// роутер поднят — тем же сетевым путём, что WebView (ProxyController) и
+    /// десктопные фетчи (favicon/ASR): режим Direct/Wg решает роутер, при
+    /// тоннеле эти запросы идут в нём (fail-closed), без роутера — напрямую.
     fn agent() -> ureq::Agent {
-        ureq::AgentBuilder::new()
+        let mut builder = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(10))
-            .timeout(Duration::from_secs(20))
-            .build()
+            .timeout(Duration::from_secs(20));
+        if let Some(port) = crate::vpn::router::socks_port() {
+            if let Ok(proxy) = ureq::Proxy::new(format!("socks5://127.0.0.1:{port}")) {
+                builder = builder.proxy(proxy);
+            }
+        }
+        builder.build()
     }
 
     /// Вызов GET c расшифровкой статусов: ureq отдаёт не-2xx как

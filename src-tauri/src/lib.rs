@@ -183,6 +183,20 @@ fn mobile_run() {
             use std::sync::Arc;
             use tauri::Manager;
             let dir = mobile_history::profile_dir()?;
+            // Маршрутизация трафика приложения (duopulse-170, паритет 7/8):
+            // роутер процесса — SOCKS5 для фетчей Core (duo-субтитры,
+            // ASR-облако) и HTTP-листенер CONNECT/absolute-form для WebView
+            // (androidx.webkit ProxyController, MobileProxyHelper). Стартовая
+            // политика Direct — как WebView2 десктопа, режим меняет тумблер
+            // тоннеля (mobile_vpn) без перезапуска. Не поднялся — деградация
+            // в журнал старта, трафик остаётся прямым.
+            let router = match vpn::router::Router::start() {
+                Ok(router) => Some(router),
+                Err(e) => {
+                    eprintln!("[vpn] роутер приложения не поднялся: {e} — трафик прямой");
+                    None
+                }
+            };
             // Диагностика (duopulse-164): старт сеанса — до открытия окна,
             // «время сеанса» снимка честное с самого запуска.
             mobile_diag::init();
@@ -223,6 +237,7 @@ fn mobile_run() {
             app.manage(account);
             app.manage(asr_cache);
             app.manage(Arc::new(mobile_asr::cmd::AsrManaged::default()));
+            app.manage(router); // Option<Router> — mobile_vpn переключает маршрут
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

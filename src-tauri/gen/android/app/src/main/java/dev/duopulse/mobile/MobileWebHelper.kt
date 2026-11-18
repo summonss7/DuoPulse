@@ -413,6 +413,16 @@ object MobileWebHelper {
     }
   }
 
+  /** Перезагрузить страницу оверлея после смены прокси WebView
+   *  (duopulse-170, MobileProxyHelper): прокси действует на новые запросы —
+   *  открытая страница перечитывается уже через выбранный маршрут. Вызовы
+   *  идут из колбэка ProxyController на UI-ните; скрытый оверлей тоже
+   *  перезагружаем — выдача обновится к возвращению. */
+  @JvmStatic fun reloadForProxy() {
+    val act = MainActivity.current ?: return
+    act.runOnUiThread { webView?.reload() }
+  }
+
   /** Закрытие из Rust (mobile_web_close). Поверхность JNI у open/close общая
    *  — (Context, String) → String (jni_impl в mobile_web.rs): второй параметр
    *  у close не используется, но обязателен дескриптору. До duopulse-145

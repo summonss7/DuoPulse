@@ -189,7 +189,10 @@ hkdf = "0.12"
 # системная установка APK через Kotlin-хелпер gen/android (контекст
 # приложения кладёт tao, эталон novagrid-063).
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-ureq = { version = "2", features = ["tls"], default-features = false }
+# socks-proxy (duopulse-170): фетчи Core мобильной ветки (duo-субтитры,
+# ASR-облако) ходят через SOCKS5-порт роутера приложения — тот же сетевой
+# путь, что WebView (ProxyController) и десктопные фетчи (favicon/ASR).
+ureq = { version = "2", features = ["tls", "socks-proxy"], default-features = false }
 # Полный адблок мобильной ветки (duopulse-144): тот же движок, что у десктопа
 # (crate::adblock из бина main.rs) — default-features = false по той же
 # причине (один Sync-движок на все WebView за мьютексом), фичи совпадают с
