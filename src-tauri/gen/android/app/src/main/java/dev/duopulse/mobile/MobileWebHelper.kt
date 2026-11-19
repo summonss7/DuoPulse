@@ -95,6 +95,19 @@ import java.io.ByteArrayInputStream
  * нижний лист имён (БЕЗ паролей) → выбор → reveal по id в Core →
  * evaluateJavascript заполняет логин+пароль точечно (пароль живёт в памяти
  * мгновение). Инкогнито: Core отдаёт пустой список — иконок и заполнения нет.
+ *
+ * duopulse-191 (жалоба «поиск Ютуб → тап по Ютуб — браузер виснет»): органика
+ * «Ютуб» в легаси-выдаче Google (WebView-клиенту достается именно она) ведёт
+ * на youtube.com/?app=desktop — форс ДЕСКТОПНОГО Polymer-сайта, который вешает
+ * WebView телефона бесконечным скелетоном и глушит рендерер («завис», иногда
+ * «открывается в обрезанном виде»). UA оверлея мобильный — достаточно
+ * выбросить app=desktop (open / shouldOverrideUrlLoading / onPageStarted —
+ * редирект google.com/goto не проходит shouldOverride), YouTube сам отдаёт
+ * m.youtube.com (проверено на эмуляторе: страница complete, рендерер жив).
+ * Заодно: внешние схемы (market:, mailto:, tel:… — карточка приложения в
+ * выдаче) прежде глотались молча — тап выглядел зависанием; теперь уходят
+ * системному ACTION_VIEW. Копирование ссылки (жалоба «нет возможности
+ * скопировать»): кроме меню «⋮» — долгое нажатие адресного чипа.
  */
 object MobileWebHelper {
   private const val TAG = "DuoPulseWeb"
@@ -112,6 +125,14 @@ object MobileWebHelper {
 
   /** videoId ([\w-]{6,20}) — общий формат id YouTube. */
   private const val ID_RE = "[\\w-]{6,20}"
+
+  /** Внешние схемы, которые отдаём системе (duopulse-191): карточка
+   *  приложения в выдаче Google — market:// (Play Store), mailto:/tel: —
+   *  почта/звонилка, мессенджеры. Остальные (javascript:, file:, blob:,
+   *  data:, about:) не грузим и не отдаём — как прежде. */
+  private val EXTERNAL_SCHEMES = setOf(
+    "market", "mailto", "tel", "sms", "geo", "tg", "whatsapp", "viber"
+  )
 
   private var overlay: FrameLayout? = null
   private var webView: WebView? = null
@@ -189,6 +210,30 @@ object MobileWebHelper {
     return youTubeVideoId(u)
   }
 
+  /** Выбросить десктоп-форс YouTube (duopulse-191): ссылки выдачи Google несут
+   *  app=desktop — десктопный Polymer вешает WebView телефона скелетоном.
+   *  UA оверлея мобильный: без параметра YouTube сам отдаст m.youtube.com.
+   *  Страницы видео не трогаем (их забирает встроенный плеер). null —
+   *  переписывать нечего (без параметра/не YouTube/битый адрес). */
+  private fun forceMobileYouTube(url: String): String? {
+    if (!url.contains("app=desktop")) return null
+    val u = try {
+      Uri.parse(url)
+    } catch (e: Exception) {
+      return null
+    }
+    val host = u.host?.lowercase()?.removePrefix("www.") ?: return null
+    if (host != "youtube.com" && !host.endsWith(".youtube.com")) return null
+    if (youTubeVideoId(u) != null) return null
+    // пересборка без app=…: очищенный URL параметра не несёт — цикла нет
+    val b = u.buildUpon().clearQuery()
+    for (name in u.queryParameterNames) {
+      if (name == "app") continue
+      for (v in u.getQueryParameters(name)) b.appendQueryParameter(name, v)
+    }
+    return b.build().toString()
+  }
+
   /** Показ адреса и кнопки «▶ duo» — на каждой смене URL. */
   private fun syncChrome(url: String?) {
     urlText?.text = url ?: ""
@@ -218,7 +263,9 @@ object MobileWebHelper {
       if (ov == null) ov = build(act, root)
       hidden = false
       syncChrome(url)
-      webView?.loadUrl(url)
+      // duopulse-191: вставленный/переданный адрес с app=desktop грузим сразу
+      // мобильной версией — десктопный YouTube вешает WebView
+      webView?.loadUrl(forceMobileYouTube(url) ?: url)
       ov.visibility = View.VISIBLE
       backCallback.isEnabled = true
     }
@@ -591,6 +638,13 @@ object MobileWebHelper {
       setStroke(dp(1), Color.argb(46, 189, 254, 79))
     }
     addr.layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f)
+    // duopulse-191: долгое нажатие адреса = «Копировать ссылку» (тот же
+    // буфер/тост, что пункт меню «⋮») — быстрый доступ без раскрытия меню
+    addr.setOnLongClickListener {
+      val u = webView?.url ?: ""
+      if (u.isNotEmpty()) copyUrl(act, u)
+      true
+    }
     urlRow.addView(addr)
     urlText = addr
 
@@ -643,12 +697,29 @@ object MobileWebHelper {
     wv.webViewClient = object : WebViewClient() {
       override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         // всё открываем в оверлее (youtube/m.youtube/music.youtube — их
-        // мобильные страницы); внешние протоколы (market:, intent:) не грузим
+        // мобильные страницы); внешние протоколы не грузим
         val scheme = request.url.scheme?.lowercase() ?: return false
-        if (scheme != "http" && scheme != "https") return true
-        // Переход на YouTube-видео с выдачи/другого сайта (duopulse-139) — не
-        // страница m.youtube с рекламой, а сразу встроенный плеер
+        if (scheme != "http" && scheme != "https") {
+          // duopulse-191: знакомые приложению схемы (карточка приложения в
+          // выдаче — market://, mailto:, tel:…) отдаём системе — прежде тап
+          // молча пропадал и выглядел зависанием; отказ — тишина
+          if (scheme in EXTERNAL_SCHEMES) {
+            try {
+              act.startActivity(Intent(Intent.ACTION_VIEW, request.url))
+            } catch (e: Exception) {
+              Log.d(TAG, "external-scheme: $scheme не открыт (${e.message})")
+            }
+          }
+          return true
+        }
         if (request.isForMainFrame) {
+          // десктоп-форс YouTube (duopulse-191) — перезагрузить мобильной
+          forceMobileYouTube(request.url.toString())?.let { clean ->
+            view.loadUrl(clean)
+            return true
+          }
+          // Переход на YouTube-видео с выдачи/другого сайта (duopulse-139) — не
+          // страница m.youtube с рекламой, а сразу встроенный плеер
           youTubeVideoId(request.url)?.let { id ->
             openVideoInPlayer(id)
             return true
@@ -686,6 +757,13 @@ object MobileWebHelper {
       override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
         // прогресс: страница грузится — полоса видна (100% погасит onProgress)
         progress?.let { it.progress = 5; it.visibility = View.VISIBLE }
+        // duopulse-191: серверный редирект (google.com/goto → 302) не проходит
+        // shouldOverrideUrlLoading — десктоп-форс YouTube ловим и здесь,
+        // перезагрузкой очищенного адреса (он без app=desktop — цикла нет)
+        forceMobileYouTube(url)?.let { clean ->
+          view.loadUrl(clean)
+          return
+        }
         // текущий адрес — фоновым нитям загрузчика (движок адблока)
         pageUrl = url
         // косметика — пораньше (документ создаётся): скриптлеты до скриптов

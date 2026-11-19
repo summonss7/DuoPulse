@@ -170,6 +170,17 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   обновляет videoId раньше parse — стенд ждёт стабильного originalId.
   Результат — e2e/mobile/duo-default-smoke-last-run.json (gitignore,
   рантайм-артефакт).
+- `e2e/mobile/yt-mobile-force-smoke.mjs` — стенд МОБИЛЬНОГО YouTube в
+  web-оверлее (карточка 191 «поиск Ютуб → тап по Ютуб — браузер виснет»:
+  ссылки выдачи Google несут app=desktop, десктопный Polymer-сайт вешает
+  WebView скелетоном; фикс срезает параметр в open/shouldOverrideUrlLoading/
+  onPageStarted — серверный редирект goto не проходит shouldOverride):
+  debug-APK + CDP 9223, 5 проверок: mobile_web_open адреса с app=desktop →
+  оверлей на m.youtube.com без параметра, readyState complete и CDP-eval
+  быстрый (до фикса рендерер молчал минутами), десктопная разметка
+  (ytd-app/#masthead) не грузится, клик по видео главной — встроенный плеер
+  (омнибокс watch?v=, путь duopulse-139 цел). Результат —
+  e2e/mobile/yt-mobile-force-smoke-last-run.json (gitignore, рантайм-артефакт).
 
 Новые временные файлы в корне не накапливать: одноразовое — `%TEMP%`, постоянное — `e2e/`.
 <!-- /E2E-ИНСТРУМЕНТЫ -->
