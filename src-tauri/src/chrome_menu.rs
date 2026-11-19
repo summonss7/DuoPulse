@@ -22,10 +22,13 @@
 //! Идентификаторы пунктов: «tab:<act>» и «star:g:<id группы>» /
 //! «star:newgroup», «bmchip:rename:<url>» / «bmchip:delete:<url>» /
 //! «bmgroup:rename:<id группы>» (строка закладок, duopulse-149/160) и
-//! «bmbar:newgroup» (правый клик по пустому месту строки, duopulse-160).
-//! Меню папки строки закладок — панель-webview bmfolder
-//! (chrome_panel.rs, duopulse-147): нативное меню не умеет drag&drop и
-//! подсветку доменов.
+//! «bmbar:newgroup» (правый клик по пустому месту строки, duopulse-160),
+//! а также меню ПАНЕЛИ папки: «bmrow:section» / «bmrow:rename:<url>» /
+//! «bmrow:delete:<url>» / «bmsection:new» (duopulse-189) — их выбор
+//! уходит не в UI-webview, а в панель-webview (emit_to chrome-panel).
+//! Содержимое папки строки закладок — панель-webview bmfolder
+//! (chrome_panel.rs, duopulse-147): список не сделать нативным меню —
+//! drag&drop и подсветка доменов; контекстные меню строк — нативные.
 
 use serde_json::Value;
 use tauri::menu::{CheckMenuItem, ContextMenu, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -190,6 +193,52 @@ fn build_bm_item_menu(app: &AppHandle, kind: &str, key: &str) -> Result<Menu<tau
 fn build_bmbar_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, String> {
     let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
     menu.append(&item(app, "bmbar:newgroup", "Новая группа…", true, None)?)
+        .map_err(|e| format!("меню: {e}"))?;
+    Ok(menu)
+}
+
+/// Меню строки закладки ПАНЕЛИ папки (duopulse-189): раньше HTML-меню .bm-ctx
+/// внутри панель-webview (duopulse-160) — но панель короткой папки (2
+/// закладки ≈ 73px) НИЖЕ меню из трёх пунктов (≈ 110px): кламп упирался в
+/// потолок, «Удалить закладку» выходил за нижнюю границу панель-webview и
+/// прятался за видео вкладки («прячется за видео на Ютубе»). Нативный popup
+/// (шаблон 086) живёт системным окном поверх всех webview — обрезки нет в
+/// принципе. Состав: «Создать раздел…» (если дерево позволяет), «Переименовать…»,
+/// «Удалить закладку»; адрес — в id пункта, выбор возвращается панель-webview.
+fn build_bmrow_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, String> {
+    let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
+    let url = payload.get("url").and_then(Value::as_str).unwrap_or("");
+    if payload.get("canNest").and_then(Value::as_bool).unwrap_or(false) {
+        menu.append(&item(app, "bmrow:section", "Создать раздел…", true, None)?)
+            .map_err(|e| format!("меню: {e}"))?;
+        menu.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
+            .map_err(|e| format!("меню: {e}"))?;
+    }
+    menu.append(&item(
+        app,
+        &format!("bmrow:rename:{url}"),
+        "Переименовать…",
+        true,
+        None,
+    )?)
+    .map_err(|e| format!("меню: {e}"))?;
+    menu.append(&item(
+        app,
+        &format!("bmrow:delete:{url}"),
+        "Удалить закладку",
+        true,
+        None,
+    )?)
+    .map_err(|e| format!("меню: {e}"))?;
+    Ok(menu)
+}
+
+/// Меню пустого места панели папки (duopulse-173/189): один пункт —
+/// «Создать раздел…» внутри открытой папки; тоже нативное (единый механизм
+/// с меню строки, duopulse-189).
+fn build_bmsection_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, String> {
+    let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
+    menu.append(&item(app, "bmsection:new", "Создать раздел…", true, None)?)
         .map_err(|e| format!("меню: {e}"))?;
     Ok(menu)
 }
@@ -550,9 +599,15 @@ fn build_duo_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
 
 /// Показать popup-меню у точки (x/y — клиентские логические координаты
 /// UI-webview). Модально: команда ждёт закрытия в отдельном потоке.
+/// Вызов из панель-webview (bmfolder, duopulse-189): x/y приходят ЛОКАЛЬНЫМИ
+/// координатами панели — переводим в клиентские окна, прибавляя фактическую
+/// позицию панель-webview (Core клампил её при создании — фронт про сдвиг
+/// не знает); UI-webview занимает всю клиентскую область окна, так что
+/// клиентские координаты окна и UI-webview совпадают.
 #[tauri::command]
 pub async fn ui_menu_open(
     app: AppHandle,
+    webview: tauri::Webview,
     kind: String,
     x: f64,
     y: f64,
@@ -578,10 +633,18 @@ pub async fn ui_menu_open(
                 .to_string(),
         )?,
         "bmbar" => build_bmbar_menu(&app)?,
+        "bmrow" => build_bmrow_menu(&app, &payload)?,
+        "bmsection" => build_bmsection_menu(&app)?,
         other => return Err(format!("неизвестное меню: {other}")),
     };
     let window = app.get_window("main").ok_or("окно main не найдено")?;
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let (x, y) = if webview.label() == crate::chrome_panel::PANEL_WEBVIEW {
+        let pos = webview.position().map_err(|e| e.to_string())?;
+        (x + pos.x as f64 / scale, y + pos.y as f64 / scale)
+    } else {
+        (x, y)
+    };
     // Позиция попапа — КЛИЕНТСКИЕ координаты окна: tauri передаёт точку в
     // muda, а muda сам приводит её по hwnd_dpi и делает ClientToScreen
     // (show_context_menu). Раньше прибавляли inner_position() (экранный ноль
@@ -618,6 +681,14 @@ pub fn emit_action(app: &AppHandle, id: &str) {
         serde_json::json!({ "menu": "bmgroup", "act": "delete", "groupId": g.parse::<i64>().unwrap_or(-1) })
     } else if id == "bmbar:newgroup" {
         serde_json::json!({ "menu": "bmbar", "act": "newgroup" })
+    } else if id == "bmrow:section" {
+        serde_json::json!({ "menu": "bmrow", "act": "section" })
+    } else if let Some(url) = id.strip_prefix("bmrow:rename:") {
+        serde_json::json!({ "menu": "bmrow", "act": "rename", "url": url })
+    } else if let Some(url) = id.strip_prefix("bmrow:delete:") {
+        serde_json::json!({ "menu": "bmrow", "act": "delete", "url": url })
+    } else if id == "bmsection:new" {
+        serde_json::json!({ "menu": "bmsection", "act": "section" })
     } else if let Some(rest) = id.strip_prefix("duo:") {
         let (act, param) = rest.split_once(':').unwrap_or((rest, ""));
         match act {
@@ -655,5 +726,21 @@ pub fn emit_action(app: &AppHandle, id: &str) {
     } else {
         return;
     };
+    // Меню панели папки (duopulse-189) открывается ТОЛЬКО из панель-webview
+    // — выбор уходит туда; UI-webview такие события не ждёт (его обработчики
+    // switch-ят по menu и неизвестный вид молча пропустят, но и слать незачем).
+    if matches!(
+        action.get("menu").and_then(Value::as_str),
+        Some("bmrow") | Some("bmsection")
+    ) {
+        let _ = app.emit_to(
+            tauri::EventTarget::Webview {
+                label: crate::chrome_panel::PANEL_WEBVIEW.into(),
+            },
+            "menu-action",
+            &action,
+        );
+        return;
+    }
     let _ = app.emit_to("main", "menu-action", &action);
 }

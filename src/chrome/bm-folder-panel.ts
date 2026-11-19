@@ -11,9 +11,15 @@
 // duopulse-149: правый клик по закладке — инлайн-переименование прямо в
 // строке (нативное меню bmchip живёт в UI-окне, panel-webview его события
 // не получает); пустое имя разрешено — строка с одним бейджем.
-// duopulse-160: правый клик — мини-меню «Переименовать… / Удалить закладку»
-// (HTML внутри панели: события нативного меню сюда не доезжают, а жалоба
-// была «только переименовывать»); drag&drop работает и через webview-границу:
+// duopulse-160: правый клик — мини-меню «Переименовать… / Удалить закладку»;
+// duopulse-189: меню стало НАТИВНЫМ popup'ом (ui_menu_open, шаблон 086) —
+// HTML-меню .bm-ctx внутри панели было ВЫШЕ короткой папки (2 закладки
+// ≈ 73px < меню ≈ 110px): кламп упирался в потолок, «Удалить закладку»
+// выходил за границу панель-webview и прятался за видео вкладки («меню
+// прячется за сайт», жалоба Артёма). Системный popup рисуется поверх всех
+// webview; координаты — локальные панели (Core прибавляет её позицию),
+// выбор возвращается событием menu-action прямо в панель-webview.
+// drag&drop работает и через webview-границу:
 // закладку можно утащить на папку строки (другую группу) и наоборот — чип
 // строки бросается в открытую папку, перенос снимает группу-источник
 // (payload своего MIME-типа, общий с bmbar).
@@ -36,6 +42,7 @@ import {
 } from "./bmbar";
 import { beginInlineRename } from "./bm-rename";
 import { closePanel } from "./panel-window";
+import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
 import { t } from "../i18n";
 
 const err = (e: unknown): void => console.error("bm-folder-panel:", e);
@@ -110,7 +117,6 @@ function renderRows(
 ): void {
   const el = panel();
   el.replaceChildren();
-  closeRowMenu(); // строки перестроились — меню прошлой строки уходит
   // имена для инлайн-правки (duopulse-149) — рендер уже без адреса-фолбэка
   bmTitleByUrl = new Map(bookmarks.map((b) => [b.url, b.title.trim()]));
   const parent = cur.parentId != null ? groups.find((g) => g.id === cur.parentId) : undefined;
@@ -200,100 +206,29 @@ let dragUrl = "";
 /** Имена закладок последнего рендера (стартовое значение input правки). */
 let bmTitleByUrl = new Map<string, string>();
 
-/** Открытое мини-меню строки (duopulse-160) — одно на панель. */
-let rowMenu: HTMLElement | null = null;
-
 /** Можно ли создать подгруппу в открытой папке (duopulse-173): дерево
  *  групп ≤ 3 уровней — внутри подгруппы 3-го уровня уже нельзя. */
 export function canNestSections(depth: number | null | undefined): boolean {
   return (depth ?? 1) < 3;
 }
 
-/** Показать мини-меню строки закладки (duopulse-160): «Создать раздел…»
- * (duopulse-173), «Переименовать…», «Удалить закладку». Закрывается кликом
- * мимо, Escape и любым выбором; позиция клампится в границы панели (клип
- * у webview). */
-function showRowMenu(row: HTMLElement, url: string, x: number, y: number): void {
-  closeRowMenu();
-  const menu = document.createElement("div");
-  menu.className = "bm-ctx";
-  if (canNestSections(openGroup?.depth)) menu.append(sectionMenuItem());
-  const rename = document.createElement("button");
-  rename.type = "button";
-  rename.textContent = t("Переименовать…");
-  rename.addEventListener("click", () => {
-    closeRowMenu();
-    beginInlineRename({
-      host: row,
-      initial: bmTitleByUrl.get(url) ?? "",
-      allowEmpty: true, // пустое имя — только бейдж (как чип-значок строки)
-      ariaLabel: t("Переименовать закладку"),
-      save: (title) => {
-        void bridge.history
-          .bookmarkUpdate({ url, title })
-          .then(renderPanel)
-          .catch((e2) => {
-            err(e2);
-            void renderPanel();
-          });
-      },
-    });
+/** Показать меню строки закладки (duopulse-189): нативный popup поверх всех
+ * webview — «Создать раздел…» (если дерево позволяет), «Переименовать…»,
+ * «Удалить закладку». x/y — локальные координаты панели: Core прибавляет
+ * позицию панель-webview в окне (ui_menu_open); выбор пункта возвращается
+ * событием menu-action в панель (обработчик в initBmFolderPanel). */
+function showRowMenu(url: string, x: number, y: number): void {
+  openOverlayMenu("bmrow", x, y, {
+    url,
+    canNest: canNestSections(openGroup?.depth),
   });
-  const del = document.createElement("button");
-  del.type = "button";
-  del.className = "bm-ctx-danger";
-  del.textContent = t("Удалить закладку");
-  del.addEventListener("click", () => {
-    closeRowMenu();
-    void bridge.history
-      .bookmarkRemove({ url })
-      .then(renderPanel)
-      .catch((e2) => {
-        err(e2);
-        void renderPanel();
-      });
-  });
-  menu.append(rename, del);
-  document.body.append(menu);
-  // размер известен после вставки — клампим, чтобы меню не вышло за панель
-  const r = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 4))}px`;
-  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 4))}px`;
-  rowMenu = menu;
-}
-
-/** Закрыть мини-меню строки (безопасно при закрытом). */
-function closeRowMenu(): void {
-  rowMenu?.remove();
-  rowMenu = null;
-}
-
-/** Пункт «Создать раздел…» (duopulse-173) — общий у меню строки и меню
- *  пустого места: подгруппа внутри открытой папки. */
-function sectionMenuItem(): HTMLButtonElement {
-  const add = document.createElement("button");
-  add.type = "button";
-  add.textContent = t("Создать раздел…");
-  add.addEventListener("click", () => {
-    closeRowMenu();
-    void createSection();
-  });
-  return add;
 }
 
 /** Показать меню пустого места панели (duopulse-173): клик мимо закладки —
  *  пустое место, подгруппа, крошка «‹ родитель» — один пункт «Создать
- *  раздел…» для открытой папки. */
+ *  раздел…» для открытой папки (нативный popup, duopulse-189). */
 function showSectionMenu(x: number, y: number): void {
-  closeRowMenu();
-  const menu = document.createElement("div");
-  menu.className = "bm-ctx";
-  menu.append(sectionMenuItem());
-  document.body.append(menu);
-  const r = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 4))}px`;
-  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 4))}px`;
-  rowMenu = menu;
+  openOverlayMenu("bmsection", x, y, null);
 }
 
 /** Создать подгруппу внутри открытой папки (duopulse-173): уникальное имя
@@ -337,17 +272,48 @@ let inited = false;
 export function initBmFolderPanel(): void {
   if (inited) return;
   inited = true;
-  // клик мимо мини-меню и Escape закрывают его (duopulse-160); capture —
-  // раньше обработчиков строк, но сами пункты меню клика не теряют
-  document.addEventListener(
-    "click",
-    (e) => {
-      if (rowMenu && !rowMenu.contains(e.target as Node)) closeRowMenu();
-    },
-    true,
-  );
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeRowMenu();
+  // Выбор пункта нативного меню панели (duopulse-189): Core адресует событие
+  // панель-webview («bmrow»/«bmsection»); чужие виды сюда не приходят, но
+  // фильтр оставляем — слушатель общий у UI-бандла.
+  onOverlayMenuAction((a) => {
+    if (a.menu !== "bmrow" && a.menu !== "bmsection") return;
+    if (a.menu === "bmsection" || a.act === "section") {
+      void createSection();
+      return;
+    }
+    const url = typeof a.url === "string" ? a.url : "";
+    if (!url) return;
+    if (a.act === "rename") {
+      const row = [...panel().querySelectorAll<HTMLElement>(".bm-row[data-url]")].find(
+        (el) => el.dataset.url === url,
+      );
+      if (!row) return; // строка ушла (панель перерисовалась) — тишина
+      beginInlineRename({
+        host: row,
+        initial: bmTitleByUrl.get(url) ?? "",
+        allowEmpty: true, // пустое имя — только бейдж (как чип-значок строки)
+        ariaLabel: t("Переименовать закладку"),
+        save: (title) => {
+          void bridge.history
+            .bookmarkUpdate({ url, title })
+            .then(renderPanel)
+            .catch((e2) => {
+              err(e2);
+              void renderPanel();
+            });
+        },
+      });
+      return;
+    }
+    if (a.act === "delete") {
+      void bridge.history
+        .bookmarkRemove({ url })
+        .then(renderPanel)
+        .catch((e2) => {
+          err(e2);
+          void renderPanel();
+        });
+    }
   });
   panel().addEventListener("click", (e) => {
     if ((e.target as HTMLElement).closest("input")) return; // правка имени
@@ -374,16 +340,16 @@ export function initBmFolderPanel(): void {
         .catch(err);
     }
   });
-  // правый клик — мини-меню закладки (duopulse-160): «Переименовать…»
-  // (инлайн, duopulse-149) и «Удалить закладку»; HTML-меню внутри панели —
-  // события нативного меню хрома сюда не доезжают. Клик мимо закладки —
-  // «Создать раздел…» в открытой папке (duopulse-173)
+  // правый клик — нативное меню закладки (duopulse-189): «Создать раздел…»
+  // / «Переименовать…» / «Удалить закладку» — системный popup поверх всех
+  // webview (HTML-меню пряталось за видео у коротких папок, duopulse-189).
+  // Клик мимо закладки — «Создать раздел…» в открытой папке (duopulse-173)
   panel().addEventListener("contextmenu", (e) => {
     if ((e.target as HTMLElement).closest("input")) return; // правка имени
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
     if (row) {
       e.preventDefault();
-      showRowMenu(row, row.dataset.url as string, e.clientX, e.clientY);
+      showRowMenu(row.dataset.url as string, e.clientX, e.clientY);
       return;
     }
     if (!canNestSections(openGroup?.depth)) return; // 3-й уровень — нельзя

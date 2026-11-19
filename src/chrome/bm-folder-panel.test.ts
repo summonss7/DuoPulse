@@ -3,19 +3,47 @@
 // чистая panelReorder — вынуть/вставить с клампом индекса. duopulse-173:
 // правый клик в панели — «Создать раздел…» (меню строки и пустого места,
 // подгруппа внутри открытой папки, инлайн-правка имени новой строки).
+// duopulse-189: контекстные меню стали нативными popup'ами (ui_menu_open):
+// правый клик шлёт команду с payload, выбор возвращается событием
+// menu-action в панель — тест эмулирует выбор дёрганьем колбека listen.
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve() }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}) }));
+const { invokes, menuCbs } = vi.hoisted(() => ({
+  invokes: [] as { cmd: string; args: Record<string, unknown> }[],
+  // слушатели по событию: menu-action — наши, chrome-panel-closed — чужой
+  menuCbs: [] as { event: string; fire: (payload: unknown) => void }[],
+}));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (cmd: string, args: Record<string, unknown>) => {
+    invokes.push({ cmd, args });
+    return Promise.resolve();
+  },
+}));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (event: string, cb: (ev: { payload: unknown }) => void) => {
+    menuCbs.push({ event, fire: (p) => cb({ payload: p }) });
+    return Promise.resolve(() => {});
+  },
+}));
 const bm = vi.hoisted(() => ({
   groupList: vi.fn(),
   bookmarkList: vi.fn(),
   groupAdd: vi.fn(),
   groupRename: vi.fn(),
+  bookmarkRemove: vi.fn(),
+  bookmarkUpdate: vi.fn(),
   favicon: vi.fn(),
 }));
 vi.mock("../bridge", () => ({ bridge: { history: bm } }));
 import { canNestSections, openBmFolderPanel, panelReorder } from "./bm-folder-panel";
+
+/** Последний вызов ui_menu_open (или null). */
+const lastMenu = () =>
+  [...invokes].reverse().find((i) => i.cmd === "ui_menu_open") ?? null;
+
+/** Эмулировать выбор пункта меню (Core → панель-webview). */
+const pickMenu = (payload: unknown) =>
+  menuCbs.filter((m) => m.event === "menu-action").forEach((m) => m.fire(payload));
 
 describe("panelReorder — порядок закладок папки", () => {
   const urls = ["a", "b", "c", "d"];
@@ -38,7 +66,7 @@ describe("panelReorder — порядок закладок папки", () => {
   });
 });
 
-describe("duopulse-173: «Создать раздел…» в панели папки", () => {
+describe("duopulse-173/189: контекстные меню панели папки — нативные", () => {
   it("canNestSections: дерево ≤ 3 уровней (глубина 1–2 — можно, 3 — нет)", () => {
     expect(canNestSections(1)).toBe(true);
     expect(canNestSections(2)).toBe(true);
@@ -46,7 +74,7 @@ describe("duopulse-173: «Создать раздел…» в панели па�
     expect(canNestSections(null)).toBe(true); // до первого рендера — не мешаем
   });
 
-  it("правый клик мимо закладки → «Создать раздел…»: подгруппа внутри открытой папки + инлайн-правка", async () => {
+  it("правый клик мимо закладки → «Создать раздел…»: команда меню + выбор → подгруппа и инлайн-правка", async () => {
     const groups: {
       id: number; name: string; parentId: number | null; depth: number;
       position: number; sortBy: string; count: number; isDefault: boolean;
@@ -65,12 +93,11 @@ describe("duopulse-173: «Создать раздел…» в панели па�
     openBmFolderPanel();
     await vi.waitFor(() => expect(document.querySelector(".bm-row[data-url]")).toBeTruthy());
 
-    // правый клик по пустому месту панели — меню с единственным пунктом
+    // правый клик по пустому месту панели — нативное меню bmsection
     const empty = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
     document.getElementById("bmFolder")!.dispatchEvent(empty);
     expect(empty.defaultPrevented).toBe(true);
-    const items = [...document.querySelectorAll(".bm-ctx button")].map((b) => b.textContent);
-    expect(items).toEqual(["Создать раздел…"]);
+    expect(lastMenu()?.args).toMatchObject({ kind: "bmsection" });
 
     // выбор пункта: подгруппа «Новый раздел» внутри открытой группы 7
     bm.groupAdd.mockImplementation((_p: { name: string }) => {
@@ -78,7 +105,7 @@ describe("duopulse-173: «Создать раздел…» в панели па�
       groups.push(g);
       return Promise.resolve(g);
     });
-    document.querySelector<HTMLButtonElement>(".bm-ctx button")!.click();
+    pickMenu({ menu: "bmsection", act: "section" });
     await vi.waitFor(() => expect(bm.groupAdd).toHaveBeenCalledWith({ name: "Новый раздел", parentId: 7 }));
     // новая строка отрисована и сразу в инлайн-правке имени
     const input = (await vi.waitFor(() =>
@@ -89,7 +116,7 @@ describe("duopulse-173: «Создать раздел…» в панели па�
     await vi.waitFor(() => expect(bm.groupRename).toHaveBeenCalledWith({ id: 12, name: "Румынская" }));
   });
 
-  it("правый клик по закладке — «Создать раздел…» вместе с переименованием и удалением; глубина 3 — пункта нет", async () => {
+  it("правый клик по закладке — меню bmrow с url и canNest по глубине; «Удалить» и «Переименовать» работают", async () => {
     const groups: {
       id: number; name: string; parentId: number | null; depth: number;
       position: number; sortBy: string; count: number; isDefault: boolean;
@@ -110,13 +137,17 @@ describe("duopulse-173: «Создать раздел…» в панели па�
       expect(document.querySelector(".bm-row[data-url] .bm-label")?.textContent).toBe("Фаза-3"),
     );
 
-    const onRow = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
-    document.querySelector(".bm-row[data-url]")!.dispatchEvent(onRow);
-    let items = [...document.querySelectorAll(".bm-ctx button")].map((b) => b.textContent);
-    expect(items).toEqual(["Переименовать…", "Удалить закладку"]); // 3-й уровень — без «Создать раздел…»
-    document.dispatchEvent(new MouseEvent("click", { bubbles: true })); // закрыть меню
+    // 3-й уровень: canNest=false (пункт «Создать раздел…» Core не добавит)
+    document.querySelector(".bm-row[data-url]")!.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+    );
+    expect(lastMenu()?.args.payload).toMatchObject({
+      url: "https://m.example/",
+      canNest: false,
+    });
+    expect(lastMenu()?.args.kind).toBe("bmrow");
 
-    // глубина 1: тот же клик по строке — пункт появляется первым
+    // глубина 1: тот же клик по строке — canNest=true
     groups[0] = { ...groups[0], depth: 1, parentId: null };
     openBmFolderPanel();
     await vi.waitFor(() =>
@@ -125,19 +156,45 @@ describe("duopulse-173: «Создать раздел…» в панели па�
     document.querySelector(".bm-row[data-url]")!.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
     );
-    items = [...document.querySelectorAll(".bm-ctx button")].map((b) => b.textContent);
-    expect(items).toEqual(["Создать раздел…", "Переименовать…", "Удалить закладку"]);
+    expect(lastMenu()?.args.payload).toMatchObject({
+      url: "https://m.example/",
+      canNest: true,
+    });
+    expect(lastMenu()?.args.kind).toBe("bmrow");
 
-    // клик мимо закладки на 3-м уровне — меню нет (вкладывать уже нельзя)
-    document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // duopulse-189 (суть жалобы): выбор «Удалить» — закладка уходит из панели
+    bm.bookmarkRemove.mockResolvedValue(undefined);
+    bm.bookmarkList.mockImplementation(() => Promise.resolve({ bookmarks: [], total: 0 }));
+    pickMenu({ menu: "bmrow", act: "delete", url: "https://m.example/" });
+    await vi.waitFor(() => expect(bm.bookmarkRemove).toHaveBeenCalledWith({ url: "https://m.example/" }));
+    await vi.waitFor(() => expect(document.querySelector(".bm-row[data-url]")).toBeNull());
+
+    // «Переименовать…» — инлайн-правка на строке (вернём закладку)
+    bm.bookmarkList.mockImplementation(() =>
+      Promise.resolve({
+        bookmarks: [{ url: "https://m.example/", title: "Фаза-1", addedAt: 1 }],
+        total: 1,
+      }),
+    );
+    openBmFolderPanel();
+    await vi.waitFor(() => expect(document.querySelector(".bm-row[data-url]")).toBeTruthy());
+    pickMenu({ menu: "bmrow", act: "rename", url: "https://m.example/" });
+    await vi.waitFor(() =>
+      expect(document.querySelector<HTMLInputElement>(".bm-row[data-url] input.bm-rename")).toBeTruthy(),
+    );
+
+    // клик мимо закладки на 3-м уровне — меню нет (вкладывать уже нельзя);
+    // дожидаемся нового рендера (openGroup станет depth 3) — в этой фазе
+    // mock отдаёт «Фаза-1», метка служит только маркером рендера
     groups[0] = { ...groups[0], depth: 3 };
     openBmFolderPanel();
     await vi.waitFor(() =>
-      expect(document.querySelector(".bm-row[data-url] .bm-label")?.textContent).toBe("Фаза-3"),
+      expect(document.querySelector(".bm-row[data-url] .bm-label")?.textContent).toBe("Фаза-1"),
     );
+    const before = invokes.length;
     const off = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
     document.getElementById("bmFolder")!.dispatchEvent(off);
     expect(off.defaultPrevented).toBe(false);
-    expect(document.querySelector(".bm-ctx")).toBeNull();
+    expect(invokes.length).toBe(before); // команды меню не было
   });
 });
