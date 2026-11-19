@@ -70,11 +70,14 @@ export function zipBaseUrls(raw: RawCaptionList, originalLangs: Set<string>): { 
   return { base, urls };
 }
 
-/** Player-ответ (Rust) → мобильный список дорожек. null — субтитров нет. */
-export function parsePlayerResponse(videoId: string, response: unknown): MobileTrackList | null {
+/** Player-ответ (Rust) → мобильный список дорожек. null — субтитров нет.
+ * uiLang (duopulse-186, п.4 дуопульса-184) — язык, переданный в hl запроса
+ * duo_yt_player: defaultCaptionTrackIndex ≠ этот язык = контентный фолбэк
+ * (язык оригинала). Язык запроса и сравнения обязаны совпадать. */
+export function parsePlayerResponse(videoId: string, response: unknown, uiLang?: string): MobileTrackList | null {
   const raw = extractCaptionList(response);
   if (!raw) return null;
-  const originalLangs = originalLangsOf(response);
+  const originalLangs = originalLangsOf(response, uiLang);
   const { base, urls } = zipBaseUrls(raw, originalLangs);
   if (base.length === 0 && raw.translationLanguages.length === 0) return null;
   return {
@@ -88,12 +91,16 @@ export function parsePlayerResponse(videoId: string, response: unknown): MobileT
 }
 
 /** Дорожка оригинала по умолчанию — как defaultBase адаптера/панели десктопа:
- * язык оригинала (ручная, иначе asr), иначе первая ручная, иначе первая. */
+ * язык оригинала (ручная, иначе asr), иначе en-ручная прежде первой
+ * (duopulse-186, п.5 дуопульса-184: при неизвестном оригинале порядок
+ * captionTracks нестабилен — у vk_xq1P7vIU первой шла zh-Hans, дефолт
+ * включал китайскую дорожку), иначе первая ручная, иначе первая. */
 export function defaultOriginal(list: MobileTrackList): BaseTrackInfo | null {
   const base = list.base;
   return (
     base.find((t) => t.original && t.kind === "manual") ??
     base.find((t) => t.original) ??
+    base.find((t) => t.kind === "manual" && t.lang.split("-")[0] === "en") ??
     base.find((t) => t.kind === "manual") ??
     base[0] ??
     null

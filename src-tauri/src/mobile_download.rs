@@ -888,7 +888,7 @@ pub(crate) mod cmd {
         }
         let player = match player {
             Some(v) => v,
-            None => player_response(&video_id, &state)?,
+            None => player_response(&video_id, &state, None)?,
         };
         Ok(build_formats(&player))
     }
@@ -927,7 +927,7 @@ pub(crate) mod cmd {
 
     /// Имя сохранаемого файла по заголовку видео (кэш player-ответа).
     fn display_name(video_id: &str, ext: &str, state: &DuoManaged) -> Result<String, String> {
-        let player = player_response(video_id, state)?;
+        let player = player_response(video_id, state, None)?;
         let title = player
             .pointer("/videoDetails/title")
             .and_then(|t| t.as_str())

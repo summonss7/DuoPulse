@@ -64,6 +64,71 @@ describe("parsePlayerResponse", () => {
     expect(titleOfPlayerResponse(playerResponse())).toBe("");
     expect(titleOfPlayerResponse(null)).toBe("");
   });
+
+  // duopulse-186 (Sam Smith vk_xq1P7vIU): все дорожки ручные (asr и
+  // аудио-маркеров нет), первой zh-Hans — порядок captionTracks нестабилен,
+  // дефолт брал китайскую дорожку. Мобильные п.4/п.5 дуопульса-184: индекс
+  // рекомендации (hl-ответ) ≠ язык UI → контентный фолбэк; без сигналов —
+  // en-ручная прежде первой.
+  const vevoList = (index: number | null): RawCaptionList => ({
+    captionTracks: [
+      { languageCode: "zh-Hans", baseUrl: "https://www.youtube.com/api/timedtext?v=X&lang=zh-Hans", name: { simpleText: "Chinese" }, isTranslatable: true },
+      { languageCode: "en", baseUrl: "https://www.youtube.com/api/timedtext?v=X&lang=en", name: { simpleText: "English" }, isTranslatable: true },
+      { languageCode: "ru", baseUrl: "https://www.youtube.com/api/timedtext?v=X&lang=ru", name: { simpleText: "Russian" }, isTranslatable: true },
+    ],
+    translationLanguages: [],
+    audioTracks: index === null ? [] : [{ captionTrackIndices: [0, 1, 2], hasDefaultTrack: true, defaultCaptionTrackIndex: index }],
+  });
+  const vevoResponse = (index: number | null): unknown => ({
+    videoDetails: { videoId: "vkxq1P7vIU0" },
+    captions: { playerCaptionsTracklistRenderer: vevoList(index) },
+  });
+
+  it("duopulse-186 п.4: индекс (hl-ответ) ≠ uiLang — en помечен оригиналом", () => {
+    const list = parsePlayerResponse("vkxq1P7vIU0", vevoResponse(1), "ru")!;
+    expect(list.originalLangs).toEqual(new Set(["en"]));
+    expect(defaultOriginal(list)?.id).toBe("yt:en"); // не yt:zh-Hans первой
+  });
+
+  it("duopulse-186 п.4: индекс совпал с языком UI или uiLang не передан — пометки нет", () => {
+    expect(parsePlayerResponse("vkxq1P7vIU0", vevoResponse(2), "ru")!.originalLangs.size).toBe(0);
+    expect(parsePlayerResponse("vkxq1P7vIU0", vevoResponse(1))!.originalLangs.size).toBe(0);
+  });
+
+  it("duopulse-186 п.5: без сигналов дефолт — en-ручная прежде первой (zh-Hans)", () => {
+    const list = parsePlayerResponse("vkxq1P7vIU0", vevoResponse(null), "ro")!;
+    expect(list.originalLangs.size).toBe(0);
+    expect(defaultOriginal(list)?.id).toBe("yt:en");
+  });
+
+  it("регрессия мульти-даб (Милан): audioTrackId первого трека — ru, uiLang не мешает", () => {
+    const resp = {
+      videoDetails: { videoId: "rcavttv5nmi0" },
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [
+            { languageCode: "ru", baseUrl: "https://www.youtube.com/api/timedtext?v=X&lang=ru", name: { simpleText: "Russian" }, isTranslatable: true },
+            { languageCode: "en", baseUrl: "https://www.youtube.com/api/timedtext?v=X&lang=en", name: { simpleText: "English" }, isTranslatable: true },
+            { languageCode: "en", kind: "asr", baseUrl: "https://www.youtube.com/api/timedtext?v=X&lang=en&kind=asr", name: { simpleText: "English (auto)" }, isTranslatable: true },
+          ],
+          translationLanguages: [],
+          audioTracks: [
+            { audioTrackId: "ru.4", captionTrackIndices: [0] },
+            { audioTrackId: "en-US.10", captionTrackIndices: [1, 2] },
+          ],
+        } as RawCaptionList,
+      },
+    };
+    const list = parsePlayerResponse("rcavttv5nmi0", resp, "en")!;
+    expect(list.originalLangs).toEqual(new Set(["ru"])); // дублированный asr не «оригинал»
+    expect(defaultOriginal(list)?.id).toBe("yt:ru");
+  });
+
+  it("регрессия Gangnam: asr-фолбэк жив при uiLang (п.4 не вытесняет)", () => {
+    const list = parsePlayerResponse("abc12345678", playerResponse(), "ru")!;
+    expect(list.originalLangs.has("ko")).toBe(true);
+    expect(defaultOriginal(list)?.id).toBe("yt:ko:asr");
+  });
 });
 
 describe("zipBaseUrls", () => {

@@ -504,33 +504,54 @@ pub(crate) mod net {
 
     /// Player-ответ YouTube (innertube, ANDROID-клиент) по videoId — сырым
     /// JSON: разбор списка дорожек делает фронтенд (content-адаптер). Кэш 1 ч.
+    /// hl (duopulse-186) — язык UI приложения: YouTube кладёт в
+    /// defaultCaptionTrackIndex дорожку языка запроса, а при её отсутствии —
+    /// контентный фолбэк (язык оригинала); фронтенд сравнивает индекс с этим
+    /// же языком (п.4 originalLangsOf дуопульса-184).
     #[tauri::command]
     pub fn duo_yt_player(
         video_id: String,
+        hl: Option<String>,
         state: State<'_, DuoManaged>,
     ) -> Result<serde_json::Value, String> {
         if !valid_video_id(&video_id) {
             return Err("некорректный videoId".into());
         }
-        player_response(&video_id, &state)
+        player_response(&video_id, &state, hl.as_deref())
+    }
+
+    /// Нормализация hl запроса: трим, пустое/с посторонними символами — None
+    /// (дефолт сервера, прежнее поведение вызовов без hl).
+    fn normalize_hl(hl: Option<&str>) -> Option<&str> {
+        hl.map(str::trim)
+            .filter(|h| !h.is_empty() && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
     }
 
     /// Player-ответ по videoId с кэшем (общее для субтитров duo_yt_player и
     /// загрузки музыки mobile_download: один innertube-запрос на видео).
+    /// Ключ кэша включает hl: рекомендация defaultCaptionTrackIndex зависит
+    /// от языка запроса (duopulse-186), ответы разных hl не смешиваем.
     pub(crate) fn player_response(
         video_id: &str,
         state: &DuoManaged,
+        hl: Option<&str>,
     ) -> Result<serde_json::Value, String> {
+        let hl = normalize_hl(hl);
+        let cache_key = format!("{video_id}|{}", hl.unwrap_or(""));
         {
             let cache = state.player_cache.lock().expect("duo: лок не отравлен");
-            if let Some((at, v)) = cache.get(video_id) {
+            if let Some((at, v)) = cache.get(&cache_key) {
                 if at.elapsed() < PLAYER_TTL {
                     return Ok(v.clone());
                 }
             }
         }
+        let mut client = serde_json::json!({ "clientName": INNERTUBE_CLIENT, "clientVersion": INNERTUBE_CLIENT_VERSION });
+        if let Some(h) = hl {
+            client["hl"] = serde_json::json!(h);
+        }
         let body = serde_json::json!({
-            "context": { "client": { "clientName": INNERTUBE_CLIENT, "clientVersion": INNERTUBE_CLIENT_VERSION } },
+            "context": { "client": client },
             "videoId": video_id,
             "contentCheckOk": true,
             "racyCheckOk": true,
@@ -575,7 +596,7 @@ pub(crate) mod net {
                 cache.remove(&oldest);
             }
         }
-        cache.insert(video_id.to_string(), (Instant::now(), value.clone()));
+        cache.insert(cache_key, (Instant::now(), value.clone()));
         Ok(value)
     }
 

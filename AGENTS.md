@@ -160,6 +160,16 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   (Keystore-блобы вычищены). Снапшот листа — глобал
   window.__duopulseMobileVpn. Результат —
   e2e/mobile/vpn-ui-smoke-last-run.json (gitignore, рантайм-артефакт).
+- `e2e/mobile/duo-default-smoke.mjs` — стенд ДЕФОЛТА дуо-набора мобильной
+  ветки (карточка 186, мобильные п.4/п.5 дуопульса-184): debug-APK + CDP
+  9223, живой YouTube; 8 проверок: VEVO-кейс без сигналов оригинала
+  (vk_xq1P7vIU, все дорожки ручные, zh-Hans в списке) — дефолт yt:en не
+  yt:zh-Hans, селект панели согласован, движок грузит yt:en + перевод
+  yt:en+gtx:ru с репликами (перевод — soft: gtx на эмуляторе бот-блокится);
+  регрессия asr-фолбэка (Gangnam 9bZkp7q19f0) — yt:ko:asr. Гонка: видео-вход
+  обновляет videoId раньше parse — стенд ждёт стабильного originalId.
+  Результат — e2e/mobile/duo-default-smoke-last-run.json (gitignore,
+  рантайм-артефакт).
 
 Новые временные файлы в корне не накапливать: одноразовое — `%TEMP%`, постоянное — `e2e/`.
 <!-- /E2E-ИНСТРУМЕНТЫ -->

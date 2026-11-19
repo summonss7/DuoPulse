@@ -1215,3 +1215,14 @@ duopulse-186 (нужен hl в innertube-запросе). Проверено: vi
 (+5 кейса 184, регрессии Милан/Gangnam/TED живы), живой стенд на URL из
 задачи: дефолт en+ru, оверлей «MAYBE IT'S ALL THAT I'VE BEEN THROUGH /
 Может быть, это всё, через что я прошёл». Десктоп-релиз 0.1.68 (оба канала + хаб + C:\DuoPulse).
+
+### 19.11.2026: duopulse-186 — мобайл: дефолт дуо на видео без asr/дублей
+Мобильное продолжение duopulse-184: та же болезнь в src/mobile/duo — на видео
+без сигналов оригинала (ручные дорожки, VEVO-клипы) дефолт брал первую дорожку
+списка (порядок нестабилен — первой шла zh-Hans). Фикс: duo_yt_player принял
+hl (язык UI приложения) → context.client.hl innertube + ключ кэша «videoId|hl»;
+parsePlayerResponse передаёт uiLang в originalLangsOf (п.4: индекс
+recommendation ≠ язык запроса → контентный фолбэк) и defaultOriginal берёт
+en-ручную прежде первой (п.5). Стенд e2e/mobile/duo-default-smoke.mjs — живой
+прогон: vk_xq1P7vIU → en+ru (не zh-Hans), Gangnam → ko:asr. Мобильный релиз
+0.1.69 (aarch64, канал Aila); десктоп не менялся — канал остался на 0.1.68.

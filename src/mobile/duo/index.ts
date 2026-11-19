@@ -5,7 +5,7 @@
 // (поколение seq — Races между загрузками не смешивают результаты).
 
 import { invoke } from "@tauri-apps/api/core";
-import { t } from "../../i18n";
+import { t, uiLang } from "../../i18n";
 import type { Cue, Track } from "../../../content/types";
 import { SubtitlesEngine } from "../../../content/engine/subtitles-engine";
 import { DuoOverlay } from "./overlay";
@@ -258,10 +258,13 @@ export class MobileDuo {
     const seq = ++this.seq;
     this.emit({ text: t("duo: читаю дорожки…"), busy: true });
     try {
-      const response = await this.doInvoke("duo_yt_player", { videoId });
+      // hl = язык UI приложения (duopulse-186): его же передаём как uiLang в
+      // parsePlayerResponse — рекомендация defaultCaptionTrackIndex в ответе
+      // считается от языка ЗАПРОСА, сравнивать надо с ним же.
+      const response = await this.doInvoke("duo_yt_player", { videoId, hl: uiLang });
       if (seq !== this.seq) return;
       this.title = titleOfPlayerResponse(response);
-      const list = parsePlayerResponse(videoId, response);
+      const list = parsePlayerResponse(videoId, response, uiLang);
       if (!list) {
         this.list = null;
         this.emit({ text: t("duo: у видео нет субтитров"), busy: false, error: true });
