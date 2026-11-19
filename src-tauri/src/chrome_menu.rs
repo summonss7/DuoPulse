@@ -87,10 +87,34 @@ fn build_tab_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, 
     Ok(menu)
 }
 
-/// Меню звёздочки: группы избранного + «Новая группа…» (без текстового
-/// ввода в нативном меню — ведёт на страницу управления закладками).
+/// Меню звёздочки: строка «что закладываем» (заголовок и адрес страницы,
+/// duopulse-187 — «хочу добавить в избранное, а там адреса нет») + группы
+/// избранного + «Новая группа…» (без текстового ввода в нативном меню —
+/// ведёт на страницу управления закладками).
 fn build_star_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, String> {
     let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
+    if let Some(page) = payload.get("page") {
+        let title = page.get("title").and_then(Value::as_str);
+        let url = page.get("url").and_then(Value::as_str).unwrap_or("?");
+        // длинный адрес — с многоточием посередине (по границам символов,
+        // не байтов), чтобы меню не растягивалось
+        let count = url.chars().count();
+        let short = if count > 80 {
+            let head: String = url.chars().take(40).collect();
+            let tail: String = url.chars().skip(count - 36).collect();
+            format!("{head}…{tail}")
+        } else {
+            url.to_string()
+        };
+        if let Some(t) = title.filter(|t| !t.is_empty()) {
+            let it = item(app, "star:page:title", t, false, None)?;
+            menu.append(&it).map_err(|e| format!("меню: {e}"))?;
+        }
+        let it = item(app, "star:page:url", &short, false, None)?;
+        menu.append(&it).map_err(|e| format!("меню: {e}"))?;
+        menu.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
+            .map_err(|e| format!("меню: {e}"))?;
+    }
     let groups = payload
         .get("groups")
         .and_then(Value::as_array)

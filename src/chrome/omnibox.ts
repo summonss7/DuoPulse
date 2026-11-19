@@ -90,6 +90,10 @@ let openedAt = 0;
  *  окна подсказок (панель на миг перехватывает фокус, Core возвращает,
  *  duopulse-097) — закрываем, только если omnibox фокус так и не вернул. */
 let blurTimer: number | undefined;
+/** Отложенный сброс editing по оконному blur (duopulse-187): фокус ушёл из
+ *  UI-окна и не вернулся за 350 мс — ввод покинут, строка снова показывает
+ *  URL вкладки. Возврат фокуса окном отменяет сброс. */
+let winBlurTimer: number | undefined;
 
 const err = (e: unknown): void => console.error("omnibox:", e);
 
@@ -237,12 +241,24 @@ function moveSel(step: number): void {
   highlight();
 }
 
+/** Завершить ввод переходом: как в браузерах, фокус уходит странице, а
+ *  адресная строка синхронизируется с URL вкладки (duopulse-187: раньше
+ *  Enter не уводил фокус, строка оставалась с ключевыми словами поиска
+ *  и после перехода по результатам на сайт — адреса не было видно). */
+function leaveToPage(): void {
+  editing = false;
+  syncFromTab();
+  input.blur();
+  void bridge.nav.focusPage().catch(err);
+}
+
 /** Переход по строке подсказки (клик или Enter с выделением). */
 async function goRow(row: Row): Promise<void> {
   close();
   try {
     const url = row.url ?? (await bridge.nav.resolveOmnibox({ input: input.value })).url;
     await bridge.nav.navigate({ url });
+    leaveToPage();
   } catch (e) {
     err(e);
   }
@@ -256,24 +272,44 @@ async function goInput(): Promise<void> {
   try {
     const { url } = await bridge.nav.resolveOmnibox({ input: q });
     await bridge.nav.navigate({ url });
+    leaveToPage();
   } catch (e) {
     err(e);
   }
 }
 
+/** URL активной вкладки (последний tabs.updated): строка показывает его,
+ *  пока пользователь не редактирует ввод. */
+let lastUrl = "";
+/** Пользователь редактирует ввод (фокус в omnibox / был ввод) — синхронизация
+ *  не затирает набранный текст. Клик по контенту webview не даёт input'у
+ *  DOM-blur (activeElement остаётся занятым input'ом, когда окно UI теряет
+ *  фокус ОС) — раньше guard «activeElement === input» из-за этого висел
+ *  вечно: после поиска строка навсегда оставалась с ключевыми словами,
+ *  адрес сайта не появлялся (duopulse-187). Теперь ввод считается
+ *  покинутым по оконному blur (фокус ушёл в контент/другое окно). */
+let editing = false;
+
+function syncFromTab(): void {
+  if (!editing) input.value = lastUrl;
+}
+
 /** URL активной вкладки — в адресную строку (когда пользователь не вводит). */
 export function setActiveUrl(url: string): void {
-  if (document.activeElement !== input) input.value = url;
+  lastUrl = url;
+  syncFromTab();
 }
 
 /** Инициализация omnibox: слушатели ввода/клавиатуры/кликов и кнопки «Перейти». */
 export function initOmnibox(): void {
   // подсказки с дебаунсом: FTS-поиск быстрый, но не чаще раза на ввод
   input.addEventListener("input", () => {
+    editing = true;
     window.clearTimeout(timer);
     timer = window.setTimeout(() => void update(), 150);
   });
   input.addEventListener("focus", () => {
+    editing = true;
     // рефокус сразу после открытия подсказок — фокус вернуло Core после
     // перехвата его панелью, не пользователь (duopulse-097): не трогаем
     // каретку и не переоткрываем окно
@@ -288,9 +324,28 @@ export function initOmnibox(): void {
     // закрываем только если omnibox его не получил (duopulse-097)
     window.clearTimeout(blurTimer);
     blurTimer = window.setTimeout(() => {
-      if (document.activeElement !== input) close();
+      if (document.activeElement !== input) {
+        // фокус ушёл другому элементу хрома — ввод завершён, строка
+        // возвращается к URL вкладки (duopulse-187)
+        editing = false;
+        syncFromTab();
+        close();
+      }
     }, 150);
   });
+  // Фокус ушёл из UI-окна (клик по контенту webview, другое приложение):
+  // input не получает DOM-blur, но ввод покинут — вернуть строке URL вкладки.
+  // Миг перехвата фокуса панелью подсказок (duopulse-097) пропускаем и
+  // отменяем сброс по возврату фокуса: там Core вернёт его omnibox'у.
+  window.addEventListener("blur", () => {
+    if (Date.now() - openedAt < 350) return;
+    window.clearTimeout(winBlurTimer);
+    winBlurTimer = window.setTimeout(() => {
+      editing = false;
+      syncFromTab();
+    }, 350);
+  });
+  window.addEventListener("focus", () => window.clearTimeout(winBlurTimer));
   input.addEventListener("keydown", (e) => {
     switch (e.key) {
       case "ArrowDown":

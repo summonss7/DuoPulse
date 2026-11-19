@@ -218,24 +218,34 @@ try {
 
   // Дропдаун подсказок (duopulse-090) — child-webview-цель index.html?panel=
   // suggest: DOM списка живёт там; цель пересоздаётся на каждый ввод-сеанс.
+  // Мёртвая цель закрытой панели висит в /json (Esc → повторный ввод) —
+  // проверяем живой DOM с маркером boot'а, мёртвые пропускаем и ищем дальше.
   const sugPanelWs = async (timeout = 8000) => {
-    const t = await waitFor(async () => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
       const list = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
-      // title в /json лагает — цель ищем по URL, boot подтвердит DOM ниже
-      return list.find(
-        (x) => x.type === "page" && x.url.includes("?panel=suggest"),
-      ) ?? null;
-    }, timeout);
-    if (!t) return null;
-    const ws = connect(t.webSocketDebuggerUrl, (m) => {
-      if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") {
-        uiConsole.push("[suggest] " + m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
+      for (const t of list.filter((x) => x.type === "page" && x.url.includes("?panel=suggest"))) {
+        const ws = connect(t.webSocketDebuggerUrl, (m) => {
+          if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") {
+            uiConsole.push("[suggest] " + m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
+          }
+        });
+        const alive = await ws
+          .send("Runtime.evaluate", {
+            expression: `document.documentElement.dataset.panel === "suggest" && document.getElementById('suggest') ? 1 : 0`,
+            returnByValue: true,
+          })
+          .then((r) => r?.result?.value === 1)
+          .catch(() => false);
+        if (alive) {
+          await ws.send("Runtime.enable").catch(() => {});
+          return ws;
+        }
+        ws.close();
       }
-    });
-    await ws.send("Runtime.enable").catch(() => {});
-    // boot панели мог ещё не оцениться (цель появляется раньше DOM-модуля)
-    await waitFor(() => evalIn(ws, `document.documentElement.dataset.panel === "suggest" ? 1 : 0`), 4000).catch(() => {});
-    return ws;
+      await sleep(300);
+    }
+    return null;
   };
   /** Состояние дропдауна: панель живёт своей целью (нет — закрыт). */
   const suggestOpen = async () => {
@@ -411,6 +421,29 @@ try {
     urlAfterEnter ?? "не дождались",
   );
 
+  // --- (5b) duopulse-187: после Enter строка показывает URL вкладки ------------
+  // (жалоба: после поиска в адресной строке оставались ключевые слова; URL
+  // вкладки обновляется на старте навигации — сети не ждём)
+  const omniAfterEnter = await waitFor(async () =>
+    (await evalIn(uiWs, `document.getElementById('omnibox').value`)) === `http://127.0.0.1:${HTTP_PORT}/typed`
+      ? 1 : null, 6000);
+  check("duopulse-187: после Enter адресная строка показывает URL вкладки", !!omniAfterEnter);
+  const focusAfterEnter = await evalIn(uiWs, `document.activeElement?.id ?? document.activeElement?.tagName`);
+  check("duopulse-187: после Enter фокус ушёл из строки (странице)", focusAfterEnter !== "omnibox", String(focusAfterEnter));
+
+  // --- (5c) duopulse-187: Enter на поисковом запросе — в строке адрес поиска ---
+  await setInput(uiWs, "rust lang");
+  await pressKey(uiWs, "Enter");
+  const searchOmni = await waitFor(async () => {
+    const v = await evalIn(uiWs, `document.getElementById('omnibox').value`);
+    return v.startsWith("https://www.google.com/search?q=") ? v : null;
+  }, 8000);
+  check(
+    "duopulse-187: Enter на поисковом запросе — строка показывает адрес поиска, не запрос",
+    !!searchOmni,
+    searchOmni ?? "не дождались",
+  );
+
   // --- (6) клик по подсказке истории → переход по её адресу --------------------
   await setInput(uiWs, "github");
   const clickRow = await waitFor(async () => {
@@ -484,6 +517,23 @@ try {
     "пустой ввод: дропдаун — закладки без строки-действия",
     !!st && st.rows.every((r) => r.kind === "bookmark"),
     st ? JSON.stringify(st.rows.map((r) => r.url)) : "не дождались",
+  );
+
+  // --- (9b) duopulse-187: покинутый ввод — строка вернула URL вкладки ----------
+  // пользователь начал ввод, но кликнул по контенту: окно UI теряет фокус ОС,
+  // input не получает DOM-blur (activeElement остаётся) — ввод считается
+  // покинутым по оконному blur, строка снова показывает URL вкладки
+  await setInput(uiWs, "забытый запрос");
+  const abandonTabUrl = await tabUrl(uiWs);
+  // панель подсказок открылась в момент ввода — 350-мс guard на перехват фокуса
+  await sleep(600);
+  await evalIn(uiWs, `window.dispatchEvent(new Event('blur'))`);
+  const restored = await waitFor(async () =>
+    (await evalIn(uiWs, `document.getElementById('omnibox').value`)) === abandonTabUrl ? abandonTabUrl : null, 4000);
+  check(
+    "duopulse-187: ввод покинут (фокус ушёл в контент) — строка вернула URL вкладки",
+    !!restored,
+    restored ? "" : `осталось «${await evalIn(uiWs, `document.getElementById('omnibox').value`)}», вкладка ${abandonTabUrl}`,
   );
 
   // --- (10) задача 1.4: живая запись визитов Core -------------------------------

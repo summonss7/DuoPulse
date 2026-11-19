@@ -75,6 +75,9 @@ async function openMenu(): Promise<void> {
     const { groups } = await bridge.history.groupList();
     const r = btn.getBoundingClientRect();
     openOverlayMenu("star", r.right, r.bottom + 6, {
+      // что закладываем (duopulse-187: «хочу добавить в избранное, а там
+      // адреса нет») — строка-заголовок меню с адресом страницы
+      page: { title: title || null, url },
       groups: groups.map((g) => ({
         id: g.id,
         name: g.name,
