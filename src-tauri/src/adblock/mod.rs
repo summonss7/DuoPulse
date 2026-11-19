@@ -137,6 +137,13 @@ const COMPAT_SOURCE: &str = "builtin:";
 /// (тот же механизм, что compat).
 const TUBES_RULES: &str = include_str!("tubes.txt");
 
+/// Встроенный список кинотеатров (карточка duopulse-188): попандеры и
+/// VAST-прероллы плееров uakinogo/kinogo (hdvb/cinemar.cc), уходящие мимо
+/// EasyList/uBO на одноразовых хостах. Правила — по фактам живого стенда
+/// e2e/adblock/sites-ads-probe.mjs (журнал 188); обновление — пересборкой
+/// бинарника (тот же механизм, что compat/tubes).
+const SITES_RULES: &str = include_str!("sites.txt");
+
 /// Встроенный снапшот uBO quick-fixes (карточки 069/072/074): оффлайн-фолбэк
 /// живого источника `QUICKFIX_URL` — первый запуск без сети/кэша работает на
 /// нём, дальше список качается и обновляется как EasyList. Обновление
@@ -190,6 +197,7 @@ fn trusted_list(name: &str) -> bool {
     matches!(
         name,
         "ublock-ads" | "duopulse-compat" | "duopulse-quickfix" | "duopulse-tubes"
+            | "duopulse-sites"
     )
 }
 
@@ -199,6 +207,7 @@ fn builtin_text(name: &str) -> Option<&'static str> {
     match name {
         "duopulse-compat" => Some(COMPAT_RULES),
         "duopulse-tubes" => Some(TUBES_RULES),
+        "duopulse-sites" => Some(SITES_RULES),
         _ => None,
     }
 }
@@ -227,6 +236,13 @@ fn list_defs() -> Vec<ListDef> {
             name: "duopulse-tubes".into(),
             source: COMPAT_SOURCE.into(),
             trusted: trusted_list("duopulse-tubes"),
+        });
+        // Карточка 188: реклама кинотеатров uakinogo/kinogo — свой
+        // встроенный список (те же механизмы кэша/меток, что compat/tubes).
+        defs.push(ListDef {
+            name: "duopulse-sites".into(),
+            source: COMPAT_SOURCE.into(),
+            trusted: trusted_list("duopulse-sites"),
         });
         // Карточка 074: живой список uBO quick-fixes (URL, качается как
         // EasyList; оффлайн-фолбэк — встроенный снапшот) — trusted-источник,

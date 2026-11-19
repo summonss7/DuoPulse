@@ -235,6 +235,120 @@ unsafe fn install_request_blocker(
     .expect("add_WebResourceRequested");
 }
 
+/// duopulse-188: скриптлеты в плеер-фреймах — OOPIF-пробел WebView2.
+///
+/// WebView2 не поднимает WebResourceRequested для запросов кросс-доменных
+/// (out-of-process) фреймов — их трафик идёт целиком мимо сетевого
+/// блокировщика: плеер-iframe кинотеатров (uakinogo → cinemar.cc) крутит
+/// VAST-прероллы на aj2517/srv224/kinoroll/kingads даже под EasyList, чьи
+/// правила эти хосты закрывают (замер стенда e2e/adblock/sites-ads-probe:
+/// рекламные теги внутри фрейма уходят с 200). Cosmetic.js во фреймах тоже
+/// не работает — ответ PostWebMessage доставляется только top-level документу
+/// (скрипт там выходит сразу). Поэтому: FrameCreated → DOMContentLoaded
+/// фрейма → URL читаем из самого документа (у ICoreWebView2Frame нет
+/// get_Source) → инъекция compiled-скрипта движка (AdblockService::
+/// cosmetic_injection_script — тот же артефакт, что у мобильного оверлея)
+/// через ExecuteScript в мире страницы: скриптлеты no-fetch-if/no-xhr-if
+/// рвут доставку VAST до старта воспроизведения.
+///
+/// Гейт по хостам (FRAME_SCRIPTLET_HOSTS): расчёт под конкретный URL —
+/// 0,2–0,9 с CPU (замер модуля adblock), а рекламные фреймы плодят
+/// уникальные URL — без гейта тяжёлые страницы устраивают фон-шторм;
+/// широкий охват (uBO режет во ВСЕХ фреймах) — вопрос согласования
+/// (предложение в отчёте duopulse-188). Тумблер адблока и сайт-исключения
+/// действуют и здесь — движок вернёт пустой скрипт.
+#[cfg(windows)]
+const FRAME_SCRIPTLET_HOSTS: [&str; 2] = ["cinemar.cc", "embf.net"];
+
+#[cfg(windows)]
+unsafe fn install_frame_scriptlets(core: &ICoreWebView2, app: &AppHandle) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2Frame2, ICoreWebView2_4};
+    use webview2_com::{
+        ExecuteScriptCompletedHandler, FrameCreatedEventHandler, FrameDOMContentLoadedEventHandler,
+    };
+    use windows_core::Interface;
+
+    // FrameCreated — интерфейс ICoreWebView2_4 (не базовый ICoreWebView2)
+    let Ok(core4) = core.cast::<ICoreWebView2_4>() else {
+        return; // старый рантайм WebView2 без фреймовых событий
+    };
+    let app = app.clone();
+    core4.add_FrameCreated(
+        &FrameCreatedEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let Ok(frame2) = args.Frame()?.cast::<ICoreWebView2Frame2>() else {
+                return Ok(()); // рантайм без ExecuteScript/событий у фрейма
+            };
+            let app = app.clone();
+            // Токен подписки не храним: хендлер живёт вместе с фреймом и
+            // срабатывает на каждую его навигацию заново. Подписка — на
+            // клоне: замыкание хендлера захватывает frame2 целиком, а
+            // вложенные замыкания ниже работают с собственными клонами.
+            let frame_owner = frame2.clone();
+            let _ = frame_owner.add_DOMContentLoaded(
+                &FrameDOMContentLoadedEventHandler::create(Box::new(move |_fs, _fa| {
+                    // Шаг 1 (UI-нить, мгновенно): URL документа фрейма.
+                    // (клоны по одному на замыкание: FnMut не отдаёт capture)
+                    let app = app.clone();
+                    let frame_inject = frame2.clone();
+                    let _ = frame2.ExecuteScript(
+                        &windows_core::HSTRING::from("location.href"),
+                        &ExecuteScriptCompletedHandler::create(Box::new(
+                            move |_hr, href| {
+                                // Результат ExecuteScript — JSON-литерал в кавычках
+                                let url = href.trim_matches('"');
+                                let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+                                let host = after_scheme
+                                    .split(['/', '?', '#'])
+                                    .next()
+                                    .unwrap_or("")
+                                    .trim_start_matches("www.");
+                                if !FRAME_SCRIPTLET_HOSTS.iter().any(|h| host == *h) {
+                                    return Ok(());
+                                }
+                                // Шаг 2 (фон): движок считает ресурсы под URL
+                                // (0,2–0,9 с — нельзя на UI-нити), инъекция —
+                                // назад на main-нить (COM-квартира фрейма).
+                                let svc = app
+                                    .state::<std::sync::Arc<adblock::AdblockService>>()
+                                    .inner()
+                                    .clone();
+                                let url = url.to_string();
+                                let frame_send = SendCom(frame_inject);
+                                let app = app.clone();
+                                std::thread::spawn(move || {
+                                    let script = svc.cosmetic_injection_script(&url);
+                                    if script.is_empty() {
+                                        return;
+                                    }
+                                    let _ = app.run_on_main_thread(move || {
+                                        let frame = frame_send.into_inner();
+                                        // Фрейм мог умереть, пока считали — тихо.
+                                        let _ = frame.ExecuteScript(
+                                            &windows_core::HSTRING::from(&script),
+                                            &ExecuteScriptCompletedHandler::create(Box::new(
+                                                |_, _| Ok(()),
+                                            )),
+                                        );
+                                    });
+                                });
+                                Ok(())
+                            },
+                        )),
+                    );
+                    Ok(())
+                })),
+                std::ptr::null_mut(),
+            );
+            Ok(())
+        })),
+        std::ptr::null_mut(),
+    )
+    .expect("add_FrameCreated");
+}
+
 /// COM-интерфейсы WebView2 не помечены Send, а Environment ещё и привязан к
 /// нити-создателю (0x802A000C «thread that created the object»): обёртка
 /// переносит их через границы нитей, а все вызовы методов — только на главном
@@ -1245,6 +1359,7 @@ pub(crate) unsafe fn install_content_handlers(
     let core: ICoreWebView2 = controller.CoreWebView2().expect("CoreWebView2 вкладки");
     let env: ICoreWebView2Environment = wv.environment();
     install_request_blocker(&core, &env, app, tab_id);
+    install_frame_scriptlets(&core, app);
     install_content_messaging(&core, app, tab_id);
     translate_menu::install_translate_menu(&core, &env, app);
     auth::install_basic_auth_handler(&core, app, tab_id);

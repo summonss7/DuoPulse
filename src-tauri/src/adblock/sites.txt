@@ -1,0 +1,34 @@
+! DuoPulse: реклама кинотеатров uakinogo/kinogo (карточка duopulse-188).
+! Общие списки (EasyList + uBO) уже режут баннерную сеть плеера hdvb/
+! cinemar.cc — aj2517.bid и srv224.com (Epom) закрыты EasyList, — но при
+! просмотре/скачивании остаются: попандер deltarockme.com (обфусцированный
+! скрипт в <head> страниц uakinogo.io, стреляет по клику — в т.ч. по кнопке
+! «Скачать» плеера) и VAST-прероллы плеера на одноразовых хостах
+! cvt-s2.aglNNN.site/.shop и rNN.adstagNNNN.xyz (теги adera/angel721/
+! viewtraff в конфиге «preroll» эмбеда). Ключевое: запросы кросс-доменного
+! (OOPIF) плеер-фрейма WebView2 НЕ поднимает WebResourceRequested — сетевые
+! правила до них не доходят (aj2517/srv224 внутри фрейма отвечали 200 под
+! живым EasyList), поэтому для плеера — скриптлеты no-fetch-if/no-xhr-if
+! (инъекция main.rs install_frame_scriptlets по DOMContentLoaded фрейма,
+! как в мобильном оверлее), рвущие доставку тегов/VAST на доставшейся
+! цепочке aj2517→kinoroll→kingads (факты стенда e2e/adblock/
+! sites-ads-probe.mjs, журнал 188). ahcdn.com/сinemap.cc НЕ трогаем — это
+! CDN самого видео. Обновление — правкой файла + пересборка (compat/tubes).
+!
+! --- сеть: попандер страницы + одноразовые VAST-хосты (top-level контекст)
+||deltarockme.com^
+||agl007.site^
+||agl008.shop^
+||adstag0102.xyz^
+||kinoroll.com^
+||kingads.digital^
+||mygaru.com^
+/^https?:\/\/cvt-s\d+\.agl\d+\.(?:site|shop)\//
+/^https?:\/\/r\d+\.adstag\d+\.xyz\//
+!
+! --- скриптлеты в плеер-фреймах (доставка VAST рвётся до сети фрейма):
+! теги adera/angel721/viewtraff + вся цепочка, замеченная в живом прогоне
+! (kinoroll — редиректор тегов, kingads — VAST/dsp, mygaru — ident-пиксель,
+! kxcdn/kx1cdn — пиксель srv224; ахcdn — видео-CDN, сюда НЕ входит)
+cinemar.cc,embf.net##+js(no-fetch-if, /aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com/)
+cinemar.cc,embf.net##+js(no-xhr-if, /aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com/)
