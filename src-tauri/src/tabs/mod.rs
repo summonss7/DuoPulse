@@ -102,6 +102,12 @@ fn window_logical_size(window: &Window<tauri::Wry>) -> LogicalSize<f64> {
         .to_logical::<f64>(scale)
 }
 
+/// Окно свёрнуто (duopulse-195): минимизация даёт клиентский размер 0×0 —
+/// relayout в этом состоянии пропускается (см. relayout).
+fn minimized_window(full: LogicalSize<f64>) -> bool {
+    full.width <= 0.0 || full.height <= 0.0
+}
+
 /// Размер дочернего webview вкладки под полосой хрома (chrome_h — текущая
 /// высота #app, карточка duopulse-143).
 fn content_rect(
@@ -771,12 +777,20 @@ impl TabManager {
     /// скрытые тоже — чтобы переключение не показало старую геометрию.
     /// Вкладка в HTML-fullscreen (карточка 062) растягивается на всё окно
     /// (0,0 — поверх полосы хрома), остальные — под хромом как обычно.
+    /// Минимизация окна здесь не работает (duopulse-195): сворачивание даёт
+    /// Resized(0×0) — перестановка всех webview в нулевой размер (и обратно
+    /// при разворачивании) устраивала бурю ресайзов рендер-процессов и
+    /// подтормаживание на слабых машинах; restore присылает Resized с живым
+    /// размером — геометрия восстановится там.
     pub fn relayout(&self, app: &AppHandle) {
         let Some(window) = app.get_window("main") else {
             return;
         };
-        let (pos, size) = content_rect(&window, self.chrome_height());
         let full = window_logical_size(&window);
+        if minimized_window(full) {
+            return;
+        }
+        let (pos, size) = content_rect(&window, self.chrome_height());
         let (fullscreen_tab, ids): (Option<String>, Vec<String>) = {
             let st = self.state.lock().expect("tabs: лок не отравлен");
             (
@@ -1681,5 +1695,15 @@ mod tests {
         assert_eq!(describe_web_error(7), "превышено время ожидания ответа");
         assert_eq!(describe_web_error(14), "сайт недоступен");
         assert_eq!(describe_web_error(99), "сайт недоступен");
+    }
+
+    /// Свёрнутое окно — нулевой размер (duopulse-195): relayout пропускает
+    /// минимизацию (Resized 0×0) и работает на живых размерах.
+    #[test]
+    fn minimized_window_detection() {
+        assert!(minimized_window(LogicalSize::new(0.0, 0.0)));
+        assert!(minimized_window(LogicalSize::new(1280.0, 0.0)));
+        assert!(minimized_window(LogicalSize::new(0.0, 720.0)));
+        assert!(!minimized_window(LogicalSize::new(1280.0, 720.0)));
     }
 }

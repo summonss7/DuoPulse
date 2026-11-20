@@ -252,6 +252,13 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
    * дорожек; потребит onYouTubeVideo, снимает disableSubs/смена видео. */
   let pendingEnable: string | null = null;
 
+  /** Пользователь держит дуо включённым в этом документе (duopulse-195):
+   * любое enableSubs (Alt+D/панель/video-auto) поднимает, disableSubs
+   * снимает. Знак для повторной попытки по событию play: включение могло
+   * прийтись на паузу (транспорт дорожек не трогает стоящее видео), а
+   * boot-флаг lastDuoEnabled в этом же документе не обновится. */
+  let duoWanted = false;
+
   /** В наборе есть хоть одна дорожка (любой части)? Видимое пользователю
    * «показано» = enabled && hasSetTracks() — решение Alt+D по нему
    * (duopulse-066), а не по флагу одному. */
@@ -414,6 +421,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
    * загрузку (duopulse-175): прогресс-применение её дорожек отменено. */
   const disableSubs = (via: string): void => {
     enabled = false;
+    duoWanted = false; // дуо выключили — повтор по play не поднимать (duopulse-195)
     pendingEnable = null; // ждущее включение отменили (duopulse-079)
     selectSeq++; // идущий selectTracks не должен вернуть показ (duopulse-175)
     applyTracks([]);
@@ -431,6 +439,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
    * помним) и собираем дефолт по приходу списка (onYouTubeVideo). */
   const enableSubs = (via: string): void => {
     enabled = true;
+    duoWanted = true; // намерение дуо живёт в документе (duopulse-195, см. выше)
     if (!hasSetTracks()) {
       const ids = defaultSetIds(trackList, preferredLangs());
       if (ids.length > 0) {
@@ -894,6 +903,24 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
       e.preventDefault();
       e.stopImmediatePropagation();
       toggleSubs("alt-d");
+    },
+    true,
+  );
+
+  // Повторная попытка дуо по факту воспроизведения (duopulse-195): транспорт
+  // дорожек больше не запускает видео сам — если включение (video-auto/Alt+D)
+  // пришлось на паузу и набор не собрался, старт воспроизведения поднимает
+  // дефолт-набор заново: YouTube грузит CC лениво у играющего плеера, теперь
+  // он играет. Работаем только при живом намерении документа (duoWanted —
+  // Alt+D/панель/video-auto), пустом наборе и ждущем включении без списка.
+  document.addEventListener(
+    "play",
+    () => {
+      if (!currentVideo || enabled || hasSetTracks() || pendingEnable !== null) return;
+      if (!duoWanted) return;
+      if (!(adapter.matches(currentVideo.url) || (currentVideo.frameProxy !== undefined && embedTracks.length > 0)))
+        return;
+      enableSubs("video-auto");
     },
     true,
   );

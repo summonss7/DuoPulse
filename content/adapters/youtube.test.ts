@@ -6,8 +6,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  PlayerApiTransport,
   YouTubeAdapter,
   YT_NATIVE_CAPTIONS_CLASS,
   blankYouTubeCaptions,
@@ -23,6 +24,7 @@ import {
   type DocumentLike,
   type PageWindow,
   type PlayerElement,
+  type TimedtextCaptureSource,
   type YouTubeTransport,
 } from "./youtube";
 import { defaultSetIds } from "../set-defaults";
@@ -750,6 +752,86 @@ describe("адаптер: загрузка выбранного набора 2�
     );
     expect(calls).toBe(2); // было 3 с паузами 6/12 с — квоту не долбим
     expect(res.failures[0].reason).toContain("429");
+  });
+});
+
+describe("PlayerApiTransport: добыча не запускает видео сама (duopulse-195)", () => {
+  const fakeCapture = {
+    all: () => [],
+    waitFor: async () => null,
+    findFor: () => null,
+    findTranslationFor: () => null,
+  } as unknown as TimedtextCaptureSource;
+
+  /** Окно с плеером-заглушкой: state управляется тестом, ad-showing нет. */
+  function transportWindow(state: number, hidden: boolean): {
+    win: PageWindow;
+    player: Record<string, unknown>;
+  } {
+    const player: Record<string, unknown> = {
+      getPlayerResponse: () => ({}),
+      loadModule: vi.fn(),
+      unloadModule: vi.fn(),
+      setOption: vi.fn(),
+      getOption: () => null,
+      getPlayerState: () => state,
+      classList: { contains: () => false },
+    };
+    const win = {
+      location: { href: "https://www.youtube.com/watch?v=TEST" },
+      document: { getElementById: () => player, hidden },
+      fetch: (() => Promise.resolve({})) as unknown as typeof fetch,
+    } as unknown as PageWindow;
+    return { win, player };
+  }
+
+  it("видимая пауза: транспорт не трогает плеер (даже loadModule) и не играет видео", async () => {
+    const { win, player } = transportWindow(1, false);
+    const plays = vi.fn(() => Promise.resolve());
+    const video = { paused: true, muted: false, play: plays, pause: vi.fn() };
+    const t = new PlayerApiTransport({ win, getVideo: () => video, capture: fakeCapture });
+    await expect(t.begin()).resolves.toBe(false);
+    expect(plays).not.toHaveBeenCalled(); // видео на паузе никто не включал
+    expect(video.muted).toBe(false);
+    expect(player.loadModule).not.toHaveBeenCalled(); // YouTube играет паузу от loadModule — не зовём
+  });
+
+  it("скрытая вкладка с паузой: быстрый отказ без loadModule и ожиданий", async () => {
+    const { win, player } = transportWindow(-1, true);
+    const plays = vi.fn(() => Promise.resolve());
+    const video = { paused: true, play: plays };
+    const t = new PlayerApiTransport({ win, getVideo: () => video, capture: fakeCapture });
+    await expect(t.begin()).resolves.toBe(false);
+    expect(plays).not.toHaveBeenCalled();
+    expect(player.loadModule).not.toHaveBeenCalled(); // даже модуль не грузим — ждать нечего
+  });
+
+  it("играющее видео: begin работает и программирует плеер (скрытый фон — тоже)", async () => {
+    const visible = transportWindow(1, false);
+    const tVis = new PlayerApiTransport({
+      win: visible.win,
+      getVideo: () => ({ paused: false }),
+      capture: fakeCapture,
+    });
+    await expect(tVis.begin()).resolves.toBe(true);
+    expect(visible.player.loadModule).toHaveBeenCalled();
+    const hidden = transportWindow(1, true);
+    const tHid = new PlayerApiTransport({
+      win: hidden.win,
+      getVideo: () => ({ paused: false }),
+      capture: fakeCapture,
+    });
+    await expect(tHid.begin()).resolves.toBe(true); // фон со звуком — легальный случай
+  });
+
+  it("пауза в середине загрузки: loadBaseTrack не программирует плеер (setOption играет паузу)", async () => {
+    const { win, player } = transportWindow(1, false);
+    const video = { paused: false };
+    const t = new PlayerApiTransport({ win, getVideo: () => video, capture: fakeCapture });
+    await expect(t.begin()).resolves.toBe(true); // начинали играющим
+    video.paused = true; // пользователь поставил на паузу, пока шла загрузка
+    await expect(t.loadBaseTrack("TEST", "en")).resolves.toBeNull();
+    expect(player.setOption).not.toHaveBeenCalled(); // плеер не программировали
   });
 });
 

@@ -106,9 +106,13 @@ export class VideoDetector {
     }
   }
 
-  /** Ключевое видео: наибольшая площадь прямоугольника (>0), иначе первое. */
+  /** Ключевое видео: наибольшая площадь прямоугольника (>0), иначе первое.
+   * Единственное видео — без замеров прямоугольников (duopulse-195:
+   * getBoundingClientRect форсирует layout — на пульсирующих страницах
+   * детектор сканирует по rAF на каждую пачку мутаций). */
   private pickVideo(): HTMLVideoElement | null {
     const videos = Array.from(document.querySelectorAll("video"));
+    if (videos.length <= 1) return videos[0] ?? null;
     let best: HTMLVideoElement | null = null;
     let bestArea = 0;
     for (const el of videos) {

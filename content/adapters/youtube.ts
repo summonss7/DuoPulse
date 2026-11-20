@@ -437,7 +437,12 @@ export function installTimedtextCapture(win: PageWindow): TimedtextCaptureSource
 /** Минимальный window (структурная типизация — тестируется без DOM). */
 export interface PageWindow {
   location: { href: string };
-  document: { getElementById(id: string): unknown; documentElement?: { lang?: unknown } };
+  document: {
+    getElementById(id: string): unknown;
+    documentElement?: { lang?: unknown };
+    /** document.hidden — скрытая вкладка (Core спрятал webview). */
+    hidden?: boolean;
+  };
   fetch: typeof fetch;
   XMLHttpRequest?: {
     prototype: {
@@ -447,12 +452,10 @@ export interface PageWindow {
   };
 }
 
-/** Минимальный <video> для транспорта. */
+/** Минимальный <video> для транспорта: достаточно знать, стоит ли на паузе
+ * (запускать видео ради добычи дорожек транспорт не вправе — duopulse-195). */
 export interface VideoForPlayer {
   paused: boolean;
-  muted: boolean;
-  play(): Promise<void>;
-  pause(): void;
 }
 
 /** movie_player (страницы watch): публичные внутренности плеера YouTube. */
@@ -475,15 +478,16 @@ export interface YouTubeTransport {
 
 /** Добыча через плеер: loadModule(captions) + setOption(track) → плеер сам
  * запрашивает timedtext (со своим pot), хук отдаёт тело. begin/end восстанав-
- * ливают состояние плеера (модуль/воспроизведение), показ не остаётся. */
+ * ливают состояние плеера (модуль captions). Видео НЕ запускается (duopulse-
+ * 195: принудительный muted-старт паузы самовольно включал видео — пользователь
+ * не просил; дорожки грузятся, когда воспроизведение реально идёт — повторную
+ * попытку на событие play поднимает duopulse-content). */
 export class PlayerApiTransport implements YouTubeTransport {
   readonly usedPath = "player-api+capture";
   private readonly win: PageWindow;
   private readonly getVideo: () => VideoForPlayer | null;
   private readonly capture: TimedtextCaptureSource;
   private wasTrack: unknown = null;
-  private startedPlay = false;
-  private wasMuted = true;
 
   constructor(opts: { win: PageWindow; getVideo: () => VideoForPlayer | null; capture: TimedtextCaptureSource }) {
     this.win = opts.win;
@@ -496,9 +500,25 @@ export class PlayerApiTransport implements YouTubeTransport {
     return el && typeof (el as PlayerElement).getPlayerResponse === "function" ? (el as PlayerElement) : null;
   }
 
+  /** Скрытый документ (Core спрятал webview неактивной вкладки): ленивая
+   * загрузка дорожек у стоящего на паузе видео там невозможна (а беззвучное
+   * фоновое видео ещё и ставится на паузу media-watch) — честный отказ без
+   * минутных ожиданий и суеты play/pause (duopulse-195). */
+  private hidden(): boolean {
+    return this.win.document.hidden === true;
+  }
+
   async begin(): Promise<boolean> {
     const el = this.player();
     if (!el) return false;
+    // Стоящее на паузе видео транспорт не трогает вовсе (duopulse-195):
+    // YouTube-плеер сам запускает воспроизведение от программирования на
+    // паузе — живой бисект показал, что даже один loadModule("captions")
+    // играет паузу. Программировать плеер можно только у играющего видео;
+    // повторную попытку поднимает событие play (duopulse-content), скрытая
+    // вкладка с паузой — тем более отказ без ожиданий.
+    const v = this.getVideo();
+    if (v?.paused) return false;
     try {
       el.loadModule?.("captions");
     } catch {
@@ -510,23 +530,11 @@ export class PlayerApiTransport implements YouTubeTransport {
     // играющего. Ждём конца рекламы, затем фактического воспроизведения;
     // по таймауту пробуем программировать всё равно (ретрай в loadBaseTrack).
     await this.waitForContent(el, 45_000);
+    if (this.getVideo()?.paused) return false; // поставили на паузу, пока ждали
     try {
       this.wasTrack = el.getOption?.("captions", "track") ?? null;
     } catch {
       this.wasTrack = null;
-    }
-    // Плеер грузит дорожки лениво у играющего видео: короткий muted-старт,
-    // если стоит на паузе (состояние вернёт end()).
-    const v = this.getVideo();
-    if (v && v.paused) {
-      this.wasMuted = v.muted;
-      try {
-        v.muted = true;
-        await v.play();
-        this.startedPlay = true;
-      } catch {
-        /* play не удался — пробуем программирование всё равно */
-      }
     }
     await this.waitForPlaying(el, 15_000);
     return true;
@@ -541,11 +549,13 @@ export class PlayerApiTransport implements YouTubeTransport {
   }
 
   /** Плеер фактически играет (getPlayerState() === 1): в буферизации (3) и
-   * до старта (-1) ленивая загрузка дорожек не срабатывает. */
+   * до старта (-1) ленивая загрузка дорожек не срабатывает. Скрытая вкладка
+   * со стоящим видео — быстрый выход: реклама/старт в ней не играют (duopulse-195). */
   private async waitForPlaying(el: PlayerElement, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (el.getPlayerState?.() === 1) return;
+      if (this.hidden() && this.getVideo()?.paused) return;
       await sleep(400);
     }
   }
@@ -562,6 +572,9 @@ export class PlayerApiTransport implements YouTubeTransport {
     // setOption той же дорожки — ноун-оп: между попытками перезапускаем
     // captions-модуль и даём странице время на токен.
     for (let attempt = 0; attempt < 3; attempt++) {
+      // Пауза (поставили, пока шла загрузка): плеер не программируем —
+      // YouTube играет паузу от setOption (duopulse-195, см. begin).
+      if (this.getVideo()?.paused) return null;
       await this.waitForContent(el, 45_000);
       await this.waitForPlaying(el, 15_000);
       if (attempt > 0) {
@@ -596,16 +609,6 @@ export class PlayerApiTransport implements YouTubeTransport {
       } catch {
         /* восстановление best-effort */
       }
-    }
-    if (this.startedPlay) {
-      const v = this.getVideo();
-      try {
-        v?.pause();
-        if (v) v.muted = this.wasMuted;
-      } catch {
-        /* best-effort */
-      }
-      this.startedPlay = false;
     }
   }
 }
