@@ -69,3 +69,8 @@
 # Та же грабля, что 083/102/119/170: без Java-ссылок R8 вырезает/переименует
 # методы — UnsatisfiedLinkError в release.
 -keep class dev.duopulse.mobile.MobileVpnHelper { *; }
+# duopulse-193: JNI-мост закладок web-оверлея (MobileBookmarksNative.*
+# external hasBookmark/toggleBookmark — символы
+# Java_dev_duopulse_mobile_MobileBookmarksNative_* экспортирует
+# libduopulse_lib; зовётся меню «⋮» оверлея). Та же грабля, что 083/102/144.
+-keep class dev.duopulse.mobile.MobileBookmarksNative { *; }

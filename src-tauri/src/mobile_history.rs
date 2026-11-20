@@ -247,3 +247,88 @@ pub fn history_delete_range(
 ) -> Result<(), String> {
     history.delete_range(params.from_ms, params.to_ms)
 }
+
+// ---------------------------------------------------------------------------
+// JNI-мост закладок web-оверлея (duopulse-193): пункты «☆ В закладки» /
+// «★ Закладки» меню «⋮» оверлея (Kotlin-объект MobileBookmarksNative) зовут
+// тот же HistoryStore, что и команды history.* выше, — страница оверлея
+// закладится в дефолтную группу без открытия UI-ветки. Синк аккаунта будим
+// как в мутаторах (schedule_sync): закладка уедет в облако с дебаунсом.
+// Паника Rust не должна валить браузер: тела под catch_unwind, строки
+// извлекаются ДО замыкания (как mobile_adblock). Только Android. Имена
+// экспортов — ровно имена Kotlin-методов (hasBookmark/toggleBookmark), JNI
+// резолвит по ним (грабля прогона 193: _has/_toggle = UnsatisfiedLinkError).
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "android")]
+pub mod jni {
+    use std::sync::{Arc, OnceLock};
+
+    use jni::objects::{JClass, JString};
+    use jni::sys::{jboolean, JNI_FALSE, JNI_TRUE};
+    use jni::JNIEnv;
+
+    use crate::aila::AilaAccount;
+    use crate::history::HistoryStore;
+
+    static STATE: OnceLock<(Arc<HistoryStore>, Arc<AilaAccount>)> = OnceLock::new();
+
+    /// Поднять мост (вызов из setup мобильной либы в lib.rs — те же Arc,
+    /// что управляются в Tauri, до старта окна).
+    pub fn init(history: Arc<HistoryStore>, account: Arc<AilaAccount>) {
+        let _ = STATE.set((history, account)); // повторный init — оставляем первый
+    }
+
+    /// java.lang.String → Option<String> (пустая — «значения нет»).
+    fn opt_str(env: &mut JNIEnv, s: JString) -> Option<String> {
+        let raw = env.get_string(&s).ok()?.to_string_lossy().into_owned();
+        (!raw.is_empty()).then_some(raw)
+    }
+
+    /// Сверить закладку по url (пункт меню показывает ☆/★).
+    #[unsafe(no_mangle)]
+    pub extern "C" fn Java_dev_duopulse_mobile_MobileBookmarksNative_hasBookmark(
+        mut env: JNIEnv,
+        _class: JClass,
+        url: JString,
+    ) -> jboolean {
+        let url = opt_str(&mut env, url);
+        let check = || STATE.get().is_some_and(|(h, _)| url.as_deref().is_some_and(|u| h.is_bookmarked(u)));
+        if std::panic::catch_unwind(check).unwrap_or(false) {
+            JNI_TRUE
+        } else {
+            JNI_FALSE
+        }
+    }
+
+    /// Переключить закладку страницы (есть — удалить, нет — добавить с
+    /// заголовком); возвращает НОВОЕ состояние (true — в закладках). Ошибка
+    /// стора — прежнее состояние, серфинг не падает.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn Java_dev_duopulse_mobile_MobileBookmarksNative_toggleBookmark(
+        mut env: JNIEnv,
+        _class: JClass,
+        url: JString,
+        title: JString,
+    ) -> jboolean {
+        let url = opt_str(&mut env, url);
+        let title = opt_str(&mut env, title).unwrap_or_default();
+        let flip = || -> Option<bool> {
+            let (h, acc) = STATE.get()?;
+            let u = url.as_deref()?;
+            if h.is_bookmarked(u) {
+                h.bookmark_remove(u).ok()?;
+                acc.schedule_sync();
+                Some(false)
+            } else {
+                h.bookmark_add_to(u, &title, None).ok()?;
+                acc.schedule_sync();
+                Some(true)
+            }
+        };
+        match std::panic::catch_unwind(flip) {
+            Ok(Some(on)) if on => JNI_TRUE,
+            _ => JNI_FALSE,
+        }
+    }
+}

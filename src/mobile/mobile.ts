@@ -108,6 +108,7 @@ root.innerHTML = `
         <label class="m-engine"><span data-i18n="Язык:">Язык:</span> <select id="mLang"></select></label>
         <label class="m-engine"><span data-i18n="Блокировщик рекламы:">Блокировщик рекламы:</span> <select id="mAdblock"></select></label>
         <div id="mAila"></div>
+        <button id="mMenuBookmarks" class="m-check-update" data-i18n="Закладки">Закладки</button>
         <button id="mHistory" class="m-check-update" data-i18n="История">История</button>
         <button id="mReopen" class="m-check-update" data-i18n="Восстановить вкладку" hidden>Восстановить вкладку</button>
         <button id="mTranslate" class="m-check-update" data-i18n="Перевести текст…">Перевести текст…</button>
@@ -356,6 +357,9 @@ function onTabActive(tab: MobileTab | null): void {
   duoPanel?.remove();
   duoPanel = null;
   if (!tab) {
+    // закладки, открытые поверх видео из меню «⋮» (193), сворачиваем: старт
+    // уже показан ниже, restore не нужен (состояние мира сменилось)
+    bookmarks.closeView(false);
     duo.close();
     omnibox.value = "";
     void bookmarks.syncVideo();
@@ -376,10 +380,16 @@ function onTabActive(tab: MobileTab | null): void {
   note(t("Плеер YouTube. Нажмите «duo» для субтитров и перевода."));
 }
 
-// ── Меню «⋮»: «История» и «Восстановить вкладку» (duopulse-156 — паритет
+// ── Меню «⋮»: «Закладки» (duopulse-193 — прежде экран был доступен только
+// со стартового экрана: при открытом видео/оверлее закладок было не
+// достать), «История» и «Восстановить вкладку» (duopulse-156 — паритет
 // с пунктами главного меню десктопа). Запись — видео-вкладки и страницы
 // web-оверлея (хук __duopulseVisit ниже); восстановление — стек закрытых
 // вкладок (tabs.reopenLast).
+root.querySelector<HTMLButtonElement>("#mMenuBookmarks")!.addEventListener("click", () => {
+  setMenu(false);
+  void bookmarks.openView();
+});
 historyBtn.addEventListener("click", () => {
   setMenu(false);
   history.setSheet(true);
@@ -799,6 +809,18 @@ home.addEventListener("click", goHome);
 // Kotlin-хелпер дергает глобал в UI-webview Tauri; оверлей закрывается
 // сам — goHome зовёт mobile_web_close.
 (window as { __duopulseGoHome?: () => void }).__duopulseGoHome = () => goHome();
+// Входы меню «⋮» web-оверлея (duopulse-193 — в оверлее не было ни закладок,
+// ни настроек): «Закладки» — список в основной ветке (оверлей прячется,
+// «назад» вернёт к странице); «Настройки» — лист настроек «⋮» основной
+// ветки (поисковик/язык/аккаунт/VPN/обновления — прежде из оверлея были
+// доступны только тумблеры YouTube и блокировщика).
+(window as { __duopulseShowBookmarks?: () => void }).__duopulseShowBookmarks = () => {
+  setMenu(false);
+  void bookmarks.openView();
+};
+(window as { __duopulseOpenSettings?: () => void }).__duopulseOpenSettings = () => {
+  setMenu(true);
+};
 for (const b of root.querySelectorAll<HTMLButtonElement>(".m-quick")) {
   b.addEventListener("click", () => {
     omnibox.value = b.dataset.url ?? "";

@@ -214,6 +214,44 @@ const main = async () => {
   v = await cdp.eval(`document.querySelector("#mBookmarks").hidden`);
   check("«←» возвращает на стартовый экран", v === true, "");
 
+  // ── 5. duopulse-193: вход из меню «⋮» (при открытом видео) и хук оверлея ──
+  // видео не грузим (rate-limit): старт прячем руками, как onTabActive
+  // открытой вкладки; «назад» из закладок должен вернуть к «видео», не к старту
+  v = await cdp.eval(`(() => {
+    document.querySelector("#mStart").hidden = true; // «открыто видео»
+    document.querySelector("#mMenu").click();
+    const item = document.querySelector("#mMenuBookmarks");
+    if (!item) return "нет пункта «Закладки» в меню «⋮»";
+    item.click();
+    return "ок";
+  })()`);
+  await sleep(400);
+  check("пункт «Закладки» в меню «⋮» открывает экран", v === "ок" && (await cdp.eval(`window.__bmDebug().open`)) === true, String(v));
+  v = await cdp.eval(`(() => {
+    const start = document.querySelector("#mStart");
+    const wasHidden = start.hidden;
+    document.querySelector(".m-bm-back").click();
+    return { wasHidden, nowHidden: start.hidden, viewHidden: document.querySelector("#mBookmarks").hidden };
+  })()`);
+  check("«←» из меню-входа возвращает к видео (старт не выскакивает)", v.viewHidden === true && v.wasHidden === true && v.nowHidden === true, JSON.stringify(v));
+  // хук пункта «★ Закладки» меню web-оверлея (Kotlin дергает его из натива)
+  v = await cdp.eval(`(() => {
+    window.__duopulseShowBookmarks();
+    const opened = window.__bmDebug().open;
+    document.querySelector(".m-bm-back").click();
+    return opened;
+  })()`);
+  check("хук __duopulseShowBookmarks (меню оверлея) открывает экран", v === true, String(v));
+  // хук «⚙ Настройки DuoPulse» из меню оверлея: лист настроек ветки
+  v = await cdp.eval(`(() => {
+    window.__duopulseOpenSettings();
+    const opened = !document.querySelector("#mMenuWrap").hidden;
+    document.querySelector("#mMenuClose").click();
+    return opened;
+  })()`);
+  check("хук __duopulseOpenSettings (меню оверлея) открывает настройки", v === true, String(v));
+  await cdp.eval(`document.querySelector("#mStart").hidden = false`); // старт — следующим прогонам
+
   const failed = results.filter((r) => !r.ok).length;
   console.log(`\n${failed === 0 ? "ALL PASS" : "FAILED"}: ${results.length - failed}/${results.length}`);
   process.exit(failed === 0 ? 0 : 1);

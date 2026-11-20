@@ -230,6 +230,10 @@ fn mobile_run() {
             // общий PasswordPrompts; статика mobile_pass даёт JNI-вызовам
             // (MobilePassNative) тот же стор и эмиттер событий UI.
             mobile_pass::init(app.handle().clone(), Arc::clone(&passwords));
+            // Закладки из меню web-оверлея (duopulse-193): тот же HistoryStore
+            // и воркер синка Aila, что у команд history.* — JNI-вызовам
+            // (MobileBookmarksNative) отдаём статику.
+            mobile_history::jni::init(Arc::clone(&history), Arc::clone(&account));
             // восстановленный вход — первый синк сразу (как main.rs этапа 4):
             // протухшая сессия всплывёт первым же кругом (401 → ошибка статуса)
             if account.restore() {

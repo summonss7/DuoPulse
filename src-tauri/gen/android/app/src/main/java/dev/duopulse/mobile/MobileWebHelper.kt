@@ -515,6 +515,26 @@ object MobileWebHelper {
       "window.__duopulseGoHome && window.__duopulseGoHome()", null)
   }
 
+  /** «Закладки» из меню оверлея (duopulse-193): спрятать оверлей («назад»
+   *  вернёт к странице) и открыть экран закладок мобильной ветки — прежде
+   *  он был достижим только кнопкой со стартового экрана, из оверлея
+   *  закладок было не достать. */
+  private fun openBookmarksList() {
+    hide()
+    MainActivity.tauriWebView?.evaluateJavascript(
+      "window.__duopulseShowBookmarks && window.__duopulseShowBookmarks()", null)
+  }
+
+  /** «Настройки DuoPulse» из меню оверлея (duopulse-193): полный лист
+   *  настроек «⋮» мобильной ветки (поисковик, язык, аккаунт, VPN,
+   *  обновления) — прежде из оверлея были доступны только тумблеры
+   *  «Десктопный YouTube» и блокировщика. */
+  private fun openSettings() {
+    hide()
+    MainActivity.tauriWebView?.evaluateJavascript(
+      "window.__duopulseOpenSettings && window.__duopulseOpenSettings()", null)
+  }
+
   /** «Копировать ссылку» из меню: буфер обмена + тост. */
   private fun copyUrl(act: MainActivity, url: String) {
     if (url.isEmpty()) return
@@ -564,6 +584,23 @@ object MobileWebHelper {
     val video = youTubeVideoId(url)
     val items = mutableListOf<Pair<String, () -> Unit>>()
     items += "⌂  Главная DuoPulse" to { goHome() }
+    items += "★  Закладки" to { openBookmarksList() }
+    // Страница — в закладки (duopulse-193): тот же стор, что у экрана
+    // закладок ветки (JNI MobileBookmarksNative); ☆/★ — текущее состояние,
+    // повторный выбор снимает. Доверенный URL — SPA-хук держит свежее.
+    val pageUrl = trustedUrl(wv)
+    if (pageUrl != null) {
+      val starred = MobileBookmarksNative.has(pageUrl)
+      items += (if (starred) "★" else "☆") + "  " +
+        (if (starred) "Убрать из закладок" else "В закладки") to {
+          val on = MobileBookmarksNative.toggle(pageUrl, wv.title ?: pageUrl)
+          Toast.makeText(
+            act,
+            if (on) "★ Добавлено в закладки" else "☆ Убрано из закладок",
+            Toast.LENGTH_SHORT
+          ).show()
+        }
+    }
     items += "⟳  Обновить страницу" to { wv.reload() }
     if (wv.canGoForward()) items += "›  Вперёд" to { wv.goForward() }
     if (video != null) items += "▶  Открыть в плеере duo" to { openVideoInPlayer(video) }
@@ -608,6 +645,9 @@ object MobileWebHelper {
       ).show()
       MobileAdblockNative.logStatus()
     }
+    // Полные настройки приложения из оверлея (duopulse-193): оверлей
+    // прячется («назад» вернёт к странице), лист «⋮» ветки открывается хуком
+    items += "⚙  Настройки DuoPulse" to { openSettings() }
 
     val list = LinearLayout(act)
     list.orientation = LinearLayout.VERTICAL

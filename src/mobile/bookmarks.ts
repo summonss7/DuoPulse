@@ -1,6 +1,8 @@
 // DuoPulse — закладки мобильной ветки (карточка duopulse-104): группы-чипы,
 // список, звёздочка в шапке плеера и перекладывание закладки пальцем между
-// группами (long-press → тяга → чип группы). Данные — те же команды
+// группами (long-press → тяга → чип группы). duopulse-193: экран открывается
+// не только со стартового экрана, но и пунктом «Закладки» меню «⋮» — поверх
+// открытого видео («назад» возвращает к видео, не к старту). Данные — те же команды
 // history.*, что на десктопе (lib.rs регистрирует подмножество для мобильной
 // либы), клиент bridge переиспользуется как есть. Модель — как на десктопе
 // (099): закладка может состоять в нескольких группах; из вида конкретной
@@ -85,6 +87,12 @@ export class MobileBookmarks {
   private starred = false;
   /** Признак для звёздочки: сейчас открыто видео (url/title — из host). */
 
+  /** Старт-экран был спрятан до открытия экрана закладок: при закрытии
+   *  возвращаем как было (duopulse-193 — экран открывается и поверх
+   *  открытого видео из меню «⋮», «назад» должен вернуть к видео, а не
+   *  к старту; из меню start и так скрыт вкладкой). */
+  private startWasHidden = false;
+
   constructor(
     private readonly host: BmHost,
     private readonly api: BmInvoke = bridge,
@@ -112,7 +120,7 @@ export class MobileBookmarks {
     this.view.hidden = true;
     this.view.innerHTML = `
       <div class="m-bm-head">
-        <button class="m-bm-back" title="${t("К старту")}" aria-label="${t("К старту")}">
+        <button class="m-bm-back" title="${t("Закрыть")}" aria-label="${t("Закрыть")}">
           <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>
           <b>${t("Закладки")}</b>
         </button>
@@ -185,21 +193,25 @@ export class MobileBookmarks {
 
   // ── вид списка ──────────────────────────────────────────────────────────
 
-  /** Открыть экран закладок (со стартового экрана). */
+  /** Открыть экран закладок (со стартового экрана или из меню «⋮» поверх
+   *  открытого видео/PDF — duopulse-193). */
   async openView(): Promise<void> {
-    this.view.hidden = false;
     const start = document.querySelector<HTMLElement>("#mStart");
+    if (this.view.hidden && start) this.startWasHidden = start.hidden;
     if (start) start.hidden = true;
+    this.view.hidden = false;
     await this.reload();
   }
 
-  closeView(): void {
+  /** Закрыть экран. restore=false — не трогать старт-экран: вызывающий уже
+   *  выставил его сам (закрытие всех вкладок — onTabActive(null)). */
+  closeView(restore = true): void {
     if (this.view.hidden) return;
     this.view.hidden = true;
     this.endDrag(false);
     this.closeSheet();
     const start = document.querySelector<HTMLElement>("#mStart");
-    if (start) start.hidden = false;
+    if (start && restore) start.hidden = this.startWasHidden;
   }
 
   /** Обновить экран после синка аккаунта Aila (duopulse-112): перечитать
