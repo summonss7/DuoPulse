@@ -1,11 +1,18 @@
 // Жизненный цикл паролей в странице (этап 2 duopulse-108): детект формы
-// логина, кандидат «Сохранить пароль?» по сабмиту и автозаполнение по клику.
+// логина, кандидат «Сохранить пароль?» по сабмиту и автозаполнение.
 //
 // Канал — WebMessage (content/messaging): «password-candidate» по сабмиту
 // (Core решает, показывать ли бар, — пароль живёт только в Core), ответ на
-// «passwords-lookup» — список логинов сайта (без паролей), «passwords-fill»
-// по клику на поле — пароль выбранного логина. Origin всегда считает Core
-// по URL вкладки: страница получает пароли только своего сайта.
+// «passwords-lookup» — список логинов сайта (без паролей; Core отвечает
+// всегда, пустой список — тоже ответ), «passwords-fill» — пароль выбранного
+// логина. Origin всегда считает Core по URL вкладки: страница получает
+// пароли только своего сайта.
+//
+// duopulse-194: формы «только пароль» (роутеры) дают кандидата с пустым
+// логином и заполняются записями с пустым логином; сохранённый вход
+// ложится в форму сам при загрузке страницы (как Chrome — видимую пустую
+// форму, не споря с ручным вводом); потерянный ранний lookup
+// переспрашивается по активации поля.
 //
 // Инкогнито (маркер window.__DUOPULSE_INCOGNITO__, карточка duopulse-096) —
 // модуль пассивен: не предлагает сохранить и не заполняет.
@@ -33,11 +40,14 @@ export interface PasswordFillStatus {
   lastCandidate: string;
   /** Логин последнего заполнения ("" — не было). */
   lastFilled: string;
+  /** Пришёл ли ответ Core на passwords-lookup (пустой — тоже ответ). */
+  lookupAnswered: boolean;
   /** Открыт ли chooser нескольких аккаунтов. */
   chooserVisible: boolean;
 }
 
-/** Пара полей формы логина: логин (может не быть) + пароль. */
+/** Пара полей формы логина: логин (может не быть — роутеры и пин-коды
+ *  спрашивают только пароль, duopulse-194) + пароль. */
 interface LoginPair {
   user: HTMLInputElement | null;
   pass: HTMLInputElement;
@@ -89,7 +99,9 @@ export class PasswordFill {
   private lastFilled = "";
   private lastFocusedPair: LoginPair | null = null;
   private chooser: HTMLDivElement | null = null;
-  private lookupSent = false;
+  private lookupSentAt: number | null = null;
+  private lookupAnswered = false;
+  private autoFilled = false;
   private observer: MutationObserver | null = null;
   private scanTimer: number | null = null;
   private detach: (() => void) | null = null;
@@ -106,6 +118,7 @@ export class PasswordFill {
       accounts: [],
       lastCandidate: "",
       lastFilled: "",
+      lookupAnswered: false,
       chooserVisible: false,
     };
   }
@@ -175,6 +188,7 @@ export class PasswordFill {
     this.status.accounts = [...this.accounts];
     this.status.lastCandidate = this.lastSignature;
     this.status.lastFilled = this.lastFilled;
+    this.status.lookupAnswered = this.lookupAnswered;
     this.status.chooserVisible = this.chooser !== null;
     return { ...this.status };
   }
@@ -208,22 +222,36 @@ export class PasswordFill {
   /** Найти поля пароля и их поля логина; первый раз — запрос логинов сайта. */
   private scan(): void {
     if (this.status.incognito) return;
-    const passes = Array.from(this.doc.querySelectorAll<HTMLInputElement>("input[type=password]"))
-      .filter((el) => !el.disabled);
+    const passes = Array.from(
+      this.doc.querySelectorAll<HTMLInputElement>("input[type=password]"),
+    ).filter((el) => !el.disabled);
     this.pairs = passes.map((pass) => ({ user: usernameFieldFor(pass), pass }));
-    if (this.pairs.length > 0 && !this.lookupSent) {
-      this.lookupSent = true;
-      // логины сайта (без паролей): Core отвечает, только когда есть чем заполнить
-      this.ports.post({ duopulse: "passwords-lookup" });
+    if (this.pairs.length > 0 && this.lookupSentAt === null) {
+      this.sendLookup();
     }
+    // форма дорисовалась позже логинов (SPA) — автозаполнение догоняет
+    if (this.accounts.length > 0) this.tryAutoFill();
+  }
+
+  /** Запрос логинов сайта (без паролей). Core отвечает всегда — пустой
+   *  список тоже ответ; пока ответа не было, активация поля переспрашивает
+   *  (ранний lookup мог уйти раньше, чем Core узнал URL вкладки — гонка
+   *  duopulse-194 оставляла страницу без автозаполнения навсегда). */
+  private sendLookup(): void {
+    const now = Date.now();
+    if (this.lookupSentAt !== null && now - this.lookupSentAt < 1000) return;
+    this.lookupSentAt = now;
+    this.ports.post({ duopulse: "passwords-lookup" });
   }
 
   /** Сабмит: отправить кандидата в Core (дедуп по логину+паролю — повторные
-   *  клики/Enter той же формы не спамят; смена пароля проходит как update). */
+   *  клики/Enter той же формы не спамят; смена пароля проходит как update).
+   *  Логина может не быть (роутер просит только пароль, duopulse-194) —
+   *  хранилище держит такие записи с пустым логином. */
   private collectCandidate(pair: LoginPair): void {
     const username = (pair.user?.value ?? "").trim();
     const password = pair.pass.value ?? "";
-    if (!username || !password) return; // пустое хранилище не примет — бара не будет
+    if (!password) return; // пароль обязателен, логин — нет
     const signature = `${username}|${password}`;
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
@@ -236,13 +264,15 @@ export class PasswordFill {
     });
   }
 
-  /** Клик/фокус на поле формы логина: есть логины сайта — заполняем (один) |
-   *  выбираем (несколько). Выбор — тоже активация поля. */
+  /** Клик/фокус на поле формы логина: есть логины сайта — заполняем (один,
+   *  только пустое — ручной ввод не затираем) | выбираем (несколько).
+   *  Выбор — тоже активация поля. */
   private onFieldActivated(pair: LoginPair, e: Event): void {
     this.lastFocusedPair = pair;
+    if (!this.lookupAnswered) this.sendLookup(); // ранний lookup потерялся — повтор
     if (this.accounts.length === 0) return;
     if (this.accounts.length === 1) {
-      this.requestFill(this.accounts[0] as string);
+      if (!pair.pass.value) this.requestFill(this.accounts[0] as string);
       return;
     }
     // несколько аккаунтов — chooser у поля (не для повторного фокуса того же)
@@ -262,15 +292,47 @@ export class PasswordFill {
         : [];
       this.origin = typeof msg["origin"] === "string" ? msg["origin"] : "";
       this.accounts = accounts;
+      this.lookupAnswered = true; // пустой список — тоже ответ (ретраи стоп)
+      this.tryAutoFill();
     } else if (msg["duopulse"] === "passwords-fill-data") {
       const username = typeof msg["username"] === "string" ? msg["username"] : "";
       const password = typeof msg["password"] === "string" ? msg["password"] : "";
-      if (!username || !password) return;
-      const pair = this.lastFocusedPair ?? this.pairs[0];
+      if (!password) return; // логин бывает пуст (запись «только пароль»)
+      const pick = (): LoginPair | null => {
+        const byFocus = this.pairOf(this.doc.activeElement);
+        if (byFocus?.pass.isConnected) return byFocus;
+        if (this.lastFocusedPair?.pass.isConnected) return this.lastFocusedPair;
+        return this.pairs.find((p) => p.pass.isConnected) ?? null;
+      };
+      let pair = pick();
+      if (!pair) {
+        // SPA перерисовал форму после запроса — пересканировать и повторить
+        this.scan();
+        pair = pick();
+      }
       if (!pair) return;
-      if (pair.user) setInputValue(pair.user, username);
+      if (pair.user && username) setInputValue(pair.user, username);
       setInputValue(pair.pass, password);
       this.lastFilled = username;
+    }
+  }
+
+  /** Автозаполнение при появлении логинов сайта или самой формы (как Chrome:
+   *  страница открылась — сохранённый вход уже в полях, duopulse-194). Первый
+   *  аккаунт идёт в видимую пустую форму; скрытые поля-ловушки и ручной ввод
+   *  не трогаем — по клику поле по-прежнему заполняется/выбирается явно. */
+  private tryAutoFill(): void {
+    if (this.autoFilled || this.accounts.length === 0) return;
+    const username = this.accounts[0] as string;
+    for (const pair of this.pairs) {
+      if (!pair.pass.isConnected || pair.pass.disabled) continue;
+      if (pair.pass.getClientRects().length === 0) continue; // невидимая форма
+      if (pair.pass.value) continue; // уже заполнено или человек печатает
+      if (pair.user && pair.user.value && pair.user.value !== username) continue;
+      this.autoFilled = true;
+      this.lastFocusedPair = pair;
+      this.requestFill(username);
+      return;
     }
   }
 
@@ -294,7 +356,7 @@ export class PasswordFill {
     s.color = "#E8EDF2";
     for (const username of this.accounts) {
       const item = doc.createElement("div");
-      item.textContent = username;
+      item.textContent = username || "(без логина)";
       const is = item.style;
       is.padding = "6px 10px";
       is.borderRadius = "6px";

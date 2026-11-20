@@ -9,9 +9,13 @@
 //      запись одна, пароль новый (passwords.reveal);
 //   4) второй аккаунт того же сайта → chooser из двух пунктов у поля,
 //      выбор второго заполняет его;
-//   5) «Никогда для этого сайта»: сайт denylist-ится — повторный сабмит
+//   5) «Никогда для этого сайта»: сайт denylist-ируется — повторный сабмит
 //      с иными данными бара не даёт;
-//   6) инкогнито-вкладка: сабмит — бара нет; клик по полю — не заполняет.
+//   6) инкогнито-вкладка: сабмит — бара нет; клик по полю — не заполняет;
+//   7) duopulse-194: сохранённый вход сам ложится в форму при загрузке
+//      (без клика); форма «только пароль» (роутер 192.168.31.1) даёт
+//      кандидата с пустым логином, бар без «для «»», запись хранится
+//      и автозаполняется только паролем.
 // Изоляция: APPDATA и WEBVIEW2_USER_DATA_FOLDER — во временных каталогах
 // (свежий passwords.db/passwords.key), DUOPULSE_ADBLOCK_LISTS="" — без сети.
 //
@@ -28,6 +32,7 @@ const EXE = process.argv[2] || path.join(ROOT, "src-tauri", "target", "debug", "
 const CDP_PORT = Number(process.env.CDP_PORT || 9226);
 const HTTP_PORT = Number(process.env.E2E_PASSWORDS_PORT || 8897); // origin A
 const HTTP_PORT_B = HTTP_PORT + 1; // origin B (denylist-проверка на другом сайте)
+const HTTP_PORT_C = HTTP_PORT + 4; // origin C («роутер» — только пароль); +2..+3 мимо: 8899 занят на этой машине
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const run = (cmd, args, opts = {}) =>
@@ -95,18 +100,30 @@ const loginPage = (port) => `<!doctype html><html><head><title>Вход Example<
 </form></body></html>`;
 const welcomePage = `<!doctype html><html><head><title>Добро пожаловать</title></head>
 <body><h1>Вы вошли</h1></body></html>`;
+// duopulse-194: «роутер» (192.168.31.1) — только пароль, без <form>,
+// кнопка — div (сабмит по Enter, как веб-морды роутеров)
+const routerPage = `<!doctype html><html><head><title>Router Login</title></head><body>
+<h1>Вход на роутер</h1>
+<div class="login"><input type="password" name="pwd" placeholder="Пароль"></div>
+</body></html>`;
 
-const mkServer = (port) => {
+const mkServer = (port, routerOnly = false) => {
   const srv = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    if (routerOnly || req.url.startsWith("/router")) {
+      res.end(routerPage);
+      return;
+    }
     res.end(req.url.startsWith("/welcome") ? welcomePage : loginPage(port));
   });
   return new Promise((r) => srv.listen(port, "127.0.0.1", () => r(srv)));
 };
 const serverA = await mkServer(HTTP_PORT);
 const serverB = await mkServer(HTTP_PORT_B);
+const serverC = await mkServer(HTTP_PORT_C, true);
 const siteA = `http://127.0.0.1:${HTTP_PORT}`;
 const siteB = `http://127.0.0.1:${HTTP_PORT_B}`;
+const siteC = `http://127.0.0.1:${HTTP_PORT_C}`;
 
 // --- 2. vite dev (debug-exe грузит UI с localhost:5173) ---------------------
 await killOurExes(); // остатки прошлых прогонов держали бы порт CDP
@@ -346,9 +363,22 @@ try {
     }
   }
 
-  // 2. повторный заход → клик по полю логина → автозаполнение
+  // 2. повторный заход: сохранённый вход САМ ложится в форму при загрузке
+  //    (duopulse-194, как Chrome); очищенное — возвращается кликом по полю
   await tab.send("Page.navigate", { url: `${siteA}/login` });
   await sleep(1200);
+  const auto = await evalIn(
+    tab,
+    `(function(){ const u=document.querySelector('input[type=text]'); const p=document.querySelector('input[type=password]');
+       return JSON.stringify({u:u.value, p:p.value}); })()`,
+  );
+  const av = JSON.parse(auto);
+  check("открытие страницы само заполняет сохранённый вход (без клика)", av.u === "artem" && av.p === "s3cret!", auto);
+  await evalIn(
+    tab,
+    `(function(){ const u=document.querySelector('input[type=text]'); const p=document.querySelector('input[type=password]');
+       u.value=''; p.value=''; return 'cleared'; })()`,
+  );
   await evalIn(tab, `document.querySelector('input[type=text]').click(); 'clicked'`);
   await sleep(700);
   const filled = await evalIn(
@@ -431,6 +461,49 @@ try {
   await sleep(2000);
   check("«Никогда для этого сайта» — сайт B больше не предлагает", await noSaveBar());
 
+  // 7. duopulse-194: «роутер» — форма «только пароль» (192.168.31.1).
+  //    Свой origin C: чужие аккаунты A не должны заливаться в роутер-форму,
+  //    вкладка A — активная (бар предлагается активной вкладке)
+  const tabIds = await viaChrome(`window.__duopulse.tabs.list()`);
+  const tabAId = tabIds?.tabs?.find((t) => t.url.includes(`127.0.0.1:${HTTP_PORT}`))?.id;
+  await viaChrome(`window.__duopulse.tabs.activate({id:'${tabAId}'})`);
+  await sleep(400);
+  await tab.send("Page.navigate", { url: `${siteC}/` });
+  await sleep(1200);
+  await evalIn(
+    tab,
+    `(function(){ const p=document.querySelector('input[type=password]');
+       p.value='router-pass'; p.dispatchEvent(new Event('input',{bubbles:true}));
+       p.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})); return 'submitted'; })()`,
+  );
+  bar = null;
+  for (let i = 0; i < 40 && !bar; i++) {
+    bar = await saveBar();
+    if (!bar) await sleep(250);
+  }
+  check("форма «только пароль» (роутер) показывает бар", !!bar, bar?.text ?? "бар не появился");
+  if (bar) {
+    check(
+      "текст бара без логина — просто «…пароль на <сайт>»",
+      !/[«“„]/.test(bar.text) && bar.text.includes(`127.0.0.1:${HTTP_PORT_C}`),
+      bar.text,
+    );
+    await clickBar(bar, "pwSaveAccept");
+    await sleep(600);
+  }
+  const routerSaved = await viaChrome(`window.__duopulse.passwords.list({query:'127.0.0.1', limit:50})`);
+  const routerEntry = routerSaved?.items?.find((i) => i.username === "");
+  check(
+    "запись «только пароль» хранится с пустым логином",
+    !!routerEntry && routerEntry.origin === siteC,
+    JSON.stringify(routerSaved?.items?.map((i) => `${i.username || "∅"}@${i.origin}`)),
+  );
+  // повторный заход: пароль ложится сам (логина в форме нет вовсе)
+  await tab.send("Page.navigate", { url: `${siteC}/` });
+  await sleep(1200);
+  const routerFilled = await evalIn(tab, `document.querySelector('input[type=password]').value`);
+  check("повторный заход на «роутер»: пароль автозаполняется", routerFilled === "router-pass", JSON.stringify(routerFilled));
+
   // 6. инкогнито: не предлагает и не заполняет
   const targetsBefore = new Set((await cdpTargets()).map((t) => t.id));
   await viaChrome(`window.__duopulse.tabs.open({url:'${siteA}/login', incognito:true})`);
@@ -489,6 +562,7 @@ try {
   } catch {}
   serverA.close();
   serverB.close();
+  serverC.close();
   await killWebViewOf(profile);
   await killOurExes();
   try {

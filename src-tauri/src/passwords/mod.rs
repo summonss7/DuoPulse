@@ -9,8 +9,11 @@
 //!
 //! Upsert — по паре (origin, username): повторное сохранение того же логина
 //! на том же сайте обновляет пароль (сценарий «сменил пароль»), разные
-//! логины одного сайта — отдельные записи. Команда list пароль не отдаёт
-//! (только reveal по конкретному id — экран «Пароли», duopulse-107).
+//! логины одного сайта — отдельные записи. Логин бывает пуст — записи
+//! «только пароль» (роутеры и пин-коды спрашивают один пароль, duopulse-194):
+//! пара (origin, "") — законный ключ, автозаполнение заполняет только пароль.
+//! Команда list пароль не отдаёт (только reveal по конкретному id —
+//! экран «Пароли», duopulse-107).
 //!
 //! Этап 2 (duopulse-108): denylist never_save («никогда для этого сайта» —
 //! бар не предлагается), accounts_for/credential — данные автозаполнения
@@ -400,9 +403,8 @@ impl PasswordStore {
         password: &str,
     ) -> Result<PasswordSaveResult, String> {
         let origin = origin_of(url)?;
-        if username.is_empty() {
-            return Err("логин пуст".into());
-        }
+        // логин бывает пуст (запись «только пароль»: роутеры, duopulse-194) —
+        // пара (origin, "") законный ключ upsert
         if password.is_empty() {
             return Err("пароль пуст".into());
         }
@@ -479,11 +481,6 @@ impl PasswordStore {
         let Some((origin, old_url, old_title)) = row else {
             return Err(format!("логин {id} не найден"));
         };
-        if let Some(u) = username {
-            if u.trim().is_empty() {
-                return Err("логин пуст".into());
-            }
-        }
         if let Some(p) = password {
             if p.is_empty() {
                 return Err("пароль пуст".into());
@@ -613,8 +610,9 @@ impl PasswordStore {
         }
         let (mut added, mut existing) = (0u64, 0u64);
         for e in entries {
-            if e.username.trim().is_empty() || e.password.is_empty() {
-                continue; // защита импортёра от самого себя
+            if e.password.is_empty() {
+                continue; // защита импортёра от самого себя (пустой логин
+                // законен — записи «только пароль» из Chrome переносятся)
             }
             if seen.contains(&(e.origin.clone(), e.username.clone())) {
                 existing += 1;
@@ -667,8 +665,9 @@ impl PasswordStore {
         let mut stats = MergeStats::default();
         let mut conn = self.conn.lock().unwrap();
         for r in remote {
-            if r.username.trim().is_empty() || r.password.is_empty() {
-                continue; // мусорный документ не ломает слияние
+            if r.password.is_empty() {
+                continue; // мусорный документ не ломает слияние (пустой
+                // логин законен — записи «только пароль», duopulse-194)
             }
             let mut local: Option<(i64, String, i64)> = None; // (id, пароль, updated_at)
             for row in rows_of(&conn)? {
@@ -1071,6 +1070,75 @@ mod tests {
                 .as_deref(),
             Some("x")
         );
+    }
+
+    #[test]
+    fn password_only_login_roundtrip() {
+        let s = store();
+        // роутер просит только пароль (duopulse-194): пустой логин — законный ключ
+        let saved = s.add("http://192.168.31.1/", Some("Роутер"), "", "admin-pass").unwrap();
+        assert!(!saved.updated);
+        let res = s.list("", 10).unwrap();
+        assert_eq!(res.total, 1);
+        assert_eq!(res.items[0].username, "");
+        assert_eq!(res.items[0].origin, "http://192.168.31.1");
+        assert_eq!(s.reveal(saved.id).unwrap(), "admin-pass");
+        // автозаполнение: пустой логин в списке, пароль по нему
+        assert_eq!(s.accounts_for("http://192.168.31.1").unwrap(), vec![""]);
+        assert_eq!(
+            s.credential("http://192.168.31.1", "")
+                .unwrap()
+                .as_deref(),
+            Some("admin-pass")
+        );
+        // смена пароля роутера — upsert по (origin, "")
+        let again = s
+            .add("http://192.168.31.1/", None, "", "new-pass")
+            .unwrap();
+        assert!(again.updated);
+        assert_eq!(again.id, saved.id);
+        assert_eq!(s.list("", 10).unwrap().total, 1);
+        // именованный логин того же сайта живёт рядом отдельной записью
+        s.add("http://192.168.31.1/", None, "guest", "g").unwrap();
+        let mut acc = s.accounts_for("http://192.168.31.1").unwrap();
+        acc.sort();
+        assert_eq!(acc, vec!["", "guest"]);
+    }
+
+    #[test]
+    fn import_keeps_password_only_entries() {
+        let s = store();
+        // Chrome хранит записи «только пароль» с пустым username_value —
+        // импорт переносит их; мусор (пустое всё) отсеивается
+        let (added, existing) = s
+            .import_batch(&[
+                PasswordImportEntry {
+                    // origin импортёр уже нормализовал (origin_of): без слэша
+                    origin: "http://192.168.31.1".into(),
+                    url: "http://192.168.31.1/".into(),
+                    title: "Роутер".into(),
+                    username: String::new(),
+                    password: "router-pass".into(),
+                    created_at: 1000,
+                },
+                PasswordImportEntry {
+                    origin: "https://junk.io/".into(),
+                    url: String::new(),
+                    title: String::new(),
+                    username: String::new(),
+                    password: String::new(),
+                    created_at: 1000,
+                },
+            ])
+            .unwrap();
+        assert_eq!((added, existing), (1, 0));
+        assert_eq!(
+            s.credential("http://192.168.31.1", "")
+                .unwrap()
+                .as_deref(),
+            Some("router-pass")
+        );
+        assert_eq!(s.list("", 10).unwrap().total, 1);
     }
 
     #[test]

@@ -1159,8 +1159,11 @@ fn handle_password_candidate(app: &AppHandle, tab_id: &str, parsed: &serde_json:
 }
 
 /// Запрос логинов origin вкладки для автозаполнения (этап 2 duopulse-108):
-/// ответ «passwords-found» тем же документом — usernames без паролей;
-/// пусто/инкогнито — без ответа (заполнять нечем, content молчит).
+/// ответ «passwords-found» тем же документом — usernames без паролей.
+/// Отвечаем ВСЕГДА, пустой список — тоже ответ (duopulse-194): content по
+/// отсутствию ответа переспрашивает — ранний lookup, ушедший раньше, чем
+/// Core узнал URL вкладки, больше не оставляет страницу без автозаполнения.
+/// Инкогнито — без ответа (модуль content там пассивен и не спросит).
 #[cfg(windows)]
 fn handle_passwords_lookup(
     app: &AppHandle,
@@ -1181,9 +1184,6 @@ fn handle_passwords_lookup(
         .state::<std::sync::Arc<passwords::PasswordStore>>()
         .accounts_for(&origin)
         .unwrap_or_default();
-    if accounts.is_empty() {
-        return;
-    }
     post_to_page(
         sender,
         &serde_json::json!({

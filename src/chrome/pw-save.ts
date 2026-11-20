@@ -54,9 +54,15 @@ function renderBar(c: PasswordsCandidateView): void {
   const close = document.getElementById("pwSaveClose") as HTMLButtonElement | null;
   if (!text || !accept || !never || !close) return;
   const site = c.origin.replace(/^https?:\/\//, "");
-  text.textContent = c.updated
-    ? t("Обновить сохранённый пароль для «{user}» на {site}?", { user: c.username, site })
-    : t("Сохранить пароль для «{user}» на {site}?", { user: c.username, site });
+  // логин бывает пуст (запись «только пароль» — роутеры, duopulse-194):
+  // текст бара без «для «»»
+  text.textContent = c.username
+    ? c.updated
+      ? t("Обновить сохранённый пароль для «{user}» на {site}?", { user: c.username, site })
+      : t("Сохранить пароль для «{user}» на {site}?", { user: c.username, site })
+    : c.updated
+      ? t("Обновить сохранённый пароль на {site}?", { site })
+      : t("Сохранить пароль на {site}?", { site });
   accept.textContent = c.updated ? t("Обновить") : t("Сохранить");
   const decide = (action: "save" | "never" | "dismiss"): void => {
     void bridge.passwords.resolveCandidate({ action }).then(closePanel, err);

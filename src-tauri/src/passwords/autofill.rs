@@ -14,12 +14,20 @@ use super::PasswordStore;
 /// десктопа): usernames без паролей — пароль отдаётся только credential
 /// ниже, по факту выбора в листе. Инкогнито и битый URL — пусто: иконки-ключа
 /// нет, выбирать нечего; ошибка хранилища тоже пусто (страница не страдает).
+/// Записи «только пароль» (пустой логин, duopulse-194) в лист не попадают:
+/// нативный лист выбора без имени не отличим, мобильное заполнение пустого
+/// логина — вопрос паритета на будущее.
 pub fn accounts_for_url(store: &PasswordStore, incognito: bool, url: &str) -> Vec<String> {
     if incognito {
         return Vec::new();
     }
     match super::origin_of(url) {
-        Ok(origin) => store.accounts_for(&origin).unwrap_or_default(),
+        Ok(origin) => store
+            .accounts_for(&origin)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|u| !u.is_empty())
+            .collect(),
         Err(_) => Vec::new(),
     }
 }
@@ -62,6 +70,20 @@ mod tests {
         acc.sort();
         assert_eq!(acc, vec!["alya", "artem"]);
         assert!(accounts_for_url(&s, false, "https://none.io/").is_empty());
+    }
+
+    #[test]
+    fn password_only_entries_hidden_from_mobile_sheet() {
+        let s = store();
+        s.add("http://192.168.31.1/", None, "", "router").unwrap();
+        s.add("http://192.168.31.1/", None, "admin", "a").unwrap();
+        // запись «только пароль» (пустой логин) в нативный лист не попадает
+        // (duopulse-194): мобильное заполнение пустого логина — паритет на
+        // будущее; десктоп работает с ней напрямую через PasswordStore
+        assert_eq!(
+            accounts_for_url(&s, false, "http://192.168.31.1/"),
+            vec!["admin"]
+        );
     }
 
     #[test]

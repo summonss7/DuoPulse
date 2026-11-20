@@ -71,8 +71,9 @@ impl Default for PasswordPrompts {
 
 impl PasswordPrompts {
     /// Принять кандидата от content-слоя. None — бар не показываем:
-    /// пустой логин/пароль, сайт в denylist либо пароль совпадает с
-    /// сохранённым. Some — кандидат запомнен, UI получает вид для бара.
+    /// пустой пароль, сайт в denylist либо пароль совпадает с сохранённым
+    /// (логин может быть пуст — записи «только пароль», duopulse-194).
+    /// Some — кандидат запомнен, UI получает вид для бара.
     /// Инкогнито и неактивная вкладка — на совести вызывающего (main.rs).
     pub fn offer(
         &self,
@@ -84,7 +85,9 @@ impl PasswordPrompts {
         password: &str,
     ) -> Result<Option<PasswordsCandidateView>, String> {
         let username = username.trim();
-        if username.is_empty() || password.is_empty() {
+        // логин бывает пуст (форма «только пароль» — роутеры, duopulse-194);
+        // пустой ПАРОЛЬ бара не заслуживает
+        if password.is_empty() {
             return Ok(None);
         }
         let origin = super::origin_of(tab_url)?;
@@ -252,15 +255,15 @@ mod tests {
             )
             .unwrap()
             .is_none());
-        // пустые поля — бара нет
+        // пустой пароль — бара нет; пустой ЛОГИН законен (роутеры, duopulse-194)
         assert!(p
-            .offer(&s, "t", "https://example.com/", "", "", "x")
+            .offer(&s, "t", "https://example.com/", "", "u", "")
             .unwrap()
             .is_none());
         assert!(p
-            .offer(&s, "t", "https://example.com/", "u", "", "")
+            .offer(&s, "t", "https://other.org/", "", "", "router-pass")
             .unwrap()
-            .is_none());
+            .is_some());
         // не-адрес вкладки — честная ошибка (журнал main.rs)
         assert!(p.offer(&s, "t", "не адрес", "", "u", "p").is_err());
     }

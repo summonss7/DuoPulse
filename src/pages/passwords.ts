@@ -175,7 +175,8 @@ function passwordRow(p: PasswordEntry): HTMLDivElement {
   const user = document.createElement("span");
   user.className = "pw-user";
   user.title = t("Логин");
-  user.textContent = p.username;
+  // запись «только пароль» (роутеры) — честная пометка вместо пустоты
+  user.textContent = p.username || t("(без логина)");
   const pass = document.createElement("span");
   pass.className = "pw-pass";
   if (revealed.has(p.id)) {
@@ -264,8 +265,9 @@ async function submitForm(): Promise<void> {
   const username = formUser.value.trim();
   const password = formPass.value;
   const title = formTitle.value.trim();
-  if (!url || !username || !password) {
-    fail(t("Заполните адрес сайта, логин и пароль"));
+  // логин необязателен (duopulse-194): записи «только пароль» — роутеры
+  if (!url || !password) {
+    fail(t("Заполните адрес сайта и пароль"));
     return;
   }
   try {
