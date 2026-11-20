@@ -42,9 +42,11 @@ export interface TranslationLangInfo {
   name: string;
 }
 
-/** Полный список дорожек видео (docs/03 §3.1: включая переводы и asr). */
+/** Полный список дорожек видео (docs/03 §3.1: включая переводы и asr).
+ * adapter "embed" — дорожки плеер-фрейма кино-сайта (duopulse-199): тот же
+ * каркас потребления (дефолт-набор, панель), но загрузка — через фрейм. */
 export interface AdapterTrackList {
-  adapter: "youtube";
+  adapter: "youtube" | "embed";
   version: string;
   /** Сработавший путь добычи (docs/03 §9: player-api | initial | texttrack). */
   usedPath: string;

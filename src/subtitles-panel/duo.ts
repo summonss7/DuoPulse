@@ -75,6 +75,7 @@ const panel = document.getElementById("duoPanel") as HTMLDivElement;
 // в ru t() возвращает исходник.
 const SOURCE_LABEL: Record<string, string> = {
   youtube: t("платформа"),
+  embed: t("плеер"),
   file: t("файл"),
   translate: t("перевод"),
   test: t("тест"),

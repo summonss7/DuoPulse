@@ -1,7 +1,7 @@
 // Ключ видео (docs/03 §6): YouTube id из всех форматов ссылок, прочие сайты —
 // URL (+ длительность, когда известна). Чистая функция — без DOM.
 import { describe, expect, it } from "vitest";
-import { videoKeyFor } from "./videoKey";
+import { isRefinedVideoKey, videoKeyFor } from "./videoKey";
 
 describe("videoKeyFor — YouTube", () => {
   it("watch?v=…", () => {
@@ -45,5 +45,16 @@ describe("videoKeyFor — прочие сайты (URL + duration)", () => {
 
   it("битая строка-URL не бросает исключения", () => {
     expect(videoKeyFor("not a url ://")).toMatch(/^url:/);
+  });
+});
+
+
+describe("isRefinedVideoKey (уточнение длительности — то же видео)", () => {
+  it("короткий → «:сек» = уточнение; прочее — другое видео", () => {
+    const short = "url:https://api.embf.net/embed/movie/90039";
+    expect(isRefinedVideoKey(short, `${short}:8701`)).toBe(true);
+    expect(isRefinedVideoKey(short, short)).toBe(false);
+    expect(isRefinedVideoKey(short, "url:https://api.embf.net/embed/movie/90040")).toBe(false);
+    expect(isRefinedVideoKey(`${short}:100`, `${short}:8701`)).toBe(false);
   });
 });

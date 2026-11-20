@@ -9,10 +9,11 @@ export interface Cue {
   text: string;
 }
 
-/** Источник дорожки (docs/03 §3): платформенные адаптеры, ручной файл,
- * перевод (M4), распознавание речи (карточка duopulse-060); «test» —
- * тест-хук e2e-стенда (задача 3.2). */
-export type TrackSource = "youtube" | "file" | "translate" | "asr" | "test";
+/** Источник дорожки (docs/03 §3): платформенные адаптеры (YouTube; «embed» —
+ * плеер-фреймы кино-сайтов, duopulse-199), ручной файл, перевод (M4),
+ * распознавание речи (карточка duopulse-060); «test» — тест-хук e2e-стенда
+ * (задача 3.2). */
+export type TrackSource = "youtube" | "embed" | "file" | "translate" | "asr" | "test";
 
 export interface Track {
   id: string; // "yt:en:orig", "file:ru", …

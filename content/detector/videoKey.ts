@@ -26,3 +26,12 @@ export function videoKeyFor(href: string, durationSec?: number): string {
       : "";
   return `url:${url.origin}${url.pathname}${url.search}${duration}`;
 }
+
+/** Уточнение длительности меняет ключ того же видео (короткий → «:сек»):
+ * детект до loadedmetadata приходит без длительности, уточнённый — следом
+ * (duopulse-180; у плеер-фреймов duopulse-199 это окно всегда открыто —
+ * дорожки выбирают сразу). Такая пара — то же видео, набор не терять. */
+export function isRefinedVideoKey(prev: string, next: string): boolean {
+  if (prev === next || !next.startsWith(`${prev}:`)) return false;
+  return /^\d+$/.test(next.slice(prev.length + 1));
+}

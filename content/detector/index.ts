@@ -9,6 +9,8 @@
 
 import { videoKeyFor } from "./videoKey";
 
+export { isRefinedVideoKey } from "./videoKey";
+
 export interface DetectedVideo {
   el: HTMLVideoElement;
   videoKey: string;

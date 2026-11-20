@@ -60,7 +60,7 @@
 // при помненном согласии (lastDuoEnabled, как на YouTube), замена файла
 // снимает файловый cloud-перевод, снятие строки — отказ за это видео.
 
-import { VideoDetector, type DetectedVideo } from "./detector";
+import { VideoDetector, isRefinedVideoKey, type DetectedVideo } from "./detector";
 import { SubtitlesEngine, type ActiveRow } from "./engine/subtitles-engine";
 import { SubtitlesOverlay } from "./overlay/overlay";
 import type { SubtitleStyle } from "./overlay/style";
@@ -87,12 +87,24 @@ import {
 } from "./adapters/file";
 import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from "./adapters/cloud";
 import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
+import {
+  EmbedHost,
+  isFrameContext,
+  startFrameAgent,
+  type EmbedTrackInfo,
+  type FrameVideoProxy,
+} from "./adapters/embed";
 import { installSelectionTranslate } from "./translate-select";
 import { installPasswordFill } from "./passwords-fill";
 import { installSubsDownload } from "./download-subs";
 import { interfaceTranslationLang, lastDuoEnabled, preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
 import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
+
+/** Видео страницы: DOM-детектор даёт элемент документа, EmbedHost плеер-фрейма
+ * (duopulse-199) — ещё и прокси-часы (frameProxy) вместо video-элемента
+ * (сам элемент недоступен из-за origin-границы фрейма). */
+type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
 
 (function (): void {
   "use strict";
@@ -111,6 +123,15 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     (location.hostname === "localhost" && location.port === "5173")
   )
     return;
+  // Плеер-фреймы кино-сайтов (duopulse-199, техзад из duopulse-198):
+  // контентный WebMessage-канал во фреймы не достаёт (ответы PostWebMessage —
+  // только top-level), поэтому в кадре фрейма работает агент-ретранслятор
+  // (видео/дорожки/часы/загрузка .vtt/drag&drop → window.parent), а
+  // полноценный бандл не стартует. Приёмная сторона — EmbedHost ниже.
+  if (isFrameContext()) {
+    startFrameAgent();
+    return;
+  }
   // Перевод выделенного текста (карточка duopulse-098): слушатели contextmenu
   // и WebMessage begin/result; пункт контекстного меню — нативный (Core).
   const selectionTranslate = installSelectionTranslate({ post: postToCore });
@@ -118,7 +139,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   // по сабмиту и автозаполнение по клику; инкогнито — модуль пассивен.
   const passwordFill = installPasswordFill({ post: postToCore });
 
-  let currentVideo: DetectedVideo | null = null;
+  let currentVideo: ContentVideo | null = null;
   // Перехват тел timedtext: только на YouTube (initialization script до
   // скриптов страницы; кросс-доменная навигация = новый документ = новый бандл).
   const capture = isYouTubeHref(location.href) ? installTimedtextCapture(pageWindow) : undefined;
@@ -237,10 +258,12 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
   const hasSetTracks = (): boolean =>
     platformTracks.length > 0 || asrTracks.length > 0 || translateTracks.length > 0 || fileTracks.length > 0;
 
-  /** Единая точка смены набора: движок + гашение нативного показа. */
+  /** Единая точка смены набора: движок + гашение нативного показа. Видео
+   * из фрейма (duopulse-199) гасить нечем — его textTracks за origin-границей,
+   * native-показ плеера управляется только самим плеером. */
   const applyTracks = (tracks: Track[]): void => {
     engine.setTracks(tracks);
-    if (tracks.length > 0) blanker.blank(currentVideo?.el ?? null);
+    if (tracks.length > 0) blanker.blank(currentVideo?.frameProxy ? null : (currentVideo?.el ?? null));
     else blanker.restore();
   };
 
@@ -517,11 +540,67 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
    * показывается сразу — перевод с 429-ретраями (tlang-квота) не держит
    * показ уже загруженного оригинала; финальный состав — по концу загрузки. */
   let selectSeq = 0;
+
+  /** Загрузка выбранных дорожек плеер-фрейма (duopulse-199): .vtt грузит
+   * агент фрейма (CDN подписывает ссылки под origin плеера — топу CORS
+   * запрещён), разбор тел — канонический парсер Core тем же путём, что у
+   * YouTube; прогрессивное применение — каждая готовая дорожка сразу в
+   * показ, финальный состав — в порядке выбора. */
+  const selectEmbedTracks = async (
+    ids: string[],
+    via: string,
+  ): Promise<{ loaded: number; failures: { id: string; reason: string }[]; unknown: string[] }> => {
+    const known = new Map(embedTracks.map((t) => [t.id, t]));
+    const unknown = ids.filter((id) => !known.has(id));
+    const failures = unknown.map((id) => ({ id, reason: "неизвестный id дорожки" }));
+    const wanted = ids.map((id) => known.get(id)).filter((t): t is EmbedTrackInfo => t !== undefined);
+    if (wanted.length === 0) return { loaded: 0, failures, unknown };
+    const keyAtStart = currentVideo?.videoKey ?? null;
+    // Уточнение длительности (isRefinedVideoKey) — то же видео: загрузка,
+    // начатая по короткому ключу, применяется и к уточнённому.
+    const sameVideo = (): boolean => {
+      const k = currentVideo?.videoKey ?? null;
+      return k === keyAtStart || (k !== null && keyAtStart !== null && isRefinedVideoKey(keyAtStart, k));
+    };
+    const loadSeq = ++selectSeq; // параллельный selectTracks гасит прогресс прошлого
+    const out: Track[] = [];
+    for (const info of wanted) {
+      try {
+        const cues = await embedHost.loadTrack(info.url, (payload) => parser.parse(payload));
+        if (!sameVideo() || loadSeq !== selectSeq) {
+          return { loaded: 0, failures, unknown };
+        }
+        const track: Track = {
+          id: info.id,
+          source: "embed",
+          lang: info.lang,
+          role: info.original ? "original" : "translation",
+          cues,
+          name: info.name,
+        };
+        out.push(track);
+        platformTracks = [...platformTracks.filter((t) => t.id !== track.id), track];
+        applySet(via);
+      } catch (err) {
+        failures.push({ id: info.id, reason: (err as Error)?.message ?? String(err) });
+      }
+    }
+    if (!sameVideo() || loadSeq !== selectSeq) {
+      return { loaded: 0, failures, unknown };
+    }
+    platformTracks = out;
+    applySet(via);
+    return { loaded: out.length, failures, unknown };
+  };
+
   const selectTracks = async (
     ids: string[],
     via = "select",
   ): Promise<{ loaded: number; failures: { id: string; reason: string }[]; unknown: string[] }> => {
     const unique = [...new Set(ids)];
+    // Дорожки плеер-фрейма (duopulse-199): свой загрузчик; смешанных наборов
+    // с yt не бывает (один источник на видео), файловая часть — как обычно.
+    if (unique.some((id) => id.startsWith("embed:"))) return selectEmbedTracks(unique, via);
     if (sameMembers(platformTracks.map((t) => t.id), unique)) {
       const byId = new Map(platformTracks.map((t) => [t.id, t]));
       platformTracks = unique
@@ -552,73 +631,203 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
     return { loaded: loaded.tracks.length, failures, unknown: resolved.unknown };
   };
 
+  /** Дорожки плеер-фрейма текущего видео (пусто — видео не из фрейма или
+   * плеер дорожек не отдал). Обновляется EmbedHost до onVideoDetected. */
+  let embedTracks: EmbedTrackInfo[] = [];
+  /** Сигнатура последнего анонса embed-дорожек в Core (дедуп повторных
+   * onVideo одного ключа: уточнение длительности/пере-анонс агента). */
+  let embedAnnounced = "";
+
+  /** Список embed-дорожек в каркасе AdapterTrackList — потребление то же,
+   * что у YouTube (дефолт-набор Alt+D, панель), но переводы tlang пусты:
+   * вторая строка дуо — облачный перевод или соседняя дорожка плеера. */
+  const embedAdapterList = (): AdapterTrackList | null =>
+    embedTracks.length === 0
+      ? null
+      : ({
+          adapter: "embed",
+          version: "embed-1",
+          usedPath: "embed-frame",
+          base: embedTracks.map((t) => ({
+            id: t.id,
+            lang: t.lang,
+            kind: "manual" as const,
+            name: t.name,
+            vssId: "",
+            translatable: true,
+            original: t.original,
+          })),
+          translations: [],
+          warnings: [],
+        });
+
+  /** Полный список дорожек — в Core (тот же контракт, что у YouTube-ветки). */
+  const postTracksToCore = (videoKey: string, list: AdapterTrackList): void => {
+    postToCore({
+      duopulse: "tracks",
+      videoKey,
+      path: list.usedPath,
+      base: list.base.map((b) => ({
+        id: b.id,
+        lang: b.lang,
+        kind: b.kind,
+        name: b.name,
+        original: b.original,
+        translatable: b.translatable,
+      })),
+      translations: [],
+    });
+  };
+
   let lastAppliedVideoKey: string | null = null;
-  const detector = new VideoDetector({
-    onVideo(video: DetectedVideo): void {
-      // Детектор уточняет ключ того же объекта (loadedmetadata/SPA) и
-      // переэмитит его — сравнение currentVideo.videoKey с video.videoKey
-      // здесь всегда «равно» (одна ссылка), поэтому помним ключ последней
-      // обработки сами: смена ключа = смена видео (docs/03 §6).
-      const changed =
-        currentVideo?.el !== video.el || lastAppliedVideoKey !== video.videoKey;
-      lastAppliedVideoKey = video.videoKey;
-      currentVideo = video;
-      if (changed) {
-        // Набор привязан к videoKey (docs/03 §6). Новый <video> с тем же
-        // ключом (смена качества у плееров, пересоздающих элемент; ключ
-        // уточняется по loadedmetadata) — применяем запомненный набор без
-        // перезагрузки (3.5); чужой ключ — чистим показ, набор-память живёт
-        // для возврата к тому же видео. Детект до loadedmetadata приходит с
-        // ключом без длительности — память по уточнённому ключу не стёрта,
-        // уточнённый детект следом её поднимет.
-        // ?? null обязателен: Map.get от отсутствующего ключа — undefined, и
-        // проверка mem === null ниже (ветка video-auto duopulse-128) оставалась
-        // мёртвой — новые видео не включались сами (duopulse-180).
-        const mem = setMemory.get(video.videoKey) ?? null;
-        platformTracks = mem ? mem.platform : [];
-        asrTracks = mem ? mem.asr : [];
-        translateTracks = mem ? mem.translate : [];
-        fileTracks = mem ? mem.files : [];
-        fileSourcedCloudIds = new Set(mem ? mem.fileCloudIds : []);
-        // Список дорожек принадлежит прошлому видео — сброс до свежего
-        // (придёт с onYouTubeVideo; дефолт-набор Alt+D не соберётся по чужому).
-        trackList = null;
-        pendingEnable = null; // ждущее включение — тоже прошлого видео
-        // Запомненное видео восстанавливает и набор, и состояние показа
-        // («последний набор», docs/03 §8 п.2). Новое видео без набора —
-        // показ честно выключен (duopulse-066): флаг не поднимаем «впустую»
-        // (иначе кнопка duo выглядит включённой без оверлея, а первый Alt+D
-        // приходилось тратить на «выключение»); Alt+D соберёт дефолт
-        // «оригинал + ru» с первого нажатия. Переходный детект (ключ ещё
-        // без длительности) в память промахивается — уточнённый детект
-        // следом восстановит показ запомненного видео.
-        enabled = mem ? mem.enabled : false;
-        if (mem === null && lastDuoEnabled() === true && adapter.matches(video.url)) {
-          // duopulse-128: пользователь в последний раз держал duo включённым —
-          // новое видео (в т.ч. в новом окне) стартует включённым: дефолт-набор
-          // соберём по приходу списка дорожек (ждущее включение, паттерн
-          // duopulse-079). lastEnabled=false/null — прежнее поведение выше.
-          enabled = true;
-          pendingEnable = "video-auto";
-        }
-        applyTracks(enabled ? lastSetTracks() : []);
-        engine.attach(video.el);
-        reportSetState("video");
-        if (adapter.matches(video.url)) onYouTubeVideo(video);
-        else {
-          trackList = null;
-          reportDetected(video, false);
+  /** Единая точка «видео найдено/сменено» (DOM-детектор и EmbedHost
+   * плеер-фрейма, duopulse-199): восстановление набора по памяти, привязка
+   * часов движка (элемент или прокси фрейма), список дорожек в Core. */
+  const onVideoDetected = (video: ContentVideo): void => {
+    // Детектор уточняет ключ того же объекта (loadedmetadata/SPA) и
+    // переэмитит его — сравнение currentVideo.videoKey с video.videoKey
+    // здесь всегда «равно» (одна ссылка), поэтому помним ключ последней
+    // обработки сами: смена ключа = смена видео (docs/03 §6).
+    const prevKey = currentVideo?.videoKey ?? null;
+    const changed = currentVideo?.el !== video.el || lastAppliedVideoKey !== video.videoKey;
+    lastAppliedVideoKey = video.videoKey;
+    currentVideo = video;
+    if (changed) {
+      // duopulse-199: уточнение длительности меняет ключ того же видео
+      // («…movie/90039» → «…movie/90039:8701»). У плеер-фреймов дорожки
+      // выбирают сразу — набор, применённый по короткому ключу, переносим
+      // на уточнённый, иначе смена ключа раздевала показ (гонка duopulse-180
+      // с всегда открытым окном).
+      if (prevKey !== null && isRefinedVideoKey(prevKey, video.videoKey)) {
+        const m = setMemory.get(prevKey);
+        if (m) {
+          setMemory.delete(prevKey);
+          setMemory.set(video.videoKey, m);
         }
       }
+      // Набор привязан к videoKey (docs/03 §6). Новый <video> с тем же
+      // ключом (смена качества у плееров, пересоздающих элемент; ключ
+      // уточняется по loadedmetadata) — применяем запомненный набор без
+      // перезагрузки (3.5); чужой ключ — чистим показ, набор-память живёт
+      // для возврата к тому же видео. Детект до loadedmetadata приходит с
+      // ключом без длительности — память по уточнённому ключу не стёрта,
+      // уточнённый детект следом её поднимет.
+      // ?? null обязателен: Map.get от отсутствующего ключа — undefined, и
+      // проверка mem === null ниже (ветка video-auto duopulse-128) оставалась
+      // мёртвой — новые видео не включались сами (duopulse-180).
+      const mem = setMemory.get(video.videoKey) ?? null;
+      platformTracks = mem ? mem.platform : [];
+      asrTracks = mem ? mem.asr : [];
+      translateTracks = mem ? mem.translate : [];
+      fileTracks = mem ? mem.files : [];
+      fileSourcedCloudIds = new Set(mem ? mem.fileCloudIds : []);
+      // Список дорожек принадлежит прошлому видео — сброс до свежего
+      // (придёт с onYouTubeVideo/embed-анонсом; дефолт-набор Alt+D не
+      // соберётся по чужому).
+      trackList = null;
+      pendingEnable = null; // ждущее включение — тоже прошлого видео
+      // Запомненное видео восстанавливает и набор, и состояние показа
+      // («последний набор», docs/03 §8 п.2). Новое видео без набора —
+      // показ честно выключен (duopulse-066): флаг не поднимаем «впустую»
+      // (иначе кнопка duo выглядит включённой без оверлея, а первый Alt+D
+      // приходилось тратить на «выключение»); Alt+D соберёт дефолт
+      // «оригинал + ru» с первого нажатия. Переходный детект (ключ ещё
+      // без длительности) в память промахивается — уточнённый детект
+      // следом восстановит показ запомненного видео.
+      enabled = mem ? mem.enabled : false;
+      if (
+        mem === null &&
+        lastDuoEnabled() === true &&
+        (adapter.matches(video.url) || (video.frameProxy !== undefined && embedTracks.length > 0))
+      ) {
+        // duopulse-128: пользователь в последний раз держал duo включённым —
+        // новое видео (в т.ч. в новом окне) стартует включённым: дефолт-набор
+        // соберём по приходу списка дорожек (ждущее включение, паттерн
+        // duopulse-079). lastEnabled=false/null — прежнее поведение выше.
+        // Кино-фреймы (duopulse-199) — тот же паттерн: дорожки плеера
+        // приходят вместе с видео, ждущее включение гасится ниже сразу.
+        enabled = true;
+        pendingEnable = "video-auto";
+      }
+      applyTracks(enabled ? lastSetTracks() : []);
+      engine.attach(video.frameProxy ?? video.el);
+      reportSetState("video");
+    }
+    if (video.frameProxy) {
+      // Плеер-фрейм (duopulse-199): дорожки пришли вместе с видео — список
+      // в Core тем же контрактом; повторные анонсы того же ключа (уточнение
+      // длительности/поздние <track>) дедуплицируются сигнатурой.
+      trackList = embedAdapterList();
+      const sig = `${video.videoKey}#${embedTracks.length}`;
+      if (sig !== embedAnnounced) {
+        embedAnnounced = sig;
+        reportDetected(video, (trackList?.base.length ?? 0) > 0);
+        if (trackList) postTracksToCore(video.videoKey, trackList);
+      }
+      // Ждущее включение (video-auto/Alt+D до списка — паттерн duopulse-079).
+      if (pendingEnable !== null && !hasSetTracks()) {
+        const via = pendingEnable;
+        pendingEnable = null;
+        enableSubs(via); // trackList уже на месте — повторного подвешивания нет
+      }
+    } else if (changed) {
+      if (adapter.matches(video.url)) onYouTubeVideo(video);
+      else {
+        trackList = null;
+        reportDetected(video, false);
+      }
+    }
+  };
+
+  /** Видео ушло (DOM-детектор или плеер-фрейм закрылся). */
+  const onVideoGone = (): void => {
+    currentVideo = null;
+    engine.detach(); // плашка гасится (rows = [])
+    blanker.restore(); // нативный показ платформы возвращается (docs/03 §2)
+    hud.hide();
+    reportSetState("lost"); // панель/кнопка «duo»: видео ушло (videoKey null)
+  };
+
+  const detector = new VideoDetector({
+    onVideo: onVideoDetected,
+    onVideoLost: onVideoGone,
+  });
+
+  // Плеер-фреймы кино-сайтов (duopulse-199): приём сообщений агентов —
+  // видео с дорожками (парсер конфига плеера во фрейме), часы, ответы на
+  // загрузку .vtt и ручные файлы, брошенные над областью плеера.
+  const embedHost = new EmbedHost({
+    onVideo(frame): void {
+      embedTracks = frame.tracks;
+      onVideoDetected({
+        el: frame.el,
+        videoKey: frame.videoKey,
+        url: frame.url,
+        frameProxy: frame.proxy,
+      });
     },
-    onVideoLost(): void {
-      currentVideo = null;
-      engine.detach(); // плашка гасится (rows = [])
-      blanker.restore(); // нативный показ платформы возвращается (docs/03 §2)
-      hud.hide();
-      reportSetState("lost"); // панель/кнопка «duo»: видео ушло (videoKey null)
+    onGone(videoKey): void {
+      embedTracks = [];
+      embedAnnounced = "";
+      if (currentVideo?.videoKey === videoKey) onVideoGone();
+    },
+    onFile(name, text): void {
+      // Дроп над фреймом: агент прочитал файл — дальше путь общего дропа
+      // (разбор Core-парсером, файловая часть набора, автоперевод 177).
+      void buildFileTracks([{ name, text: () => Promise.resolve(text) }], { parser }).then((result) => {
+        if (result.tracks.length === 0) return; // нераспознанный файл — мимо
+        replaceFileTracks(result.tracks, "drop");
+        postToCore({
+          duopulse: "file-tracks",
+          videoKey: currentVideo?.videoKey ?? "",
+          applied: result.tracks.length,
+          failures: result.failures.length,
+          via: "drop",
+        });
+      });
     },
   });
+  embedHost.start();
 
   // Тест-хуки e2e-стенда (задача 3.2): тест-страница/CDP задаёт дорожку и сдвиг
   // напрямую — сервис-обвязка Core subtitles.* появится в задачах 3.5–3.7.
@@ -879,6 +1088,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
       translateTracks: { id: string; lang: string; cues: number }[];
       fileTracks: { id: string; lang: string; cues: number; topStarts?: number[] }[];
       setMemory: { key: string; enabled: boolean; tracks: number }[];
+      embed: ReturnType<EmbedHost["state"]>;
       cloud: ReturnType<typeof cloudTranslateStatus>;
       asr: ReturnType<typeof asrStatus>;
       translateSelection: ReturnType<typeof selectionTranslate.state>;
@@ -902,6 +1112,7 @@ import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
           enabled: m.enabled,
           tracks: m.platform.length + m.asr.length + m.translate.length + m.files.length,
         })),
+        embed: embedHost.state(),
         cloud: cloudTranslateStatus(),
         asr: asrStatus(),
         translateSelection: selectionTranslate.state(),
