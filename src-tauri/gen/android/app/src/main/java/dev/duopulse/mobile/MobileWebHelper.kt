@@ -22,6 +22,8 @@ import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import android.webkit.HttpAuthHandler
 import android.webkit.URLUtil
@@ -37,6 +39,7 @@ import android.widget.PopupWindow
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import java.net.URLEncoder
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -105,12 +108,42 @@ import java.io.ByteArrayInputStream
  * редирект google.com/goto не проходит shouldOverride), YouTube сам отдаёт
  * m.youtube.com (проверено на эмуляторе: страница complete, рендерер жив).
  * Заодно: внешние схемы (market:, mailto:, tel:… — карточка приложения в
- * выдаче) прежде глотались молча — тап выглядел зависанием; теперь уходят
+ * выдаче) прежде глотались молча (тап выглядел зависанием) — теперь уходят
  * системному ACTION_VIEW. Копирование ссылки (жалоба «нет возможности
  * скопировать»): кроме меню «⋮» — долгое нажатие адресного чипа.
+ *
+ * duopulse-192 (доработка 191: «верхнее меню не такое, строка ввода адреса
+ * не кликабельна — со всеми сайтами из поиска; YouTube верни расширенную»):
+ *  - тап по адресному чипу = омнибокс: чип сменяется полем ввода с текущим
+ *    адресом, GO — URL-догадка (схема/домен/локальные — пара resolveMobileInput
+ *    platform.ts) или поиск Google; YouTube-видео из ввода, как и клик по
+ *    ссылке, забирает встроенный плеер;
+ *  - «расширенный» YouTube — тумблером «Десктопный YouTube» в меню «⋮»
+ *    (SharedPreferences duopulse_web, переживает рестарт): десктопный
+ *    Polymer грузится с ДЕСКТОП-UA (вис 191 был у пары «десктопный сайт +
+ *    мобильный UA»; с правильной парой главная грузится за секунды),
+ *    m.youtube.com переписывается на www, серверный редирект goto ловится
+ *    в onPageStarted UA-мисматчем → перезапрос. ДЕФОЛТ ВЫКЛ: стенд 192
+ *    показал, что после десктопных страниц WebView оверлея клинится до
+ *    конца сессии (главная ок, следующие навигации мертвы) — «виснет
+ *    браузер» жалобы; дефолт — поведение 191 (app=desktop срезается,
+ *    мобильный UA, m.youtube). Видео-страницы по-прежнему идут во
+ *    встроенный плеер с duo-субтитрами, режим сайта их не касается.
  */
 object MobileWebHelper {
   private const val TAG = "DuoPulseWeb"
+
+  /** Настройки оверлея (duopulse-192): SharedPreferences — тумблеры шапки
+   *  живут рядом с их UI, без JNI-моста в settings.json Core. */
+  private const val PREFS = "duopulse_web"
+
+  /** «Десктопный YouTube» (duopulse-192, просьба вернуть «расширенную»):
+   *  дефолт ВЫКЛ — даже с десктоп-UA десктопный YouTube клинит WebView
+   *  оверлея (стенд 192: главная грузится за 4 с, но ВСЕ следующие
+   *  навигации сессии умирают — тот самый «виснет браузер» жалобы);
+   *  «расширенная» включается тумблером «⋮» — на мощных устройствах
+   *  работает, состояние переживает рестарт). */
+  private const val PREF_YT_DESKTOP = "yt_desktop"
 
   /** Хвосты рекламных/трекинговых хостов для лёгкого адблока (суффикс-матч
    *  по host подресурсов; главные фреймы не режем — сайт должен открыться).
@@ -138,6 +171,19 @@ object MobileWebHelper {
   private var webView: WebView? = null
   private var urlText: TextView? = null
   private var duoBtn: Button? = null
+
+  /** Поле правки адреса (duopulse-192): чип по тапу сменяется им —
+   *  «строка ввода адреса» оверлея кликабельна, как омнибокс мобильной ветки. */
+  private var addrEdit: EditText? = null
+
+  /** Идёт правка адреса (duopulse-192): syncChrome не затирает ввод
+   *  пользователя URL'ами загрузок. */
+  private var addrEditing = false
+
+  /** Дефолтный (мобильный) UA WebView, захвачен при build (duopulse-192):
+   *  база для восстановления после десктопного YouTube и для номера Chrome
+   *  в собираемом десктоп-UA. */
+  private var defaultUa: String? = null
 
   /** Полоса прогресса загрузки под шапкой (duopulse-145). */
   private var progress: ProgressBar? = null
@@ -210,13 +256,81 @@ object MobileWebHelper {
     return youTubeVideoId(u)
   }
 
-  /** Выбросить десктоп-форс YouTube (duopulse-191): ссылки выдачи Google несут
-   *  app=desktop — десктопный Polymer вешает WebView телефона скелетоном.
-   *  UA оверлея мобильный: без параметра YouTube сам отдаст m.youtube.com.
-   *  Страницы видео не трогаем (их забирает встроенный плеер). null —
-   *  переписывать нечего (без параметра/не YouTube/битый адрес). */
-  private fun forceMobileYouTube(url: String): String? {
-    if (!url.contains("app=desktop")) return null
+  /** Хост — главный сайт YouTube (без www, любые поддомены). */
+  private fun youTubeHost(url: String): Boolean {
+    val host = try {
+      Uri.parse(url).host?.lowercase()?.removePrefix("www.")
+    } catch (e: Exception) {
+      null
+    } ?: return false
+    return host == "youtube.com" || host.endsWith(".youtube.com")
+  }
+
+  /** Тумблер «Десктопный YouTube» (duopulse-192): SharedPreferences; дефолт
+   *  ВЫКЛ — мобильная версия 191 (десктопный сайт клинит WebView оверлея,
+   *  см. комментарий у PREF_YT_DESKTOP). */
+  private fun ytDesktop(ctx: Context): Boolean =
+    try {
+      ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getBoolean(PREF_YT_DESKTOP, false)
+    } catch (e: Exception) {
+      false
+    }
+
+  private fun setYtDesktop(ctx: Context, on: Boolean) {
+    try {
+      ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        .putBoolean(PREF_YT_DESKTOP, on).apply()
+    } catch (e: Exception) {
+      Log.d(TAG, "yt-desktop-pref: ${e.message}")
+    }
+  }
+
+  /** Десктопный UA из дефлотного (duopulse-192): номер Chrome берём свой —
+   *  возможности движка WebView соответствуют заявленной версии. */
+  private fun desktopUa(base: String): String {
+    val ver = Regex("Chrome/(\\d+)").find(base)?.groupValues?.get(1) ?: "130"
+    return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/$ver.0.0.0 Safari/537.36"
+  }
+
+  /** Целевой UA для адреса (duopulse-192): YouTube в «расширенном» режиме —
+   *  десктопный (вис 191 был у пары «десктопный Polymer + мобильный UA»),
+   *  всё прочее — дефолтный мобильный. */
+  private fun uaFor(url: String, base: String): String =
+    if (youTubeHost(url) && ytDesktopSafe()) desktopUa(base) else base
+
+  private fun ytDesktopSafe(): Boolean =
+    MainActivity.current?.let { ytDesktop(it) } ?: true
+
+  /** Выставить UA под адрес ДО запроса (duopulse-192): open/клики/ввод
+   *  проходят наши хуки; серверные редиректы (google.com/goto) догоняет
+   *  onPageStarted. Смена UA не перезагружает текущую страницу. */
+  private fun applyUaFor(url: String) {
+    val wv = webView ?: return
+    val base = defaultUa ?: return
+    val target = uaFor(url, base)
+    if (wv.settings.userAgentString != target) {
+      wv.settings.userAgentString = target
+      Log.d(TAG, "ua-switch: ${target.take(60)}… ← ${url.take(80)}")
+    }
+  }
+
+  /** UA WebView не соответствует целевому для адреса (duopulse-192): адрес
+   *  стартовал без нашего хука (серверный редирект) — сигналя перезапуску. */
+  private fun uaMismatched(url: String): Boolean {
+    val wv = webView ?: return false
+    val base = defaultUa ?: return false
+    return wv.settings.userAgentString != uaFor(url, base)
+  }
+
+  /** Адрес главного фрейма YouTube под режимом (duopulse-191/192):
+   *  мобильный режим (тумблер выкл) — выбросить app=desktop: десктопный
+   *  Polymer на мобильном UA вешает WebView скелетоном (191); «расширенный»
+   *  (вкл, дефолт) — наоборот, m.youtube.com переписать на www (тот же сайт
+   *  загрузится десктопной версией с десктоп-UA, см. applyUaFor). Страницы
+   *  видео не трогаем (их забирает встроенный плеер). null — не трогать. */
+  private fun youTubeModeUrl(url: String): String? {
     val u = try {
       Uri.parse(url)
     } catch (e: Exception) {
@@ -225,6 +339,13 @@ object MobileWebHelper {
     val host = u.host?.lowercase()?.removePrefix("www.") ?: return null
     if (host != "youtube.com" && !host.endsWith(".youtube.com")) return null
     if (youTubeVideoId(u) != null) return null
+    if (ytDesktopSafe()) {
+      if (host != "m.youtube.com") return null
+      // m → www: расширенный режим грузит десктопный сайт (music и прочие
+      // поддомены не трогаем — у них свои версии)
+      return u.buildUpon().authority("www.youtube.com").build().toString()
+    }
+    if (!url.contains("app=desktop")) return null
     // пересборка без app=…: очищенный URL параметра не несёт — цикла нет
     val b = u.buildUpon().clearQuery()
     for (name in u.queryParameterNames) {
@@ -234,9 +355,88 @@ object MobileWebHelper {
     return b.build().toString()
   }
 
-  /** Показ адреса и кнопки «▶ duo» — на каждой смене URL. */
+  /** «Голый домен» без схемы (TLD с буквы) — пара BARE_DOMAIN platform.ts
+   *  (отсекает «2.5»/«1.2.3.4.5» — это поиск; IP ловится отдельно). */
+  private val BARE_DOMAIN =
+    Regex("^[a-z0-9-]+(\\.[a-z0-9-]+)*\\.[a-z][a-z0-9-]*([/?#:].*)?$", RegexOption.IGNORE_CASE)
+
+  /** IPv4-литерал ввода (порт/путь после хоста допустимы) — isIpv4Input. */
+  private fun isIpv4Input(q: String): Boolean {
+    val host = (q.split(Regex("[/?#]")).firstOrNull() ?: "")
+      .replace(Regex(":\\d+$"), "")
+    val parts = host.split(".")
+    return parts.size == 4 &&
+      parts.all { it.matches(Regex("\\d{1,3}")) && it.toInt() <= 255 }
+  }
+
+  /** IPv6-литерал в скобках (порт/путь допустимы) — IPV6_LITERAL. */
+  private val IPV6_LITERAL =
+    Regex("^\\[[0-9a-f:.]+\\](:\\d+)?([/?#].*)?$", RegexOption.IGNORE_CASE)
+
+  /** Ввод «URL (догадка схемы) или поиск» — мобильная пара resolveMobileInput
+   *  (platform.ts): http(s) — как есть; домен/localhost/IP — с догадкой схемы
+   *  (локальные — http, роутеры почти всегда без TLS, duopulse-154); прочее —
+   *  поиск Google (дефолт мобильной ветки, duopulse-085). */
+  private fun resolveInput(q: String): String {
+    if (q.startsWith("http://", true) || q.startsWith("https://", true)) return q
+    val local = q.startsWith("localhost", true) &&
+      (q.length == 9 || "/:?#".contains(q[9])) ||
+      isIpv4Input(q) || IPV6_LITERAL.containsMatchIn(q)
+    if (BARE_DOMAIN.containsMatchIn(q) || local) {
+      return (if (local) "http://" else "https://") + q
+    }
+    return "https://www.google.com/search?q=" +
+      URLEncoder.encode(q, "UTF-8")
+  }
+
+  /** Тап по адресному чипу (duopulse-192): чип → поле ввода с текущим
+   *  адресом (выделен — заменяется вводом), клавиатура открыта. */
+  private fun beginAddrEdit() {
+    val edit = addrEdit ?: return
+    if (addrEditing) return
+    addrEditing = true
+    val cur = if (pageUrl.startsWith("http")) pageUrl else (webView?.url ?: "")
+    edit.setText(cur)
+    edit.selectAll()
+    urlText?.visibility = View.GONE
+    edit.visibility = View.VISIBLE
+    edit.requestFocus()
+    val imm = edit.context
+      .getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+    imm.showSoftInput(edit, 0)
+  }
+
+  /** Вернуть чип (без перехода): отмена правки, уход фокуса, после GO. */
+  private fun endAddrEdit() {
+    addrEditing = false
+    addrEdit?.let {
+      it.visibility = View.GONE
+      val imm = it.context
+        .getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+      imm.hideSoftInputFromWindow(it.windowToken, 0)
+    }
+    urlText?.visibility = View.VISIBLE
+  }
+
+  /** GO поля адреса (duopulse-192): разбор ввода, YouTube-видео — как клик
+   *  по ссылке во встроенный плеер, прочее — загрузка в оверлее. */
+  private fun commitAddrEdit(raw: String) {
+    endAddrEdit()
+    val q = raw.trim()
+    if (q.isEmpty()) return
+    val target = resolveInput(q)
+    applyUaFor(target)
+    youTubeVideoId(target)?.let { id ->
+      openVideoInPlayer(id)
+      return
+    }
+    webView?.loadUrl(target)
+  }
+
+  /** Показ адреса и кнопки «▶ duo» — на каждой смене URL. Во время правки
+   *  адреса (duopulse-192) ввод пользователя не затираем — только кнопку. */
   private fun syncChrome(url: String?) {
-    urlText?.text = url ?: ""
+    if (!addrEditing) urlText?.text = url ?: ""
     val hasVideo = url != null && youTubeVideoId(url) != null
     duoBtn?.visibility = if (hasVideo) View.VISIBLE else View.GONE
   }
@@ -263,9 +463,11 @@ object MobileWebHelper {
       if (ov == null) ov = build(act, root)
       hidden = false
       syncChrome(url)
-      // duopulse-191: вставленный/переданный адрес с app=desktop грузим сразу
-      // мобильной версией — десктопный YouTube вешает WebView
-      webView?.loadUrl(forceMobileYouTube(url) ?: url)
+      // duopulse-191/192: адрес под режимом YouTube — мобильный срезает
+      // app=desktop, «расширенный» держит десктоп (с десктоп-UA до запроса)
+      val target = youTubeModeUrl(url) ?: url
+      applyUaFor(target)
+      webView?.loadUrl(target)
       ov.visibility = View.VISIBLE
       backCallback.isEnabled = true
     }
@@ -368,6 +570,29 @@ object MobileWebHelper {
     items += "⧉  Копировать ссылку" to { copyUrl(act, url) }
     items += "↗  Поделиться…" to { share(act, url) }
     items += "⌘  Открыть в браузере" to { openInBrowser(act, url) }
+    // «Расширенный» YouTube (duopulse-192, просьба Артёма): десктопный сайт
+    // с десктоп-UA (мобильный UA + десктопный Polymer = вис 191); выкл —
+    // прежнее поведение 191 (app=desktop срезается, m.youtube). Видео-страницы
+    // режим не касается — их всегда забирает встроенный плеер duo
+    val ytDesk = ytDesktop(act)
+    items += (if (ytDesk) "✓" else "○") + "  Десктопный YouTube" to {
+      val on = !ytDesk
+      setYtDesktop(act, on)
+      Toast.makeText(
+        act,
+        if (on) "YouTube — расширенная (десктопная) версия"
+        else "YouTube — мобильная версия",
+        Toast.LENGTH_SHORT
+      ).show()
+      // на YouTube — перечитать адрес уже в новом режиме
+      val wv2 = webView
+      if (wv2 != null && youTubeHost(wv2.url ?: "")) {
+        val cur = wv2.url ?: ""
+        val target = youTubeModeUrl(cur) ?: cur
+        applyUaFor(target)
+        wv2.loadUrl(target)
+      }
+    }
     // Тумблер полного блокировщика (duopulse-144): галка — состояние из
     // settings.json Core (переживает перезапуск); выкл = прежнее поведение
     // (лёгкий хост-лист duopulse-139)
@@ -506,11 +731,15 @@ object MobileWebHelper {
     accountSheet = null
     backCallback.isEnabled = false
     backCallback.remove()
+    if (addrEditing) endAddrEdit() // клавиатура/поле не должны пережить оверлей
     val wv = webView
     webView = null
     urlText = null
+    addrEdit = null
+    addrEditing = false
     duoBtn = null
     progress = null
+    defaultUa = null
     hidden = false
     lastReportedUrl = null
     lastCosmetic = null
@@ -638,6 +867,10 @@ object MobileWebHelper {
       setStroke(dp(1), Color.argb(46, 189, 254, 79))
     }
     addr.layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f)
+    addr.contentDescription = "Адресная строка"
+    // duopulse-192: тап по чипу = омнибокс (жалоба «строка ввода адреса не
+    // кликабельна») — чип сменяется полем ввода (beginAddrEdit)
+    addr.setOnClickListener { beginAddrEdit() }
     // duopulse-191: долгое нажатие адреса = «Копировать ссылку» (тот же
     // буфер/тост, что пункт меню «⋮») — быстрый доступ без раскрытия меню
     addr.setOnLongClickListener {
@@ -647,6 +880,40 @@ object MobileWebHelper {
     }
     urlRow.addView(addr)
     urlText = addr
+
+    // поле правки адреса (duopulse-192): тот же чип-стиль, GO — переход,
+    // уход фокуса — вернуть чип без перехода; подменяет чип в ряду
+    val edit = EditText(act)
+    edit.setTextColor(Color.parseColor("#F2F7EE")) // --text-primary
+    edit.textSize = 14f
+    edit.hint = "Адрес или поиск"
+    edit.maxLines = 1
+    edit.setSingleLine()
+    edit.imeOptions = EditorInfo.IME_ACTION_GO
+    edit.inputType = InputType.TYPE_CLASS_TEXT or
+      InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    edit.setPadding(dp(12), 0, dp(12), 0)
+    edit.background = GradientDrawable().apply {
+      cornerRadius = dp(18).toFloat()
+      setColor(Color.parseColor("#0a0e17")) // --bg-base
+      setStroke(dp(1), Color.argb(46, 189, 254, 79))
+    }
+    edit.layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f)
+    edit.visibility = View.GONE
+    edit.setOnEditorActionListener { v, actionId, _ ->
+      if (actionId == EditorInfo.IME_ACTION_GO) {
+        commitAddrEdit(v.text.toString())
+        true
+      } else {
+        false
+      }
+    }
+    edit.setOnFocusChangeListener { _, hasFocus ->
+      // фокус ушёл (клавиатура скрыта/тап мимо) — вернуть чип без перехода
+      if (!hasFocus && addrEditing) endAddrEdit()
+    }
+    urlRow.addView(edit)
+    addrEdit = edit
 
     val duo = toolButton("▶ duo", "Открыть во встроенном плеере")
     duo.visibility = View.GONE
@@ -694,6 +961,9 @@ object MobileWebHelper {
     val wv = WebView(act)
     wv.settings.javaScriptEnabled = true
     wv.settings.domStorageEnabled = true
+    // дефолтный (мобильный) UA WebView (duopulse-192): база переключения
+    // на десктопный для «расширенного» YouTube и обратно
+    defaultUa = wv.settings.userAgentString
     wv.webViewClient = object : WebViewClient() {
       override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         // всё открываем в оверлее (youtube/m.youtube/music.youtube — их
@@ -713,8 +983,11 @@ object MobileWebHelper {
           return true
         }
         if (request.isForMainFrame) {
-          // десктоп-форс YouTube (duopulse-191) — перезагрузить мобильной
-          forceMobileYouTube(request.url.toString())?.let { clean ->
+          // YouTube под режимом (duopulse-191/192): мобильный срезает
+          // app=desktop, расширенный переписывает m → www — и грузим с
+          // правильным UA (до запроса)
+          youTubeModeUrl(request.url.toString())?.let { clean ->
+            applyUaFor(clean)
             view.loadUrl(clean)
             return true
           }
@@ -724,6 +997,8 @@ object MobileWebHelper {
             openVideoInPlayer(id)
             return true
           }
+          // UA под цель до запроса (duopulse-192): youtube↔прочие сайты
+          applyUaFor(request.url.toString())
         }
         return false
       }
@@ -757,13 +1032,31 @@ object MobileWebHelper {
       override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
         // прогресс: страница грузится — полоса видна (100% погасит onProgress)
         progress?.let { it.progress = 5; it.visibility = View.VISIBLE }
-        // duopulse-191: серверный редирект (google.com/goto → 302) не проходит
-        // shouldOverrideUrlLoading — десктоп-форс YouTube ловим и здесь,
-        // перезагрузкой очищенного адреса (он без app=desktop — цикла нет)
-        forceMobileYouTube(url)?.let { clean ->
+        // duopulse-191/192: серверный редирект (google.com/goto → 302) не
+        // проходит shouldOverrideUrlLoading — YouTube под режимом ловим и
+        // здесь: адрес под режимом, затем UA (очищенный/переписанный адрес
+        // повторной переработки не требует — цикла нет)
+        youTubeModeUrl(url)?.let { clean ->
+          applyUaFor(clean)
           view.loadUrl(clean)
           return
         }
+        // duopulse-192: редирект мог привести на десктопный YouTube до нашего
+        // ведома (goto несёт app=desktop) — запрос уже ушёл с мобильным UA,
+        // той паре и обязан вис 191: выставить десктоп-UA и перезапросить
+        // (второй проход идёт правильным UA — цикла нет). Уход с YouTube —
+        // просто вернуть мобильный UA будущим загрузкам (без перезапуска).
+        if (youTubeHost(url) && ytDesktopSafe()) {
+          if (uaMismatched(url)) {
+            applyUaFor(url)
+            view.loadUrl(url)
+            return
+          }
+        } else if (defaultUa != null && view.settings.userAgentString != defaultUa) {
+          view.settings.userAgentString = defaultUa
+        }
+        // чип адреса — сразу (duopulse-192), не дожидаясь onPageFinished
+        syncChrome(url)
         // текущий адрес — фоновым нитям загрузчика (движок адблока)
         pageUrl = url
         // косметика — пораньше (документ создаётся): скриптлеты до скриптов
