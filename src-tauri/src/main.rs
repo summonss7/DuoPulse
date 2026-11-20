@@ -167,8 +167,33 @@ unsafe fn install_request_blocker(
     };
     use windows_core::{HSTRING, PWSTR};
 
-    core.AddWebResourceRequestedFilter(&HSTRING::from("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)
-        .expect("AddWebResourceRequestedFilter");
+    // duopulse-190: перегрузка ICoreWebView2_22 AddWebResourceRequestedFilter
+    // WithRequestSourceKinds с request source kinds = ALL закрывает сетевой
+    // пробел OOPIF — базовая регистрация не поднимает WebResourceRequested
+    // для запросов кросс-доменных (out-of-process) фреймов (реклама
+    // плеер-iframe уходила с 200 мимо движка). Браузер-флаг
+    // msWebViewApplyWebResourceRequestedFilterForOOPIFs НЕ нужен: замер
+    // e2e/adblock/frame-storm-probe.mjs — перегрузка работает и без него
+    // (рантайм ≥ SDK 1.0.2957). DUOPULSE_OOPIF_FILTER=0 — A/B-выключатель
+    // стендов (базовая регистрация, фреймы снова мимо). Старый рантайм без
+    // ICoreWebView2_22 — тихий фолбэк на базовую регистрацию.
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL, ICoreWebView2_22,
+    };
+    use windows_core::Interface;
+    let oopif_on = std::env::var("DUOPULSE_OOPIF_FILTER").map(|v| v != "0").unwrap_or(true);
+    match (oopif_on, core.cast::<ICoreWebView2_22>()) {
+        (true, Ok(core22)) => core22
+            .AddWebResourceRequestedFilterWithRequestSourceKinds(
+                &HSTRING::from("*"),
+                COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+            )
+            .expect("AddWebResourceRequestedFilterWithRequestSourceKinds"),
+        _ => core
+            .AddWebResourceRequestedFilter(&HSTRING::from("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)
+            .expect("AddWebResourceRequestedFilter"),
+    }
 
     let env = env.clone();
     let app = app.clone();
@@ -251,14 +276,14 @@ unsafe fn install_request_blocker(
 /// через ExecuteScript в мире страницы: скриптлеты no-fetch-if/no-xhr-if
 /// рвут доставку VAST до старта воспроизведения.
 ///
-/// Гейт по хостам (FRAME_SCRIPTLET_HOSTS): расчёт под конкретный URL —
-/// 0,2–0,9 с CPU (замер модуля adblock), а рекламные фреймы плодят
-/// уникальные URL — без гейта тяжёлые страницы устраивают фон-шторм;
-/// широкий охват (uBO режет во ВСЕХ фреймах) — вопрос согласования
-/// (предложение в отчёте duopulse-188). Тумблер адблока и сайт-исключения
-/// действуют и здесь — движок вернёт пустой скрипт.
-#[cfg(windows)]
-const FRAME_SCRIPTLET_HOSTS: [&str; 2] = ["cinemar.cc", "embf.net"];
+/// Гейт по хостам снят (duopulse-190, согласовано с Артёмом: «расширить на
+/// все фреймы с префильтром»): решение принимает [`AdblockService::
+/// frame_script_plan`] — дешёвый префильтр «есть ли у хоста хоть какие-то
+/// правила» (по текстам списков) + кэш по хостнейму + дедупликация
+/// in-flight расчётов: результат `url_cosmetic_resources` зависит только от
+/// хоста, а шторм уникальных URL рекламных фреймов гасится кэшем (расчёт
+/// 0,2–0,9 с CPU — один раз на хост, в фоновой нити). Тумблер адблока и
+/// сайт-исключения действуют и здесь — движок вернёт пустой скрипт.
 
 #[cfg(windows)]
 unsafe fn install_frame_scriptlets(core: &ICoreWebView2, app: &AppHandle) {
@@ -299,42 +324,57 @@ unsafe fn install_frame_scriptlets(core: &ICoreWebView2, app: &AppHandle) {
                             move |_hr, href| {
                                 // Результат ExecuteScript — JSON-литерал в кавычках
                                 let url = href.trim_matches('"');
-                                let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
-                                let host = after_scheme
-                                    .split(['/', '?', '#'])
-                                    .next()
-                                    .unwrap_or("")
-                                    .trim_start_matches("www.");
-                                if !FRAME_SCRIPTLET_HOSTS.iter().any(|h| host == *h) {
-                                    return Ok(());
+                                if !url.starts_with("http://") && !url.starts_with("https://") {
+                                    return Ok(()); // about:blank/data: — нечего фильтровать
                                 }
-                                // Шаг 2 (фон): движок считает ресурсы под URL
-                                // (0,2–0,9 с — нельзя на UI-нити), инъекция —
-                                // назад на main-нить (COM-квартира фрейма).
+                                // Решение — префильтр/кэш модуля adblock
+                                // (duopulse-190): мгновенно на UI-нити.
                                 let svc = app
                                     .state::<std::sync::Arc<adblock::AdblockService>>()
                                     .inner()
                                     .clone();
-                                let url = url.to_string();
-                                let frame_send = SendCom(frame_inject);
-                                let app = app.clone();
-                                std::thread::spawn(move || {
-                                    let script = svc.cosmetic_injection_script(&url);
-                                    if script.is_empty() {
-                                        return;
-                                    }
-                                    let _ = app.run_on_main_thread(move || {
-                                        let frame = frame_send.into_inner();
-                                        // Фрейм мог умереть, пока считали — тихо.
-                                        let _ = frame.ExecuteScript(
+                                match svc.frame_script_plan(url) {
+                                    adblock::FrameScriptPlan::Inject(script) => {
+                                        // Кэш-хит: вливаем сразу, без фоновой нити.
+                                        let _ = frame_inject.ExecuteScript(
                                             &windows_core::HSTRING::from(&script),
                                             &ExecuteScriptCompletedHandler::create(Box::new(
                                                 |_, _| Ok(()),
                                             )),
                                         );
-                                    });
-                                });
-                                Ok(())
+                                        Ok(())
+                                    }
+                                    adblock::FrameScriptPlan::Compute { host } => {
+                                        // Шаг 2 (фон): движок считает ресурсы под URL
+                                        // (0,2–0,9 с — нельзя на UI-нити), инъекция —
+                                        // назад на main-нить (COM-квартира фрейма).
+                                        let url = url.to_string();
+                                        let frame_send = SendCom(frame_inject);
+                                        let app = app.clone();
+                                        std::thread::spawn(move || {
+                                            let script = svc.frame_injection_script(&url);
+                                            if let Some(s) = script.as_ref().filter(|s| !s.is_empty()) {
+                                                let script = s.clone();
+                                                let _ = app.run_on_main_thread(move || {
+                                                    let frame = frame_send.into_inner();
+                                                    // Фрейм мог умереть, пока считали — тихо.
+                                                    let _ = frame.ExecuteScript(
+                                                        &windows_core::HSTRING::from(script.as_str()),
+                                                        &ExecuteScriptCompletedHandler::create(Box::new(
+                                                            |_, _| Ok(()),
+                                                        )),
+                                                    );
+                                                });
+                                            }
+                                            // Мемоизация по хосту (None — движок не
+                                            // готов: кэш не трогаем, следующий DCL
+                                            // фрейма повторит).
+                                            svc.frame_script_done(&host, script);
+                                        });
+                                        Ok(())
+                                    }
+                                    adblock::FrameScriptPlan::Skip => Ok(()),
+                                }
                             },
                         )),
                     );
@@ -1747,6 +1787,10 @@ fn main() {
             {
                 proxy_args.push_str(&format!(" --remote-debugging-port={port}"));
             }
+            // duopulse-190: сетевой уровень OOPIF решён НЕ браузер-флагом, а
+            // перегрузкой AddWebResourceRequestedFilterWithRequestSourceKinds
+            // (install_request_blocker; детали и A/B-замеры —
+            // e2e/adblock/OOPIF-NETWORK-SPIKE.md).
             STARTUP_PROXY_ARGS
                 .set(proxy_args.clone())
                 .expect("STARTUP_PROXY_ARGS инициализируется один раз");

@@ -34,8 +34,10 @@ const URL_ = process.argv[2] || "https://uakinogo.io/novinki/116356-chelovek-pau
 // Рекламные хосты: наши (deltarockme/agl/adstag) + уже закрытые EasyList
 // (aj2517/srv224 — в ансамбле они тоже обязаны быть порезаны) + цепочка
 // VAST из живого прогона (kinoroll — редиректор тегов, kingads — VAST/dsp,
-// mygaru — ident-пиксель).
-const AD_HOST_RE = /(^|\.)(deltarockme\.com|agl\d+\.(site|shop)|adstag\d+\.xyz|aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com)$/i;
+// mygaru — ident-пиксель) + новая сеть плеера duopulse-190 (20.11: тег
+// res64.traffer.net → креатив vcdn.traffer.biz, метрика *.temptcdn.com —
+// преролл pokerbet; cfnd.cinemap.cc/ahcdn — CDN видео, НЕ рекламные).
+const AD_HOST_RE = /(^|\.)(deltarockme\.com|agl\d+\.(site|shop)|adstag\d+\.xyz|aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|traffer\.net|traffer\.biz|temptcdn\.com|cfnd\.cinemap\.cc)$/i;
 const SECS = Number(process.env.DUOPULSE_E2E_SECS) || 75;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -130,6 +132,10 @@ const VID_PROBE = `(() => {
     src: (() => { try { return decodeURIComponent(v.currentSrc || v.src || '').replace(/^https?:\\/\\//, '').slice(0, 90); } catch { return '?'; } })(),
     t: Math.round(v.currentTime * 10) / 10, dur: Math.round(v.duration || 0), paused: v.paused,
     w: v.videoWidth, h: v.videoHeight,
+    // duopulse-190: дом-прероллы с origin самого плеера неблокируемы —
+    // клик play во время «Рекламы» уходит рекламному слоту и перезапускает
+    // её; жест даём только когда рекламной метки нет
+    ad: (document.body && document.body.innerText || '').includes('Реклама'),
   });
 })()`;
 
@@ -357,6 +363,7 @@ async function probeRun() {
     // видео-зонда — видео может просто ещё не существовать до старта).
     // Страница время от времени подвисает на evaluate — перевязываем ws.
     let playClicked = 0;
+    let lastClickAt = 0;
     const timeline = [];
     const t0 = Date.now();
     const reconnectPage = async () => {
@@ -376,12 +383,16 @@ async function probeRun() {
         if (!playerSid) await attachPlayer();
         const v = JSON.parse((await playerEval(VID_PROBE)) || "null");
         sample.vid = v;
-        if ((!v || v.paused) && playClicked < 4 && Date.now() - t0 > 8000) {
+        // duopulse-190: новый плеер крутит дом-прероллы (origin самого
+        // cinemar.cc, сети не видно) — клики во время «Рекламы» уходят
+        // слоту; ждём её конца, клики рассредоточены (бюджет 8, пауза 12 с)
+        if ((!v || (v.paused && !v.ad)) && playClicked < 8 && Date.now() - t0 > 8000 && Date.now() - lastClickAt > 12000) {
           const rect = JSON.parse((await evalIn(page, PLAYER_RECT, undefined, 10000)) || "null");
           if (rect) {
             await page.send("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, x: rect.x, y: rect.y });
             await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, x: rect.x, y: rect.y });
             playClicked++;
+            lastClickAt = Date.now();
             console.log(`    клик play #${playClicked} → iframe@${rect.x},${rect.y}`);
           }
         }

@@ -80,6 +80,19 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   скриптлетов, rpnt-пейлоад в DOM, UA-токены, `.ad-showing`, SSAP/USDAI-маркер в
   stats for nerds; `--deep` — плотный дамп во время рекламы (playerResponse, патчи
   нативов). Результат — e2e/adblock/ssai-last-run.json (gitignore, рантайм-артефакт).
+- `e2e/adblock/sites-ads-probe.mjs` — стенд рекламы кинотеатров uakinogo/kinogo
+  (карточки 188/190): живая страница фильма + плеер-iframe cinemar.cc (OOPIF),
+  duopulse-sites поверх живых EasyList/uBO; клик play обходит дом-прероллы
+  плеера (видео-зонд с детектом метки «Реклама», duopulse-190). Результат —
+  e2e/adblock/sites-ads-last-run.json (gitignore, рантайм-артефакт).
+- `e2e/adblock/frame-storm-probe.mjs` — стенд OOPIF-охвата адблока (карточка
+  190): локальная страница + 40 кросс-доменных iframes sub*.localhost; fetch
+  BLOCK_TEST_PATH из фрейма → 403 только при регистрации фильтра перегрузкой
+  AddWebResourceRequestedFilterWithRequestSourceKinds(ALL) (базовая — OOPIF
+  мимо; DUOPULSE_OOPIF_FILTER=0 — A/B-доказательство, проверка 2 инвертируется);
+  UI/Core round-trip и CPU при шторме DCL, YouTube-эмбед жив; детали и замеры —
+  e2e/adblock/OOPIF-NETWORK-SPIKE.md. Результат —
+  e2e/adblock/frame-storm-last-run.json (gitignore, рантайм-артефакт).
 - `e2e/tabs/mem-hang-probe.mjs` — стенд «много вкладок → память/зависание»
   (карточка 115): N вкладок локального «тяжёлого» сайта (HEAVY=1 — играющее видео
   + JS-куча), режим живых адресов URLS=http://…,http://…; меряет дерево

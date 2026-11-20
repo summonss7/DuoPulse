@@ -430,6 +430,18 @@ struct Inner {
     /// `url_cosmetic_resources` 0,2–0,9 с — дедупликация в-flight расчётов
     /// (разогрев с NavigationStarting и запрос document-start делят один).
     early_cache: std::collections::HashMap<String, Arc<EarlySlot>>,
+    /// Префильтр фреймовых скриптлетов (duopulse-190): хосты, у которых в
+    /// текстах списков есть хоть какие-то host-специфичные правила
+    /// (сеть `||host`, косметика `host##…`) или entity-шаблоны `host.*`.
+    frame_hosts: std::collections::HashSet<String>,
+    /// Кэш фреймовых скриптов по хостнейму (duopulse-190): результат
+    /// `url_cosmetic_resources` — функция хоста (не полного URL), а рекламные
+    /// фреймы плодят уникальные URL. `None` — «у хоста ничего» (мемо
+    /// отрицательного ответа префильтра/расчёта).
+    frame_cache: std::collections::HashMap<String, Option<Arc<String>>>,
+    /// Хосты с идущим фоновым расчётом фреймового скрипта (дедупликация
+    /// шторма: повторный DCL фрейма того же хоста не плодит нити).
+    frame_computing: std::collections::HashSet<String>,
     /// Запрошено принудительное обновление (adblock.update_lists force).
     force_update: bool,
 }
@@ -470,6 +482,9 @@ impl AdblockService {
                 replace_rules: Vec::new(),
                 replaced_total: 0,
                 early_cache: std::collections::HashMap::new(),
+                frame_hosts: std::collections::HashSet::new(),
+                frame_cache: std::collections::HashMap::new(),
+                frame_computing: std::collections::HashSet::new(),
                 force_update: false,
             }),
             wake: Condvar::new(),
@@ -853,6 +868,72 @@ impl AdblockService {
         cosmetic_script_from(&res)
     }
 
+    /// Решение по инъекции скриптлетов в кросс-доменный фрейм (duopulse-190:
+    /// гейт хостов снят, охват — все фреймы). Мгновенно (UI-нить): кэш по
+    /// хостнейму → префильтр «есть ли у хоста хоть какие-то правила» →
+    /// дедупликация in-flight. Тумблер/сайт-исключения/отсутствие движка —
+    /// `Skip` без мемоизации (состояние изменчиво, следующий DCL фрейма
+    /// повторит запрос).
+    pub fn frame_script_plan(&self, url: &str) -> FrameScriptPlan {
+        let Some(host) = frame_host_of(url) else {
+            return FrameScriptPlan::Skip;
+        };
+        let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
+        if !guard.enabled {
+            return FrameScriptPlan::Skip;
+        }
+        let has_engine = guard.engine.is_some() || guard.trusted_engine.is_some();
+        if !has_engine {
+            return FrameScriptPlan::Skip; // списки грузятся — не мемоизируем
+        }
+        if source_host_exempted(&guard.site_exceptions, url) {
+            return FrameScriptPlan::Skip;
+        }
+        if let Some(cached) = guard.frame_cache.get(&host) {
+            // Кэш-хит (в т.ч. «у хоста ничего») — влить готовое без расчёта
+            return match cached {
+                Some(script) => FrameScriptPlan::Inject(script.to_string()),
+                None => FrameScriptPlan::Skip,
+            };
+        }
+        if guard.frame_computing.contains(&host) {
+            return FrameScriptPlan::Skip; // уже считается — результат придёт в кэш
+        }
+        if !frame_host_has_rules(&guard.frame_hosts, &host) {
+            guard.frame_cache.insert(host, None);
+            return FrameScriptPlan::Skip;
+        }
+        if guard.frame_cache.len() >= 512 {
+            guard.frame_cache.clear(); // простое ограничение памяти
+        }
+        guard.frame_computing.insert(host.clone());
+        FrameScriptPlan::Compute { host }
+    }
+
+    /// Фоновый расчёт фреймового скрипта (после `Compute`): `None` — движок
+    /// не готов (кэш не трогать), `Some` — окончательный ответ (возможно
+    /// пустой: правил под этот хост не нашлось).
+    pub fn frame_injection_script(&self, url: &str) -> Option<String> {
+        let res = self.cosmetic_resources(url);
+        if !res.ready {
+            return None;
+        }
+        Some(cosmetic_script_from(&res))
+    }
+
+    /// Опубликовать результат фонового расчёта (пара к `Compute` из
+    /// [`Self::frame_script_plan`]): мемо по хостнейму — пустой скрипт тоже
+    /// мемо (следующие фреймы хоста не пересчитывают), `None` — расчёт
+    /// не окончателен, хост просто покидает in-flight.
+    pub fn frame_script_done(&self, host: &str, script: Option<String>) {
+        let mut guard = self.inner.lock().expect("adblock: лок не отравлен");
+        guard.frame_computing.remove(host);
+        if let Some(script) = script {
+            let cached = (!script.is_empty()).then(|| Arc::new(script));
+            guard.frame_cache.insert(host.to_string(), cached);
+        }
+    }
+
     // --- нить обновления ----------------------------------------------------
 
     fn updater_loop(self: Arc<Self>) {
@@ -957,6 +1038,9 @@ impl AdblockService {
             .iter()
             .flat_map(|(_, t, _)| replace::parse_replace_rules(t))
             .collect();
+        // Префильтр фреймовых скриптлетов (duopulse-190) — из тех же текстов
+        guard.frame_hosts = frame_rule_hosts(texts.iter().map(|(_, t, _)| t.as_str()));
+        guard.frame_cache.clear();
         guard.lists = states;
     }
 
@@ -1052,6 +1136,8 @@ impl AdblockService {
             guard.lists = new_states;
             guard.replace_rules = Vec::new();
             guard.early_cache.clear();
+            guard.frame_hosts.clear();
+            guard.frame_cache.clear();
             return;
         }
 
@@ -1074,6 +1160,10 @@ impl AdblockService {
                 .iter()
                 .flat_map(|(_, t, _)| replace::parse_replace_rules(t))
                 .collect();
+            // Префильтр фреймовых скриптлетов (duopulse-190) — из тех же
+            // текстов; движок сменился — кэш фреймовых скриптов протух
+            guard.frame_hosts = frame_rule_hosts(texts.iter().map(|(_, t, _)| t.as_str()));
+            guard.frame_cache.clear();
             // правила могли измениться — ответы раннего канала по тем же URL
             // больше не действительны (карточка 044)
             guard.early_cache.clear();
@@ -1685,6 +1775,111 @@ pub(crate) fn cosmetic_script_from(res: &CosmeticResources) -> String {
     js
 }
 
+/// Решение [`AdblockService::frame_script_plan`] для фрейма (duopulse-190).
+#[derive(Debug)]
+pub enum FrameScriptPlan {
+    /// Готовый скрипт из кэша — влить сразу.
+    Inject(String),
+    /// Хост прошёл префильтр: считать в фоновой нити, ключ кэша — хост.
+    Compute { host: String },
+    /// Нечего вливать (нет правил/выключен/исключение/уже считается).
+    Skip,
+}
+
+/// Хостнейм из URL фрейма (дешёвый разбор без url-крейта): только http(s),
+/// без порта и хвостовой точки, в нижнем регистре. `None` — не URL или
+/// не http(s) (about:blank, data:, blob: — фильтровать нечего).
+pub(crate) fn frame_host_of(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next()?.trim_end_matches('.');
+    let host = host.split(':').next()?; // порт не входит в ключ
+    if host.is_empty() || !host.contains('.') {
+        return None; // «localhost»-подобные и мусор — вне фильтрации фреймов
+    }
+    Some(host.to_ascii_lowercase())
+}
+
+/// Собрать префильтр фреймов из текстов списков (duopulse-190): хосты
+/// host-специфичных правил. Честный разбор всего синтаксиса не нужен —
+/// потеря хоста здесь = «не вливаем скриптлеты в фрейм этого хоста»
+/// (сетевые правила действуют независимо), а лишний хост = один лишний
+/// расчёт, мемоированный кэшем. Считаем:
+/// - сеть: `||host…` (и `@@||…`), хост — до первого `^ $ / * :`;
+/// - косметика: часть до `##`/`#@#`/`#?#` (запятая — список хостов),
+///   entity-шаблоны `example.*` — как есть (матчится суффикс-переходом),
+///   ведущий `*.` отбрасываем (суффикс-матчинг покрывает поддомены).
+/// Безхостовые строки (`##.ad` — generic) и host-only строки без `||`
+/// (неотличимы от keyword-правил) НЕ попадают: generic-косметика во
+/// фреймах не вливается (перф-решение 190), keyword-правила косметику
+/// фрейма не создают.
+pub(crate) fn frame_rule_hosts<'a>(texts: impl Iterator<Item = &'a str>) -> std::collections::HashSet<String> {
+    let mut hosts = std::collections::HashSet::new();
+    for text in texts {
+        for raw in text.lines() {
+            let line = raw.trim();
+            if line.is_empty()
+                || line.starts_with('!')
+                || line.starts_with('[') // [Adblock Plus 2.0]
+            {
+                continue;
+            }
+            // Косметика: host##sel / host#@#sel / host#?#sel (host-часть до маркера)
+            if let Some(pos) = line.find("##").or_else(|| line.find("#@#")).or_else(|| line.find("#?#")) {
+                let host_part = &line[..pos];
+                if host_part.is_empty() {
+                    continue; // generic — на все сайты, префильтром не считается
+                }
+                for entity in host_part.split(',') {
+                    let entity = entity.trim().trim_start_matches('~');
+                    let entity = entity.strip_prefix("*.").unwrap_or(entity);
+                    insert_host(&mut hosts, entity);
+                }
+                continue;
+            }
+            // Сеть: ||host… / @@||host…
+            let rule = line.strip_prefix("@@").unwrap_or(line);
+            if let Some(rest) = rule.strip_prefix("||") {
+                let host: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+                    .collect();
+                insert_host(&mut hosts, &host);
+            }
+        }
+    }
+    hosts
+}
+
+/// Добавить хост в префильтр, если он похож на домен (есть точка, только
+/// доменные символы) — мусорные обрезки (`||^`, `||ads`) не копим.
+fn insert_host(hosts: &mut std::collections::HashSet<String>, host: &str) {
+    let host = host.to_ascii_lowercase();
+    if host.contains('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '*')) {
+        hosts.insert(host);
+    }
+}
+
+/// Есть ли у хоста хоть какие-то правила: суффикс-переход по меткам
+/// (`a.b.example.com` → `b.example.com`, `example.com`, `com`) с учётом
+/// entity-шаблонов (`example.*`). O(меток) аллокаций — наносекунды против
+/// 0,2–0,9 с полного расчёта.
+pub(crate) fn frame_host_has_rules(hosts: &std::collections::HashSet<String>, host: &str) -> bool {
+    let labels: Vec<&str> = host.split('.').collect();
+    let n = labels.len();
+    for i in 0..n {
+        if hosts.contains(&labels[i..].join(".")) {
+            return true;
+        }
+        // example.* покрывает <суффикс>.<любой TLD> (включая сам TLD-метку)
+        if i + 1 < n && hosts.contains(&format!("{}.*", labels[i..n - 1].join("."))) {
+            return true;
+        }
+    }
+    false
+}
+
 // ---------------------------------------------------------------------------
 // Тесты (без сети)
 // ---------------------------------------------------------------------------
@@ -1709,6 +1904,185 @@ mod tests {
 
     fn engine(rules: &[&str]) -> Engine {
         Engine::from_rules(rules.iter().copied(), ParseOptions::default())
+    }
+
+    #[test]
+    fn frame_rule_hosts_parses_network_and_cosmetic() {
+        let hosts = frame_rule_hosts(
+            [
+                "! комментарий",
+                "[Adblock Plus 2.0]",
+                "||ads.example.com^",
+                "@@||fine.example.com^$script",
+                "||Tracker.NET^$third-party",
+                "example.com##.banner",
+                "CinemaR.CC,embf.net##+js(no-fetch-if, /x/)",
+                "movies.*##.player-ad",
+                "*.wild.example##.ad",
+                "~neg.example.org#@#.promo",
+                "##.ad",
+                "keyword-only-rule",
+                "||",
+                "||nodot",
+            ]
+            .into_iter(),
+        );
+        assert!(hosts.contains("ads.example.com"));
+        assert!(hosts.contains("fine.example.com"));
+        assert!(hosts.contains("tracker.net"));
+        assert!(hosts.contains("example.com"));
+        assert!(hosts.contains("cinemar.cc"));
+        assert!(hosts.contains("embf.net"));
+        assert!(hosts.contains("movies.*"));
+        assert!(hosts.contains("wild.example")); // ведущий *. срезан
+        assert!(hosts.contains("neg.example.org")); // ~-негацию тоже считаем «правилами»
+        assert!(!hosts.contains("nodot"));
+        assert_eq!(hosts.len(), 9);
+    }
+
+    #[test]
+    fn frame_host_of_strips_port_and_rejects_non_http() {
+        assert_eq!(
+            frame_host_of("https://Player.Cinemar.cc:443/x?y#z"),
+            Some("player.cinemar.cc".to_string())
+        );
+        assert_eq!(frame_host_of("http://a.b.example.com./p"), Some("a.b.example.com".to_string()));
+        assert_eq!(frame_host_of("about:blank"), None);
+        assert_eq!(frame_host_of("data:text/html,x"), None);
+        assert_eq!(frame_host_of("http://localhost/x"), None); // без точки — вне фильтрации
+        assert_eq!(frame_host_of("не url"), None);
+    }
+
+    #[test]
+    fn frame_host_has_rules_suffix_and_entity() {
+        let hosts = frame_rule_hosts(
+            ["||ads.example.com^", "movies.*##.ad", "embf.net##+js(x)"].into_iter(),
+        );
+        assert!(frame_host_has_rules(&hosts, "ads.example.com"));
+        assert!(frame_host_has_rules(&hosts, "cdn.ads.example.com"));
+        assert!(!frame_host_has_rules(&hosts, "example.com")); // у родителя правил нет
+        assert!(frame_host_has_rules(&hosts, "movies.ru"));
+        assert!(frame_host_has_rules(&hosts, "hd.movies.io"));
+        assert!(!frame_host_has_rules(&hosts, "movies.example.other.net"));
+        assert!(frame_host_has_rules(&hosts, "embf.net"));
+        assert!(!frame_host_has_rules(&hosts, " unrelated.org "));
+    }
+
+    #[test]
+    fn frame_script_plan_prefilter_cache_and_dedup() {
+        let s = service();
+        s.set_engine(scriptlet_engine(&["cinemar.cc##+js(no-fetch-if, /ad/)"]));
+        {
+            let mut guard = s.inner.lock().unwrap();
+            guard.frame_hosts = frame_rule_hosts(["cinemar.cc##+js(no-fetch-if, /ad/)"].into_iter());
+        }
+        // Хост без правил — Skip и мемо отрицательного ответа
+        assert!(matches!(s.frame_script_plan("https://no-rules.example.net/p"), FrameScriptPlan::Skip));
+        assert!(matches!(s.frame_script_plan("https://no-rules.example.net/other"), FrameScriptPlan::Skip));
+        // Хост с правилами — Compute
+        let host = match s.frame_script_plan("https://cinemar.cc/player") {
+            FrameScriptPlan::Compute { host } => host,
+            other => panic!("ожидали Compute, получили {other:?}"),
+        };
+        assert_eq!(host, "cinemar.cc");
+        // In-flight дедупликация: повтор до завершения — Skip
+        assert!(matches!(s.frame_script_plan("https://cinemar.cc/second"), FrameScriptPlan::Skip));
+        // Расчёт готов (скриптлет есть) → мемо → следующий фрейм хоста — Inject из кэша
+        let script = s.frame_injection_script("https://cinemar.cc/player").unwrap();
+        assert!(script.contains("preventFetch("));
+        s.frame_script_done("cinemar.cc", Some(script.clone()));
+        match s.frame_script_plan("https://cinemar.cc/another-url") {
+            FrameScriptPlan::Inject(cached) => assert_eq!(cached, script),
+            _ => panic!("ожидали Inject из кэша"),
+        }
+        // Пустой результат — мемо «у хоста ничего» (без пересчёта)
+        s.frame_script_done("embf.net", Some(String::new()));
+        assert!(matches!(s.frame_script_plan("https://embf.net/x"), FrameScriptPlan::Skip));
+        // Не готовый расчёт (None) — кэш не трогаем, хост покидает in-flight
+        s.frame_script_done("half.example.org", None);
+        assert!(matches!(s.frame_script_plan("https://half.example.org/x"), FrameScriptPlan::Skip)); // правил нет
+    }
+
+    #[test]
+    fn frame_script_plan_skips_without_engine_and_when_disabled() {
+        let s = service(); // движка нет
+        assert!(matches!(s.frame_script_plan("https://cinemar.cc/p"), FrameScriptPlan::Skip));
+        s.set_engine(engine(&["cinemar.cc##+js(x)"]));
+        {
+            let mut guard = s.inner.lock().unwrap();
+            guard.frame_hosts = frame_rule_hosts(["cinemar.cc##+js(x)"].into_iter());
+        }
+        assert!(matches!(
+            s.frame_script_plan("https://cinemar.cc/p"),
+            FrameScriptPlan::Compute { .. }
+        ));
+        s.set_enabled_inner(None, false).unwrap();
+        assert!(matches!(s.frame_script_plan("https://cinemar.cc/p"), FrameScriptPlan::Skip));
+    }
+
+    /// Замер перфа префильтра против полного расчёта (duopulse-190): живой
+    /// EasyList из профиля (переменная DUOPULSE_PERF_LIST или кэш списков
+    /// профиля DuoPulse), 50 «рекламно-штормовых» URL. Полный расчёт —
+    /// сотни мс на URL; префильтр+кэш — единицы микросекунд. Запуск:
+    /// cargo test --manifest-path src-tauri/Cargo.toml frame_perf_probe -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn frame_perf_probe() {
+        let list_path = std::env::var("DUOPULSE_PERF_LIST")
+            .unwrap_or_else(|_| {
+                let app = std::env::var("APPDATA").unwrap_or_default();
+                format!("{app}\\..\\Local\\DuoPulse\\profile\\filters\\easylist.txt")
+            });
+        let Ok(text) = std::fs::read_to_string(&list_path) else {
+            eprintln!("SKIP: нет {list_path}");
+            return;
+        };
+        let mut eng = Engine::from_rules(text.lines(), ParseOptions::default());
+        eng.use_resources(serde_json::from_str::<Vec<Resource>>(SCRIPTLETS_JSON).unwrap());
+        let hosts = frame_rule_hosts([text.as_str()].into_iter());
+        eprintln!("list lines: {}, prefilter hosts: {}", text.lines().count(), hosts.len());
+
+        let urls: Vec<String> = (0..50)
+            .map(|i| format!("https://srv{i}.adfarm{}.example/x/{i}", i % 7))
+            .collect();
+        // Хосты С правилами (худший случай: generichide-проверка матчит
+        // сетевые исключения, specific-правила собираются): берём реальные
+        // рекламные хосты из самого списка + youtube для полноты.
+        let known = [
+            "https://youtube.com/",
+            "https://aj2517.bid/tag",
+            "https://srv224.com/x",
+            "https://kinoroll.com/x",
+            "https://doubleclick.net/x",
+            "https://google.com/page",
+        ];
+        let t0 = std::time::Instant::now();
+        let mut total_engine = std::time::Duration::ZERO;
+        for url in &urls {
+            let t = std::time::Instant::now();
+            let _ = eng.url_cosmetic_resources(url);
+            total_engine += t.elapsed();
+        }
+        let engine_time = t0.elapsed();
+        let mut known_times = Vec::new();
+        for url in &known {
+            let t = std::time::Instant::now();
+            let _ = eng.url_cosmetic_resources(url);
+            known_times.push(t.elapsed());
+        }
+        let t1 = std::time::Instant::now();
+        for url in &urls {
+            let _ = frame_host_has_rules(&hosts, frame_host_of(url).as_deref().unwrap_or(""));
+        }
+        let prefilter_time = t1.elapsed();
+        eprintln!(
+            "engine(50 unknown): {total_engine:?} (avg {:?}/url), known hosts: {known_times:?}, prefilter 50 urls: {prefilter_time:?}",
+            total_engine / urls.len() as u32
+        );
+        assert!(
+            prefilter_time.as_micros() < 5_000,
+            "префильтр 50 URL должен быть микросекундами, а не {prefilter_time:?}"
+        );
     }
 
     #[test]

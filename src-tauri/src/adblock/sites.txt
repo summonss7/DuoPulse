@@ -23,12 +23,20 @@
 ||kinoroll.com^
 ||kingads.digital^
 ||mygaru.com^
+! duopulse-190 (20.11): сеть плеера сменилась с Epom(aj2517/srv224) на
+! traffer (зонд фрейма: тег res64.traffer.net → креатив vcdn.traffer.biz,
+! метрика metrics/stats.temptcdn.com — преролл pokerbet «Реклама 1/2»)
+||traffer.net^
+||traffer.biz^
+||temptcdn.com^
 /^https?:\/\/cvt-s\d+\.agl\d+\.(?:site|shop)\//
 /^https?:\/\/r\d+\.adstag\d+\.xyz\//
+/^https?:\/\/r\d+\.traffer\.(?:net|biz)\//
 !
 ! --- скриптлеты в плеер-фреймах (доставка VAST рвётся до сети фрейма):
 ! теги adera/angel721/viewtraff + вся цепочка, замеченная в живом прогоне
 ! (kinoroll — редиректор тегов, kingads — VAST/dsp, mygaru — ident-пиксель,
-! kxcdn/kx1cdn — пиксель srv224; ахcdn — видео-CDN, сюда НЕ входит)
-cinemar.cc,embf.net##+js(no-fetch-if, /aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com/)
-cinemar.cc,embf.net##+js(no-xhr-if, /aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com/)
+! kxcdn/kx1cdn — пиксель srv224; ахcdn — видео-CDN, сюда НЕ входит;
+! traffer/temptcdn — новая сеть прероллов, duopulse-190)
+cinemar.cc,embf.net##+js(no-fetch-if, /aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com|traffer\.net|traffer\.biz|temptcdn\.com/)
+cinemar.cc,embf.net##+js(no-xhr-if, /aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com|traffer\.net|traffer\.biz|temptcdn\.com/)
