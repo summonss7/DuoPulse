@@ -7481,3 +7481,42 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   uiautomator + скриншоты: меню «⋮» содержит «Копировать ссылку», тап пункта и long-press адресного чипа дают тост
   «Ссылка скопирована»; vitest 669/669; свежие debug/release-APK собираются без ошибок.
 - Коммит: 716b784 (fix(mobile): duopulse-191 — «поиск Ютуб → тап по Ютуб — виснет браузер»…)
+
+## 2026-11-20, 06:20 — duopulse-190: адблок — сетевой пробел кросс-доменных (OOPIF) фреймов закрыт, скриптлеты во все фреймы с префильтром
+- Начало работы: 2026-11-20, 02:13
+- Окончание работы: 2026-11-20, 06:20
+- Что сделано: спайк закрыл вопрос «что реально работает в WebView2» (дока e2e/adblock/OOPIF-NETWORK-SPIKE.md):
+  базовый AddWebResourceRequestedFilter запросы OOPIF не видит; браузер-флаг
+  msEdgeWebViewApplyWebResourceRequestedFilterForOOPIFs на рантайме 157 НЕ работает (41/42 фреймовых
+  запросов проходили насквозь); работает перегрузка ICoreWebView2_22
+  AddWebResourceRequestedFilterWithRequestSourceKinds("*", ALL, REQUEST_SOURCE_KINDS_ALL) — и без всяких
+  флагов (A/B-доказательство стендом). Внедрено в main.rs install_request_blocker: сетевые правила и
+  $replace теперь действуют и во фреймах (живой прогон sites-ads-probe: blockedTotal 4 → 17 — движок
+  начал резать запросы внутри плеер-фрейма uakinogo); старый рантайм без ICoreWebView2_22 — тихий
+  фолбэк на базовую регистрацию, ничего не ломается. Гейт хостов фреймовых скриптлетов снят (ответ
+  Артёма: «расширить на все фреймы с префильтром»): AdblockService::frame_script_plan — дешёвый
+  префильтр «есть ли у хоста хоть какие-то правила» (разбор текстов списков, суффикс-матчинг с
+  entity-шаблонами example.*, ~6 мкс) + кэш по хостнейму (результат url_cosmetic_resources — функция
+  хоста) + дедупликация in-flight расчётов. Побочное: uakinogo за сутки сменил рекламную сеть
+  (Epom → traffer) — duopulse-sites расширен (||traffer.net^, ||traffer.biz^, ||temptcdn.com^,
+  r\d+.traffer-регекс + те же хосты в no-fetch-if/no-xhr-if фреймов плеера; cfnd.cinemap.cc/ahcdn —
+  CDN видео, не трогаем). Стенд 188 научен дом-прероллам плеера: видео-зонд детектит метку «Реклама»,
+  клик play даётся только после её конца (клики в рекламный слот перезапускали её — фильм не
+  стартовал). Новый постоянный стенд e2e/adblock/frame-storm-probe.mjs (40 кросс-доменных
+  sub*.localhost-фреймов: перехват 42/42, UI/Core round-trip, CPU-шторм, YouTube-эмбед жив;
+  DUOPULSE_OOPIF_FILTER=0 — A/B-инверсия проверки сети; результат — *-last-run.json в gitignore);
+  AGENTS.md (e2e-каталог: sites-ads-probe зарегистрирован — 188 его не вносил, + новый стенд).
+  Замеры перфа (frame_perf_probe --ignored, живой ансамбль 89 027 строк / 60 175 хостов префильтра):
+  полный расчёт косметики 0,37–1,2 мс/уникальный хост (исторические «0,2–0,9 с» — generic-фаза по
+  DOM, во фреймовом пути не вызывается), префильтр ~70× дешевле; шторм 40 уникальных хостов:
+  round-trip 3 мс, CPU дерева +0,4 с за 10 с — деградации нет. backup.bat снят до правок
+  (backup_2026-11-20_02-13-42). Версия 0.1.73 (tauri.conf.json = package.json = Cargo.toml =
+  Cargo.lock), десктопный релиз в каналы Aila+GitHub + хаб «Скачать» + C:\DuoPulse — этим же сеансом
+  (менялся src-tauri, duopulse-120).
+- Как проверено: cargo test 439+36 passed / 0 failed (5 новых: разбор hosts, суффикс/entity-матчинг,
+  кэш/дедуп/мемо-отрицаний, Skip без движка и при выключенном); vitest 669/669; e2e живые прогоны:
+  sites-ads-probe 5/5 (фильм играет dur=8711 с без преролла от сетей, 17 рекламных попыток/0 байт
+  утечек, попандеров нет), adblock run 18/18, cosmetic 13/13, scriptlets 14/14, frame-storm-probe
+  5/5 (OOPIF-перехват 42/42, эмбед jNQXAC9IVRw играет; A/B OFF: 1/42 — пробел как был, dQw4w9WgXcQ
+  для стенда непригоден — embedding запрещён, «Video unavailable»).
+- Коммит: daed866 (fix(adblock): duopulse-190 — OOPIF-перегрузка+префильтр…)
