@@ -6,6 +6,7 @@
 
 import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyle } from "../../../content/overlay/style";
 import { OFFSET_LIMIT_MS } from "../../../content/engine/subtitles-engine";
+import { defaultTranslationTarget } from "../../../content/set-defaults";
 
 /** Ключ localStorage (единый объект настроек мобильного duo). */
 const STORAGE_KEY = "duopulse.duo.mobile.v1";
@@ -22,9 +23,17 @@ export const GTX_TARGET_LANGS: ReadonlyArray<{ code: string; name: string }> = [
   { code: "es", name: "Español" },
 ];
 
-/** Выбор перевода: null — нет; "gtx:<lang>" — Google; "track:<baseId>" —
- * готовая дорожка перевода видео (TED-подобные несут десятки языков). */
+/** Выбор перевода: null — нет; "auto" — цель по правилу дуо (см.
+ * AUTO_TRANSLATION); "gtx:<lang>" — Google; "track:<baseId>" — готовая
+ * дорожка перевода видео (TED-подобные несут десятки языков). */
 export type TranslationChoice = string | null;
+
+/** Перевод «Авто» — дефолт и значение по правилу дуо duopulse-196
+ * (мобильный паритет — duopulse-201): цель выбирает
+ * defaultTranslationTarget(content/set-defaults) — русский оригинал →
+ * gtx:en, прочие → gtx:ru. Явный выбор языка/дорожки в панели главнее:
+ * правило не перетирает. */
+export const AUTO_TRANSLATION = "auto";
 
 export interface DuoMobileSettings {
   /** Показ субтитров включён (как enabled десктопа, docs/03 §8). */
@@ -45,11 +54,24 @@ export function defaultDuoSettings(): DuoMobileSettings {
   return {
     enabled: true,
     originalId: null,
-    translation: "gtx:ru",
+    translation: AUTO_TRANSLATION,
     fontScalePct: DEFAULT_SUBTITLE_STYLE.fontScalePct,
     position: DEFAULT_SUBTITLE_STYLE.position,
     offsetMs: 0,
   };
+}
+
+/** Канонизация выбора перевода: «auto»/gtx:/track: — валидны; легаси-дефолт
+ * «gtx:ru» (персистнут до duopulse-201, мог быть не явным выбором, а
+ * сохранённым дефолтом duopulse-082) → «auto»: правило дуо главнее — у
+ * русского оригинала старая цель равнялась языку источника и перевод молча
+ * не поднимался (соло-оригинал); явный выбор другого языка (gtx:uk) и
+ * готовой дорожки — как есть; мусор → null («нет»). */
+function canonTranslation(raw: unknown): TranslationChoice {
+  if (raw === AUTO_TRANSLATION) return AUTO_TRANSLATION;
+  if (typeof raw !== "string") return null;
+  if (raw === "gtx:ru") return AUTO_TRANSLATION; // легаси-дефолт дуо-082
+  return raw.startsWith("gtx:") || raw.startsWith("track:") ? raw : null;
 }
 
 /** Канонизация значения из хранилища/патча: клампы и типы как у стиля
@@ -62,10 +84,7 @@ export function normalizeSettings(raw: unknown): DuoMobileSettings {
   return {
     enabled: typeof v.enabled === "boolean" ? v.enabled : d.enabled,
     originalId: typeof v.originalId === "string" && v.originalId ? v.originalId : null,
-    translation:
-      typeof v.translation === "string" && (v.translation.startsWith("gtx:") || v.translation.startsWith("track:"))
-        ? v.translation
-        : null,
+    translation: canonTranslation(v.translation),
     fontScalePct: Math.min(300, Math.max(75, Math.round(num(v.fontScalePct, d.fontScalePct)))),
     position: v.position === "top" ? "top" : "bottom",
     offsetMs: Math.min(OFFSET_LIMIT_MS, Math.max(-OFFSET_LIMIT_MS, Math.round(num(v.offsetMs, 0)))),
@@ -102,4 +121,17 @@ export function parseTranslationChoice(choice: TranslationChoice): { kind: "none
   if (choice.startsWith("gtx:")) return { kind: "gtx", lang: choice.slice(4) };
   const baseId = choice.slice("track:".length);
   return { kind: "track", baseId };
+}
+
+/** Разбор выбора перевода ДЛЯ ПОКАЗА (duopulse-201): «auto» резолвится
+ * правилом дуо duopulse-196 — defaultTranslationTarget: русский оригинал →
+ * gtx:en, прочие → gtx:ru (подтег не мешает: «ru-RU» — тоже русский);
+ * явный gtx:<lang>/track:<id>/null — как выбрал пользователь, правило не
+ * перетирает. */
+export function resolveTranslationChoice(
+  choice: TranslationChoice,
+  originalLang: string,
+): ReturnType<typeof parseTranslationChoice> {
+  if (choice === AUTO_TRANSLATION) return { kind: "gtx", lang: defaultTranslationTarget(originalLang) };
+  return parseTranslationChoice(choice);
 }

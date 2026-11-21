@@ -5,17 +5,23 @@
 // en-ручную, а не первую дорожку. Регрессия: видео только с asr (Gangnam)
 // — оригинал остаётся asr-дорожкой, п.4 (hl-сравнение) её не вытесняет.
 //
+// duopulse-201: дефолт перевода — «auto» по правилу дуо duopulse-196
+// (русский оригинал → gtx:en, прочие → gtx:ru) — пункт 3.
+//
 // Debug-сборка на эмуляторе (у релиза нет CDP-сокета webview_devtools_remote,
 // конвенция смоуков duopulse-144+ — порт 9223). Сценарий:
-//   1) vk_xq1P7vIU: duo-сессия стартует сама (enabled: true, перевод gtx:ru);
+//   1) vk_xq1P7vIU: duo-сессия стартует сама (enabled: true, перевод — авто);
 //     дефолт originalId = yt:en (не yt:zh-Hans) — п.4 (defaultCaptionTrackIndex
 //     hl-ответа ≠ язык UI → контентный фолбэк) и/или п.5 (en-ручная прежде
 //     первой); селект панели согласован; движок грузит yt:en с репликами;
-//     перевод gtx:ru — soft (внешний gtx на эмуляторе бот-блокится, дуопульс-133);
+//     перевод — авто → gtx:ru, soft (внешний gtx на эмуляторе бот-блокится,
+//     дуопульс-133);
 //   2) 9bZkp7q19f0 (Gangnam, только asr ko): originalId = yt:ko:asr.
+//   3) _wnQ3Ow02yQ (Круг «Владимирский централ», ru:asr): перевод — авто,
+//     правило дуо 196 → цель gtx:en (статус «ru → en» / дорожка +gtx:en).
 // Запуск (debug-APK установлен, эмулятор поднят):
 //   node e2e/mobile/duo-default-smoke.mjs
-// Переопределения: DUO_VIDEO_VEVO, DUO_VIDEO_ASR, CDP_PORT.
+// Переопределения: DUO_VIDEO_VEVO, DUO_VIDEO_ASR, DUO_VIDEO_RU, CDP_PORT.
 // Результат — e2e/mobile/duo-default-smoke-last-run.json (gitignore,
 // рантайм-артефакт). Скриншоты — %TEMP%/duopulse-186-*.png.
 import { execFileSync } from "node:child_process";
@@ -30,6 +36,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "duo-default-smoke-last-run.json");
 const VIDEO_VEVO = process.env.DUO_VIDEO_VEVO || "vk_xq1P7vIU"; // Sam Smith — ручные дорожки, без asr/audioTrackId
 const VIDEO_ASR = process.env.DUO_VIDEO_ASR || "9bZkp7q19f0"; // Gangnam Style — только asr ko
+const VIDEO_RU = process.env.DUO_VIDEO_RU || "_wnQ3Ow02yQ"; // Круг «Владимирский централ» — ru:asr (duopulse-201)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const SERIAL = process.env.ANDROID_SERIAL ||
@@ -160,7 +167,7 @@ try {
   check("(1) дефолт оригинала — yt:en, НЕ yt:zh-Hans (п.4/п.5)", d1.settings.originalId === "yt:en", `originalId=${d1.settings.originalId}`);
   const sel = await ui.evalJs(`document.querySelector('.m-duo-original')?.value ?? ""`);
   check("(1) селект панели согласован (yt:en)", sel === "yt:en", sel);
-  check("(1) перевод по дефолту gtx:ru", d1.settings.translation === "gtx:ru", d1.settings.translation);
+  check("(1) перевод по дефолту — авто (правило дуо: en → gtx:ru)", d1.settings.translation === "auto", d1.settings.translation);
   // движок грузит оригинал с репликами; перевод gtx — soft (бот-блок gtx на
   // эмуляторе — внешний фактор, дуопульс-133)
   let d1e = null;
@@ -189,12 +196,39 @@ try {
   check("(2) Gangnam: оригинал yt:ko:asr (asr-фолбэк жив)", d2.settings.originalId === "yt:ko:asr",
     `originalId=${d2.settings.originalId}`);
   shot("asr-default");
+
+  // (3) duopulse-201: русский оригинал — цель gtx:en (правило дуо 196):
+  // раньше дефолт gtx:ru равнялся языку источника и перевод молча не
+  // поднимался (соло-оригинал); теперь «auto» → ru → en.
+  await openVideo(VIDEO_RU);
+  const d3 = await waitDefaults(VIDEO_RU);
+  check("(3) перевод — авто (правило дуо не выключалось)", d3.settings.translation === "auto",
+    d3.settings.translation);
+  const ruOrig = d3.settings.originalId ?? "";
+  check(`(3) оригинал — ru-дорожка`, /^yt:ru/.test(ruOrig), ruOrig);
+  shot("ru-default");
+  // правило выбрало en: статус «перевожу (ru → en)» в кольцевом логе
+  // __duoDebug.statusLog (панель может открыться позже короткого статуса —
+  // 429 мгновенный, строка панели его не увидит; лог от панели не зависит)
+  // ИЛИ готовая дорожка +gtx:en в движке (gtx бот-блокится — дуопульс-133)
+  let sawRuleEn = false;
+  let ruTrans = null;
+  for (let i = 0; i < 120 && !(sawRuleEn && ruTrans); i++) {
+    const d = await debug().catch(() => null);
+    if ((d?.statusLog ?? []).some((s) => /ru → en/.test(String(s)))) sawRuleEn = true;
+    ruTrans = (d?.engine?.tracks ?? []).find((t) => /gtx:en$/.test(t.id) && (t.cues ?? 0) > 0) ?? null;
+    if (!(sawRuleEn && ruTrans)) await sleep(500);
+  }
+  check("(3) правило 196: цель ru → en (статус конвейера или дорожка)",
+    sawRuleEn || !!ruTrans, sawRuleEn ? "статус «ru → en» в логе конвейера" : "статус не пойман");
+  check("(3) вторая строка gtx:en в движке (soft: gtx)", !!ruTrans,
+    ruTrans ? `${ruTrans.cues} реплик` : await statusText().catch(() => ""), true);
 } catch (e) {
   results.push({ name: "сценарий упал", ok: false, error: String(e) });
   console.error("ОШИБКА:", e);
 } finally {
   ui?.close();
-  writeFileSync(OUT, JSON.stringify({ started: new Date().toISOString(), videoVevo: VIDEO_VEVO, videoAsr: VIDEO_ASR, results, ok: results.every((r) => r.ok || r.soft) }, null, 2));
+  writeFileSync(OUT, JSON.stringify({ started: new Date().toISOString(), videoVevo: VIDEO_VEVO, videoAsr: VIDEO_ASR, videoRu: VIDEO_RU, results, ok: results.every((r) => r.ok || r.soft) }, null, 2));
   const ok = results.length > 0 && results.every((r) => r.ok || r.soft);
   console.log(`\n${results.filter((r) => r.ok).length}/${results.length} проверок — ${ok ? "OK" : "ЕСТЬ ПРОВАЛЫ"}`);
   console.log(`результат: ${OUT}`);

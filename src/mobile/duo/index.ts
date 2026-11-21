@@ -19,8 +19,7 @@ import {
   type DuoInvoke,
   type MobileTrackList,
 } from "./session";
-import { loadDuoSettings, saveDuoSettings, type DuoMobileSettings } from "./state";
-import { parseTranslationChoice } from "./state";
+import { loadDuoSettings, saveDuoSettings, resolveTranslationChoice, type DuoMobileSettings } from "./state";
 import {
   asrProgressText,
   createMobileAsr,
@@ -86,6 +85,7 @@ export class MobileDuo {
       engine: this.engine.state(),
       settings: this.settings,
       baseCount: this.list?.base.length ?? 0,
+      statusLog: [...this.statusLog],
       asr: this.asr.stateSnapshot(),
       asrTracks: [...this.asrCues.keys()],
     });
@@ -167,9 +167,17 @@ export class MobileDuo {
   }
 
   /** Единственная точка исхода статусов: запоминаем последний — повторная
-   * эмуляция в finally recognizeSpeech возвращает кнопку конвейера. */
+   *  эмуляция в finally recognizeSpeech возвращает кнопку конвейера.
+   *  Кольцевой лог (последние 30) — тест-хук смоуков: панель может
+   *  открыться ПОСЛЕ короткого статуса (например «перевожу (ru → en)…» →
+   *  мгновенный 429) и не увидеть его; лог в __duoDebug от панели не
+   *  зависит (duopulse-201). */
+  private readonly statusLog: string[] = [];
+
   private emit(s: DuoStatus): void {
     this.lastStatus = s;
+    this.statusLog.push(s.text ?? "␀");
+    if (this.statusLog.length > 30) this.statusLog.shift();
     this.onStatus(s);
   }
 
@@ -408,7 +416,10 @@ export class MobileDuo {
         },
       ];
       this.engine.setTracks(tracks);
-      const choice = parseTranslationChoice(this.settings.translation);
+      // Цель перевода: «auto» (дефолт) — по правилу дуо duopulse-196
+      // (русский оригинал → gtx:en, прочие → gtx:ru, duopulse-201); явный
+      // выбор в панели главнее — не перетираем.
+      const choice = resolveTranslationChoice(this.settings.translation, original.lang);
       if (choice.kind === "gtx" && choice.lang !== original.lang) {
         this.emit({
           text: t("duo: перевожу ({from} → {to})…", { from: original.lang, to: choice.lang }),

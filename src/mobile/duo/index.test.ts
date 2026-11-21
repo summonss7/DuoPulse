@@ -3,6 +3,8 @@
 // освобождает конвейер в ЛЮБОЙ фазе (включая зависший офлайн-перевод — кнопка
 // возвращается немедленно, а не по таймауту), сбой перевода — честная
 // ошибка статуса (error), конвейер не остаётся «занят».
+// duopulse-201: цель авто-перевода — правило дуо duopulse-196 (русский
+// оригинал → gtx:en, прочие → gtx:ru), явный выбор панели не перетирается.
 import { describe, expect, it, vi } from "vitest";
 import { MobileDuo, type DuoStatus } from "./index";
 import type { DuoInvoke } from "./session";
@@ -86,5 +88,103 @@ describe("MobileDuo: конвейер ASR не виснет на перевод�
     // событие done приходит ПОСЛЕ ошибки applySet (офлайн-отказ быстрее доставки)
     duo.onAsrProgress({ tabId: "abc12345678", videoKey: "k", engine: "local:whisper", phase: "done", done: 5, total: 5, fromCache: true });
     expect(statuses[statuses.length - 1]?.text).toContain("перевод недоступен");
+  });
+});
+
+describe("MobileDuo: цель авто-перевода — правило дуо duopulse-196 (duopulse-201)", () => {
+  /** ASR-кэш-хит с lang из аргумента: applySet уходит в авто-перевод —
+   *  язык оригинала управляем без живого YouTube. */
+  const startDoneLang = (lang: string) => ({
+    status: "done",
+    cues: [{ startMs: 0, endMs: 900, text: `привет мир ${lang}` }],
+    lang,
+    fromCache: true,
+    engine: "local:whisper",
+  });
+
+  it("русский оригинал + дефолт «авто» → вторая строка gtx:en (не соло)", async () => {
+    localStorage.clear();
+    const gtxCalls: Array<{ from: string; to: string }> = [];
+    const invoke: DuoInvoke = (cmd, args) => {
+      if (cmd === "subtitles_asr_start") return Promise.resolve(startDoneLang("ru"));
+      if (cmd === "duo_translate_texts") {
+        const a = args as { texts: string[]; from: string; to: string };
+        gtxCalls.push({ from: a.from, to: a.to });
+        return Promise.resolve(a.texts.map((t) => `✓${t}`));
+      }
+      return Promise.resolve({});
+    };
+    const { duo, statuses } = makeDuo(invoke);
+    (duo as unknown as { videoId: string }).videoId = "abc12345678";
+    await duo.recognizeSpeech();
+    expect(gtxCalls.length).toBeGreaterThan(0); // перевод ПОДНЯЛСЯ (раньше — соло)
+    expect(gtxCalls[0]).toEqual({ from: "ru", to: "en" }); // правило 196: ru → en
+    expect(statuses.some((s) => (s.text ?? "").includes("ru → en"))).toBe(true);
+    const tracks = ((window as unknown as { __duoDebug: () => { engine: { tracks: Array<{ id: string }> } } }).__duoDebug().engine.tracks ?? []);
+    expect(tracks.map((t) => t.id)).toContain("asr:ru+gtx:en");
+    // лог статусов (duopulse-201): короткие статусы видны смоукам без панели
+    const dbg = (window as unknown as { __duoDebug: () => { statusLog: string[] } }).__duoDebug();
+    expect((dbg.statusLog ?? []).join("\n")).toContain("ru → en");
+  });
+
+  it("нерусский оригинал + дефолт «авто» → gtx:ru (паритет прежнего поведения)", async () => {
+    localStorage.clear();
+    const gtxCalls: Array<{ to: string }> = [];
+    const invoke: DuoInvoke = (cmd, args) => {
+      if (cmd === "subtitles_asr_start") return Promise.resolve(startDoneLang("ko"));
+      if (cmd === "duo_translate_texts") {
+        const a = args as { texts: string[]; to: string };
+        gtxCalls.push({ to: a.to });
+        return Promise.resolve(a.texts.map((t) => `✓${t}`));
+      }
+      return Promise.resolve({});
+    };
+    const { duo } = makeDuo(invoke);
+    (duo as unknown as { videoId: string }).videoId = "abc12345678";
+    await duo.recognizeSpeech();
+    expect(gtxCalls.length).toBeGreaterThan(0);
+    expect(gtxCalls.every((c) => c.to === "ru")).toBe(true);
+  });
+
+  it("явный выбор gtx:uk в панели не перетирается правилом", async () => {
+    localStorage.clear();
+    const gtxCalls: Array<{ to: string }> = [];
+    const invoke: DuoInvoke = (cmd, args) => {
+      if (cmd === "subtitles_asr_start") return Promise.resolve(startDoneLang("ru"));
+      if (cmd === "duo_translate_texts") {
+        const a = args as { texts: string[]; to: string };
+        gtxCalls.push({ to: a.to });
+        return Promise.resolve(a.texts.map((t) => `✓${t}`));
+      }
+      return Promise.resolve({});
+    };
+    const { duo } = makeDuo(invoke);
+    (duo as unknown as { videoId: string }).videoId = "abc12345678";
+    await duo.recognizeSpeech(); // ru → en (правило)
+    duo.update({ translation: "gtx:uk" }); // явный выбор пользователя
+    await vi.waitFor(() => expect(gtxCalls.some((c) => c.to === "uk")).toBe(true));
+    // последнее слово — за пользователем, не за правилом
+    expect(gtxCalls[gtxCalls.length - 1]?.to).toBe("uk");
+  });
+
+  it("выбор «перевод — готовая дорожка» (track:) не заменяется правилом на gtx", async () => {
+    localStorage.clear();
+    const gtxCalls: Array<{ to: string }> = [];
+    const invoke: DuoInvoke = (cmd, args) => {
+      if (cmd === "subtitles_asr_start") return Promise.resolve(startDoneLang("ru"));
+      if (cmd === "duo_translate_texts") {
+        const a = args as { texts: string[]; to: string };
+        gtxCalls.push({ to: a.to });
+        return Promise.resolve(a.texts.map((t) => `✓${t}`));
+      }
+      return Promise.resolve({});
+    };
+    const { duo } = makeDuo(invoke);
+    (duo as unknown as { videoId: string }).videoId = "abc12345678";
+    await duo.recognizeSpeech();
+    const before = gtxCalls.length;
+    duo.update({ translation: "track:yt:en" }); // дорожка видео, не gtx
+    await new Promise((r) => setTimeout(r, 300));
+    expect(gtxCalls.length).toBe(before); // правило не втянуло обратно в gtx
   });
 });

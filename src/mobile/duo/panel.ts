@@ -11,7 +11,7 @@
 // пока конвейер занят.
 
 import { t } from "../../i18n";
-import { GTX_TARGET_LANGS, parseTranslationChoice, type DuoMobileSettings } from "./state";
+import { AUTO_TRANSLATION, GTX_TARGET_LANGS, parseTranslationChoice, type DuoMobileSettings } from "./state";
 import type { MobileTrackList } from "./session";
 import { LOCAL_MODELS, type LocalModelSizeId, type MobileAsrSettings, type MobileAsrSettingsPatch } from "./asr";
 import type { DuoStatus } from "./index";
@@ -301,6 +301,10 @@ export class DuoPanel {
     }
     this.transSel.innerHTML = "";
     this.transSel.add(new Option(t("нет"), ""));
+    // «Авто» — дефолт (duopulse-201): цель перевода по правилу дуо
+    // duopulse-196 — русский оригинал → en, прочие → ru; явный выбор ниже
+    // главнее правила
+    this.transSel.add(new Option(t("Авто (ru→en, иначе ru)"), AUTO_TRANSLATION));
     // gtx-цели предлагаем ВСЕГДА (duopulse-182): gtx переводит любой
     // оригинал, включая дорожку ASR видео без субтитров — раньше при
     // null/синтетическом списке селектор вырождался в «нет» и попытка смены
