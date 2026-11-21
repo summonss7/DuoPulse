@@ -7,6 +7,7 @@
 
 import type { BaseTrackInfo, TranslationLangInfo } from "../bridge/gen/types";
 import { t } from "../i18n";
+import { defaultTranslationTarget } from "../../content/set-defaults";
 
 /** Предпочитаемые языки перевода по порядку (как content/set-defaults;
  * порядок хозяина — карточка duopulse-094: en → ro → ru → ar). */
@@ -20,16 +21,22 @@ export interface PresetSet {
 }
 
 /** Пресеты из списка адаптера: оригинал = дорожка с original=true (нет —
- * первая); переводы — предпочитаемые языки по порядку, затем первый
- * доступный; перевод языка оригинала и повторы пропускаются; Duo/Трио —
- * только если платформа разрешает перевод оригинала (translatable). */
+ * первая); переводы — цель правила дуо duopulse-196 (русский оригинал →
+ * en, прочие → ru) прежде предпочитаемых языков, затем первый доступный;
+ * перевод языка оригинала и повторы пропускаются; Duo/Трио — только если
+ * платформа разрешает перевод оригинала (translatable). Порядок — тот же,
+ * что собирает дефолт-набор Alt+D/video-auto (content/set-defaults):
+ * пресет «Дуо» совпадает с тем, что включается сам. */
 export function presetSets(base: BaseTrackInfo[], translations: TranslationLangInfo[]): PresetSet[] {
   const original = base.find((b) => b.original) ?? base[0];
   if (!original) return [];
+  // цель правила — первой, затем прежний порядок (fallback, если цели нет)
+  const rule = defaultTranslationTarget(original.lang);
+  const order = [rule, ...PREFERRED_TRANSLATION_LANGS.filter((lang) => lang !== rule)];
   const pick = (skip: readonly string[]): TranslationLangInfo | undefined => {
     const ok = (t: TranslationLangInfo): boolean =>
       t.lang !== original.lang && !skip.includes(t.lang);
-    for (const lang of PREFERRED_TRANSLATION_LANGS) {
+    for (const lang of order) {
       const hit = translations.find((t) => t.lang === lang && ok(t));
       if (hit) return hit;
     }

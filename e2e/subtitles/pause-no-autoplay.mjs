@@ -13,7 +13,9 @@
 //   B) инструментированный call-log: video.play/player.playVideo не звались
 //      из наших скриптов до явного play стенда;
 //   C) play поднимает дефолт-набор заново (re-arm): дорожки в движке,
-//      плашка показана (перевод может 429-квотиться — достаточно 1 дорожки).
+//      плашка показана (перевод может 429-квотиться — достаточно 1 дорожки);
+//   D) duopulse-196: дуо включён ПО УМОЛЧАНИЮ — свежий профиль, никто не жал
+//      кнопку, video-auto сам поднял дефолт-набор (en-видео → перевод ru).
 // Запуск: node e2e/subtitles/pause-no-autoplay.mjs [duopulse.exe] [videoId]
 // Требует собранный debug-exe; профиль свежий на прогон; тег <video>
 // (dataset.p Stand195) отличает наш элемент от пересозданного YouTube.
@@ -125,6 +127,20 @@ try {
     if (ok === true) break;
     await sleep(1000);
   }
+
+  // D: дуо по умолчанию (duopulse-196) — свежий профиль (lastEnabled нет),
+  // видео играет само; video-auto обязан поднять набор без всяких кнопок
+  let auto = null;
+  for (let i = 0; i < 40; i++) {
+    auto = await evalIn(tab, `__duopulseContent.state()`);
+    if (auto && auto.enabled && auto.engine.trackCount >= 1) break;
+    await sleep(1000);
+  }
+  check(
+    "D. дуо включён сам (video-auto, duopulse-196): набор в движке",
+    !!(auto && auto.enabled && auto.engine.trackCount >= 1),
+    auto ? JSON.stringify({ enabled: auto.enabled, tracks: auto.engine.trackCount }) : "нет состояния",
+  );
 
   // Инструментация (duopulse-195): кто зовёт video.play / player API
   await evalIn(tab, `(function(){

@@ -92,18 +92,19 @@ describe("baseStyle (задача 5.1)", () => {
   });
 });
 
-// duopulse-128: последнее вкл/выкл duo — новые окна стартуют в нём.
-describe("lastDuoEnabled (duopulse-128)", () => {
+// duopulse-128: последнее вкл/выкл duo — новые окна стартуют в нём;
+// duopulse-196: без переключений (null) показ включён ПО УМОЛЧАНИЮ.
+describe("lastDuoEnabled (duopulse-128/196)", () => {
   it("boolean читается как есть", () => {
     expect(lastDuoEnabled(win({ subtitles: { lastEnabled: true } }))).toBe(true);
     expect(lastDuoEnabled(win({ subtitles: { lastEnabled: false } }))).toBe(false);
   });
 
-  it("отсутствует/мусор — null (прежнее поведение)", () => {
-    expect(lastDuoEnabled(win(undefined))).toBeNull();
-    expect(lastDuoEnabled(win({}))).toBeNull();
-    expect(lastDuoEnabled(win({ subtitles: {} }))).toBeNull();
-    expect(lastDuoEnabled(win({ subtitles: { lastEnabled: "on" } }))).toBeNull();
+  it("отсутствует/мусор — true: дуо включён по умолчанию (duopulse-196)", () => {
+    expect(lastDuoEnabled(win(undefined))).toBe(true);
+    expect(lastDuoEnabled(win({}))).toBe(true);
+    expect(lastDuoEnabled(win({ subtitles: {} }))).toBe(true);
+    expect(lastDuoEnabled(win({ subtitles: { lastEnabled: "on" } }))).toBe(true);
   });
 });
 

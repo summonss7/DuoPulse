@@ -161,10 +161,11 @@ describe("извлечение списка из player-ответа (фикст
     expect(list!.base.find((b) => b.id === "yt:en:asr")!.original).toBe(true);
     expect(list!.base[0].original).toBe(false); // af — первая по алфавиту
     expect(list!.base.find((b) => b.id === "yt:ro")!.original).toBe(false); // defaultCaptionTrackIndex-ловушка
-    // дефолтный набор Alt+D: «оригинал + предпочитаемый перевод» (порядок
-    // хозяина duopulse-094: en→ro→ru→ar — ro прежде ru), не af+перевод
+    // дефолтный набор Alt+D: «оригинал + перевод по правилу дуо» (duopulse-
+    // 196: en-оригинал → ru; прежний порядок en→ro→ru→ar — только фолбэк),
+    // не af+перевод
     const ids = defaultSetIds(list);
-    expect(ids).toEqual(["yt:en", "ro"]);
+    expect(ids).toEqual(["yt:en", "ru"]);
     // голый код перевода — базой становится оригинал
     const { refs } = adapter.resolveIds(["ru"]);
     expect(refs[0].baseId).toBe("yt:en");

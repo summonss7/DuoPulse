@@ -12,11 +12,21 @@ import type { AdapterTrackList } from "./adapters/types";
  * второй строкой; язык из настроек (defaults.preferredLangs) — ещё раньше. */
 export const PREFERRED_TRANSLATION_LANGS: readonly string[] = ["en", "ro", "ru", "ar"];
 
+/** Целевой язык перевода дефолт-набора (duopulse-196, правило хозяина):
+ * русский оригинал → всегда английский, прочие языки (en/ro/ar/fr/de/…)
+ * → всегда русский; подтег не мешает («ru-RU» — тоже русский). Правило
+ * первично, порядок preferred — фолбэк, когда цель правила в списке
+ * переводов платформы нет. */
+export function defaultTranslationTarget(originalLang: string): string {
+  return originalLang.trim().toLowerCase().split("-")[0] === "ru" ? "en" : "ru";
+}
+
 /** Дефолтный набор: [оригинал] или [оригинал, перевод]. Оригинал — дорожка
- * с original=true (язык аудио); нет такой — первая базовая. Перевод — tlang
- * из PREFERRED_TRANSLATION_LANGS по порядку, затем первый доступный; базой
- * перевода служит оригинал (голый код перевода в resolveIds). Пустой список
- * адаптера → [] (включать нечего, Alt+D просто поднимет флаг enabled).
+ * с original=true (язык аудио); нет такой — первая базовая. Перевод — цель
+ * правила duopulse-196 (defaultTranslationTarget), затем tlang из
+ * preferred по порядку, затем первый доступный; базой перевода служит
+ * оригинал (голый код перевода в resolveIds). Пустой список адаптера → []
+ * (включать нечего, Alt+D просто поднимет флаг enabled).
  * duopulse-184: при неизвестном оригинале (все дорожки ручные — языка аудио
  * в player-ответе нет) прежде первой берётся en-ручная: порядок captionTracks
  * нестабилен (зависит от hl/гео сессии — у vk_xq1P7vIU первым шёл zh-Hans и
@@ -32,11 +42,13 @@ export function defaultSetIds(
     list.base.find((b) => b.kind === "manual" && b.lang.split("-")[0] === "en") ??
     list.base[0];
   const ids = [original.id];
-  // Перевод языка оригинала бессмыслен — исключаем; предпочитаемые языки
-  // по порядку, затем первый доступный из оставшихся.
+  // Перевод языка оригинала бессмыслен — исключаем; цель правила duopulse-196
+  // прежде порядка preferred, затем первый доступный из оставшихся.
   const candidates = list.translations.filter((t) => t.lang !== original.lang);
+  const rule = defaultTranslationTarget(original.lang);
+  const order = [rule, ...preferred.filter((lang) => lang !== rule)];
   const translation =
-    preferred.map((lang) => candidates.find((t) => t.lang === lang)).find(Boolean) ??
+    order.map((lang) => candidates.find((t) => t.lang === lang)).find(Boolean) ??
     candidates[0];
   // оригинал переводим только если платформа разрешает (translatable)
   if (translation && original.translatable) ids.push(translation.lang);

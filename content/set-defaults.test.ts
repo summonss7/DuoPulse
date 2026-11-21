@@ -3,7 +3,7 @@
 // перестановки набора панелью; decideToggle — решение Alt+D (duopulse-066:
 // «флаг поднят, набор пуст» — собрать дефолт, а не снять флаг).
 import { describe, expect, it } from "vitest";
-import { decideToggle, defaultSetIds, sameMembers } from "./set-defaults";
+import { decideToggle, defaultSetIds, defaultTranslationTarget, sameMembers } from "./set-defaults";
 import type { AdapterTrackList } from "./adapters/types";
 
 const list = (base: Partial<AdapterTrackList["base"][number]>[], translations: string[]): AdapterTrackList => ({
@@ -34,11 +34,26 @@ describe("defaultSetIds (Alt+D на пустом наборе)", () => {
     expect(defaultSetIds(list([{ lang: "en", original: true }], ["uk", "es"]))[1]).toBe("uk");
   });
 
-  it("duopulse-094: порядок предпочтений en → ro → ru → ar", () => {
-    // en — язык оригинала (сам не перевод) → ro прежде ru
-    expect(defaultSetIds(list([{ lang: "en", original: true }], ["ru", "ro", "es"]))[1]).toBe("ro");
-    expect(defaultSetIds(list([{ lang: "en", original: true }], ["ar", "ru"]))[1]).toBe("ru");
-    // не-en оригинал → en первым
+  it("duopulse-196: правило — русский оригинал → en, прочие → ru", () => {
+    // «весь русский текст всегда переводит на английский, весь английский —
+    // на русский, румынский/арабский/прочие — на русский» (пожелание)
+    expect(defaultSetIds(list([{ lang: "ru", original: true }], ["ro", "en"]))[1]).toBe("en");
+    expect(defaultSetIds(list([{ lang: "en", original: true }], ["ro", "ru"]))[1]).toBe("ru");
+    expect(defaultSetIds(list([{ lang: "ro", original: true }], ["en", "ru"]))[1]).toBe("ru");
+    expect(defaultSetIds(list([{ lang: "ar", original: true }], ["en", "ru"]))[1]).toBe("ru");
+    expect(defaultSetIds(list([{ lang: "fr", original: true }], ["de", "ru"]))[1]).toBe("ru");
+    // подтег не мешает: «ru-RU» — тоже русский
+    expect(defaultSetIds(list([{ lang: "ru-RU", original: true }], ["ro", "en"]))[1]).toBe("en");
+  });
+
+  it("duopulse-196: цели правила нет в списке — прежний порядок preferred", () => {
+    // en-видео без ru-перевода → фолбэк порядка (настройки, затем en→ro→ru→ar)
+    expect(defaultSetIds(list([{ lang: "en", original: true }], ["ro", "es"]))[1]).toBe("ro");
+    // русское видео без en-перевода → первый доступный
+    expect(defaultSetIds(list([{ lang: "ru", original: true }], ["ro", "uk"]))[1]).toBe("ro");
+    // fr-видео без ru → явный preferred (настройка) прежде порядка по умолчанию
+    expect(defaultSetIds(list([{ lang: "fr", original: true }], ["de", "en"]), ["de"])[1]).toBe("de");
+    // fr-видео, предпочтений нет вовсе (дефолт en→ro→ru→ar) — en
     expect(defaultSetIds(list([{ lang: "fr", original: true }], ["de", "en"]))[1]).toBe("en");
   });
 
@@ -76,6 +91,21 @@ describe("defaultSetIds (Alt+D на пустом наборе)", () => {
   it("пустой список адаптера — включать нечего", () => {
     expect(defaultSetIds(null)).toEqual([]);
     expect(defaultSetIds(list([], ["ru"]))).toEqual([]);
+  });
+});
+
+describe("defaultTranslationTarget (правило дуо, duopulse-196)", () => {
+  it("русский (в любом регистре/с подтегом) → en, прочие → ru", () => {
+    expect(defaultTranslationTarget("ru")).toBe("en");
+    expect(defaultTranslationTarget("RU")).toBe("en");
+    expect(defaultTranslationTarget("ru-RU")).toBe("en");
+    expect(defaultTranslationTarget("en")).toBe("ru");
+    expect(defaultTranslationTarget("ro")).toBe("ru");
+    expect(defaultTranslationTarget("ar")).toBe("ru");
+    expect(defaultTranslationTarget("fr")).toBe("ru");
+    expect(defaultTranslationTarget("de")).toBe("ru");
+    expect(defaultTranslationTarget("und")).toBe("ru");
+    expect(defaultTranslationTarget("")).toBe("ru");
   });
 });
 

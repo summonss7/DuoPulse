@@ -89,6 +89,7 @@ import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from ".
 import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import {
   EmbedHost,
+  autoTranslateEmbedDecision,
   isFrameContext,
   startFrameAgent,
   type EmbedTrackInfo,
@@ -97,9 +98,9 @@ import {
 import { installSelectionTranslate } from "./translate-select";
 import { installPasswordFill } from "./passwords-fill";
 import { installSubsDownload } from "./download-subs";
-import { interfaceTranslationLang, lastDuoEnabled, preferredLangs } from "./defaults";
+import { lastDuoEnabled, preferredLangs } from "./defaults";
 import type { Cue, Track } from "./types";
-import { defaultSetIds, decideToggle, sameMembers } from "./set-defaults";
+import { defaultSetIds, defaultTranslationTarget, decideToggle, sameMembers } from "./set-defaults";
 
 /** Видео страницы: DOM-детектор даёт элемент документа, EmbedHost плеер-фрейма
  * (duopulse-199) — ещё и прокси-часы (frameProxy) вместо video-элемента
@@ -204,6 +205,11 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
   // замена файла снимает их — перевод прежней версии .srt больше не
   // соответствует показываемому файлу.
   let fileSourcedCloudIds = new Set<string>();
+  // Облачные строки, поднятые автопереводом плеер-фрейма (duopulse-196):
+  // снятие такой строки — отказ от автоперевода за это видео (как у файлов).
+  // Живёт до смены видео: набор-память хранит сами дорожки, метка нужна
+  // только решению «снимать = отказаться».
+  let embedSourcedCloudIds = new Set<string>();
   // Видео, где пользователь снял автоперевод файловой дорожки (duopulse-177):
   // согласие не навязываем — повторный дроп того же файла не запустит перевод
   // заново; новое видео (другой videoKey) — снова предложит.
@@ -376,19 +382,21 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
    * сразу перевод»): после применения файловой части — решение чистой
    * autoTranslateFileDecision (согласие lastDuoEnabled — та же логика, что
    * на YouTube, автоперевод не молча: прогресс и строка набора видны в
-   * панели; снял строку — за это видео больше не предлагаем). */
+   * панели; снял строку — за это видео больше не предлагаем). Цель —
+   * правило дуо duopulse-196 (defaultTranslationTarget: русский файл → en,
+   * прочие → ru), прежде — язык интерфейса из настроек. */
   const maybeAutoTranslateFileTrack = (): void => {
+    const target = defaultTranslationTarget(fileTracks[0]?.lang ?? "und");
     const decision = autoTranslateFileDecision({
       fileTracks,
       platformTracks,
       translateTracks,
-      targetLang: interfaceTranslationLang(),
-      consent: lastDuoEnabled() === true,
+      targetLang: target,
+      consent: lastDuoEnabled(),
       declined: currentVideo ? declinedAutoTranslate.has(currentVideo.videoKey) : false,
     });
     if (decision.run && decision.source) {
       const source = decision.source;
-      const target = interfaceTranslationLang();
       const videoKey = currentVideo?.videoKey ?? "";
       postToCore({
         duopulse: "auto-translate-file",
@@ -399,6 +407,38 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
       });
       startTrackTranslation(source, target, true);
     }
+  };
+
+  /** Автоперевод дорожки плеер-фрейма (duopulse-196: «другие видеохостинги» —
+   * кино-плееры отдают только оригинал, вторую строку-перевод поднимает
+   * облако; цель — то же правило дуо). Согласие/отказ — паттерн duopulse-177:
+   * снял строку — за это видео больше не предлагаем. embedAutoAsked страхует
+   * от двойного запуска (прогрессивные applySet в selectEmbedTracks). */
+  const embedAutoAsked = new Set<string>();
+  const maybeAutoTranslateEmbedTrack = (): void => {
+    const videoKey = currentVideo?.videoKey;
+    if (!videoKey || embedAutoAsked.has(videoKey)) return;
+    const source = platformTracks[0];
+    const target = defaultTranslationTarget(source?.lang ?? "und");
+    const decision = autoTranslateEmbedDecision({
+      platformTracks,
+      translateTracks,
+      fileTracks,
+      targetLang: target,
+      consent: lastDuoEnabled(),
+      declined: declinedAutoTranslate.has(videoKey),
+    });
+    if (!decision.run || !decision.source) return;
+    embedAutoAsked.add(videoKey);
+    embedSourcedCloudIds.add(`cloud:${target}`); // будущая строка набора — снятие = отказ
+    postToCore({
+      duopulse: "auto-translate-embed",
+      videoKey,
+      sourceLang: decision.source.lang,
+      targetLang: target,
+      cues: decision.source.cues.length,
+    });
+    startTrackTranslation(decision.source, target, false);
   };
 
   /** Применить новую файловую часть набора (дроп или subtitles.load_file,
@@ -599,6 +639,10 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
     }
     platformTracks = out;
     applySet(via);
+    // duopulse-196: автоматические включения (video-auto/Alt+D) на дорожках
+    // плеер-фрейма поднимают и перевод облаком; явный выбор состава панелью
+    // («Оригинал» и пр.) — не трогаем, пользователь собрал набор сам.
+    if (via === "video-auto" || via === "alt-d") maybeAutoTranslateEmbedTrack();
     return { loaded: out.length, failures, unknown };
   };
 
@@ -730,6 +774,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
       translateTracks = mem ? mem.translate : [];
       fileTracks = mem ? mem.files : [];
       fileSourcedCloudIds = new Set(mem ? mem.fileCloudIds : []);
+      embedSourcedCloudIds = new Set(); // метка автоперевода фрейма — в этом документе
       // Список дорожек принадлежит прошлому видео — сброс до свежего
       // (придёт с onYouTubeVideo/embed-анонсом; дефолт-набор Alt+D не
       // соберётся по чужому).
@@ -961,6 +1006,12 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
       if (fileSourcedCloudIds.has(id) && currentVideo) {
         declinedAutoTranslate.add(currentVideo.videoKey);
         fileSourcedCloudIds.delete(id);
+      }
+      // Автоперевод фрейма (duopulse-196): снятие поднятой им строки —
+      // отказ за это видео (тот же паттерн, что у файлов 177).
+      if (embedSourcedCloudIds.has(id) && currentVideo) {
+        declinedAutoTranslate.add(currentVideo.videoKey);
+        embedSourcedCloudIds.delete(id);
       }
       translateTracks = translateTracks.filter((t) => t.id !== id);
       applySet("remove");

@@ -883,6 +883,19 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                         "[subtitles] auto-translate-file: {video_key} {source} → {target} ({cues} cue, tab {tab_id})"
                     );
                 }
+            } else if parsed["duopulse"] == "auto-translate-embed" {
+                // Автоперевод дорожки плеер-фрейма кино-сайта запущен
+                // (duopulse-196: «другие видеохостинги» — у плееров нет tlang,
+                // вторую строку дуо поднимает облако). Телеметрия решения.
+                if let (Some(video_key), Some(target)) =
+                    (parsed["videoKey"].as_str(), parsed["targetLang"].as_str())
+                {
+                    let source = parsed["sourceLang"].as_str().unwrap_or("?");
+                    let cues = parsed["cues"].as_u64().unwrap_or(0);
+                    eprintln!(
+                        "[subtitles] auto-translate-embed: {video_key} {source} → {target} ({cues} cue, tab {tab_id})"
+                    );
+                }
             } else if parsed["duopulse"] == "parse-subtitles" {
                 // Разбор payload дорожки в Core (задача 3.3): канонические
                 // парсеры задачи 3.1, формат — автодетект по содержимому.

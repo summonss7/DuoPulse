@@ -8,10 +8,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   EmbedHost,
   FrameVideoProxy,
+  autoTranslateEmbedDecision,
   langOfTrackName,
   parseMakePlayerCc,
 } from "./embed";
-import type { Cue } from "../types";
+import type { Cue, Track } from "../types";
 
 /** Живой фрагмент эмбеда api.embf.net (duopulse-198: инлайн makePlayer,
  * пять .vtt в source.cc, аудио-дубляжи с Eng.Original; подписи вырезаны). */
@@ -181,6 +182,70 @@ describe("EmbedHost (протокол relay)", () => {
     msg({ type: "video", videoKey: "spoofed" });
     window.dispatchEvent(new MessageEvent("message", { data: "string-not-object" }));
     expect(events.video).toEqual([]);
+  });
+});
+
+// Автоперевод дорожки плеер-фрейма (duopulse-196): чистое решение — когда
+// облачная строка-перевод поднимается сама (согласие + дефолт-набор из
+// одного оригинала), цель — правило дуо defaultTranslationTarget.
+describe("autoTranslateEmbedDecision (duopulse-196)", () => {
+  const cue: Cue = { startMs: 0, endMs: 1, text: "hi" };
+  const embedTrack = (over: Partial<Track> = {}): Track => ({
+    id: "embed:en:0",
+    source: "embed",
+    lang: "en",
+    role: "original",
+    cues: [cue],
+    ...over,
+  });
+  const args = (over: Partial<Parameters<typeof autoTranslateEmbedDecision>[0]> = {}) => ({
+    platformTracks: [embedTrack()],
+    translateTracks: [],
+    fileTracks: [],
+    targetLang: "ru",
+    consent: true,
+    declined: false,
+    ...over,
+  });
+
+  it("дефолт-набор с согласием — переводить (en → ru)", () => {
+    const d = autoTranslateEmbedDecision(args());
+    expect(d.run).toBe(true);
+    expect(d.source?.id).toBe("embed:en:0");
+  });
+
+  it("без согласия/после отказа — не трогать", () => {
+    expect(autoTranslateEmbedDecision(args({ consent: false })).run).toBe(false);
+    expect(autoTranslateEmbedDecision(args({ declined: true })).run).toBe(false);
+  });
+
+  it("цель равна языку оригинала — не переводить; правило ru → en живо", () => {
+    // en-оригинал с целью en — бессмысленный перевод
+    expect(autoTranslateEmbedDecision(args({ targetLang: "en" })).run).toBe(false);
+    // русский оригинал → en (правило дуо duopulse-196)
+    const toEn = args({ platformTracks: [embedTrack({ id: "embed:ru:3", lang: "ru" })], targetLang: "en" });
+    expect(autoTranslateEmbedDecision(toEn).run).toBe(true);
+    // русский оригинал с целью ru — нет
+    const same = args({ platformTracks: [embedTrack({ id: "embed:ru:3", lang: "ru" })], targetLang: "ru" });
+    expect(autoTranslateEmbedDecision(same).run).toBe(false);
+  });
+
+  it("не дефолт-набор (свой состав/файлы/готовый перевод) — не вмешиваться", () => {
+    const second = embedTrack({ id: "embed:uk:1", lang: "uk", role: "translation" });
+    expect(autoTranslateEmbedDecision(args({ platformTracks: [embedTrack(), second] })).run).toBe(false);
+    expect(autoTranslateEmbedDecision(args({ fileTracks: [embedTrack({ id: "file:en", source: "file" })] })).run).toBe(false);
+    const cloud = { id: "cloud:ru", source: "translate", lang: "ru", role: "translation", cues: [cue] } as Track;
+    expect(autoTranslateEmbedDecision(args({ translateTracks: [cloud] })).run).toBe(false);
+  });
+
+  it("не оригинал/без cue/неизвестный язык — не переводить", () => {
+    expect(
+      autoTranslateEmbedDecision(args({ platformTracks: [embedTrack({ role: "translation" })] })).run,
+    ).toBe(false);
+    expect(autoTranslateEmbedDecision(args({ platformTracks: [embedTrack({ cues: [] })] })).run).toBe(false);
+    expect(
+      autoTranslateEmbedDecision(args({ platformTracks: [embedTrack({ lang: "und" })], targetLang: "ru" })).run,
+    ).toBe(false);
   });
 });
 

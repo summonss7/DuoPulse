@@ -62,11 +62,26 @@ describe("presetSets", () => {
     expect(sets[1].ids).toEqual(["yt:en", "uk"]);
   });
 
-  it("duopulse-094: порядок предпочтений en → ro → ru → ar", () => {
-    // en — язык оригинала → ro прежде ru в «Дуо»
+  it("duopulse-196: правило дуо — en-оригинал → ru прежде ro", () => {
+    // «весь английский текст всегда переводит на русский»: цель правила
+    // первой, прежний порядок en → ro → ru → ar — фолбэк (для Трио)
     const sets = presetSets([base({ original: true })], [tlang("ru"), tlang("ro"), tlang("ar")]);
+    expect(sets.find((s) => s.key === "duo")!.ids).toEqual(["yt:en", "ru"]);
+    expect(sets.find((s) => s.key === "trio")!.ids).toEqual(["yt:en", "ru", "ro"]);
+  });
+
+  it("duopulse-196: русский оригинал → «Дуо ru+en»", () => {
+    const sets = presetSets(
+      [base({ id: "yt:ru", lang: "ru", original: true })],
+      [tlang("en"), tlang("ro")],
+    );
+    expect(sets.find((s) => s.key === "duo")!.ids).toEqual(["yt:ru", "en"]);
+  });
+
+  it("duopulse-196: цели правила нет в переводах — прежний порядок", () => {
+    // en-видео без ru-перевода → ro (fallback duopulse-094)
+    const sets = presetSets([base({ original: true })], [tlang("ro"), tlang("ar")]);
     expect(sets.find((s) => s.key === "duo")!.ids).toEqual(["yt:en", "ro"]);
-    expect(sets.find((s) => s.key === "trio")!.ids).toEqual(["yt:en", "ro", "ru"]);
   });
 
   it("второй перевод не повторяет первый (Трио)", () => {

@@ -28,7 +28,7 @@
 import { VideoDetector, type DetectedVideo } from "../detector";
 import { pickSubtitleFiles } from "./file";
 import type { VideoLike } from "../engine/subtitles-engine";
-import type { Cue } from "../types";
+import type { Cue, Track } from "../types";
 
 /** Маркер протокола: window.postMessage(JSON) между фреймом и top-документом.
  * Чужие postMessage страницы его не содержат — игнорируются. */
@@ -64,6 +64,58 @@ export function langOfTrackName(name: string): string {
   ];
   for (const [re, lang] of rules) if (re.test(name)) return lang;
   return "und";
+}
+
+/** Базовый код языка без подтега и регистра — сравнение с целью перевода. */
+function embedBaseLang(lang: string): string {
+  return lang.trim().toLowerCase().split("-")[0] ?? "";
+}
+
+/** Решение об автопереводе дорожки плеер-фрейма (duopulse-196: дуо на
+ * «других видеохостингах» — кино-плееры отдают только оригинал без tlang,
+ * вторую строку-перевод поднимает облако; цель — правило дуо
+ * defaultTranslationTarget: русский → en, прочие → ru). Чистая функция —
+ * применение и телеметрия в duopulse-content; согласие и отказ — тот же
+ * паттерн, что у файлового автоперевода (duopulse-177). */
+export interface AutoTranslateEmbedArgs {
+  platformTracks: readonly Track[];
+  translateTracks: readonly Track[];
+  fileTracks: readonly Track[];
+  /** Целевой язык — defaultTranslationTarget(языка оригинала). */
+  targetLang: string;
+  /** lastDuoEnabled() === true — согласие (показ включён/был включён). */
+  consent: boolean;
+  /** Автоперевод за это видео уже снимали — не навязываемся. */
+  declined: boolean;
+}
+
+export interface AutoTranslateEmbedDecision {
+  run: boolean;
+  /** Дорожка-источник (run=true). */
+  source: Track | null;
+}
+
+export function autoTranslateEmbedDecision(args: AutoTranslateEmbedArgs): AutoTranslateEmbedDecision {
+  // Сценарий «дефолт-набор»: ровно одна платформенная дорожка — оригинал
+  // плеер-фрейма (пользователь ещё не собирал свой состав), файлов нет.
+  const solo =
+    args.platformTracks.length === 1
+      ? args.platformTracks[0]
+      : null;
+  const source = solo && solo.source === "embed" && solo.role === "original" ? solo : null;
+  const target = embedBaseLang(args.targetLang);
+  const run =
+    args.consent &&
+    !args.declined &&
+    source !== null &&
+    source.cues.length > 0 &&
+    embedBaseLang(source.lang) !== "" &&
+    embedBaseLang(source.lang) !== "und" &&
+    target !== "" &&
+    embedBaseLang(source.lang) !== target &&
+    args.fileTracks.length === 0 &&
+    !args.translateTracks.some((t) => embedBaseLang(t.lang) === target);
+  return { run, source: run ? source : null };
 }
 
 /** Выдержка строкового литерала JS (`"…"`/`'…'`) с JSON-эскейпами; null —

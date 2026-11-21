@@ -49,11 +49,13 @@ export function preferredLangs(holder: DefaultsHolder = window as unknown as Def
 }
 
 /** Последнее пользовательское вкл/выкл duo (карточка duopulse-128): новые
- * окна/видео стартуют в том же состоянии. null — пользователь ещё не
- * переключал — прежнее поведение (выключено до Alt+D/кнопки). */
-export function lastDuoEnabled(holder: DefaultsHolder = window as unknown as DefaultsHolder): boolean | null {
+ * окна/видео стартуют в том же состоянии. duopulse-196: null (пользователь
+ * ещё не переключал) трактуется как true — показ с переводом включён по
+ * умолчанию на каждом новом видео, хозяин не жмёт кнопку; явное выключение
+ * (false) помнится и новые видео стартуют выключенными. */
+export function lastDuoEnabled(holder: DefaultsHolder = window as unknown as DefaultsHolder): boolean {
   const last = rawDefaults(holder)?.subtitles?.lastEnabled;
-  return typeof last === "boolean" ? last : null;
+  return typeof last === "boolean" ? last : true;
 }
 
 /** Базовый стиль плашки новых вкладок: дефолты content-слоя + патч настроек
