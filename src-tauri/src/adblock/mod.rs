@@ -2123,6 +2123,43 @@ mod tests {
     }
 
     #[test]
+    fn tubes_rules_block_xhamster_ad_network_not_content() {
+        // Карточка 197: рекламная сеть преролла xhamster (ротационные DSP/
+        // HLS-хосты) режется, контентные CDN (xhcdn/flixcdn, api xhamster.com,
+        // региональный eu-west-1) — нет.
+        let s = service();
+        let rules: Vec<&str> = TUBES_RULES.lines().collect();
+        s.set_engine(engine(&rules));
+        let page = Some("https://xhamster.com/videos/vera-8446830");
+        for (ty, url) in [
+            ("xhr", "https://gogukypynijoxy.com/do2/hMZw/master"),
+            ("script", "https://cdn.gogukypynijoxy.com/sdk/v1/ad.js"),
+            ("xhr", "https://cdn.gogukypynijoxy.com/dsp-pixels"),
+            // CDN-семья *cdnssedge.com рандомит поддомены (grow/media-hls/xhvideo)
+            ("xhr", "https://media-hls.growcdnssedge.com/b-hls-06/102034310/x.m3u8"),
+            ("media", "https://xhvideo.sacdnssedge.com/video/2d670d82b3b3114ddf"),
+            ("xhr", "https://xvacdn77.mulewosizeseha.com/pHvx/media=hlsA/multi=854x480"),
+            ("script", "https://jssdk.juneworewyjyna.com/hMZwCUh0wZH.js"),
+            ("image", "https://lumen.flirtify.com/4vSNtvNyWRkiwTuCRXEdMQ==,1796256000/6/a/e/x.webp"),
+            ("fetch", "https://valentine.xhamster.com/V70FD/v2/for-page"),
+            // cdn-fc.com — scoped $script,domain=xhamster.com|pornhub.com
+            ("script", "https://cdn-fc.com/spot.js"),
+        ] {
+            assert!(s.should_block(page, url, ty, page), "не заблокирован: {url}");
+        }
+        for (ty, url) in [
+            ("xhr", "https://video-nss.xhcdn.com/DVNFxRPQ==,1795/media=hls4/multi=256x144"),
+            ("script", "https://static-ah.xhcdn.com/xh-desktop/js/app.js"),
+            ("fetch", "https://xhamster.com/api/front/batch/W3siaWQi"),
+            // региональный API-эндпоинт: только пиксели, не блокируем (197)
+            ("fetch", "https://eu-west-1.xhamster.com/ma325/r"),
+            ("image", "https://thumb-ah.flixcdn.com/xc/Y5/heat-preview/a-352x220.jpg"),
+        ] {
+            assert!(!s.should_block(page, url, ty, page), "ложный блок: {url}");
+        }
+    }
+
+    #[test]
     fn global_toggle_and_counters() {
         let s = service();
         s.set_engine(engine(&["/blocked/*"]));

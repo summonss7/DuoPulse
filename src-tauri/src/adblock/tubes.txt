@@ -1,5 +1,44 @@
-! DuoPulse: преролл-реклама и попандеры туб-сайтов (карточка duopulse-140).
+! DuoPulse: преролл-реклама и попандеры туб-сайтов (карточки duopulse-140/197).
 ! Общие списки (EasyList + uBO) режут баннерную сеть, но преролл pornhub/
 ! xhamster живёт на собственных интеграциях плееров и часто уходит мимо.
-! Правила — по фактам стенда e2e/adblock/tube-ads-probe.mjs (журнал 140);
+! Правила — по фактам стенда e2e/adblock/tube-ads-probe.mjs (журнал 197);
 ! обновление — правкой этого файла + пересборка (механизм compat-списка).
+!
+! Факты xhamster (21.11, две сессии + прогон 140 от 13.11 — сеть стабильна):
+! преролл играет тем же <video> (blob/MSE), оверлей — xplayer-ads-block*;
+! рекламная сеть на ротационных «случайных» доменах: DSP-теги <host>/do2/<hash>
+! (gogukypynijoxy.com, mulewosizeseha.com), SDK cdn.<host>/sdk/v1/*.js +
+! /dsp-pixels + pxl-eu.<host> (pix), видео-реклама media-hls/edge-hls.
+! growcdnssedge.com (b-hls-06/<id>) и xvacdnNN.<host> (media=hlsA), обвязка
+! jssdk.<host>/<hash>.js и cdn-fc.com; креативы знакомств lumen.flirtify.com;
+! собственный конфиг «что показать на странице» —
+! valentine.xhamster.com/<rand>/v2/for-page. НЕ трогаем контент:
+! xhamster.com (api/навигация), *-nss/static-ah.xhcdn.com (видео/статика),
+! thumb-ah.flixcdn.com (превью); eu-west-1.xhamster.com — региональный
+! API-эндпоинт (живой прогон: /api/models/v1st) с пикселями поверх — не
+! блокируем, риск сломать сайт (подпись URL «==,ts» у пикселей та же, что у
+! контентного видео — только доменами, не regex).
+!
+! --- сеть: рекламная сеть преролла (главный фрейм, WebResourceRequested)
+! CDN-семья <prefix>cdnssedge.com рандомит префиксы по сеансам (growcdnssedge,
+! sacdnssedge/xhvideo — преролл-видео 6–30 с, media/edge-hls) — regex семьи
+/^https?:\/\/(?:[a-z0-9-]+\.)*[a-z0-9-]*cdnssedge\.com\//
+||gogukypynijoxy.com^
+||mulewosizeseha.com^
+||juneworewyjyna.com^
+||flirtify.com^
+||valentine.xhamster.com^
+! одноразовый скрипт-хост с «говорящим» именем — только на страницах тубов
+||cdn-fc.com^$script,domain=xhamster.com|pornhub.com
+!
+! --- скриптлеты: страховка от ротации доменов той же сети — у тегов/DSP
+! стабильные подписи путей (/do2/, /dsp-pixels), доставка рвётся в fetch/XHR
+! страницы плеера независимо от хоста
+xhamster.com##+js(no-fetch-if, /\/do2\/|\/dsp-pixels|cdnssedge\.com|valentine\.xhamster\.com/)
+xhamster.com##+js(no-xhr-if, /\/do2\/|\/dsp-pixels|cdnssedge\.com|valentine\.xhamster\.com/)
+!
+! --- косметика: оверлей преролла и его баннеры-спутники, сайдбар-споты
+! и попап-карточки промо (placement-*/popup-* — id рандомятся по прогону)
+xhamster.com##[class*="xplayer-ads-block"]
+xhamster.com##.traffic-stars
+xhamster.com##[class*="placement-"][class*="popup-"]

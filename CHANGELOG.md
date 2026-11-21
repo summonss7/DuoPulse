@@ -7737,3 +7737,34 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   call-log без чужих play, play → набор+плашка); релиз 0.1.79 собран и опубликован (оба канала + хаб +
   C:\DuoPulse).
 - Коммит: 98a8799 (feat(subtitles): duopulse-196 — дуо включён по умолчанию + правило перевода…); версия 0.1.79.
+
+## 21.11.2026, 05:25 — feat(adblock): duopulse-197 — реклама xHamster: преролл «по 15 минут» и оверлей плеера убраны встроенным списком duopulse-tubes
+- Начало работы: 21.11.2026, 04:35
+- Окончание работы: 21.11.2026, 05:25
+- Что сделано: пожелание Артёма «убрать рекламу на xHamster (по 15 минут в начале)». Список duopulse-tubes
+  (карточка 140 оставила его пустым после отмены) заполнен по фактам живого стенда e2e/adblock/tube-ads-probe.mjs
+  (4 прогона, свежий профиль, клик play, A/B до/после правил):
+  1) Факты: преролл играет тем же <video>, что и контент (blob/MSE, длительности 6–30 с, цепочки — откуда
+     «15 минут»), поверх — кликабельный оверлей xplayer-ads-block* с баннерами-спутниками; рекламная сеть живёт
+     мимо EasyList/uBO на ротационных «случайных» доменах: DSP-теги <host>/do2/<hash> (gogukypynijoxy.com,
+     mulewosizeseha.com — стабильны с 13.11), SDK cdn.<host>/sdk/v1/*.js + /dsp-pixels + pxl-eu.<host>,
+     видео-реклама на CDN-семье <prefix>cdnssedge.com (префиксы рандомятся по сеансам: media-hls.grow-,
+     xhvideo.sa- — поймано живой итерацией), креативы знакомств lumen.flirtify.com, обвязка jssdk.<host>,
+     конфиг «что показать на странице» valentine.xhamster.com/<rand>/v2/for-page.
+  2) Правила (src-tauri/src/adblock/tubes.txt): сеть — хосты DSP/SDK, regex семьи cdnssedge, valentine,
+     flirtify; cdn-fc.com — scoped $script,domain=xhamster|pornhub; скриптлеты no-fetch-if/no-xhr-if по
+     стабильным подписям путей (/do2/, /dsp-pixels, cdnssedge) — страховка от ротации доменов; косметика —
+     оверлей/споты (xplayer-ads-block*, traffic-stars, placement-*+popup-*). Контент не задет: xhamster.com
+     (api), *-nss/static-ah.xhcdn.com (видео/статика), thumb-ah.flixcdn.com; eu-west-1.xhamster.com —
+     региональный API-эндпоинт (живой прогон: /api/models/v1st) — сознательно НЕ блокируем.
+  3) Cargo-тест tubes_rules_block_xhamster_ad_network_not_content (блок всей замеченной сети, не блок
+     контентных CDN). Стенд: +DUOPULSE_E2E_NO_SINGLE_INSTANCE, метрика блокировок исправлена (движок
+     отвечает 403, а не ERR_BLOCKED_BY_CLIENT — раньше блоки были невидимы в сводке).
+  4) Мобильная ветка получает список автоматически (общий adblock-модуль duopulse-144) — выйдет с ближайшим
+     мобильным релизом.
+- Как проверено: cargo 480/480 (444 bin + 36 lib, +1 tubes-тест); живой стенд e2e/adblock/tube-ads-probe.mjs
+  A/B: до правил — преролл 14–18 с + оверлей xplayer-ads-block (0 сетевых блокировок), после — преролла нет
+  (видео с первой секунды контентное, dur=122), «реклама в DOM: не замечено», движок режет valentine/flirtify
+  (403 в сетевом логе), видео-контент/превью/API сайта работают; релиз 0.1.80 собран и опубликован (оба
+  канала + хаб + C:\DuoPulse).
+- Коммит: <hash> (feat(adblock): duopulse-197 — реклама xhamster: список duopulse-tubes…); версия 0.1.80.

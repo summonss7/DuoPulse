@@ -201,6 +201,8 @@ function launchApp(tmp, url) {
     ...process.env,
     APPDATA: tmp,
     DUOPULSE_START_URL: url,
+    // DuoPulse Артёма может быть запущен — single-instance прибьёт наш debug-exe
+    DUOPULSE_E2E_NO_SINGLE_INSTANCE: "1",
     WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, "webview2-data"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
   };
@@ -403,7 +405,9 @@ try {
       catch (e) { console.log(`  попытка ${attempt} не удалась — ${e.message}`); }
     }
     if (!r) { results.push({ site, error: "прогон не удался" }); continue; }
-    const blocked = r.net.filter((x) => x.failed === "net::ERR_BLOCKED_BY_CLIENT");
+    // Движок DuoPulse отвечает на заблокированный запрос 403 (синтетический
+    // ответ WebResourceRequested), а не ERR_BLOCKED_BY_CLIENT — считаем оба.
+    const blocked = r.net.filter((x) => x.failed === "net::ERR_BLOCKED_BY_CLIENT" || x.status === 403);
     const leaked = r.net.filter((x) => !x.failed && !/^data:|^blob:/.test(x.url));
     const popups = [...new Set([...r.newTargets, ...r.samples.flatMap((s) => s.popups || [])])];
     const adsSeen = r.samples.filter((s) => s.skip || (s.adish && s.adish.length));

@@ -1253,3 +1253,21 @@ e2e/subs/embed-subs-probe.mjs — живой прогон uakinogo (5 прове
   целится по тому же правилу. Мобильная ветка — паритет отдельной карточкой
   (duopulse-200). Тесты: vitest 701/701 (+9), cargo 443/443; живой стенд
   e2e/subtitles/pause-no-autoplay.mjs 7/7 (+проверка D «включился сам»).
+
+### 21.11.2026: duopulse-197 — реклама xhamster (преролл, оверлей плеера)
+Пожелание Артёма («по 15 минут рекламы в начале»): у xhamster преролл играет
+тем же <video>, что и контент (blob/MSE), поверх — кликабельный оверлей
+xplayer-ads-block* с баннерами-спутниками; рекламная сеть живёт на
+ротационных «случайных» доменах (DSP-теги <host>/do2/<hash>, SDK
+cdn.<host>/sdk/v1, видео-реклама media-hls/edge-hls.growcdnssedge.com и
+xvacdnNN.<host>), поэтому EasyList её не догоняет. Список duopulse-tubes
+(карточка 140 оставила его пустым) заполнен по фактам живого стенда
+e2e/adblock/tube-ads-probe.mjs: сетевые правила (сеть преролла + собственный
+конфиг valentine.xhamster.com; cdn-fc.com — scoped $script,domain),
+скриптлеты no-fetch-if/no-xhr-if по стабильным подписям путей (/do2/,
+/dsp-pixels) — страховка от ротации доменов, косметика оверлея и спотов.
+Контент не задет: xhamster.com/api, *-nss/static-ah.xhcdn.com,
+thumb-ah.flixcdn.com; eu-west-1.xhamster.com (пиксели на региональном
+API-эндпоинте) сознательно не блокируем. Мобильная ветка получает список
+автоматически (общий adblock-модуль). Cargo-тест на содержимое списка
+(tubes_rules_block_xhamster_ad_network_not_content).
