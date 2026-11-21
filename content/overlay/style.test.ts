@@ -20,6 +20,7 @@ import {
   plateFontSizeCss,
   rowStyleFor,
   stepScale,
+  visibleRowText,
 } from "./style";
 
 describe("mergeStyle — настройки отображения с клампами", () => {
@@ -261,5 +262,41 @@ describe("swapRows (duopulse-181)", () => {
     expect(displayOrder(3, true)).toEqual([2, 1, 0]);
     expect(displayOrder(1, true)).toEqual([0]);
     expect(displayOrder(0, true)).toEqual([]);
+  });
+});
+
+// duopulse-200: потолок строки плашки — «субтитры на весь экран» (tlang-окна
+// ASR-переводов и лирика: cue по много строк/символов) не рендерятся целиком.
+describe("visibleRowText — потолок строки (duopulse-200)", () => {
+  it("обычные реплики и двухстрочные диалоги проходят без изменений", () => {
+    expect(visibleRowText("Привет")).toBe("Привет");
+    expect(visibleRowText("")).toBe("");
+    expect(visibleRowText("— Сколько?\n— Пять")).toBe("— Сколько?\n— Пять");
+    expect(visibleRowText("а".repeat(240))).toBe("а".repeat(240));
+  });
+
+  it("трёхстрочный потолок: показан хвост cue с меткой «…»", () => {
+    expect(visibleRowText("один\nдва\nтри\nчетыре\nпять")).toBe("…три\nчетыре\nпять");
+  });
+
+  it("символьный потолок: хвост до 240 знаков, рез по границе слова, метка «…»", () => {
+    const words = Array.from({ length: 60 }, (_, i) => `слово${i}`).join(" ");
+    const out = visibleRowText(words);
+    expect(out.startsWith("…")).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(241); // «…» + ≤240
+    expect(out.slice(1)).toMatch(/^слово\d+ /); // без полуслова в начале
+    expect(out).toMatch(/слово59$/); // хвост, а не голова
+  });
+
+  it("потолок строк в длинном тексте: последние 3 строки даже после реза символов", () => {
+    const lines = Array.from({ length: 40 }, (_, i) => `строка номер ${i} с текстом`).join("\n");
+    const out = visibleRowText(lines);
+    expect(out.startsWith("…")).toBe(true);
+    expect(out.split("\n").length).toBe(3);
+    expect(out).toContain("строка номер 39");
+  });
+
+  it("CRLF нормализуется до LF (cue Windows-вида)", () => {
+    expect(visibleRowText("раз\r\nдва\r\nтри\r\nчетыре")).toBe("…два\nтри\nчетыре");
   });
 });

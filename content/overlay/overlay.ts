@@ -31,6 +31,7 @@ import {
   rowStyleFor,
   stepScale,
   mergeStyle,
+  visibleRowText,
   type SubtitleStyle,
 } from "./style";
 
@@ -187,7 +188,8 @@ export class SubtitlesOverlay {
     if (sameShape) {
       rows.forEach((row, i) => {
         const el = rowsEl.children[i] as HTMLElement | undefined;
-        if (el && el.textContent !== row.text) el.textContent = row.text;
+        const shown = visibleRowText(row.text); // потолок строки, duopulse-200
+        if (el && el.textContent !== shown) el.textContent = shown;
       });
     } else {
       rowsEl.replaceChildren(
@@ -195,7 +197,7 @@ export class SubtitlesOverlay {
           const el = document.createElement("div");
           el.className = "duopulse-subtitles-row";
           el.dataset.trackId = row.trackId;
-          el.textContent = row.text;
+          el.textContent = visibleRowText(row.text); // потолок строки, duopulse-200
           this.applyRowStyle(el, roleIdx[i] ?? i);
           return el;
         }),

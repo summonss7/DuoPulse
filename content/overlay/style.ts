@@ -138,6 +138,31 @@ export function stepScale(currentPct: number, direction: number): number {
  * превышении кегль строк плавно уменьшается (перенос длинных cue остаётся). */
 export const PLATE_MAX_SHARE = 0.5;
 
+/** Потолок ОДНОЙ строки набора (duopulse-200, «субтитры на весь экран»):
+ * переводы tlang дорожек-ASR и лирика приходят «окнами» — cue по много строк
+ * на десятки секунд; pre-wrap рендерил их целиком, плашка росла до потолка
+ * доли видео и выше. Показ — хвост cue (речь всегда вперёд): последние
+ * MAX_ROW_LINES строк / MAX_ROW_CHARS символов, обрезка помечается «…».
+ * Двухстрочные диалоги и обычные реплики проходят без изменений. */
+export const MAX_ROW_LINES = 3;
+export const MAX_ROW_CHARS = 240;
+
+/** Видимый текст строки плашки: cue длиннее потолка обрезается с хвоста
+ * (последние строки/символы, обрез по границе слова) с меткой «…» спереди. */
+export function visibleRowText(text: string): string {
+  const norm = text.replace(/\r\n?/g, "\n");
+  if (norm.length <= MAX_ROW_CHARS) {
+    const lines = norm.split("\n");
+    if (lines.length <= MAX_ROW_LINES) return norm;
+    return `…${lines.slice(-MAX_ROW_LINES).join("\n").trimStart()}`;
+  }
+  let tail = norm.slice(-MAX_ROW_CHARS).replace(/^\S+\s/, ""); // без полуслова
+  const nl = tail.split("\n");
+  if (nl.length > MAX_ROW_LINES) tail = nl.slice(-MAX_ROW_LINES).join("\n");
+  const out = `…${tail.trimStart()}`;
+  return out.trim() === "…" ? "" : out;
+}
+
 /** Шаг авто-подгона кегля под потолок плашки (карточка 046): текущий кегль
  * pct даёт высоту plateH при потолке maxH — вернуть кегль в пропорции
  * maxH/plateH. Геометрия плашки em-линейна (паддинг 16px — малая нелинейность),
