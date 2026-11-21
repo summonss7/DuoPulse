@@ -14,7 +14,6 @@ import {
   cssFontFamily,
   fitStepPct,
   hexToRgba,
-  isRuUaLang,
   mergeStyle,
   plateBackground,
   plateFontSizeCss,
@@ -247,8 +246,9 @@ describe("подложка и кегль", () => {
   });
 });
 
-// duopulse-181: перестановка строк (перевод сверху) — патч и порядок показа.
-describe("swapRows (duopulse-181)", () => {
+// duopulse-181: перестановка строк — патч и порядок показа; duopulse-206:
+// правило хозяина — ПЕРЕВОД всегда верхней строкой (роль дорожки, не язык).
+describe("swapRows (duopulse-181) + правило перевода сверху (duopulse-206)", () => {
   it("дефолт false, патч bool, мусор игнорируется", () => {
     expect(DEFAULT_SUBTITLE_STYLE.swapRows).toBe(false);
     expect(mergeStyle(DEFAULT_SUBTITLE_STYLE, { swapRows: true }).swapRows).toBe(true);
@@ -258,40 +258,29 @@ describe("swapRows (duopulse-181)", () => {
     ).toBe(false);
   });
 
-  it("rowDisplayOrder: без перестановки — порядок дорожек, с ней — обратный", () => {
-    expect(rowDisplayOrder(["en", "ru"], false)).toEqual([0, 1]);
-    expect(rowDisplayOrder(["en", "ru", "ro"], true)).toEqual([1, 2, 0]); // правило → разворот
-    expect(rowDisplayOrder(["en"], true)).toEqual([0]);
+  it("rowDisplayOrder: перевод сверху при любом языке оригинала (duopulse-206)", () => {
+    // Русский клип (ru-оригинал + en-перевод) → en сверху; иностранный
+    // (en-оригинал + ru-перевод) → ru сверху: правило ЗАВИСИТ ОТ РОЛИ, не от
+    // языка — duopulse-206 меняет прежнее поведение 203 (en оставался сверху).
+    expect(rowDisplayOrder(["original", "translation"], false)).toEqual([1, 0]);
+    // Три строки: оригинал + два перевода — переводы сверху в порядке движка,
+    // оригинал — нижней.
+    expect(rowDisplayOrder(["original", "translation", "translation"], false)).toEqual([1, 2, 0]);
+    // Два оригинала (файл + файл): порядок движка, лишней перестановки нет.
+    expect(rowDisplayOrder(["original", "original"], false)).toEqual([0, 1]);
+    // Роль неизвестна (тест-конструкция без role) — трактуется как оригинал:
+    // уходит вниз относительно известного перевода.
+    expect(rowDisplayOrder([undefined, "translation"], false)).toEqual([1, 0]);
+    // Одна строка и пустой набор — порядок не меняется.
+    expect(rowDisplayOrder(["original"], true)).toEqual([0]);
     expect(rowDisplayOrder([], true)).toEqual([]);
   });
 
-  // duopulse-203: правило хозяина — иностранный язык (не ru/uk) всегда
-  // верхней строкой: русский/украинский клип = перевод сверху, оригинал низ.
-  it("rowDisplayOrder: ru/uk-строки уходят вниз, иностранные — вверх (duopulse-203)", () => {
-    // Русский клип: оригинал ru + перевод en → en сверху, ru снизу.
-    expect(rowDisplayOrder(["ru", "en"], false)).toEqual([1, 0]);
-    // Украинский клип: оригинал uk + перевод ru → оба ru/uk — порядок движка.
-    expect(rowDisplayOrder(["uk", "ru"], false)).toEqual([0, 1]);
-    // Иностранный клип: оригинал en + перевод ru — прежний порядок (en сверху).
-    expect(rowDisplayOrder(["en", "ru"], false)).toEqual([0, 1]);
-    // Подтеги («ru-RU») и регистр не мешают правилу.
-    expect(rowDisplayOrder(["ru-RU", "en-US"], false)).toEqual([1, 0]);
-    // Три строки: ru-оригинал + en-перевод + ro — ru вниз, en/ro на месте.
-    expect(rowDisplayOrder(["ru", "en", "ro"], false)).toEqual([1, 2, 0]);
-    // Язык неизвестен (und/файл) — строка не ru/uk, остаётся на месте.
-    expect(rowDisplayOrder(["ru", undefined], false)).toEqual([1, 0]);
-    // swapRows переворачивает ИТОГОВЫЙ порядок (ручная перестановка поверх правила).
-    expect(rowDisplayOrder(["ru", "en"], true)).toEqual([0, 1]);
-  });
-
-  it("isRuUaLang: первичный подтег ru/uk, без него — false", () => {
-    expect(isRuUaLang("ru")).toBe(true);
-    expect(isRuUaLang("uk")).toBe(true);
-    expect(isRuUaLang("ru-RU")).toBe(true);
-    expect(isRuUaLang("UK")).toBe(true);
-    expect(isRuUaLang("en")).toBe(false);
-    expect(isRuUaLang("")).toBe(false);
-    expect(isRuUaLang(undefined)).toBe(false);
+  it("rowDisplayOrder: swapRows переворачивает ИТОГОВЫЙ порядок (duopulse-181)", () => {
+    // Русский клип: правило → [en, ru], swap → оригинал ru сверху.
+    expect(rowDisplayOrder(["original", "translation"], true)).toEqual([0, 1]);
+    // Три строки: правило → [tr1, tr2, orig], swap — разворот итога [orig, tr2, tr1].
+    expect(rowDisplayOrder(["original", "translation", "translation"], true)).toEqual([0, 2, 1]);
   });
 });
 

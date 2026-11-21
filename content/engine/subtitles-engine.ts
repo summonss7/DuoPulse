@@ -26,11 +26,14 @@ export const OFFSET_LIMIT_MS = 10_000;
 /** Строка плашки = активный cue дорожки; порядок = порядок дорожек набора.
  * top — реплика верхнего расположения (.ass \an7/8/9, duopulse-178): оверлей
  * рисует такие строки в плашке-верх, обычные — в основной. lang — язык
- * дорожки (duopulse-203: порядок строк плашки — иностранный сверху). */
+ * дорожки; role — её роль (duopulse-206: перевод — всегда верхняя строка
+ * плашки, оригинал — нижняя; optional только для тест-конструкций, движок
+ * ставит всегда). */
 export interface ActiveRow {
   trackId: string;
   text: string;
   lang?: string;
+  role?: "original" | "translation";
   top?: boolean;
 }
 
@@ -175,6 +178,7 @@ export class SubtitlesEngine {
         trackId: bound.track.id,
         text: cue.text,
         lang: bound.track.lang || undefined,
+        role: bound.track.role,
         top: bound.topStarts.has(cue.startMs) || undefined,
       });
     }

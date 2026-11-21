@@ -1,11 +1,11 @@
-// Живой стенд карточки duopulse-181 (+ порядок duopulse-203): перестановка
+// Живой стенд карточки duopulse-181 (+ порядок duopulse-203/206): перестановка
 // строк субтитров и живые правки вида. Локальная страница с видео и двумя
 // тест-дорожками (ru оригинал + en перевод, перекрывающиеся cue) — без
 // YouTube и его rate-limit.
 //
 // Проверки:
-//   A) набор из 2 дорожек: правило duopulse-203 — иностранный (не ru/uk)
-//      всегда верхней строкой: en-перевод сверху, ru-оригинал снизу;
+//   A) набор из 2 дорожек: правило duopulse-206 — ПЕРЕВОД всегда верхней
+//      строкой (роль дорожки, не язык): en-перевод сверху, ru-оригинал снизу;
 //      стили ролевые (оригинал — белый 500/1em, перевод — лайм 400/0.85em);
 //   B) duopulse-set-style {swapRows:true} — строки поменялись местами,
 //      цвета/веса остались при СВОИХ ролях (не переехали с позициями);
@@ -13,7 +13,10 @@
 //   D) живая смена цвета перевода — перекраска на месте в любом порядке;
 //   E) живая смена гарнитуры — font-family плашки обновился;
 //   F) дифф-обновление при swapRows=true: смена cue тем же составом дорожек
-//      обновляет textContent БЕЗ пересоздания узлов строк (bottomDisplay).
+//      обновляет textContent БЕЗ пересоздания узлов строк (bottomDisplay);
+//   H) duopulse-206, иностранное видео: набор en-оригинал + ru-перевод —
+//      русская строка-перевод ПЕРВОЙ (сверху), оригинал — снизу; swap —
+//      оригинал сверху; цвета остаются ролевыми.
 //
 // Запуск:  node e2e/subtitles/swap-rows.mjs [путь-к-duopulse.exe]
 // Требует собранный debug-exe (cargo build из src-tauri) и vite dev (поднимает
@@ -129,6 +132,26 @@ const TRACKS = [
   },
 ];
 
+// duopulse-206, фаза H: иностранное видео — en-оригинал + ru-перевод;
+// правило «перевод сверху» должно поднять РУССКУЮ строку (до 203 en
+// оставался верхней — проверяем смену правила по ролям, не по языку).
+const TRACKS_FOREIGN = [
+  {
+    id: "test:en", source: "test", lang: "en", role: "original",
+    cues: [
+      { startMs: 6000, endMs: 9500, text: "Original: line one" },
+      { startMs: 12000, endMs: 15000, text: "Original: line two" },
+    ],
+  },
+  {
+    id: "test:ru", source: "test", lang: "ru", role: "translation",
+    cues: [
+      { startMs: 6000, endMs: 9500, text: "Перевод: реплика один" },
+      { startMs: 12000, endMs: 15000, text: "Перевод: реплика два" },
+    ],
+  },
+];
+
 try {
   await killOurExes();
   const subsDir = path.join(ROOT, "e2e", "subtitles");
@@ -205,7 +228,7 @@ try {
     }
   }
   check("A1: оверлей рисует 2 строки", rows.length === 2, rows.map((r) => r.text).join(" / "));
-  check("A2: правило duopulse-203 — иностранный (en) сверху, ru-оригинал снизу",
+  check("A2: правило duopulse-206 — перевод (en) сверху, ru-оригинал снизу",
     rows[0]?.text?.startsWith("Translation") && rows[1]?.text?.startsWith("Оригинал"),
     rows.map((r) => r.text).join(" / "));
   check("A3: перевод — фирменный лайм 400/0.85em (роль, не место)",
@@ -245,7 +268,7 @@ try {
   await dispatchStyle(tab, { swapRows: false });
   await sleep(400);
   rows = await plateRows(tab);
-  check("C: swapRows=false — снова иностранный (en) сверху", rows[0]?.text?.startsWith("Translation"),
+  check("C: swapRows=false — снова перевод (en) сверху", rows[0]?.text?.startsWith("Translation"),
     rows.map((r) => r.text).join(" / "));
 
   // D) живая смена цвета перевода (как пункт меню «Цвет перевода»).
@@ -265,6 +288,41 @@ try {
     return plate?.style.fontFamily ?? '';
   })()`);
   check("E: гарнитура плашки живо сменилась на JetBrains Mono", plateFont.includes("JetBrains Mono"), plateFont);
+
+  // H) duopulse-206: иностранное видео (en-оригинал + ru-перевод) —
+  // русский перевод ПЕРВОЙ строкой, оригинал — снизу; swap поднимает
+  // оригинал; цвета остаются ролевыми (перевод — лайм, где бы ни стоял).
+  await evalIn(tab, `(() => {
+    window.__DUOPULSE_TEST_TRACK__ = ${JSON.stringify(TRACKS_FOREIGN)};
+    document.dispatchEvent(new CustomEvent('duopulse-test-track'));
+    const v = document.querySelector('video');
+    v.currentTime = 7; v.play().catch(() => {});
+  })()`);
+  rows = [];
+  for (let i = 0; i < 40; i++) {
+    await sleep(500);
+    rows = await plateRows(tab);
+    if (rows.length >= 2 && rows.some((r) => r.text?.startsWith("Перевод"))) break;
+  }
+  check("H1: иностранное видео — русский ПЕРЕВОД сверху (duopulse-206)",
+    rows[0]?.text?.startsWith("Перевод") && rows[1]?.text?.startsWith("Original"),
+    rows.map((r) => r.text).join(" / "));
+  check("H2: цвета ролевые — перевод лайм сверху, оригинал белый снизу",
+    rows[0]?.color === "rgb(189, 254, 79)" && rows[0]?.size === "0.85em" &&
+      rows[1]?.color === "rgb(255, 255, 255)" && rows[1]?.size === "1em",
+    rows.map((r) => `${r.color} ${r.size}`).join(" / "));
+  await dispatchStyle(tab, { swapRows: true });
+  await sleep(400);
+  rows = await plateRows(tab);
+  check("H3: swapRows=true — оригинал (en) сверху, перевод снизу",
+    rows[0]?.text?.startsWith("Original") && rows[1]?.text?.startsWith("Перевод") &&
+      rows[1]?.color === "rgb(189, 254, 79)",
+    rows.map((r) => r.text).join(" / "));
+  await dispatchStyle(tab, { swapRows: false });
+  await sleep(400);
+  rows = await plateRows(tab);
+  check("H4: swapRows=false — снова перевод (ru) сверху", rows[0]?.text?.startsWith("Перевод"),
+    rows.map((r) => r.text).join(" / "));
 
   // G) Alt+D не задет рефакторингом: синтетический keydown (как в run.mjs 35)
   // выключает показ, повторный — включает (контроль регрессии оверлея).

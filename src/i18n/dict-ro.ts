@@ -46,9 +46,10 @@ export const dict: Record<string, string> = {
   "Сохранено — применено к открытым видео и новым вкладкам.": "Salvat — aplicat videourilor deschise și filelor noi.",
   // duopulse-181: ordinea rândurilor, fontul și paleta — ajustări rapide
   "Порядок строк": "Ordinea rândurilor",
-  "Какая строка выше на плашке: по умолчанию иностранный язык (не рус/укр)": "Ce rând apare sus pe placă: implicit limba străină (nu rusă/ucraineană)",
-  "Иностранный сверху": "Limba străină sus",
-  "Обратный порядок": "Ordine inversă",
+  "Какая строка выше на плашке: по умолчанию перевод (оригинал — нижней)": "Ce rând apare sus pe placă: implicit traducerea (originalul jos)",
+  "Перевод сверху": "Traducere sus",
+  "Оригинал сверху": "Originalul sus",
+  " Обратный порядок строк (оригинал сверху)": " Ordine inversă a rândurilor (originalul sus)",
   "Системный": "Sistem",
   "Белый": "Alb",
   "Лайм": "Verde lămâi",
@@ -56,7 +57,6 @@ export const dict: Record<string, string> = {
   "Голубой": "Bleu deschis",
   "Розовый": "Roz",
   "Светло-серый": "Gri deschis",
-  " Обратный порядок строк (рус./укр. сверху)": " Ordine inversă a rândurilor (rusă/ucraineană sus)",
   "Язык — код из 2–3 букв (ru, es, pt-br).": "Limba — cod de 2–3 litere (ru, es, pt-br).",
   "Перевод": "Traducere",
   "Облачный перевод дорожек субтитров; ключ хранится в DPAPI (не в settings.json).":

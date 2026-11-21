@@ -153,10 +153,10 @@ export class SubtitlesOverlay {
   private renderRows(rows: ActiveRow[]): void {
     if (!this.rowsEl) return;
     const bottom = rows.filter((r) => !r.top);
-    // Порядок показа (duopulse-181 + duopulse-203): rowDisplayOrder даёт
+    // Порядок показа (duopulse-181 + duopulse-206): rowDisplayOrder даёт
     // индексы ролей — цвет/вес строки берутся по роли дорожки, а не по месту
-    // на плашке; правило — иностранный язык сверху, swapRows переворачивает.
-    const order = rowDisplayOrder(bottom.map((r) => r.lang), this.style.swapRows);
+    // на плашке; правило — перевод сверху, оригинал снизу; swapRows переворачивает.
+    const order = rowDisplayOrder(bottom.map((r) => r.role), this.style.swapRows);
     const display = order.map((i) => bottom[i]);
     this.rowRoleIdx = order;
     this.renderRowsInto(display, this.rowRoleIdx, this.rowsEl, this.bottomDisplay);

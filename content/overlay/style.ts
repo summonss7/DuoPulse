@@ -119,25 +119,21 @@ export function mergeStyle(base: SubtitleStyle, patch: Partial<SubtitleStyle>): 
   };
 }
 
-/** Порядок показа строк основной плашки (duopulse-181 + duopulse-203).
- * Правило хозяина duopulse-203: иностранный язык (любой кроме русского и
- * украинского) — всегда ВЕРХНЕЙ строкой: в русских/украинских клипах
- * перевод идёт первым, оригинал — нижней строкой. Правило — стабильное
- * разделение по языку (ru/uk вниз, порядок прочих не меняется); swapRows
+/** Порядок показа строк основной плашки (duopulse-181 + duopulse-206).
+ * Правило хозяина duopulse-206: ПЕРЕВОД — всегда верхняя строка (русское
+ * видео — английский сверху, иностранное — русский сверху), оригинал —
+ * нижней. Роль строки — role дорожки (original/translation), не язык:
+ * ASR и файловые дорожки — оригиналы, tlang/облачные — переводы; внутри
+ * групп порядок движка сохраняется (устойчивая сортировка). swapRows
  * (duopulse-181) переворачивает ИТОГОВЫЙ порядок — ручная перестановка
  * поверх правила. Возвращает индексы исходного массива строк: стиль строки
  * берётся по её роли — map-элемент параллелен отображаемому списку. */
-export function isRuUaLang(lang: string | undefined): boolean {
-  const primary = (lang ?? "").trim().toLowerCase().split("-")[0] ?? "";
-  return primary === "ru" || primary === "uk";
-}
-
-/** Индексы строк порядка показа: langs — языки строк в порядке движка
- * (роль), swap — ручная перестановка. Одноязычный набор и набор без языков
- * (und/файлы без имени) — прежнее поведение displayOrder. */
-export function rowDisplayOrder(langs: readonly (string | undefined)[], swap: boolean): number[] {
-  const idx = Array.from({ length: langs.length }, (_, i) => i);
-  const ordered = idx.sort((a, b) => Number(isRuUaLang(langs[a])) - Number(isRuUaLang(langs[b])));
+export function rowDisplayOrder(
+  roles: readonly ("original" | "translation" | undefined)[],
+  swap: boolean,
+): number[] {
+  const idx = Array.from({ length: roles.length }, (_, i) => i);
+  const ordered = idx.sort((a, b) => Number(roles[b] === "translation") - Number(roles[a] === "translation"));
   return swap ? ordered.reverse() : ordered;
 }
 

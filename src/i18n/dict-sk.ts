@@ -46,9 +46,10 @@ export const dict: Record<string, string> = {
   "Сохранено — применено к открытым видео и новым вкладкам.": "Uložené — použité pre otvorené videá a nové karty.",
   // duopulse-181: poradie riadkov, písmo a paleta — rýchle úpravy
   "Порядок строк": "Poradie riadkov",
-  "Какая строка выше на плашке: по умолчанию иностранный язык (не рус/укр)": "Ktorý riadok je na platni hore: predvolene cudzí jazyk (nie rus./ukr.)",
-  "Иностранный сверху": "Cudzí jazyk hore",
-  "Обратный порядок": "Opačné poradie",
+  "Какая строка выше на плашке: по умолчанию перевод (оригинал — нижней)": "Ktorý riadok je na platni hore: predvolene preklad (originál dole)",
+  "Перевод сверху": "Preklad hore",
+  "Оригинал сверху": "Originál hore",
+  " Обратный порядок строк (оригинал сверху)": " Opačné poradie riadkov (originál hore)",
   "Системный": "Systém",
   "Белый": "Biely",
   "Лайм": "Limetkový",
@@ -56,7 +57,6 @@ export const dict: Record<string, string> = {
   "Голубой": "Svetlomodrý",
   "Розовый": "Ružový",
   "Светло-серый": "Svetlosivý",
-  " Обратный порядок строк (рус./укр. сверху)": " Opačné poradie riadkov (rus./ukr. hore)",
   "Язык — код из 2–3 букв (ru, es, pt-br).": "Jazyk — kód 2–3 písmená (ru, es, pt-br).",
   "Перевод": "Preklad",
   "Облачный перевод дорожек субтитров; ключ хранится в DPAPI (не в settings.json).":

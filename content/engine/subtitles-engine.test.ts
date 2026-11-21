@@ -96,7 +96,7 @@ describe("SubtitlesEngine — выбор cue по времени", () => {
 
     video.currentTime = 2.0;
     video.fire("timeupdate");
-    expect(emits[emits.length - 1]).toEqual([{ trackId: "test:ru", lang: "ru", text: "Первая" }]);
+    expect(emits[emits.length - 1]).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Первая" }]);
 
     video.currentTime = 3.5; // пауза между репликами
     video.fire("timeupdate");
@@ -104,7 +104,7 @@ describe("SubtitlesEngine — выбор cue по времени", () => {
 
     video.currentTime = 5.0;
     video.fire("timeupdate");
-    expect(emits[emits.length - 1]).toEqual([{ trackId: "test:ru", lang: "ru", text: "Вторая" }]);
+    expect(emits[emits.length - 1]).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Вторая" }]);
 
     video.currentTime = 6.5;
     video.fire("timeupdate");
@@ -125,7 +125,7 @@ describe("SubtitlesEngine — выбор cue по времени", () => {
     expect(onRowsChange).toHaveBeenCalledTimes(1);
   });
 
-  it("строки набора идут в порядке дорожек, неся свой язык (duopulse-203)", () => {
+  it("строки набора идут в порядке дорожек, неся свой язык и роль (duopulse-203/206)", () => {
     const first: Track = { id: "a:orig", source: "test", lang: "en", role: "original", cues: [{ startMs: 0, endMs: 5000, text: "orig" }] };
     const second: Track = { id: "a:ru", source: "test", lang: "ru", role: "translation", cues: [{ startMs: 0, endMs: 5000, text: "перевод" }] };
     const emits: ActiveRow[][] = [];
@@ -136,8 +136,8 @@ describe("SubtitlesEngine — выбор cue по времени", () => {
     video.currentTime = 2.0;
     video.fire("timeupdate");
     expect(emits[emits.length - 1]).toEqual([
-      { trackId: "a:orig", lang: "en", text: "orig" },
-      { trackId: "a:ru", lang: "ru", text: "перевод" },
+      { trackId: "a:orig", lang: "en", role: "original", text: "orig" },
+      { trackId: "a:ru", lang: "ru", role: "translation", text: "перевод" },
     ]);
   });
 });
@@ -160,7 +160,7 @@ describe("SubtitlesEngine — seek (docs/03 §4: правило 150 мс)", () =
 
     video.currentTime = 2.8; // остаток 200 мс
     video.fire("seeked");
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "Первая" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Первая" }]);
   });
 
   it("подавленный скачком cue не «вспыхивает» на остатке при продолжении показа", () => {
@@ -182,7 +182,7 @@ describe("SubtitlesEngine — seek (docs/03 §4: правило 150 мс)", () =
 
     video.currentTime = 5.0; // следующая реплика — показывается
     video.fire("timeupdate");
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "Вторая" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Вторая" }]);
   });
 
   it("программный скачок без seeked распознаётся по |Δt| > 250 мс", () => {
@@ -192,7 +192,7 @@ describe("SubtitlesEngine — seek (docs/03 §4: правило 150 мс)", () =
 
     video.currentTime = 2.5;
     video.fire("timeupdate");
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "Первая" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Первая" }]);
 
     // Реплика [1000,3000] «осталась» в прошлом при t=12 — активна «Дальняя»;
     // назад по таймлайну призраков нет:
@@ -208,11 +208,11 @@ describe("SubtitlesEngine — seek (docs/03 §4: правило 150 мс)", () =
 
     video.currentTime = 13.0;
     video.fire("seeked");
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "D" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "D" }]);
 
     video.currentTime = 2.0;
     video.fire("seeked");
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "A" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "A" }]);
   });
 });
 
@@ -229,7 +229,7 @@ describe("SubtitlesEngine — offset (docs/03 §4: применяется к н�
 
     video.currentTime = 1.6;
     video.fire("timeupdate");
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "Первая" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Первая" }]);
   });
 
   it("отрицательный offset показывает субтитры раньше", () => {
@@ -240,7 +240,7 @@ describe("SubtitlesEngine — offset (docs/03 §4: применяется к н�
     engine.setOffset(-1000);
     video.currentTime = 1.2; // реплика начнётся на 2000-1000=1000 — уже идёт
     video.fire("timeupdate");
-    expect(emits[emits.length - 1]).toEqual([{ trackId: "test:ru", lang: "ru", text: "Реплика" }]);
+    expect(emits[emits.length - 1]).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Реплика" }]);
   });
 
   it("offset зажимается пределом ±10 c", () => {
@@ -258,7 +258,7 @@ describe("SubtitlesEngine — offset (docs/03 §4: применяется к н�
 
     video.currentTime = 1.2;
     video.fire("timeupdate");
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "Первая" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Первая" }]);
 
     engine.setOffset(2000); // теперь эффективное время -0.8 с — реплика ещё не началась
     expect(shown()).toEqual([]);
@@ -273,7 +273,7 @@ describe("SubtitlesEngine — покадровая точность rVFC (зад
 
     video.currentTime = 2.0;
     video.runFrames(1); // кадр отрисован — timeupdate не приходит
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "Первая" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Первая" }]);
 
     video.currentTime = 3.5;
     video.runFrames(1);
@@ -299,7 +299,7 @@ describe("SubtitlesEngine — покадровая точность rVFC (зад
     engine.attach(video);
     video.currentTime = 2.0;
     video.runFrames(1);
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "Длинная" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Длинная" }]);
 
     engine.detach();
     expect(video.canceled).toBe(1); // ожидающий кадр снят с планирования
@@ -317,7 +317,7 @@ describe("SubtitlesEngine — покадровая точность rVFC (зад
 
     video.currentTime = 13.0;
     video.runFrames(1);
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "D" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "D" }]);
 
     video.currentTime = 2.9; // Δ ≈ 10 с назад, остаток cue A — 100 мс < 150
     video.runFrames(1);
@@ -342,7 +342,7 @@ describe("SubtitlesEngine — привязка видео", () => {
     engine.attach(video);
     video.currentTime = 2.0;
     video.fire("timeupdate");
-    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", text: "Длинная" }]);
+    expect(shown()).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "Длинная" }]);
 
     engine.detach();
     expect(shown()).toEqual([]);
@@ -372,6 +372,6 @@ describe("SubtitlesEngine — привязка видео", () => {
     expect(s.attached).toBe(true);
     expect(s.trackCount).toBe(1);
     expect(s.offsetMs).toBe(0);
-    expect(s.activeRows).toEqual([{ trackId: "test:ru", lang: "ru", text: "x" }]);
+    expect(s.activeRows).toEqual([{ trackId: "test:ru", lang: "ru", role: "original", text: "x" }]);
   });
 });

@@ -383,8 +383,8 @@ function renderStyle(): void {
   for (const b of (document.getElementById("duoPosition") as HTMLElement).children) {
     (b as HTMLElement).dataset.on = String((b as HTMLElement).dataset.pos === state.style.position);
   }
-  // Порядок строк (duopulse-181 + duopulse-203): по умолчанию иностранный
-  // язык сверху (правило хозяина), swapRows=true — обратный порядок.
+  // Порядок строк (duopulse-181 + duopulse-206): по умолчанию перевод
+  // сверху (правило хозяина — при любом языке видео), swapRows=true — оригинал.
   for (const b of (document.getElementById("duoSwap") as HTMLElement).children) {
     (b as HTMLElement).dataset.on = String(
       (b as HTMLElement).dataset.swap === (state.style.swapRows ? "on" : "off"),
