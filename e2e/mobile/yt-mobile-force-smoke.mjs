@@ -29,6 +29,11 @@
 //      ON пережил) + ЛОКАЛЬНЫЙ 302-редирект (имитирует google.com/goto,
 //      стартует с мобильного UA на свежем процессе) → www десктопом —
 //      перехват onPageStarted.
+//   C (duopulse-207, шапка — полное зеркало старта): 8) состав шапки —
+//      ⌂/очки-инкогнито/⬇/⋮ + поле/★/GO и их порядок; 9) звёздочка
+//      закладки — тап ★/☆ (тот же стор, что у меню «⋮»); 10) «⬇» на обычной
+//      странице — тост-подсказка; 11) очки — инкогнито ON (оверлей закрылся,
+//      m-private) и выход кнопкой старта.
 // Запуск (APK установлен, эмулятор поднят):
 //   node e2e/mobile/yt-mobile-force-smoke.mjs
 // Переопределения: YT_FORCE_URL, CDP_PORT, REDIR_PORT. Результат —
@@ -336,8 +341,129 @@ try {
     check("A4 ввод запроса → поиск Google", false, "чип не найден");
   }
 
+  // ── Фаза C (duopulse-207): шапка оверлея — ПОЛНОЕ зеркало старта ──────
+  // очки-инкогнито + «⬇» загрузки перед «⋮» + звёздочка закладки в строке
+  // адреса (жалоба: «нет звёздочки, нет двух кнопок перед тремя точками»)
+  {
+    await openOverlay("https://example.com/");
+    await overlayState(25000, 2000);
+    const nodes = uiNodes();
+    const byDesc = (d) => nodes.find((n) => n.desc === d);
+    const home = byDesc("На стартовый экран");
+    const glasses = byDesc("Инкогнито");
+    const music = byDesc("Скачать: аудио, видео или субтитры");
+    const menu = nodes.find((n) => n.desc === "Меню" || n.text === "⋮");
+    const edit = byDesc("Адресная строка");
+    const star = nodes.find((n) => n.desc === "В избранное" || n.desc === "Убрать из избранного");
+    const go = byDesc("Перейти");
+    shot("c1-full-bar");
+    check("C1 полный состав шапки (⌂/очки/⬇/⋮/поле/★/GO)",
+      !!(home && glasses && music && menu && edit && star && go),
+      `⌂=${!!home} очки=${!!glasses} ⬇=${!!music} ⋮=${!!menu} поле=${!!edit} ★=${!!star} GO=${!!go}`);
+    check("C1 порядок: очки и ⬇ перед «⋮», ★ между полем и GO",
+      !!(glasses && music && menu && edit && star && go &&
+        glasses.x < menu.x && music.x < menu.x && music.x > glasses.x &&
+        edit.x < star.x && star.x < go.x),
+      `x: очки=${glasses?.x} ⬇=${music?.x} ⋮=${menu?.x} поле=${edit?.x} ★=${star?.x} GO=${go?.x}`);
+
+    // звёздочка: тап → ★ («Убрать из избранного»), повтор → ☆ (стор чист)
+    if (star) {
+      adb("shell", "input", "tap", String(star.x), String(star.y));
+      let st = null;
+      for (let i = 0; i < 6 && !st; i++) {
+        await sleep(400);
+        st = uiNodes().find((n) => n.text === "★" && n.desc === "Убрать из избранного");
+      }
+      check("C2a тап ★ — страница в закладках (★/«Убрать из избранного»)", !!st);
+      if (st) {
+        adb("shell", "input", "tap", String(st.x), String(st.y));
+        let back = null;
+        for (let i = 0; i < 6 && !back; i++) {
+          await sleep(400);
+          back = uiNodes().find((n) => n.text === "☆" && n.desc === "В избранное");
+        }
+        check("C2b повторный тап — закладка снята (☆)", !!back);
+      } else {
+        check("C2b повторный тап — закладка снята (☆)", false, "звезда не включилась");
+      }
+    } else {
+      check("C2a тап ★ — страница в закладках (★/«Убрать из избранного»)", false, "узел ★ не найден");
+      check("C2b повторный тап — закладка снята (☆)", false, "узел ★ не найден");
+    }
+
+    // «⬇» на не-видео странице: тост-подсказка (кнопка не молчит).
+    // uiautomator на API 36 тосты НЕ отдаёт (окно SystemUI) — ловим
+    // пикселями сырого screencap: полупрозрачный серый пилл внизу-по-центру
+    // (сплошной серый прогон >80px; текст страницы даёт лишь короткие штрихи)
+    const toastVisible = () => {
+      try {
+        const raw = execFileSync("adb", ["-s", SERIAL, "exec-out", "screencap"],
+          { maxBuffer: 24 * 1024 * 1024 });
+        const w = raw.readUInt32LE(0), h = raw.readUInt32LE(4);
+        if (!w || !h || raw.length < 12 + w * h * 4) return false;
+        for (let y = Math.floor(h * 0.88); y < h - 30; y += 4) {
+          let run = 0;
+          for (let x = 100; x < w - 100; x++) {
+            const o = 12 + (y * w + x) * 4;
+            const r = raw[o], g = raw[o + 1], b = raw[o + 2];
+            const gray = Math.abs(r - g) < 24 && Math.abs(g - b) < 24;
+            if (r + g + b < 680 && gray) {
+              run++;
+              if (run > 80) return true;
+            } else {
+              run = 0;
+            }
+          }
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
+    if (music) {
+      adb("shell", "input", "tap", String(music.x), String(music.y));
+      let toast = false;
+      for (let i = 0; i < 4 && !toast; i++) {
+        toast = toastVisible();
+        if (!toast) await sleep(400);
+      }
+      check("C3 «⬇» на обычной странице — тост-подсказка", toast);
+    } else {
+      check("C3 «⬇» на обычной странице — тост-подсказка", false, "узел ⬇ не найден");
+    }
+
+    // очки-инкогнито: тап → режим ON (body.m-private UI-webview) и оверлей
+    // закрылся (нативного «⋮» больше нет — оверлей на общем профиле WebView);
+    // выход — кнопкой-очками старта (#mPrivate)
+    if (glasses) {
+      adb("shell", "input", "tap", String(glasses.x), String(glasses.y));
+      let priv = false;
+      let overlayGone = false;
+      for (let i = 0; i < 10 && !(priv && overlayGone); i++) {
+        await sleep(700);
+        priv = await ui.c.evalJs("document.body.classList.contains('m-private')").catch(() => false);
+        overlayGone = !uiNodes().some((n) => n.desc === "Меню");
+      }
+      check("C4a очки включают инкогнито (m-private, оверлей закрылся)",
+        priv === true && overlayGone === true, `m-private=${priv} нативный ⋮ остался=${!overlayGone}`);
+      await ui.c.evalJs("document.getElementById('mPrivate').click()").catch(() => {});
+      let off = false;
+      for (let i = 0; i < 10 && !off; i++) {
+        await sleep(700);
+        off = await ui.c.evalJs("!document.body.classList.contains('m-private')").catch(() => false);
+      }
+      check("C4b выход из инкогнито кнопкой старта", off === true);
+    } else {
+      check("C4a очки включают инкогнито (m-private, оверлей закрылся)", false, "узел очков не найден");
+      check("C4b выход из инкогнито кнопкой старта", false, "узел очков не найден");
+    }
+  }
+
   // ── Фаза B: «расширенный» YouTube тумблером (десктоп-фазы — в конце:
   // после десктопных страниц WebView оверлея может клиниться до рестарта) ─
+  // фаза C закрыла оверлей (цикл инкогнито) — поднимаем заново
+  await openOverlay("https://example.com/");
+  await overlayState(25000, 2000);
   // 5) меню «⋮» → «○ Десктопный YouTube» → ON
   const menuTapped = tapNode((n) => n.desc === "Меню" || n.text === "⋮", "кнопка ⋮");
   await sleep(700);

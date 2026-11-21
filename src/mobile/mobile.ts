@@ -718,6 +718,14 @@ async function openExternal(url: string): Promise<void> {
  *  Активное видео под оверлеем — на паузу (звучать за выдачей оно не
  *  должно, duopulse-139); вкладка остаётся в переключателе. */
 async function openInApp(url: string): Promise<void> {
+  // Инкогнито (duopulse-207): web-оверлей живёт на системном профиле WebView
+  // (куки общие с плеером) — режим и оверлей несовместимы, включение режима
+  // оверлей закрывает (setIncognito). Прежде поиск из инкогнито молча
+  // открывал оверлей на общем профиле; теперь — системным браузером.
+  if (incognito) {
+    await openExternal(url);
+    return;
+  }
   if (tabs.active) tabs.newTab();
   try {
     const r = await invoke<string>("mobile_web_open", { url });
@@ -760,6 +768,28 @@ async function navigate(input: string, newTab = false): Promise<void> {
   pdfView.close();
   video.close();
   tabs.open(id, "", true);
+};
+
+/** Вход для «⬇» web-оверлея (duopulse-207): открыть YouTube-видео во
+ *  встроенном плеере и поднять лист загрузок (аудио/видео/субтитры) — та же
+ *  кнопка «⬇», что в шапке ветки. Лист ждёт готовности движка видео
+ *  (duo.currentVideoId), потолок 15 с — видео не поднялось, лист не дёргаем. */
+(window as { __duopulseOpenVideoDownload?: (id: string) => void }).__duopulseOpenVideoDownload = (
+  id: string,
+) => {
+  if (!/^[\w-]{6,20}$/.test(id)) return; // id из evaluateJavascript — проверяем
+  pdfView.close();
+  video.close();
+  tabs.open(id, "", true);
+  const started = Date.now();
+  const poll = () => {
+    if (duo.currentVideoId === id) {
+      music.start();
+      return;
+    }
+    if (Date.now() - started < 15000) window.setTimeout(poll, 400);
+  };
+  window.setTimeout(poll, 400);
 };
 
 /** Визит страницы web-оверлея в историю (duopulse-156): Kotlin-хелпер зовёт
@@ -809,6 +839,13 @@ home.addEventListener("click", goHome);
 // Kotlin-хелпер дергает глобал в UI-webview Tauri; оверлей закрывается
 // сам — goHome зовёт mobile_web_close.
 (window as { __duopulseGoHome?: () => void }).__duopulseGoHome = () => goHome();
+// Входы кнопки-очков «инкогнито» web-оверлея (duopulse-207): шапка оверлея —
+// зеркало .m-bar, очки переключают режим той же логикой, что на старте
+// (включение закрывает сам оверлей — он на системном профиле WebView);
+// __duopulsePrivateOn — состояние для подсветки кнопки.
+(window as { __duopulseTogglePrivate?: () => void }).__duopulseTogglePrivate = () =>
+  setIncognito(!incognito);
+(window as { __duopulsePrivateOn?: () => boolean }).__duopulsePrivateOn = () => incognito;
 // Входы меню «⋮» web-оверлея (duopulse-193 — в оверлее не было ни закладок,
 // ни настроек): «Закладки» — список в основной ветке (оверлей прячется,
 // «назад» вернёт к странице); «Настройки» — лист настроек «⋮» основной

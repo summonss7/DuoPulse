@@ -123,6 +123,18 @@ import java.io.ByteArrayInputStream
  * (backCallback и прежде вёл историю WebView), закрытие — «⌂» (goHome)
  * и системным «назад» по исчерпании истории.
  *
+ * duopulse-207 (доработка 202: «всё равно не все кнопки — нет звёздочки,
+ * нет двух кнопок перед тремя точками; сделайте такое же окно, как при
+ * старте, чтобы не менялось»): шапка — ПОЛНОЕ зеркало .m-bar старта.
+ * Добавлены очки-инкогнито (перенос SVG-иконки .m-private-btn; тап — тот же
+ * переключатель режима, что на старте: включение закрывает оверлей, он на
+ * системном профиле WebView), «⬇» загрузки (на YouTube-видео — встроенный
+ * плеер + лист аудио/видео/субтитров хуком __duopulseOpenVideoDownload,
+ * прочая страница — тост-подсказка) и звёздочка закладки в строке адреса
+ * (☆/★, тот же стор закладок, что у меню «⋮» и экрана ветки). Состав
+ * рядов — как на старте с открытым видео: «⌂ логотип [очки] [▶ duo] [⬇] ⋮»
+ * и «поле ☆ GO».
+ *
  * duopulse-192 (доработка 191: «верхнее меню не такое, строка ввода адреса
  * не кликабельна — со всеми сайтами из поиска; YouTube верни расширенную»):
  *  - тап по адресному чипу = омнибокс: чип сменяется полем ввода с текущим
@@ -181,6 +193,17 @@ object MobileWebHelper {
   private var overlay: FrameLayout? = null
   private var webView: WebView? = null
   private var duoBtn: Button? = null
+
+  /** Очки-инкогнито шапки (duopulse-207): подсветка по состоянию режима. */
+  private var glassesIcon: GlassesIcon? = null
+
+  /** «⬇» загрузки шапки (duopulse-207): YouTube-видео — плеер + лист
+   *  аудио/видео/субтитров, прочая страница — тост-подсказка. */
+  private var musicBtn: Button? = null
+
+  /** Звёздочка закладки в строке адреса (duopulse-207): ☆/★, тот же стор
+   *  закладок, что у меню «⋮» и экрана ветки. */
+  private var starBtn: Button? = null
 
   /** Омнибокс-поле адреса шапки (duopulse-202): всегда редактируемое,
    *  как на старте приложения, — показывает текущий URL, тап выделяет
@@ -426,12 +449,51 @@ object MobileWebHelper {
     webView?.loadUrl(target)
   }
 
-  /** Показ адреса и кнопки «▶ duo» — на каждой смене URL. Пока поле в
-   * фокусе (правка), ввод пользователя не затираем — только кнопку. */
+  /** Показ адреса и кнопок шапки — на каждой смене URL. Пока поле в
+   * фокусе (правка), ввод пользователя не затираем — только кнопки. */
   private fun syncChrome(url: String?) {
     if (!addrEditing) addrEdit?.setText(url ?: "")
     val hasVideo = url != null && youTubeVideoId(url) != null
     duoBtn?.visibility = if (hasVideo) View.VISIBLE else View.GONE
+    syncStar(url)
+  }
+
+  /** Звёздочка закладки (duopulse-207): состояние страницы — тот же стор,
+   *  что у пункта меню «В закладки» и экрана закладок ветки (JNI
+   *  MobileBookmarksNative); не-http (about:blank) — прячем, как старт
+   *  прячет звёздочку без видео. */
+  private fun syncStar(url: String?) {
+    val b = starBtn ?: return
+    val trusted = url?.takeIf { it.startsWith("http") }
+    if (trusted == null) {
+      b.visibility = View.GONE
+      return
+    }
+    b.visibility = View.VISIBLE
+    val on = MobileBookmarksNative.has(trusted)
+    b.text = if (on) "★" else "☆"
+    b.setTextColor(Color.parseColor(if (on) "#BDFE4F" else "#F2F7EE"))
+    b.contentDescription = if (on) "Убрать из избранного" else "В избранное"
+  }
+
+  /** Подсветка очков-инкогнито оверлея (duopulse-207): состояние режима —
+   *  из UI-webview Tauri (хук __duopulsePrivateOn старта). */
+  private fun queryPrivateState() {
+    val tw = MainActivity.tauriWebView ?: return
+    tw.evaluateJavascript(
+      "window.__duopulsePrivateOn ? window.__duopulsePrivateOn() : false"
+    ) { v -> glassesIcon?.setOn(v == "true") }
+  }
+
+  /** Тап «⬇» шапки оверлея (duopulse-207): YouTube-видео — открыть
+   *  встроенным плеером и поднять лист загрузок (аудио/видео/субтитры)
+   *  хуком __duopulseOpenVideoDownload, оверлей спрятать («назад» вернёт);
+   *  прочая страница — тост-подсказка (кнопка видна всегда: шапка — зеркало
+   *  старта и не «меняется», жалоба duopulse-207). */
+  private fun openVideoDownload(id: String) {
+    hide()
+    MainActivity.tauriWebView?.evaluateJavascript(
+      "window.__duopulseOpenVideoDownload && window.__duopulseOpenVideoDownload('$id')", null)
   }
 
   /** JSON-строка для evaluateJavascript (duopulse-156: визит в историю —
@@ -456,6 +518,7 @@ object MobileWebHelper {
       if (ov == null) ov = build(act, root)
       hidden = false
       syncChrome(url)
+      queryPrivateState()
       // duopulse-191/192: адрес под режимом YouTube — мобильный срезает
       // app=desktop, «расширенный» держит десктоп (с десктоп-UA до запроса)
       val target = youTubeModeUrl(url) ?: url
@@ -770,6 +833,9 @@ object MobileWebHelper {
     addrEdit = null
     addrEditing = false
     duoBtn = null
+    glassesIcon = null
+    musicBtn = null
+    starBtn = null
     progress = null
     defaultUa = null
     hidden = false
@@ -815,10 +881,12 @@ object MobileWebHelper {
     // ── Шапка оверлея — зеркало .m-bar стартового экрана (duopulse-202:
     // жалоба «при поиске открывается новый дизайн, не такой как идёт на
     // старте» — прежние «‹»/«✕» + пассивный адрес-чип читались другим
-    // браузером). Ряд 1 — «⌂» домой + логотип + «▶ duo» (контекстно) + «⋮»;
-    // ряд 2 — омнибокс-поле + круглая GO. Размеры/отступы — как
-    // .m-bar/.m-bar-top/.m-urlrow mobile.css (кнопки 36dp, gap 8, паддинги
-    // 6/10/0 и 8/10); цвета — токены tokens.css: surface/base/elevated/акцент.
+    // браузером; duopulse-207 — полное зеркало по кнопкам). Ряд 1 — «⌂»
+    // домой + логотип + очки-инкогнито + «▶ duo» (контекстно) + «⬇» + «⋮»;
+    // ряд 2 — омнибокс-поле + звёздочка ☆ + круглая GO. Размеры/отступы —
+    // как .m-bar/.m-bar-top/.m-urlrow mobile.css (кнопки 36dp, gap 8,
+    // паддинги 6/10/0 и 8/10); цвета — токены tokens.css:
+    // surface/base/elevated/акцент.
     val header = LinearLayout(act)
     header.orientation = LinearLayout.VERTICAL
     header.setBackgroundColor(Color.parseColor("#111d2b")) // --bg-surface
@@ -871,6 +939,19 @@ object MobileWebHelper {
     bar.addView(logo, LinearLayout.LayoutParams(
       0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginEnd = dp(8) })
 
+    // очки-инкогнито (duopulse-207) — как .m-private-btn старта: иконка 18dp
+    // в круге 36dp (перенос SVG — юникод-«очки» это эмодзи и ломает дизайн);
+    // тап — тот же переключатель режима (включение закрывает оверлей — он на
+    // системном профиле WebView, см. setIncognito мобильной ветки)
+    val glasses = GlassesIcon(act)
+    glasses.contentDescription = "Инкогнито"
+    glasses.setOnClickListener {
+      MainActivity.tauriWebView?.evaluateJavascript(
+        "window.__duopulseTogglePrivate && window.__duopulseTogglePrivate()", null)
+    }
+    bar.addView(glasses, iconLp(8))
+    glassesIcon = glasses
+
     // «▶ duo» на страницах YouTube-видео — как «duo»-кнопка старта
     // (.m-duo-btn: pill 30dp, рамка акцента 0.35, elevated-фон)
     val duo = Button(act)
@@ -898,6 +979,43 @@ object MobileWebHelper {
     bar.addView(duo, LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.WRAP_CONTENT, dp(30)).apply { marginEnd = dp(8) })
     duoBtn = duo
+
+    // «⬇» загрузка (duopulse-207) — как .m-music-btn старта: pill 34×30,
+    // рамка акцента 0.35, elevated-фон; видео — плеер + лист загрузок,
+    // прочее — тост (кнопка всегда видна: шапка не «меняется», жалоба 207)
+    val music = Button(act)
+    music.text = "⬇"
+    music.contentDescription = "Скачать: аудио, видео или субтитры"
+    music.transformationMethod = null
+    music.setTextColor(Color.parseColor("#BDFE4F")) // --accent-neon
+    music.textSize = 14f
+    music.gravity = Gravity.CENTER
+    music.setPadding(0, 0, 0, 0)
+    music.minimumWidth = 0
+    music.minWidth = 0
+    music.minimumHeight = 0
+    music.minHeight = 0
+    music.background = GradientDrawable().apply {
+      cornerRadius = dp(15).toFloat()
+      setColor(Color.parseColor("#1d282b")) // --bg-elevated
+      setStroke(dp(1), Color.argb(89, 189, 254, 79))
+    }
+    music.setOnClickListener {
+      val wv = webView ?: return@setOnClickListener
+      val id = youTubeVideoId(trustedUrl(wv) ?: "")
+      if (id != null) {
+        openVideoDownload(id)
+      } else {
+        Toast.makeText(
+          act, "Скачивание — для YouTube-видео: откройте видео в плеере duo",
+          Toast.LENGTH_LONG).show()
+      }
+    }
+    bar.addView(music, LinearLayout.LayoutParams(dp(34), dp(30)).apply {
+      gravity = Gravity.CENTER_VERTICAL
+      marginEnd = dp(8)
+    })
+    musicBtn = music
 
     val menuBtn = toolButton("⋮", "Меню")
     menuBtn.setOnClickListener { showMenu(act, it) }
@@ -958,6 +1076,25 @@ object MobileWebHelper {
     }
     urlRow.addView(edit, LinearLayout.LayoutParams(0, dp(36), 1f))
     addrEdit = edit
+
+    // звёздочка закладки (duopulse-207) — между адресом и GO, как mStar
+    // старта: ☆/★, состояние/тап — тот же стор закладок, что у меню «⋮»
+    val star = toolButton("☆", "В избранное")
+    star.setOnClickListener {
+      val wv = webView ?: return@setOnClickListener
+      val url = trustedUrl(wv) ?: return@setOnClickListener
+      val on = MobileBookmarksNative.toggle(url, wv.title ?: url)
+      syncStar(url)
+      Toast.makeText(
+        act,
+        if (on) "★ Добавлено в закладки" else "☆ Убрано из закладок",
+        Toast.LENGTH_SHORT
+      ).show()
+    }
+    urlRow.addView(star, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+      marginStart = dp(8)
+    })
+    starBtn = star
 
     // GO — как .m-go старта: круглая 36dp акцентная, тёмная стрелка
     val goBtn = Button(act)
@@ -1408,6 +1545,50 @@ object MobileWebHelper {
           // битый JSON с чужой страницы — тихо, страница не страдает
         }
       }
+    }
+  }
+
+  /** Очки-инкогнито шапки (duopulse-207) — перенос SVG-иконки
+   *  .m-private-btn старта (viewBox 16×16, stroke 1.6, дужки + две линзы +
+   *  переносье): юникод-«очки» — эмодзи и ломает дизайн-язык шапки, а
+   *  зеркальность иконок — суть жалобы 202/207. Включённый режим —
+   *  фиолетовый tint и внутреннее кольцо, как .m-private-btn.on. */
+  private class GlassesIcon(act: Context) : View(act) {
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+      style = android.graphics.Paint.Style.STROKE
+      strokeCap = android.graphics.Paint.Cap.ROUND
+      color = Color.parseColor("#8a94a6") // --text-muted (выкл)
+    }
+
+    fun setOn(on: Boolean) {
+      paint.color = Color.parseColor(if (on) "#9a8fd8" else "#8a94a6")
+      background = if (on) {
+        GradientDrawable().apply {
+          shape = GradientDrawable.OVAL
+          setStroke(
+            (1.5f * resources.displayMetrics.density).toInt(),
+            Color.parseColor("#9a8fd8"))
+        }
+      } else {
+        null
+      }
+      invalidate()
+    }
+
+    override fun onDraw(c: android.graphics.Canvas) {
+      // иконка 18dp по центру круга 36dp — как SVG 18px в кнопке 36px старта
+      val box = 18f * resources.displayMetrics.density
+      val pad = (width - box) / 2f
+      paint.strokeWidth = 1.6f // юниты viewBox — масштаб canvas.scale
+      val p = android.graphics.Path()
+      p.moveTo(4f, 6.5f); p.lineTo(5f, 4f); p.lineTo(11f, 4f); p.lineTo(12f, 6.5f)
+      p.moveTo(3f, 6.5f); p.lineTo(13f, 6.5f)
+      p.addCircle(5.5f, 10.5f, 2f, android.graphics.Path.Direction.CW)
+      p.addCircle(10.5f, 10.5f, 2f, android.graphics.Path.Direction.CW)
+      p.moveTo(7.5f, 10.5f); p.lineTo(8.5f, 10.5f)
+      c.translate(pad, pad)
+      c.scale(box / 16f, box / 16f)
+      c.drawPath(p, paint)
     }
   }
 
