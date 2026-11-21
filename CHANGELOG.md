@@ -7767,4 +7767,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   (видео с первой секунды контентное, dur=122), «реклама в DOM: не замечено», движок режет valentine/flirtify
   (403 в сетевом логе), видео-контент/превью/API сайта работают; релиз 0.1.80 собран и опубликован (оба
   канала + хаб + C:\DuoPulse).
-- Коммит: <hash> (feat(adblock): duopulse-197 — реклама xhamster: список duopulse-tubes…); версия 0.1.80.
+- Коммит: 78c1729 (feat(adblock): duopulse-197 — реклама xhamster убрана: список duopulse-tubes…); версия 0.1.80.
