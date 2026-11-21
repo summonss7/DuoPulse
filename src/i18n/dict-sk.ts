@@ -907,4 +907,40 @@ export const dict: Record<string, string> = {
   "Импорт отменён": "Import zrušený",
   "Не удалось прочитать файл": "Súbor sa nepodarilo prečítať",
   "VPN: не удалось прочитать состояние": "VPN: nepodarilo sa prečítať stav",
+  // zvuk 5.1/7.1 (duopulse-204)
+  "Звук 5.1/7.1": "Zvuk 5.1/7.1",
+  "Проверка многоканальной системы и баланс колонок: поканальный тест-тон, усиление каждого канала (передние мощнее задних — как захотите) и распределение стерео-звука видео на все колонки. До включения звук страниц не меняется вовсе.":
+    "Kontrola viackanálového systému a vyváženie reproduktorov: testovací tón po kanáloch, zosilnenie každého kanála (predné hlasnejšie ako zadné — ako chcete) a rozprestretie stereo zvuku videa na všetky reproduktory. Kým nie je zapnuté, zvuk strán sa nemení.",
+  "Фронт левый": "Predný ľavý",
+  "Фронт правый": "Predný pravý",
+  "Центр": "Stred",
+  "Сабвуфер": "Subwoofer",
+  "Тыл левый": "Priestorový ľavý",
+  "Тыл правый": "Priestorový pravý",
+  "Задний левый": "Zadný ľavý",
+  "Задний правый": "Zadný pravý",
+  "Проверить устройство": "Skontrolovať zariadenie",
+  "Windows сейчас отдаёт браузеру стерео. Чтобы задействовать колонки 5.1/7.1: Панель управления → Оборудование и звук → Звук → устройство вывода → «Настройка динамиков» → выберите 5.1/7.1 — и нажмите «Проверить устройство» снова.":
+    "Windows momentálne poskytuje prehliadaču stereo. Na použitie reproduktorov 5.1/7.1: Ovládací panel → Hardvér a zvuk → Zvuk → výstupné zariadenie → «Nastavenie reproduktorov» → vyberte 5.1/7.1 — a znova stlačte «Skontrolovať zariadenie».",
+  "Играет: {name} — {hz} Гц": "Prehráva: {name} — {hz} Hz",
+  "Тест каналов пройден.": "Test kanálov dokončený.",
+  "Все по очереди": "Všetky postupne",
+  "Стоп": "Stop",
+  "Тест колонок": "Test reproduktorov",
+  "Каждая кнопка играет тон в свою колонку; «Все по очереди» — последовательная проверка.":
+    "Každé tlačidlo prehrá tón do svojho reproduktora; «Všetky postupne» — postupná kontrola.",
+  " Применять к видео: стерео — на все колонки, 5.1/7.1 — поканальное усиление":
+    " Aplikovať na video: stereo — na všetky reproduktory, 5.1/7.1 — zosilnenie po kanáloch",
+  "Включено: звук видео идёт через WebAudio — стерео распределяется на все колонки (центр/саб/тыл тише фронтов, ползунки правят), многоканальные дорожки — с поканальным усилением. DRM-видео и кросс-доменные плееры не трогаются. Выключено — звук как есть, без обработки.":
+    "Zapnuté: zvuk videa ide cez WebAudio — stereo sa rozprestrie na všetky reproduktory (stred/sub/priestorové tichšie ako predné, jazdce doladia), viackanálové stopy dostanú zosilnenie po kanáloch. DRM video a prehrávače naprieč doménami sa nedotkneme. Vypnuté — zvuk ostáva bez zásahu.",
+  "Сбросить баланс": "Obnoviť vyváženie",
+  "WebAudio недоступен — тест не сработает": "WebAudio nie je dostupné — test nefunguje",
+  "7.1 (8 каналов)": "7.1 (8 kanálov)",
+  "5.1 (6 каналов)": "5.1 (6 kanálov)",
+  "стерео (2 канала)": "stereo (2 kanály)",
+  "{n} каналов": "{n} kanálov",
+  "Устройство вывода для браузера: {layout}, {hz} Гц": "Výstupné zariadenie pre prehliadač: {layout}, {hz} Hz",
+  "Устройство стерео: тон выйдет из обоих фронтов — включите 5.1/7.1 в настройках звука Windows":
+    "Stereo zariadenie: tón vyjde z oboch predných reproduktorov — zapnite 5.1/7.1 v nastaveniach zvuku Windows",
+  "Канал есть только в раскладке 7.1": "Kanál existuje iba v rozložení 7.1",
 };

@@ -907,4 +907,40 @@ export const dict: Record<string, string> = {
   "Импорт отменён": "Import anulat",
   "Не удалось прочитать файл": "Nu am putut citi fișierul",
   "VPN: не удалось прочитать состояние": "VPN: nu am putut citi starea",
+  // sunet 5.1/7.1 (duopulse-204)
+  "Звук 5.1/7.1": "Sunet 5.1/7.1",
+  "Проверка многоканальной системы и баланс колонок: поканальный тест-тон, усиление каждого канала (передние мощнее задних — как захотите) и распределение стерео-звука видео на все колонки. До включения звук страниц не меняется вовсе.":
+    "Verificarea sistemului multicanal și balanța boxelor: ton de test pe fiecare canal, amplificare pe canal (față mai tare decât spatele — cum preferi) și distribuirea sunetului stereo al videoclipurilor pe toate boxele. Până la activare, sunetul paginilor rămâne neatins.",
+  "Фронт левый": "Față stânga",
+  "Фронт правый": "Față dreapta",
+  "Центр": "Centru",
+  "Сабвуфер": "Subwoofer",
+  "Тыл левый": "Surround stânga",
+  "Тыл правый": "Surround dreapta",
+  "Задний левый": "Spate stânga",
+  "Задний правый": "Spate dreapta",
+  "Проверить устройство": "Verifică dispozitivul",
+  "Windows сейчас отдаёт браузеру стерео. Чтобы задействовать колонки 5.1/7.1: Панель управления → Оборудование и звук → Звук → устройство вывода → «Настройка динамиков» → выберите 5.1/7.1 — и нажмите «Проверить устройство» снова.":
+    "Windows oferă acum browserului doar stereo. Pentru boxe 5.1/7.1: Panou de control → Hardware și sunet → Sunet → dispozitivul de ieșire → „Configurare boxe” → alegeți 5.1/7.1 — și apăsați din nou „Verifică dispozitivul”.",
+  "Играет: {name} — {hz} Гц": "Redă: {name} — {hz} Hz",
+  "Тест каналов пройден.": "Testul canalelor a fost parcurs.",
+  "Все по очереди": "Toate pe rând",
+  "Стоп": "Stop",
+  "Тест колонок": "Testul boxelor",
+  "Каждая кнопка играет тон в свою колонку; «Все по очереди» — последовательная проверка.":
+    "Fiecare buton redă un ton în propria boxă; „Toate pe rând” — verificare secvențială.",
+  " Применять к видео: стерео — на все колонки, 5.1/7.1 — поканальное усиление":
+    " Aplică la videoclipuri: stereo — pe toate boxele, 5.1/7.1 — amplificare pe canal",
+  "Включено: звук видео идёт через WebAudio — стерео распределяется на все колонки (центр/саб/тыл тише фронтов, ползунки правят), многоканальные дорожки — с поканальным усилением. DRM-видео и кросс-доменные плееры не трогаются. Выключено — звук как есть, без обработки.":
+    "Activat: sunetul videoclipurilor trece prin WebAudio — stereo se distribuie pe toate boxele (centru/subwoofer/surround mai încet decât fața, glisoarele ajustează), pistele multicanal primesc amplificare pe canal. Videoclipurile DRM și playerele cross-origin nu sunt atinse. Dezactivat — sunetul rămâne neatins.",
+  "Сбросить баланс": "Resetează balanța",
+  "WebAudio недоступен — тест не сработает": "WebAudio indisponibil — testul nu va funcționa",
+  "7.1 (8 каналов)": "7.1 (8 canale)",
+  "5.1 (6 каналов)": "5.1 (6 canale)",
+  "стерео (2 канала)": "stereo (2 canale)",
+  "{n} каналов": "{n} canale",
+  "Устройство вывода для браузера: {layout}, {hz} Гц": "Dispozitivul de ieșire pentru browser: {layout}, {hz} Hz",
+  "Устройство стерео: тон выйдет из обоих фронтов — включите 5.1/7.1 в настройках звука Windows":
+    "Dispozitiv stereo: tonul va ieși din ambele boxe frontale — activați 5.1/7.1 în setările de sunet Windows",
+  "Канал есть только в раскладке 7.1": "Canalul există doar în configurația 7.1",
 };

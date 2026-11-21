@@ -345,6 +345,123 @@ pub fn save_subtitles(dir: &Path, cfg: &SubtitlesConfig) -> Result<(), String> {
     save_section(dir, "subtitles", cfg)
 }
 
+// Звук 5.1/7.1 (duopulse-204, требование F-11 из docs/01 §4.1)
+// ---------------------------------------------------------------------------
+
+/// Поканальное усиление, % (0–200; 100 — без изменения). Индексы каналов —
+/// порядок WebAudio (5.1: FL FR C LFE SL SR; 7.1 добавляет BL BR): тест-тоны
+/// и матрица воспроизведения в content/audio-balance.ts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AudioChannelGains {
+    pub front_left: u32,
+    pub front_right: u32,
+    pub center: u32,
+    /// Сабвуфер (LFE).
+    pub lfe: u32,
+    /// Тыл/бок 5.1 (WebAudio SL/SR, индексы 4/5).
+    pub side_left: u32,
+    pub side_right: u32,
+    /// Задние 7.1 (WebAudio BL/BR, индексы 6/7).
+    pub back_left: u32,
+    pub back_right: u32,
+}
+
+impl Default for AudioChannelGains {
+    fn default() -> Self {
+        Self {
+            front_left: 100,
+            front_right: 100,
+            center: 100,
+            lfe: 100,
+            side_left: 100,
+            side_right: 100,
+            back_left: 100,
+            back_right: 100,
+        }
+    }
+}
+
+impl AudioChannelGains {
+    /// Клампы перед сохранением: усиление 0–200% на канал.
+    pub fn normalized(mut self) -> Self {
+        for g in [
+            &mut self.front_left,
+            &mut self.front_right,
+            &mut self.center,
+            &mut self.lfe,
+            &mut self.side_left,
+            &mut self.side_right,
+            &mut self.back_left,
+            &mut self.back_right,
+        ] {
+            *g = (*g).clamp(0, 200);
+        }
+        self
+    }
+
+    /// camelCase-объект для init-скрипта дефолтов и события duopulse-audio-set.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "frontLeft": self.front_left,
+            "frontRight": self.front_right,
+            "center": self.center,
+            "lfe": self.lfe,
+            "sideLeft": self.side_left,
+            "sideRight": self.side_right,
+            "backLeft": self.back_left,
+            "backRight": self.back_right,
+        })
+    }
+}
+
+/// Раздел "audio" settings.json — колонки 5.1/7.1 (duopulse-204): усиление
+/// каналов («передние мощнее задних») и тумблер применения к воспроизведению
+/// видео (WebAudio-хук в контент-бандле: стерео распределяется на все
+/// колонки, многоканальные дорожки идут с поканальным усилением; выкл —
+/// звук страницы не трогаем вовсе, путь бит-точный). Диагностика устройства
+/// и поканальный тест — клиентские (WebAudio на странице настроек), в
+/// разделе не хранятся.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AudioConfig {
+    /// Применять баланс и объёмное распределение к видео на страницах.
+    pub apply_to_playback: bool,
+    pub gains: AudioChannelGains,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            apply_to_playback: false,
+            gains: AudioChannelGains::default(),
+        }
+    }
+}
+
+impl AudioConfig {
+    pub fn normalized(mut self) -> Self {
+        self.gains = self.gains.normalized();
+        self
+    }
+
+    /// camelCase-объект для init-скрипта дефолтов и события duopulse-audio-set.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "applyToPlayback": self.apply_to_playback,
+            "gains": self.gains.to_json(),
+        })
+    }
+}
+
+pub fn load_audio(dir: &Path) -> AudioConfig {
+    load_section(dir, "audio")
+}
+
+pub fn save_audio(dir: &Path, cfg: &AudioConfig) -> Result<(), String> {
+    save_section(dir, "audio", cfg)
+}
+
 /// Последнее пользовательское состояние показа duo (карточка duopulse-128):
 /// вкл/выкл, выбранные Alt+D/кнопкой/панелью. Отдельный ключ корня (не раздел
 /// "subtitles"), чтобы settings.apply и синк профиля его не перетирали.
@@ -369,7 +486,9 @@ pub fn save_last_duo_enabled(dir: &Path, on: bool) {
 /// новые вкладки видели свежесохранённые настройки.
 pub fn content_defaults_script(dir: &Path) -> String {
     let subs = load_subtitles(dir);
+    let audio = load_audio(dir);
     let value = serde_json::json!({
+        "audio": audio.to_json(),
         "subtitles": {
             "defaultTranslationLang": subs.default_translation_lang,
             // duopulse-128: последнее вкл/выкл duo — новые окна стартуют
@@ -825,6 +944,49 @@ mod tests {
     }
 
     #[test]
+    fn audio_config_defaults_and_clamps() {
+        // duopulse-204: дефолт выключен и нейтрален (бит-точный путь звука),
+        // клампы — 0–200% на канал, старый файл без полей добирает дефолты.
+        assert_eq!(AudioConfig::default(), AudioConfig {
+            apply_to_playback: false,
+            gains: AudioChannelGains::default(),
+        });
+        let clamped = AudioConfig {
+            apply_to_playback: true,
+            gains: AudioChannelGains {
+                front_left: 400,
+                front_right: 0,
+                center: 120,
+                lfe: 80,
+                side_left: 60,
+                side_right: 100,
+                back_left: 200,
+                back_right: 5,
+            },
+        }
+        .normalized();
+        assert_eq!(clamped.gains.front_left, 200);
+        assert_eq!(clamped.gains.front_right, 0);
+        assert_eq!(clamped.gains.back_left, 200);
+        assert_eq!(clamped.gains.back_right, 5);
+        assert!(clamped.apply_to_playback);
+        let dir = tmp_dir("audio");
+        write_key(
+            &dir,
+            "audio",
+            &serde_json::json!({"applyToPlayback": true, "gains": {"frontLeft": 150}}),
+        )
+        .unwrap();
+        let cfg = load_audio(&dir);
+        assert!(cfg.apply_to_playback);
+        assert_eq!(cfg.gains.front_left, 150);
+        assert_eq!(cfg.gains.center, 100, "старый файл добирает дефолты");
+        save_audio(&dir, &clamped).unwrap();
+        assert_eq!(load_audio(&dir), clamped);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn content_defaults_script_is_valid_json_literal() {
         let dir = tmp_dir("script");
         save_subtitles(
@@ -853,6 +1015,10 @@ mod tests {
         let json = &js[";(window.__DUOPULSE_DEFAULTS__=".len()..js.len() - 2];
         let parsed: serde_json::Value = serde_json::from_str(json).expect("JSON-литерал валиден");
         assert_eq!(parsed["subtitles"]["defaultTranslationLang"], "uk");
+        // duopulse-204: дефолты баланса колонок — в init-скрипте контента.
+        assert_eq!(parsed["audio"]["applyToPlayback"], false);
+        assert_eq!(parsed["audio"]["gains"]["frontLeft"], 100);
+        assert_eq!(parsed["audio"]["gains"]["backRight"], 100);
         assert_eq!(parsed["subtitles"]["style"]["swapRows"], true, "duopulse-181");
         // duopulse-128: без переключений lastEnabled нет (null — прежнее
         // поведение новых окон); после сохранения — в литерале и чтении.

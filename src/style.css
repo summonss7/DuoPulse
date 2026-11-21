@@ -2883,6 +2883,46 @@ input[type="range"] {
 .set-field select {
   font-family: inherit;
 }
+/* Звук 5.1/7.1 (duopulse-204): сетка тест-кнопок каналов и ползунков
+ * усиления; активный канал теста подсвечен акцентом. */
+.set-audio-channels {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.set-audio-channels button {
+  height: 30px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.set-audio-channels button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.set-audio-channels button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.set-audio-gains {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 18px;
+}
+.set-audio-gains .set-field-name {
+  min-width: 120px;
+}
+.set-audio-gains input[type="range"] {
+  flex: 1;
+}
+.set-field-wide {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 6px;
+}
 .set-field input:focus,
 .set-field select:focus {
   border-color: var(--accent-neon); /* фокус — неон, §3 */

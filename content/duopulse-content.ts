@@ -96,6 +96,7 @@ import {
   type FrameVideoProxy,
 } from "./adapters/embed";
 import { installSelectionTranslate } from "./translate-select";
+import { installAudioBalance } from "./audio-balance";
 import { installPasswordFill } from "./passwords-fill";
 import { installSubsDownload } from "./download-subs";
 import { lastDuoEnabled, preferredLangs } from "./defaults";
@@ -124,6 +125,10 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
     (location.hostname === "localhost" && location.port === "5173")
   )
     return;
+  // Поканальный баланс 5.1/7.1 (duopulse-204): включается настройкой «Звук»;
+  // до включения пассивен (звук страниц не трогаем). Ставится и в топ, и во
+  // фреймы плееров (embed-агент ниже — только пересылка субтитров).
+  installAudioBalance(document, window);
   // Плеер-фреймы кино-сайтов (duopulse-199, техзад из duopulse-198):
   // контентный WebMessage-канал во фреймы не достаёт (ответы PostWebMessage —
   // только top-level), поэтому в кадре фрейма работает агент-ретранслятор

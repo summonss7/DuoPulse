@@ -2710,6 +2710,91 @@
       "params": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
+          "AudioChannelGains": {
+            "description": "Поканальное усиление, % (0–200; 100 — без изменения). Индексы каналов — порядок WebAudio (5.1: FL FR C LFE SL SR; 7.1 добавляет BL BR): тест-тоны и матрица воспроизведения в content/audio-balance.ts.",
+            "properties": {
+              "backLeft": {
+                "default": 100,
+                "description": "Задние 7.1 (WebAudio BL/BR, индексы 6/7).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "backRight": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "center": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "frontLeft": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "frontRight": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "lfe": {
+                "default": 100,
+                "description": "Сабвуфер (LFE).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sideLeft": {
+                "default": 100,
+                "description": "Тыл/бок 5.1 (WebAudio SL/SR, индексы 4/5).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sideRight": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "AudioConfig": {
+            "description": "Раздел \"audio\" settings.json — колонки 5.1/7.1 (duopulse-204): усиление каналов («передние мощнее задних») и тумблер применения к воспроизведению видео (WebAudio-хук в контент-бандле: стерео распределяется на все колонки, многоканальные дорожки идут с поканальным усилением; выкл — звук страницы не трогаем вовсе, путь бит-точный). Диагностика устройства и поканальный тест — клиентские (WebAudio на странице настроек), в разделе не хранятся.",
+            "properties": {
+              "applyToPlayback": {
+                "default": false,
+                "description": "Применять баланс и объёмное распределение к видео на страницах.",
+                "type": "boolean"
+              },
+              "gains": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/AudioChannelGains"
+                  }
+                ],
+                "default": {
+                  "backLeft": 100,
+                  "backRight": 100,
+                  "center": 100,
+                  "frontLeft": 100,
+                  "frontRight": 100,
+                  "lfe": 100,
+                  "sideLeft": 100,
+                  "sideRight": 100
+                }
+              }
+            },
+            "type": "object"
+          },
           "DiagnosticsConfig": {
             "description": "Раздел \"diagnostics\" settings.json (карточка duopulse-129): видимость диагностического бейджа M0 (content/m0-spike.js — слева внизу: инжекция, сетевой перехват, fps/дропы кадров). По умолчанию ВЫКЛЮЧЕН — раньше бейдж показывался всегда («окошко слева внизу при просмотре видео» — пожелание Артёма). Раздел после v3 — serde-умолчания, миграция не нужна.",
             "properties": {
@@ -2936,6 +3021,16 @@
         },
         "description": "settings.apply: частичный патч разделов (неназванные не меняются). Прокси-пароль и ключи API — только существующими командами (settings.set proxy / translate.set_settings: секреты идут в DPAPI, не в патче).",
         "properties": {
+          "audio": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AudioConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "diagnostics": {
             "anyOf": [
               {
@@ -3259,6 +3354,91 @@
               "openaiModel",
               "provider"
             ],
+            "type": "object"
+          },
+          "AudioChannelGains": {
+            "description": "Поканальное усиление, % (0–200; 100 — без изменения). Индексы каналов — порядок WebAudio (5.1: FL FR C LFE SL SR; 7.1 добавляет BL BR): тест-тоны и матрица воспроизведения в content/audio-balance.ts.",
+            "properties": {
+              "backLeft": {
+                "default": 100,
+                "description": "Задние 7.1 (WebAudio BL/BR, индексы 6/7).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "backRight": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "center": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "frontLeft": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "frontRight": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "lfe": {
+                "default": 100,
+                "description": "Сабвуфер (LFE).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sideLeft": {
+                "default": 100,
+                "description": "Тыл/бок 5.1 (WebAudio SL/SR, индексы 4/5).",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "sideRight": {
+                "default": 100,
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "AudioConfig": {
+            "description": "Раздел \"audio\" settings.json — колонки 5.1/7.1 (duopulse-204): усиление каналов («передние мощнее задних») и тумблер применения к воспроизведению видео (WebAudio-хук в контент-бандле: стерео распределяется на все колонки, многоканальные дорожки идут с поканальным усилением; выкл — звук страницы не трогаем вовсе, путь бит-точный). Диагностика устройства и поканальный тест — клиентские (WebAudio на странице настроек), в разделе не хранятся.",
+            "properties": {
+              "applyToPlayback": {
+                "default": false,
+                "description": "Применять баланс и объёмное распределение к видео на страницах.",
+                "type": "boolean"
+              },
+              "gains": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/AudioChannelGains"
+                  }
+                ],
+                "default": {
+                  "backLeft": 100,
+                  "backRight": 100,
+                  "center": 100,
+                  "frontLeft": 100,
+                  "frontRight": 100,
+                  "lfe": 100,
+                  "sideLeft": 100,
+                  "sideRight": 100
+                }
+              }
+            },
             "type": "object"
           },
           "DeeplPlan": {
@@ -3637,6 +3817,14 @@
             ],
             "description": "Распознавание речи (карточка duopulse-060): движок/модель/ключ."
           },
+          "audio": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/AudioConfig"
+              }
+            ],
+            "description": "Звук 5.1/7.1 (duopulse-204): баланс каналов и применение к видео."
+          },
           "diagnostics": {
             "allOf": [
               {
@@ -3711,6 +3899,7 @@
           "adblockEnabled",
           "appearance",
           "asr",
+          "audio",
           "diagnostics",
           "downloads",
           "engines",

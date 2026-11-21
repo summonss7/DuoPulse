@@ -612,6 +612,256 @@ export function initSettingsPage(): void {
       .catch((e2) => (asrStatus.textContent = String(e2)));
   });
 
+  // --- 4b. Звук 5.1/7.1 (duopulse-204, F-11) -----------------------------------
+  const audio = section(
+    t("Звук 5.1/7.1"),
+    t("Проверка многоканальной системы и баланс колонок: поканальный тест-тон, усиление каждого канала (передние мощнее задних — как захотите) и распределение стерео-звука видео на все колонки. До включения звук страниц не меняется вовсе."),
+  );
+  /** Каналы в порядке WebAudio: 5.1 = фронт L/R, центр, саб, тыл L/R
+   *  (SL/SR — задние колонки 5.1-системы); 7.1 добавляет задние BL/BR. */
+  const AUDIO_CHANNELS = [
+    { key: "frontLeft", label: t("Фронт левый"), hz: 440 },
+    { key: "frontRight", label: t("Фронт правый"), hz: 554 },
+    { key: "center", label: t("Центр"), hz: 659 },
+    { key: "lfe", label: t("Сабвуфер"), hz: 61 },
+    { key: "sideLeft", label: t("Тыл левый"), hz: 784 },
+    { key: "sideRight", label: t("Тыл правый"), hz: 880 },
+    { key: "backLeft", label: t("Задний левый"), hz: 988 },
+    { key: "backRight", label: t("Задний правый"), hz: 1047 },
+  ] as const;
+  type AudioGainKey = (typeof AUDIO_CHANNELS)[number]["key"];
+
+  // Диагностика: что Windows дала браузеру (стерео/5.1/7.1) + частота.
+  const audioDiag = el("div", "set-status");
+  const audioRecheck = document.createElement("button");
+  audioRecheck.type = "button";
+  audioRecheck.className = "ghost";
+  audioRecheck.textContent = t("Проверить устройство");
+  const audioStereoWarn = el("div", "set-warn");
+  audioStereoWarn.hidden = true;
+  audioStereoWarn.textContent = t(
+    "Windows сейчас отдаёт браузеру стерео. Чтобы задействовать колонки 5.1/7.1: Панель управления → Оборудование и звук → Звук → устройство вывода → «Настройка динамиков» → выберите 5.1/7.1 — и нажмите «Проверить устройство» снова.",
+  );
+
+  // Поканальный тест: тон в свой дискретный канал merger → destination.
+  let audioCtx: AudioContext | null = null;
+  let testMerger: ChannelMergerNode | null = null;
+  let testTone: { osc: OscillatorNode; gain: GainNode } | null = null;
+  let seqTimer: ReturnType<typeof setTimeout> | null = null;
+  const audioTestStatus = el("div", "set-status");
+  const audioTestGrid = el("div", "set-audio-channels");
+  const audioTestButtons: HTMLButtonElement[] = [];
+  const audioStop = (): void => {
+    if (seqTimer !== null) {
+      clearTimeout(seqTimer);
+      seqTimer = null;
+    }
+    if (testTone) {
+      try {
+        const now = audioCtx?.currentTime ?? 0;
+        testTone.gain.gain.cancelScheduledValues(now);
+        testTone.gain.gain.setValueAtTime(testTone.gain.gain.value, now);
+        testTone.gain.gain.linearRampToValueAtTime(0, now + 0.03);
+        testTone.osc.stop(now + 0.05);
+      } catch {
+        /* тон уже остановлен */
+      }
+      testTone = null;
+    }
+    for (const btn of audioTestButtons) btn.classList.remove("on");
+  };
+  /** Текущее усиление канала из слайдеров (тест играет уже с балансом). */
+  const audioGainValue = (key: AudioGainKey): number =>
+    Number(audioGains[key].input.value) / 100;
+  const playChannel = (idx: number): void => {
+    if (!audioCtx || !testMerger) return;
+    void audioCtx.resume();
+    audioStop();
+    const ch = AUDIO_CHANNELS[idx];
+    const osc = audioCtx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = ch.hz;
+    const gain = audioCtx.createGain();
+    const mult = audioGainValue(ch.key);
+    const peak = (ch.key === "lfe" ? 0.9 : 0.5) * mult;
+    const now = audioCtx.currentTime;
+    const dur = ch.key === "lfe" ? 1.6 : 1.1;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(peak, now + 0.04);
+    gain.gain.setValueAtTime(peak, now + dur - 0.07);
+    gain.gain.linearRampToValueAtTime(0, now + dur);
+    osc.connect(gain);
+    gain.connect(testMerger, 0, idx);
+    osc.start(now);
+    osc.stop(now + dur + 0.05);
+    testTone = { osc, gain };
+    audioTestButtons[idx]?.classList.add("on");
+    audioTestStatus.textContent = t("Играет: {name} — {hz} Гц", { name: ch.label, hz: ch.hz });
+  };
+  const playSequence = (): void => {
+    const layout = audioCtx ? Math.max(2, Math.min(audioCtx.destination.maxChannelCount || 2, 8)) : 2;
+    let idx = 0;
+    const step = (): void => {
+      if (idx >= layout) {
+        audioStop();
+        audioTestStatus.textContent = t("Тест каналов пройден.");
+        return;
+      }
+      playChannel(idx);
+      idx += 1;
+      seqTimer = setTimeout(step, 1400);
+    };
+    step();
+  };
+  const audioTestAll = document.createElement("button");
+  audioTestAll.type = "button";
+  audioTestAll.textContent = t("Все по очереди");
+  audioTestAll.addEventListener("click", playSequence);
+  const audioTestStop = document.createElement("button");
+  audioTestStop.type = "button";
+  audioTestStop.className = "ghost";
+  audioTestStop.textContent = t("Стоп");
+  audioTestStop.addEventListener("click", () => {
+    audioStop();
+    audioTestStatus.textContent = "";
+  });
+  for (const [idx, ch] of AUDIO_CHANNELS.entries()) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = ch.label;
+    btn.addEventListener("click", () => playChannel(idx));
+    audioTestGrid.append(btn);
+    audioTestButtons.push(btn);
+  }
+  const audioTestRow = el("div", "set-row");
+  audioTestRow.append(audioTestAll, audioTestStop, audioTestStatus);
+
+  // Баланс: усиление каждого канала, 0–200% (100 — без изменения).
+  const audioGains: Record<AudioGainKey, { input: HTMLInputElement; val: HTMLElement }> =
+    Object.fromEntries(
+      AUDIO_CHANNELS.map((ch) => {
+        const input = document.createElement("input");
+        input.type = "range";
+        input.min = "0";
+        input.max = "200";
+        input.step = "5";
+        const val = el("span", "set-range-val");
+        input.addEventListener("input", () => (val.textContent = pct(Number(input.value))));
+        return [ch.key, { input, val }];
+      }),
+    ) as Record<AudioGainKey, { input: HTMLInputElement; val: HTMLElement }>;
+  const audioStatus = el("div", "set-status");
+  const audioApplyCheck = document.createElement("input");
+  audioApplyCheck.type = "checkbox";
+  const audioApplyLabel = el("label", "set-check");
+  audioApplyLabel.append(
+    audioApplyCheck,
+    Object.assign(el("span"), {
+      textContent: t(" Применять к видео: стерео — на все колонки, 5.1/7.1 — поканальное усиление"),
+    }),
+  );
+  const audioApplyHint = el("span", "set-hint");
+  audioApplyHint.textContent = t(
+    "Включено: звук видео идёт через WebAudio — стерео распределяется на все колонки (центр/саб/тыл тише фронтов, ползунки правят), многоканальные дорожки — с поканальным усилением. DRM-видео и кросс-доменные плееры не трогаются. Выключено — звук как есть, без обработки.",
+  );
+  const audioSave = (): void => {
+    const gains = Object.fromEntries(
+      AUDIO_CHANNELS.map((ch) => [ch.key, Number(audioGains[ch.key].input.value)]),
+    ) as Record<AudioGainKey, number>;
+    void bridge.settings
+      .apply({ audio: { applyToPlayback: audioApplyCheck.checked, gains } })
+      .then(() => (audioStatus.textContent = t("Сохранено.")))
+      .catch((e) => (audioStatus.textContent = String(e)));
+  };
+  for (const ch of AUDIO_CHANNELS) {
+    audioGains[ch.key].input.addEventListener("change", audioSave);
+  }
+  audioApplyCheck.addEventListener("change", audioSave);
+  const audioReset = document.createElement("button");
+  audioReset.type = "button";
+  audioReset.className = "ghost";
+  audioReset.textContent = t("Сбросить баланс");
+  audioReset.addEventListener("click", () => {
+    for (const ch of AUDIO_CHANNELS) {
+      audioGains[ch.key].input.value = "100";
+      audioGains[ch.key].val.textContent = pct(100);
+    }
+    audioSave();
+  });
+  const audioResetRow = el("div", "set-row");
+  audioResetRow.append(audioReset, audioStatus);
+
+  /** (Пере)создать AudioContext и перерисовать диагностику/кнопки теста. */
+  const renderAudioDiag = async (): Promise<void> => {
+    if (!audioCtx) {
+      try {
+        audioCtx = new AudioContext();
+        testMerger = audioCtx.createChannelMerger(8);
+        testMerger.connect(audioCtx.destination);
+      } catch {
+        audioDiag.textContent = t("WebAudio недоступен — тест не сработает");
+        return;
+      }
+    }
+    const max = Math.max(2, audioCtx.destination.maxChannelCount || 2);
+    const layout =
+      max >= 8
+        ? t("7.1 (8 каналов)")
+        : max >= 6
+          ? t("5.1 (6 каналов)")
+          : max === 2
+            ? t("стерео (2 канала)")
+            : t("{n} каналов", { n: max });
+    audioDiag.textContent = t("Устройство вывода для браузера: {layout}, {hz} Гц", {
+      layout,
+      hz: audioCtx.sampleRate,
+    });
+    audioStereoWarn.hidden = max >= 6;
+    for (const [idx, btn] of audioTestButtons.entries()) {
+      btn.disabled = idx >= max;
+      btn.title =
+        max < 6
+          ? t("Устройство стерео: тон выйдет из обоих фронтов — включите 5.1/7.1 в настройках звука Windows")
+          : idx >= max
+            ? t("Канал есть только в раскладке 7.1")
+            : "";
+    }
+  };
+  audioRecheck.addEventListener("click", () => {
+    audioStop();
+    void (async (): Promise<void> => {
+      // Смена устройства видна только в новом контексте (как в Chrome).
+      if (audioCtx) {
+        const old = audioCtx;
+        audioCtx = null;
+        testMerger = null;
+        await old.close().catch(() => undefined);
+      }
+      await renderAudioDiag();
+    })();
+  });
+
+  const audioDiagRow = el("div", "set-row");
+  audioDiagRow.append(audioDiag, audioRecheck);
+  const audioTestField = field(t("Тест колонок"), audioTestGrid, t("Каждая кнопка играет тон в свою колонку; «Все по очереди» — последовательная проверка."));
+  audioTestField.className = "set-field set-field-wide";
+  const audioGainsGrid = el("div", "set-audio-gains");
+  for (const ch of AUDIO_CHANNELS) {
+    const row = field(ch.label, audioGains[ch.key].input);
+    row.append(audioGains[ch.key].val);
+    audioGainsGrid.append(row);
+  }
+  audio.body.append(
+    audioDiagRow,
+    audioStereoWarn,
+    audioTestField,
+    audioTestRow,
+    audioApplyLabel,
+    audioApplyHint,
+    audioGainsGrid,
+    audioResetRow,
+  );
+
   // --- 5. Прокси / VPN --------------------------------------------------------
   const proxy = section(
     t("Прокси / VPN"),
@@ -1329,6 +1579,7 @@ export function initSettingsPage(): void {
     subs.root,
     tr.root,
     asr.root,
+    audio.root,
     proxy.root,
     split.root,
     privacy.root,
@@ -1415,6 +1666,17 @@ export function initSettingsPage(): void {
       swapCheck.checked = st.swapRows ?? false;
       markLookChip();
       clearHist.checked = all.privacy.clearHistoryOnExit ?? false;
+      // Звук 5.1/7.1 (duopulse-204): форма баланса + диагностика устройства.
+      const au = all.audio;
+      const auGains = au.gains ?? {};
+      audioApplyCheck.checked = au.applyToPlayback ?? false;
+      for (const ch of AUDIO_CHANNELS) {
+        const value = auGains[ch.key] ?? 100;
+        audioGains[ch.key].input.value = String(value);
+        audioGains[ch.key].val.textContent = pct(value);
+      }
+      audioStatus.textContent = "";
+      await renderAudioDiag();
       m0Badge.checked = all.diagnostics.m0Badge ?? false;
       dlDirText.textContent = all.downloads.dir ?? t("Системная папка «Загрузки»");
       const up = all.updater;

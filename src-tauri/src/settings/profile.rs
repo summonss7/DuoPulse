@@ -96,6 +96,7 @@ const PORTABLE_SETTINGS_KEYS: &[&str] = &[
     "adblock",
     "search",
     "subtitles",
+    "audio",
     "appearance",
     "privacy",
     "updater",
@@ -253,6 +254,12 @@ pub fn apply(
             "subtitles" => {
                 serde_json::from_value::<super::SubtitlesConfig>(value.clone())
                     .map_err(|e| format!("раздел subtitles в файле не читается: {e}"))?;
+            }
+            "audio" => {
+                // duopulse-204: баланс колонок едет с профилем; serde(default)
+                // контейнера снисходителен к чужим/старым полям.
+                serde_json::from_value::<super::AudioConfig>(value.clone())
+                    .map_err(|e| format!("раздел audio в файле не читается: {e}"))?;
             }
             "appearance" | "privacy" | "adblock" => {
                 // свободная форма JSON-объектов (adblock — BTreeSet/bool,

@@ -135,6 +135,8 @@ export interface DuoPulseBridgeContract {
   PerfTabSwitchInfo: PerfTabSwitchInfo;
   PerfTabs: PerfTabs;
   SettingsPatch: SettingsPatch;
+  AudioChannelGains: AudioChannelGains;
+  AudioConfig: AudioConfig;
   DiagnosticsConfig: DiagnosticsConfig;
   DownloadConfig: DownloadConfig;
   PrivacyConfig: PrivacyConfig;
@@ -1104,6 +1106,7 @@ export interface PerfTabs {
  * settings.apply: частичный патч разделов (неназванные не меняются). Прокси-пароль и ключи API — только существующими командами (settings.set proxy / translate.set_settings: секреты идут в DPAPI, не в патче).
  */
 export interface SettingsPatch {
+  audio?: AudioConfig | null;
   diagnostics?: DiagnosticsConfig | null;
   downloads?: DownloadConfig | null;
   privacy?: PrivacyConfig | null;
@@ -1111,6 +1114,38 @@ export interface SettingsPatch {
   subtitles?: SubtitlesConfig | null;
   ui?: UiConfig | null;
   updater?: UpdaterConfig | null;
+}
+/**
+ * Раздел "audio" settings.json — колонки 5.1/7.1 (duopulse-204): усиление каналов («передние мощнее задних») и тумблер применения к воспроизведению видео (WebAudio-хук в контент-бандле: стерео распределяется на все колонки, многоканальные дорожки идут с поканальным усилением; выкл — звук страницы не трогаем вовсе, путь бит-точный). Диагностика устройства и поканальный тест — клиентские (WebAudio на странице настроек), в разделе не хранятся.
+ */
+export interface AudioConfig {
+  /**
+   * Применять баланс и объёмное распределение к видео на страницах.
+   */
+  applyToPlayback?: boolean;
+  gains?: AudioChannelGains;
+}
+/**
+ * Поканальное усиление, % (0–200; 100 — без изменения). Индексы каналов — порядок WebAudio (5.1: FL FR C LFE SL SR; 7.1 добавляет BL BR): тест-тоны и матрица воспроизведения в content/audio-balance.ts.
+ */
+export interface AudioChannelGains {
+  /**
+   * Задние 7.1 (WebAudio BL/BR, индексы 6/7).
+   */
+  backLeft?: number;
+  backRight?: number;
+  center?: number;
+  frontLeft?: number;
+  frontRight?: number;
+  /**
+   * Сабвуфер (LFE).
+   */
+  lfe?: number;
+  /**
+   * Тыл/бок 5.1 (WebAudio SL/SR, индексы 4/5).
+   */
+  sideLeft?: number;
+  sideRight?: number;
 }
 /**
  * Раздел "diagnostics" settings.json (карточка duopulse-129): видимость диагностического бейджа M0 (content/m0-spike.js — слева внизу: инжекция, сетевой перехват, fps/дропы кадров). По умолчанию ВЫКЛЮЧЕН — раньше бейдж показывался всегда («окошко слева внизу при просмотре видео» — пожелание Артёма). Раздел после v3 — serde-умолчания, миграция не нужна.
@@ -1298,6 +1333,10 @@ export interface SettingsAll {
    * Распознавание речи (карточка duopulse-060): движок/модель/ключ.
    */
   asr: AsrSettings;
+  /**
+   * Звук 5.1/7.1 (duopulse-204): баланс каналов и применение к видео.
+   */
+  audio: AudioConfig;
   /**
    * Диагностика (карточка duopulse-129): бейдж M0 на страницах видео.
    */

@@ -921,4 +921,40 @@ export const dict: Record<string, string> = {
   "Импорт отменён": "Import cancelled",
   "Не удалось прочитать файл": "Failed to read the file",
   "VPN: не удалось прочитать состояние": "VPN: failed to read state",
+  // звук 5.1/7.1 (duopulse-204)
+  "Звук 5.1/7.1": "Sound 5.1/7.1",
+  "Проверка многоканальной системы и баланс колонок: поканальный тест-тон, усиление каждого канала (передние мощнее задних — как захотите) и распределение стерео-звука видео на все колонки. До включения звук страниц не меняется вовсе.":
+    "Multichannel system check and speaker balance: per-channel test tone, per-channel gain (front louder than rear — as you like) and spreading stereo video sound to all speakers. Until enabled, page audio is untouched.",
+  "Фронт левый": "Front left",
+  "Фронт правый": "Front right",
+  "Центр": "Center",
+  "Сабвуфер": "Subwoofer",
+  "Тыл левый": "Surround left",
+  "Тыл правый": "Surround right",
+  "Задний левый": "Back left",
+  "Задний правый": "Back right",
+  "Проверить устройство": "Check device",
+  "Windows сейчас отдаёт браузеру стерео. Чтобы задействовать колонки 5.1/7.1: Панель управления → Оборудование и звук → Звук → устройство вывода → «Настройка динамиков» → выберите 5.1/7.1 — и нажмите «Проверить устройство» снова.":
+    "Windows currently exposes stereo to the browser. To use 5.1/7.1 speakers: Control Panel → Hardware and Sound → Sound → output device → “Speaker setup” → choose 5.1/7.1, then press “Check device” again.",
+  "Играет: {name} — {hz} Гц": "Playing: {name} — {hz} Hz",
+  "Тест каналов пройден.": "Channel test finished.",
+  "Все по очереди": "All in sequence",
+  "Стоп": "Stop",
+  "Тест колонок": "Speaker test",
+  "Каждая кнопка играет тон в свою колонку; «Все по очереди» — последовательная проверка.":
+    "Each button plays a tone into its own speaker; “All in sequence” checks them one by one.",
+  " Применять к видео: стерео — на все колонки, 5.1/7.1 — поканальное усиление":
+    " Apply to video: stereo — to all speakers, 5.1/7.1 — per-channel gain",
+  "Включено: звук видео идёт через WebAudio — стерео распределяется на все колонки (центр/саб/тыл тише фронтов, ползунки правят), многоканальные дорожки — с поканальным усилением. DRM-видео и кросс-доменные плееры не трогаются. Выключено — звук как есть, без обработки.":
+    "On: video audio goes through WebAudio — stereo is spread to all speakers (center/sub/surround quieter than the fronts, sliders adjust), multichannel tracks get per-channel gain. DRM video and cross-origin players are untouched. Off — audio as is, unprocessed.",
+  "Сбросить баланс": "Reset balance",
+  "WebAudio недоступен — тест не сработает": "WebAudio unavailable — the test won't work",
+  "7.1 (8 каналов)": "7.1 (8 channels)",
+  "5.1 (6 каналов)": "5.1 (6 channels)",
+  "стерео (2 канала)": "stereo (2 channels)",
+  "{n} каналов": "{n} channels",
+  "Устройство вывода для браузера: {layout}, {hz} Гц": "Output device for the browser: {layout}, {hz} Hz",
+  "Устройство стерео: тон выйдет из обоих фронтов — включите 5.1/7.1 в настройках звука Windows":
+    "Stereo device: the tone will come from both fronts — enable 5.1/7.1 in Windows sound settings",
+  "Канал есть только в раскладке 7.1": "Channel exists only in the 7.1 layout",
 };

@@ -334,6 +334,8 @@ pub struct SettingsAll {
     pub downloads: crate::settings::DownloadConfig,
     /// Диагностика (карточка duopulse-129): бейдж M0 на страницах видео.
     pub diagnostics: crate::settings::DiagnosticsConfig,
+    /// Звук 5.1/7.1 (duopulse-204): баланс каналов и применение к видео.
+    pub audio: crate::settings::AudioConfig,
     /// Язык интерфейса (duopulse-136): общий для всех webview.
     pub ui: crate::settings::UiConfig,
 }
@@ -348,6 +350,8 @@ pub struct SettingsPatch {
     pub search: Option<crate::settings::SearchConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitles: Option<crate::settings::SubtitlesConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<crate::settings::AudioConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub privacy: Option<crate::settings::PrivacyConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2234,6 +2238,7 @@ fn settings_get_all(
         asr: crate::asr::config::settings_view(&dir),
         downloads: crate::settings::load_downloads(&dir),
         diagnostics: crate::settings::load_diagnostics(&dir),
+        audio: crate::settings::load_audio(&dir),
         ui: crate::settings::load_ui(&dir),
     })
 }
@@ -2282,6 +2287,14 @@ fn settings_apply(
     }
     if let Some(privacy) = params.privacy {
         crate::settings::save_privacy(&dir, &privacy)?;
+    }
+    if let Some(audio) = params.audio {
+        // duopulse-204: баланс колонок 5.1/7.1 — живьём во все открытые
+        // вкладки (duopulse-audio-set): контент-бандл перекладывает матрицу
+        // WebAudio без перезагрузки страницы.
+        let cfg = audio.normalized();
+        crate::settings::save_audio(&dir, &cfg)?;
+        eval_all_tabs_event(&app, &manager, "duopulse-audio-set", &cfg.to_json());
     }
     if let Some(updater) = params.updater {
         crate::settings::save_updater(&dir, &updater)?;
