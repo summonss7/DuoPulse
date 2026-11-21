@@ -193,6 +193,25 @@ body {
   background: var(--bg-warm-2);
   color: var(--text-primary);
 }
+/* duopulse-205: drag&drop вкладок — тянущаяся полупрозрачна, маркер-вставка
+   — неоновая кромка 3px у левого (drop-before) / правого (drop-after, конец
+   бара) края; ::before/::after вкладки заняты (кромка активной, пульс
+   загрузки) — маркер через inset box-shadow, у активной вместе со свечением */
+.tab.dragging {
+  opacity: 0.45;
+}
+.tab.drop-before {
+  box-shadow: inset 3px 0 0 0 var(--accent-neon);
+}
+.tab.drop-after {
+  box-shadow: inset -3px 0 0 0 var(--accent-neon);
+}
+.tab.active.drop-before {
+  box-shadow: var(--glow-neon), inset 3px 0 0 0 var(--accent-neon);
+}
+.tab.active.drop-after {
+  box-shadow: var(--glow-neon), inset -3px 0 0 0 var(--accent-neon);
+}
 #newtab {
   flex: none;
   display: inline-flex;

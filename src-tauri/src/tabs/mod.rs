@@ -635,6 +635,41 @@ impl TabManager {
         self.activate(app, &id)
     }
 
+    /// tabs.move (карточка duopulse-205): переставить вкладку в таб-баре —
+    /// drag&drop мышью. Вкладка вынимается и вставляется перед before_id
+    /// (None / не найдена — в конец). Активная вкладка не меняется (индекс
+    /// пересчитывается по id), webview не трогаем: позиция в баре не связана
+    /// с раскладкой (все webview в одном content_rect, виден активный).
+    pub fn move_tab(
+        &self,
+        app: &AppHandle,
+        id: &str,
+        before_id: Option<&str>,
+    ) -> Result<TabsListResult, String> {
+        {
+            let mut st = self.state.lock().expect("tabs: лок не отравлен");
+            let from = st
+                .tabs
+                .iter()
+                .position(|t| t.id == id)
+                .ok_or_else(|| format!("вкладка {id} не найдена"))?;
+            if before_id == Some(id) {
+                return Ok(self.snapshot()); // перед самим собой — нет хода
+            }
+            // активная — по id: после перестановки индекс другой
+            let active_id = st.active.map(|i| st.tabs[i].id.clone());
+            let entry = st.tabs.remove(from);
+            let at = match before_id {
+                Some(b) => st.tabs.iter().position(|t| t.id == b),
+                None => None,
+            }
+            .unwrap_or(st.tabs.len());
+            st.tabs.insert(at, entry);
+            st.active = active_id.and_then(|aid| st.tabs.iter().position(|t| t.id == aid));
+        }
+        Ok(self.finish(app))
+    }
+
     /// Горячие клавиши таб-бара: из content-webview (content/chrome-hotkeys.js
     /// → WebMessageReceived, main.rs) и из UI (src/chrome/tabbar.ts).
     pub fn handle_hotkey(&self, app: &AppHandle, key: &str) {

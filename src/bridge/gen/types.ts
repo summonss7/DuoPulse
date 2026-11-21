@@ -184,6 +184,7 @@ export interface DuoPulseBridgeContract {
   TabsListResult: TabsListResult;
   TabInfo: TabInfo;
   TabsCloseParams: TabsCloseParams;
+  TabsMoveParams: TabsMoveParams;
   TabsOpenParams: TabsOpenParams;
   TabsSetChromeHeightParams: TabsSetChromeHeightParams;
   TabsSleepParams: TabsSleepParams;
@@ -1706,6 +1707,16 @@ export interface TabInfo {
  * tabs.close: закрыть вкладку по id; активной становится соседняя.
  */
 export interface TabsCloseParams {
+  id: string;
+}
+/**
+ * tabs.move: переставить вкладку в таб-баре (drag&drop мышью, карточка duopulse-205): вкладка вставляется перед before_id (null — в конец). Активная вкладка не меняется, порядок пишется в сессию.
+ */
+export interface TabsMoveParams {
+  /**
+   * Вкладка, перед которой поставить (null — в конец бара).
+   */
+  beforeId?: string | null;
   id: string;
 }
 /**

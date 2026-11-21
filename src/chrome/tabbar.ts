@@ -6,6 +6,9 @@
 // зовёт tabs.reopen; когда фокус в контенте, те же клавиши приходят из
 // content/chrome-hotkeys.js через Core — обе стороны сходятся на одном списке.
 //
+// Карточка duopulse-205: вкладки переставляются мышью (drag&drop) — порядок
+// пишет команда tabs.move, модель перестановки — tab-drag.ts (чистая, тесты).
+//
 // Контекстное меню вкладки (карточка duopulse-086) рендерится в оверлей-окне
 // menu-overlay: контентные webview рисуются поверх HTML UI, и панель,
 // выезжающая за полосу хрома, уходила под страницу. Логика (доступность
@@ -16,6 +19,7 @@ import { bridge } from "../bridge";
 import type { TabInfo, TabsListResult } from "../bridge";
 import { t } from "../i18n";
 import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
+import { dropBeforeId, tabReorder } from "./tab-drag";
 import { tabMenuDisabled } from "./tab-menu";
 
 const err = (e: unknown): void => console.error("tabbar:", e);
@@ -58,6 +62,7 @@ function render(): void {
       el.dataset.id = tab.id;
       el.dataset.loading = String(tab.loading);
       el.dataset.sleeping = String(tab.sleeping);
+      el.draggable = true; // перестановка drag&drop'ом (карточка 205)
       el.setAttribute("role", "tab");
       el.setAttribute("aria-selected", String(tab.active));
       el.title = tab.sleeping
@@ -159,6 +164,74 @@ tabsEl.addEventListener("wheel", (e) => {
   tabsEl.scrollLeft += e.deltaY + e.deltaX;
   e.preventDefault();
 });
+
+// --- drag&drop: перестановка вкладок (карточка duopulse-205) -----------------
+// Зажатая левая кнопка тянет вкладку, маркер-вставка — у ближайшего правого
+// соседа (как чипы строки закладок, duopulse-147); порядок пишет команда
+// tabs.move — Core меняет список и сессию, бар перерисуется по tabs:updated.
+
+/** Тянущаяся вкладка (id) во время drag&drop. */
+let dragTabId: string | null = null;
+
+/** Вкладки бара как геометрия drop-модели (dropBeforeId поверх DOM). */
+function tabRects(): { id: string; left: number; width: number }[] {
+  return [...tabsEl.querySelectorAll<HTMLElement>(".tab")].map((el) => {
+    const r = el.getBoundingClientRect();
+    return { id: el.dataset.id as string, left: r.left, width: r.width };
+  });
+}
+
+/** Снять маркеры-вставки (каждый dragover); all=true — и drag-слой целиком
+ *  (drop/dragend): подсветка тянущейся вкладки, её id. */
+function clearTabDragMarks(all = false): void {
+  for (const el of tabsEl.querySelectorAll(".tab.drop-before, .tab.drop-after")) {
+    (el as HTMLElement).classList.remove("drop-before", "drop-after");
+  }
+  if (all) {
+    tabsEl.querySelector(".tab.dragging")?.classList.remove("dragging");
+    dragTabId = null;
+  }
+}
+
+tabsEl.addEventListener("dragstart", (e) => {
+  const tab = tabElement(e.target);
+  if (!tab || !e.dataTransfer) return;
+  dragTabId = tab.dataset.id ?? null;
+  tab.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+});
+
+tabsEl.addEventListener("dragover", (e) => {
+  if (!dragTabId || !e.dataTransfer) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  clearTabDragMarks();
+  const before = dropBeforeId(tabRects(), e.clientX, dragTabId);
+  if (!before) {
+    // курсор правее всех — в конец: маркер у последней нетянущейся
+    const last = [...tabsEl.querySelectorAll<HTMLElement>(".tab")]
+      .filter((el) => el.dataset.id !== dragTabId)
+      .pop();
+    last?.classList.add("drop-after");
+    return;
+  }
+  tabsEl
+    .querySelector(`.tab[data-id="${CSS.escape(before)}"]`)
+    ?.classList.add("drop-before");
+});
+
+tabsEl.addEventListener("drop", (e) => {
+  if (!dragTabId) return;
+  e.preventDefault();
+  const id = dragTabId;
+  const before = dropBeforeId(tabRects(), e.clientX, id);
+  clearTabDragMarks(true);
+  // порядок не изменился (перед самим собой / соседом справа) — без команды
+  if (tabReorder(tabs, id, before).join("\n") === tabs.map((t) => t.id).join("\n")) return;
+  void bridge.tabs.move({ id, beforeId: before }).then(apply, err);
+});
+
+tabsEl.addEventListener("dragend", () => clearTabDragMarks(true));
 
 newtabBtn.addEventListener("click", () => {
   void bridge.tabs.open({}).then(apply, err);

@@ -92,6 +92,7 @@ import type {
   TabsSetChromeHeightParams,
   TabsCloseParams,
   TabsListResult,
+  TabsMoveParams,
   TabsOpenParams,
   TabsSleepParams,
   TabsWakeParams,
@@ -134,6 +135,9 @@ export const bridge = {
     reopen: () => invoke<TabsListResult>("tabs_reopen"),
     /** tabs.activate: сделать вкладку активной (клик по вкладке). */
     activate: (params: TabsActivateParams) => invoke<TabsListResult>("tabs_activate", { params }),
+    /** tabs.move: переставить вкладку drag&drop'ом (карточка duopulse-205):
+     *  beforeId — вкладка, перед которой поставить (null — в конец). */
+    move: (params: TabsMoveParams) => invoke<TabsListResult>("tabs_move", { params }),
     /** tabs.sleep: усыпить вкладку (авто-усыпление простаивающих — Core). */
     sleep: (params: TabsSleepParams) => invoke<TabsListResult>("tabs_sleep", { params }),
     /** tabs.wake: разбудить вкладку (активация и так будит — диагностика). */

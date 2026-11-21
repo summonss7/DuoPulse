@@ -151,6 +151,18 @@ pub struct TabsActivateParams {
     pub id: String,
 }
 
+/// tabs.move: переставить вкладку в таб-баре (drag&drop мышью, карточка
+/// duopulse-205): вкладка вставляется перед before_id (null — в конец).
+/// Активная вкладка не меняется, порядок пишется в сессию.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TabsMoveParams {
+    pub id: String,
+    /// Вкладка, перед которой поставить (null — в конец бара).
+    #[serde(default)]
+    pub before_id: Option<String>,
+}
+
 /// tabs.sleep: усыпить вкладку вручную (задача 2.3; авто-усыпление долгих
 /// простоёв — фоновая нить Core). Активная вкладка и вкладка с играющим
 /// звуком/видео не усыпляются — ошибка.
@@ -1108,6 +1120,8 @@ pub fn contract_json() -> serde_json::Value {
                              "result": schema!(TabsListResult) },
             "tabs.activate": { "handler": "tabs_activate", "params": schema!(TabsActivateParams),
                                "result": schema!(TabsListResult) },
+            "tabs.move": { "handler": "tabs_move", "params": schema!(TabsMoveParams),
+                           "result": schema!(TabsListResult) },
             "tabs.sleep": { "handler": "tabs_sleep", "params": schema!(TabsSleepParams),
                             "result": schema!(TabsListResult) },
             "tabs.wake": { "handler": "tabs_wake", "params": schema!(TabsWakeParams),
@@ -1594,6 +1608,17 @@ async fn tabs_activate(
         }
     });
     Ok(snapshot)
+}
+
+/// tabs.move (карточка duopulse-205): перестановка вкладки drag&drop'ом —
+/// порядок таб-бара; активная и webview не меняются.
+#[tauri::command]
+fn tabs_move(
+    app: AppHandle,
+    manager: tauri::State<'_, crate::tabs::TabManager>,
+    params: TabsMoveParams,
+) -> Result<TabsListResult, String> {
+    manager.move_tab(&app, &params.id, params.before_id.as_deref())
 }
 
 /// tabs.sleep: усыпить вкладку (задача 2.3). Сам TrySuspend асинхронен —
@@ -3540,6 +3565,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         tabs_close,
         tabs_reopen,
         tabs_activate,
+        tabs_move,
         tabs_sleep,
         tabs_wake,
         nav_navigate,

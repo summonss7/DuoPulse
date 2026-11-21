@@ -4819,6 +4819,94 @@
         "type": "object"
       }
     },
+    "tabs.move": {
+      "handler": "tabs_move",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "tabs.move: переставить вкладку в таб-баре (drag&drop мышью, карточка duopulse-205): вкладка вставляется перед before_id (null — в конец). Активная вкладка не меняется, порядок пишется в сессию.",
+        "properties": {
+          "beforeId": {
+            "default": null,
+            "description": "Вкладка, перед которой поставить (null — в конец бара).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TabsMoveParams",
+        "type": "object"
+      },
+      "result": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TabInfo": {
+            "properties": {
+              "active": {
+                "description": "Активна ли вкладка (виден её webview).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Идентификатор webview-вкладки.",
+                "type": "string"
+              },
+              "incognito": {
+                "description": "Инкогнито-вкладка (карточка duopulse-096): изолированная среда, без истории и сессии — значок-шпион в таб-баре, подсказки истории в omnibox скрыты.",
+                "type": "boolean"
+              },
+              "loading": {
+                "description": "Идёт загрузка документа (пульс-индикатор вкладки, гайд 06 §3).",
+                "type": "boolean"
+              },
+              "sleeping": {
+                "description": "Спит ли вкладка (приостановлена WebView2; задача 2.3): JS/таймеры заморожены, состояние страницы сохранено, активация будит.",
+                "type": "boolean"
+              },
+              "title": {
+                "description": "Заголовок страницы (пусто — до первого on_document_title_changed).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "url": {
+                "description": "Текущий URL вкладки.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "active",
+              "id",
+              "incognito",
+              "loading",
+              "sleeping",
+              "url"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "tabs.list: вкладки окна в порядке таб-бара (менеджер вкладок — src/tabs/).",
+        "properties": {
+          "tabs": {
+            "items": {
+              "$ref": "#/definitions/TabInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "TabsListResult",
+        "type": "object"
+      }
+    },
     "tabs.open": {
       "handler": "tabs_open",
       "params": {
