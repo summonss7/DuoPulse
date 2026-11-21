@@ -119,13 +119,26 @@ export function mergeStyle(base: SubtitleStyle, patch: Partial<SubtitleStyle>): 
   };
 }
 
-/** Порядок показа строк основной плашки (duopulse-181): false — порядок
- * дорожек (оригинал сверху), true — обратный (перевод сверху). Возвращает
- * индексы исходного массива строк: стиль строки берётся по её роли —
- * map-элемент параллелен отображаемому списку. */
-export function displayOrder(count: number, swap: boolean): number[] {
-  const idx = Array.from({ length: count }, (_, i) => i);
-  return swap ? idx.reverse() : idx;
+/** Порядок показа строк основной плашки (duopulse-181 + duopulse-203).
+ * Правило хозяина duopulse-203: иностранный язык (любой кроме русского и
+ * украинского) — всегда ВЕРХНЕЙ строкой: в русских/украинских клипах
+ * перевод идёт первым, оригинал — нижней строкой. Правило — стабильное
+ * разделение по языку (ru/uk вниз, порядок прочих не меняется); swapRows
+ * (duopulse-181) переворачивает ИТОГОВЫЙ порядок — ручная перестановка
+ * поверх правила. Возвращает индексы исходного массива строк: стиль строки
+ * берётся по её роли — map-элемент параллелен отображаемому списку. */
+export function isRuUaLang(lang: string | undefined): boolean {
+  const primary = (lang ?? "").trim().toLowerCase().split("-")[0] ?? "";
+  return primary === "ru" || primary === "uk";
+}
+
+/** Индексы строк порядка показа: langs — языки строк в порядке движка
+ * (роль), swap — ручная перестановка. Одноязычный набор и набор без языков
+ * (und/файлы без имени) — прежнее поведение displayOrder. */
+export function rowDisplayOrder(langs: readonly (string | undefined)[], swap: boolean): number[] {
+  const idx = Array.from({ length: langs.length }, (_, i) => i);
+  const ordered = idx.sort((a, b) => Number(isRuUaLang(langs[a])) - Number(isRuUaLang(langs[b])));
+  return swap ? ordered.reverse() : ordered;
 }
 
 /** Шаг масштаба колесом: direction > 0 — крупнее; границы 75–300 (docs/03 §5). */

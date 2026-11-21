@@ -12,12 +12,13 @@ import {
   SCALE_MIN_PCT,
   clampColor,
   cssFontFamily,
-  displayOrder,
   fitStepPct,
   hexToRgba,
+  isRuUaLang,
   mergeStyle,
   plateBackground,
   plateFontSizeCss,
+  rowDisplayOrder,
   rowStyleFor,
   stepScale,
   visibleRowText,
@@ -257,11 +258,40 @@ describe("swapRows (duopulse-181)", () => {
     ).toBe(false);
   });
 
-  it("displayOrder: без перестановки — порядок дорожек, с ней — обратный", () => {
-    expect(displayOrder(2, false)).toEqual([0, 1]);
-    expect(displayOrder(3, true)).toEqual([2, 1, 0]);
-    expect(displayOrder(1, true)).toEqual([0]);
-    expect(displayOrder(0, true)).toEqual([]);
+  it("rowDisplayOrder: без перестановки — порядок дорожек, с ней — обратный", () => {
+    expect(rowDisplayOrder(["en", "ru"], false)).toEqual([0, 1]);
+    expect(rowDisplayOrder(["en", "ru", "ro"], true)).toEqual([1, 2, 0]); // правило → разворот
+    expect(rowDisplayOrder(["en"], true)).toEqual([0]);
+    expect(rowDisplayOrder([], true)).toEqual([]);
+  });
+
+  // duopulse-203: правило хозяина — иностранный язык (не ru/uk) всегда
+  // верхней строкой: русский/украинский клип = перевод сверху, оригинал низ.
+  it("rowDisplayOrder: ru/uk-строки уходят вниз, иностранные — вверх (duopulse-203)", () => {
+    // Русский клип: оригинал ru + перевод en → en сверху, ru снизу.
+    expect(rowDisplayOrder(["ru", "en"], false)).toEqual([1, 0]);
+    // Украинский клип: оригинал uk + перевод ru → оба ru/uk — порядок движка.
+    expect(rowDisplayOrder(["uk", "ru"], false)).toEqual([0, 1]);
+    // Иностранный клип: оригинал en + перевод ru — прежний порядок (en сверху).
+    expect(rowDisplayOrder(["en", "ru"], false)).toEqual([0, 1]);
+    // Подтеги («ru-RU») и регистр не мешают правилу.
+    expect(rowDisplayOrder(["ru-RU", "en-US"], false)).toEqual([1, 0]);
+    // Три строки: ru-оригинал + en-перевод + ro — ru вниз, en/ro на месте.
+    expect(rowDisplayOrder(["ru", "en", "ro"], false)).toEqual([1, 2, 0]);
+    // Язык неизвестен (und/файл) — строка не ru/uk, остаётся на месте.
+    expect(rowDisplayOrder(["ru", undefined], false)).toEqual([1, 0]);
+    // swapRows переворачивает ИТОГОВЫЙ порядок (ручная перестановка поверх правила).
+    expect(rowDisplayOrder(["ru", "en"], true)).toEqual([0, 1]);
+  });
+
+  it("isRuUaLang: первичный подтег ru/uk, без него — false", () => {
+    expect(isRuUaLang("ru")).toBe(true);
+    expect(isRuUaLang("uk")).toBe(true);
+    expect(isRuUaLang("ru-RU")).toBe(true);
+    expect(isRuUaLang("UK")).toBe(true);
+    expect(isRuUaLang("en")).toBe(false);
+    expect(isRuUaLang("")).toBe(false);
+    expect(isRuUaLang(undefined)).toBe(false);
   });
 });
 

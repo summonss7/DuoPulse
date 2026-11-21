@@ -831,14 +831,13 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 let state = parse_set_state(&parsed);
                 let via = parsed["via"].as_str().unwrap_or("?").to_string();
                 // duopulse-128: последнее пользовательское вкл/выкл duo — в
-                // настройки (новые окна/видео стартуют в том же состоянии).
-                // Только «пользовательские» via: смена видео/уход видео и
-                // патчи стиля/сдвига флага не меняют, иначе каждое свежее
-                // видео гасило бы память.
-                if matches!(
-                    via.as_str(),
-                    "alt-d" | "panel" | "select" | "remove" | "translate" | "asr" | "load_file" | "drop"
-                ) {
+                // настройки. duopulse-203: показ на новых видео теперь
+                // включён всегда (память больше не гейтит video-auto), флаг
+                // остаётся согласием на автоперевод файлов/фреймов — пишем
+                // его только от ЯВНЫх переключений показа (alt-d/панель);
+                // транзиентные select/remove/load_file могли мимоходом
+                // записать false («набор пуст») и молча вырубить автоперевод.
+                if matches!(via.as_str(), "alt-d" | "panel") {
                     settings::save_last_duo_enabled(&proxy::profile_dir(), state.enabled);
                 }
                 eprintln!(

@@ -50,9 +50,9 @@ export const dict: Record<string, string> = {
   "Сохранено — применено к открытым видео и новым вкладкам.": "Saved — applied to open videos and new tabs.",
   // duopulse-181: порядок строк, шрифт и палитра — быстрые правки вида
   "Порядок строк": "Row order",
-  "Какая строка выше на плашке": "Which subtitle line is on top of the plate",
-  "Оригинал сверху": "Original on top",
-  "Перевод сверху": "Translation on top",
+  "Какая строка выше на плашке: по умолчанию иностранный язык (не рус/укр)": "Which subtitle line is on top: by default the foreign language (not Russian/Ukrainian)",
+  "Иностранный сверху": "Foreign language on top",
+  "Обратный порядок": "Reverse order",
   "Системный": "System",
   "Белый": "White",
   "Лайм": "Lime",
@@ -60,7 +60,7 @@ export const dict: Record<string, string> = {
   "Голубой": "Light blue",
   "Розовый": "Pink",
   "Светло-серый": "Light gray",
-  " Перевод сверху (поменять строки местами)": " Translation on top (swap subtitle lines)",
+  " Обратный порядок строк (рус./укр. сверху)": " Reverse row order (Russian/Ukrainian on top)",
   "Язык — код из 2–3 букв (ru, es, pt-br).": "Language — a 2–3 letter code (ru, es, pt-br).",
   // перевод
   "Перевод": "Translation",

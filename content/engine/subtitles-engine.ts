@@ -25,10 +25,12 @@ export const OFFSET_LIMIT_MS = 10_000;
 
 /** Строка плашки = активный cue дорожки; порядок = порядок дорожек набора.
  * top — реплика верхнего расположения (.ass \an7/8/9, duopulse-178): оверлей
- * рисует такие строки в плашке-верху, обычные — в основной. */
+ * рисует такие строки в плашке-верх, обычные — в основной. lang — язык
+ * дорожки (duopulse-203: порядок строк плашки — иностранный сверху). */
 export interface ActiveRow {
   trackId: string;
   text: string;
+  lang?: string;
   top?: boolean;
 }
 
@@ -169,7 +171,12 @@ export class SubtitlesEngine {
         bound.suppressed = cue.endMs - shifted < MIN_REMAINING_AFTER_SEEK_MS ? cue : null;
       }
       if (!cue || cue === bound.suppressed || !cue.text) continue;
-      rows.push({ trackId: bound.track.id, text: cue.text, top: bound.topStarts.has(cue.startMs) || undefined });
+      rows.push({
+        trackId: bound.track.id,
+        text: cue.text,
+        lang: bound.track.lang || undefined,
+        top: bound.topStarts.has(cue.startMs) || undefined,
+      });
     }
     this.setRows(rows);
   }

@@ -24,7 +24,7 @@ import {
   MARGIN_MAX_PCT,
   PLATE_MAX_SHARE,
   cssFontFamily,
-  displayOrder,
+  rowDisplayOrder,
   fitStepPct,
   plateBackground,
   plateFontSizeCss,
@@ -153,9 +153,10 @@ export class SubtitlesOverlay {
   private renderRows(rows: ActiveRow[]): void {
     if (!this.rowsEl) return;
     const bottom = rows.filter((r) => !r.top);
-    // Порядок показа (duopulse-181): displayOrder даёт индексы ролей —
-    // цвет/вес строки берутся по роли дорожки, а не по месту на плашке.
-    const order = displayOrder(bottom.length, this.style.swapRows);
+    // Порядок показа (duopulse-181 + duopulse-203): rowDisplayOrder даёт
+    // индексы ролей — цвет/вес строки берутся по роли дорожки, а не по месту
+    // на плашке; правило — иностранный язык сверху, swapRows переворачивает.
+    const order = rowDisplayOrder(bottom.map((r) => r.lang), this.style.swapRows);
     const display = order.map((i) => bottom[i]);
     this.rowRoleIdx = order;
     this.renderRowsInto(display, this.rowRoleIdx, this.rowsEl, this.bottomDisplay);

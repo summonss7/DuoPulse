@@ -233,7 +233,7 @@ export function initSettingsPage(): void {
   const swapCheck = document.createElement("input");
   swapCheck.type = "checkbox";
   const swapLabel = el("label", "set-check");
-  swapLabel.append(swapCheck, Object.assign(el("span"), { textContent: t(" Перевод сверху (поменять строки местами)") }));
+  swapLabel.append(swapCheck, Object.assign(el("span"), { textContent: t(" Обратный порядок строк (рус./укр. сверху)") }));
   const lookForm = (): LookSource => ({
     originalColor: lookColors.originalColor.value,
     translationColor: lookColors.translationColor.value,

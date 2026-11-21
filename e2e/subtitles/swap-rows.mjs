@@ -1,10 +1,11 @@
-// Живой стенд карточки duopulse-181: быстрая перестановка строк субтитров
-// (оригинал ↔ перевод) и живые правки вида. Локальная страница с видео и
-// двумя тест-дорожками (ru оригинал + en перевод, перекрывающиеся cue) —
-// без YouTube и его rate-limit.
+// Живой стенд карточки duopulse-181 (+ порядок duopulse-203): перестановка
+// строк субтитров и живые правки вида. Локальная страница с видео и двумя
+// тест-дорожками (ru оригинал + en перевод, перекрывающиеся cue) — без
+// YouTube и его rate-limit.
 //
 // Проверки:
-//   A) набор из 2 дорожек: порядок строк = порядок дорожек (оригинал сверху),
+//   A) набор из 2 дорожек: правило duopulse-203 — иностранный (не ru/uk)
+//      всегда верхней строкой: en-перевод сверху, ru-оригинал снизу;
 //      стили ролевые (оригинал — белый 500/1em, перевод — лайм 400/0.85em);
 //   B) duopulse-set-style {swapRows:true} — строки поменялись местами,
 //      цвета/веса остались при СВОИХ ролях (не переехали с позициями);
@@ -204,36 +205,38 @@ try {
     }
   }
   check("A1: оверлей рисует 2 строки", rows.length === 2, rows.map((r) => r.text).join(" / "));
-  check("A2: порядок дорожек — оригинал сверху (ru→en)",
-    rows[0]?.text?.startsWith("Оригинал") && rows[1]?.text?.startsWith("Translation"));
-  check("A3: стили ролевые — оригинал белый 500/1em",
-    rows[0]?.color === "rgb(255, 255, 255)" && rows[0]?.weight === "500" && rows[0]?.size === "1em",
+  check("A2: правило duopulse-203 — иностранный (en) сверху, ru-оригинал снизу",
+    rows[0]?.text?.startsWith("Translation") && rows[1]?.text?.startsWith("Оригинал"),
+    rows.map((r) => r.text).join(" / "));
+  check("A3: перевод — фирменный лайм 400/0.85em (роль, не место)",
+    rows[0]?.color === "rgb(189, 254, 79)" && rows[0]?.weight === "400" && rows[0]?.size === "0.85em",
     `${rows[0]?.color} ${rows[0]?.weight} ${rows[0]?.size}`);
-  check("A4: перевод — фирменный лайм 400/0.85em",
-    rows[1]?.color === "rgb(189, 254, 79)" && rows[1]?.weight === "400" && rows[1]?.size === "0.85em",
+  check("A4: оригинал — белый 500/1em (роль)",
+    rows[1]?.color === "rgb(255, 255, 255)" && rows[1]?.weight === "500" && rows[1]?.size === "1em",
     `${rows[1]?.color} ${rows[1]?.weight} ${rows[1]?.size}`);
 
   // B) перестановка: строки меняются местами, стили остаются ролевыми.
   await dispatchStyle(tab, { swapRows: true });
   await sleep(400);
   rows = await plateRows(tab);
-  check("B1: swapRows=true — перевод сверху (en→ru)",
-    rows[0]?.text?.startsWith("Translation") && rows[1]?.text?.startsWith("Оригинал"),
+  check("B1: swapRows=true — обратный порядок (ru-оригинал сверху)",
+    rows[0]?.text?.startsWith("Оригинал") && rows[1]?.text?.startsWith("Translation"),
     rows.map((r) => r.text).join(" / "));
-  check("B2: цвета НЕ переехали — перевод остался лаймом 0.85em",
-    rows[0]?.color === "rgb(189, 254, 79)" && rows[0]?.size === "0.85em",
+  check("B2: цвета НЕ переехали — оригинал остался белым 1em/500",
+    rows[0]?.color === "rgb(255, 255, 255)" && rows[0]?.size === "1em" && rows[0]?.weight === "500",
     `${rows[0]?.color} ${rows[0]?.size}`);
-  check("B3: оригинал остался белым 1em/500",
-    rows[1]?.color === "rgb(255, 255, 255)" && rows[1]?.size === "1em" && rows[1]?.weight === "500",
+  check("B3: перевод остался лаймом 0.85em",
+    rows[1]?.color === "rgb(189, 254, 79)" && rows[1]?.size === "0.85em",
     `${rows[1]?.color} ${rows[1]?.size}`);
 
-  // F) при swapRows=true смена cue тем же составом — дифф без пересоздания.
+  // F) при swapRows=true смена cue тем же составом — дифф без пересоздания
+  // (ru-оригинал при swap=true сверху — ждём его «реплика два»).
   await rowMarks(tab);
   await evalIn(tab, `(() => { const v = document.querySelector('video'); v.currentTime = 13; return true; })()`);
   for (let i = 0; i < 20; i++) {
     await sleep(400);
-    const txt = await evalIn(tab, `(document.querySelectorAll('[data-duopulse-subtitles] .duopulse-subtitles-row')[0]?.textContent ?? '')`);
-    if (txt.includes("line two")) break;
+    const txt = await evalIn(tab, `([...document.querySelectorAll('[data-duopulse-subtitles] .duopulse-subtitles-row')].map((r) => r.textContent).join("|"))`);
+    if (txt.includes("реплика два") && txt.includes("line two")) break;
   }
   const alive = await marksAlive(tab);
   check("F: смена cue при swap — узлы строк живы (дифф, без пересоздания)", alive === 2, `живых узлов: ${alive}`);
@@ -242,15 +245,16 @@ try {
   await dispatchStyle(tab, { swapRows: false });
   await sleep(400);
   rows = await plateRows(tab);
-  check("C: swapRows=false — снова оригинал сверху", rows[0]?.text?.startsWith("Оригинал"),
+  check("C: swapRows=false — снова иностранный (en) сверху", rows[0]?.text?.startsWith("Translation"),
     rows.map((r) => r.text).join(" / "));
 
   // D) живая смена цвета перевода (как пункт меню «Цвет перевода»).
   await dispatchStyle(tab, { translationColor: "#ffd54d" });
   await sleep(300);
   rows = await plateRows(tab);
-  check("D: цвет перевода живо сменился на жёлтый", rows[1]?.color === "rgb(255, 213, 77)",
-    `${rows[1]?.color}`);
+  const transRow = rows.find((r) => r.text?.startsWith("Translation"));
+  check("D: цвет перевода живо сменился на жёлтый", transRow?.color === "rgb(255, 213, 77)",
+    `${transRow?.color}`);
   await dispatchStyle(tab, { translationColor: "#bdfe4f" }); // вернуть фирменный
 
   // E) живая смена гарнитуры (пункт меню «Шрифт плашки»).
