@@ -51,8 +51,8 @@ import java.io.ByteArrayInputStream
  * работы в Гугле, на видео подгружается реклама»; доработка duopulse-145
  * по жалобе «обновился — меню нет, только ссылка сверху, ощущение другой
  * программы»):
- *  - бренд: шапка КАК в мобильной ветке (.m-bar, два ряда: кнопки + адрес-
- *    чип-омнибокс, токены темы из tokens.css: surface #111d2b, base
+ *  - бренд: шапка КАК в мобильной ветке (.m-bar, два ряда: кнопки +
+ *    омнибокс-поле с GO, токены темы из tokens.css: surface #111d2b, base
  *    #0a0e17, elevated #1d282b, акцент #BDFE4F), полоса прогресса загрузки;
  *  - меню «⋮» (duopulse-145, стиль .m-menu): Главная DuoPulse (хук
  *    __duopulseGoHome), обновить, вперёд, открыть в плеере duo, копировать
@@ -112,6 +112,17 @@ import java.io.ByteArrayInputStream
  * системному ACTION_VIEW. Копирование ссылки (жалоба «нет возможности
  * скопировать»): кроме меню «⋮» — долгое нажатие адресного чипа.
  *
+ * duopulse-202 (жалоба «при поиске информации открывается новый дизайн
+ * браузера, не такой как идёт на старте»): шапка оверлея — ТОЧНОЕ зеркало
+ * стартовой .m-bar мобильной ветки, прежний «свой» хром («‹» назад +
+ * «✕» закрыть текстовыми кнопками + пассивный адрес-чип) читался другим
+ * браузером. Теперь ряд 1 — «⌂» домой + логотип + «▶ duo» (контекстно,
+ * стиль .m-duo-btn) + «⋮»; ряд 2 — омнибокс-ПОЛЕ (36dp, скругление 18,
+ * текущий адрес, тап = выделение как в Chrome, правка на месте) + круглая
+ * акцентная GO (.m-go). Навигация «назад» — системной кнопкой/жестом
+ * (backCallback и прежде вёл историю WebView), закрытие — «⌂» (goHome)
+ * и системным «назад» по исчерпании истории.
+ *
  * duopulse-192 (доработка 191: «верхнее меню не такое, строка ввода адреса
  * не кликабельна — со всеми сайтами из поиска; YouTube верни расширенную»):
  *  - тап по адресному чипу = омнибокс: чип сменяется полем ввода с текущим
@@ -169,14 +180,14 @@ object MobileWebHelper {
 
   private var overlay: FrameLayout? = null
   private var webView: WebView? = null
-  private var urlText: TextView? = null
   private var duoBtn: Button? = null
 
-  /** Поле правки адреса (duopulse-192): чип по тапу сменяется им —
-   *  «строка ввода адреса» оверлея кликабельна, как омнибокс мобильной ветки. */
+  /** Омнибокс-поле адреса шапки (duopulse-202): всегда редактируемое,
+   *  как на старте приложения, — показывает текущий URL, тап выделяет
+   *  (ввод заменяет, как в Chrome), GO — переход/поиск. */
   private var addrEdit: EditText? = null
 
-  /** Идёт правка адреса (duopulse-192): syncChrome не затирает ввод
+  /** Идёт правка адреса (= поле в фокусе): syncChrome не затирает ввод
    *  пользователя URL'ами загрузок. */
   private var addrEditing = false
 
@@ -389,39 +400,21 @@ object MobileWebHelper {
       URLEncoder.encode(q, "UTF-8")
   }
 
-  /** Тап по адресному чипу (duopulse-192): чип → поле ввода с текущим
-   *  адресом (выделен — заменяется вводом), клавиатура открыта. */
-  private fun beginAddrEdit() {
-    val edit = addrEdit ?: return
-    if (addrEditing) return
-    addrEditing = true
-    val cur = if (pageUrl.startsWith("http")) pageUrl else (webView?.url ?: "")
-    edit.setText(cur)
-    edit.selectAll()
-    urlText?.visibility = View.GONE
-    edit.visibility = View.VISIBLE
-    edit.requestFocus()
-    val imm = edit.context
-      .getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-    imm.showSoftInput(edit, 0)
-  }
-
-  /** Вернуть чип (без перехода): отмена правки, уход фокуса, после GO. */
-  private fun endAddrEdit() {
-    addrEditing = false
+  /** Спрятать клавиатуру омнибокса (GO/teardown оверлея). */
+  private fun hideKb() {
     addrEdit?.let {
-      it.visibility = View.GONE
       val imm = it.context
         .getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
       imm.hideSoftInputFromWindow(it.windowToken, 0)
     }
-    urlText?.visibility = View.VISIBLE
   }
 
-  /** GO поля адреса (duopulse-192): разбор ввода, YouTube-видео — как клик
-   *  по ссылке во встроенный плеер, прочее — загрузка в оверлее. */
+  /** GO омнибокса (duopulse-192): разбор ввода, YouTube-видео — как клик
+   * по ссылке во встроенный плеер, прочее — загрузка в оверлее. Фокус
+   * снимаем — syncChrome пишет в поле адрес загрузки (duopulse-202). */
   private fun commitAddrEdit(raw: String) {
-    endAddrEdit()
+    hideKb()
+    addrEdit?.clearFocus()
     val q = raw.trim()
     if (q.isEmpty()) return
     val target = resolveInput(q)
@@ -433,10 +426,10 @@ object MobileWebHelper {
     webView?.loadUrl(target)
   }
 
-  /** Показ адреса и кнопки «▶ duo» — на каждой смене URL. Во время правки
-   *  адреса (duopulse-192) ввод пользователя не затираем — только кнопку. */
+  /** Показ адреса и кнопки «▶ duo» — на каждой смене URL. Пока поле в
+   * фокусе (правка), ввод пользователя не затираем — только кнопку. */
   private fun syncChrome(url: String?) {
-    if (!addrEditing) urlText?.text = url ?: ""
+    if (!addrEditing) addrEdit?.setText(url ?: "")
     val hasVideo = url != null && youTubeVideoId(url) != null
     duoBtn?.visibility = if (hasVideo) View.VISIBLE else View.GONE
   }
@@ -771,10 +764,9 @@ object MobileWebHelper {
     accountSheet = null
     backCallback.isEnabled = false
     backCallback.remove()
-    if (addrEditing) endAddrEdit() // клавиатура/поле не должны пережить оверлей
+    if (addrEditing) hideKb() // клавиатура не должна пережить оверлей
     val wv = webView
     webView = null
-    urlText = null
     addrEdit = null
     addrEditing = false
     duoBtn = null
@@ -803,7 +795,9 @@ object MobileWebHelper {
   private fun build(act: MainActivity, root: FrameLayout): FrameLayout {
     val dp = { v: Int -> (v * act.resources.displayMetrics.density).toInt() }
     val ov = FrameLayout(act)
-    ov.setBackgroundColor(Color.WHITE)
+    // фон оверлея — --bg-base (duopulse-202): тёмная тема старта, без
+    // белой вспышки под страницей при загрузке
+    ov.setBackgroundColor(Color.parseColor("#0a0e17"))
     // edge-to-edge (duopulse-133): enableEdgeToEdge в MainActivity гасит
     // fitsSystemWindows у decor — оверлей рисуется под статус-баром и тот
     // перекрывал тулбар с адресом. Применяем инсеты сами: паддинг системными
@@ -818,21 +812,26 @@ object MobileWebHelper {
     val col = LinearLayout(act)
     col.orientation = LinearLayout.VERTICAL
 
-    // ── Шапка оверлея — как .m-bar мобильной ветки (duopulse-145): два ряда
-    // (кнопки + адрес-чип-омнибокс) + меню «⋮» + полоса прогресса. Прежний
-    // один тонкий ряд читался «ссылкой сверху чужой программы» (жалоба
-    // duopulse-145). Цвета — токены tokens.css: surface/base/elevated/акцент.
+    // ── Шапка оверлея — зеркало .m-bar стартового экрана (duopulse-202:
+    // жалоба «при поиске открывается новый дизайн, не такой как идёт на
+    // старте» — прежние «‹»/«✕» + пассивный адрес-чип читались другим
+    // браузером). Ряд 1 — «⌂» домой + логотип + «▶ duo» (контекстно) + «⋮»;
+    // ряд 2 — омнибокс-поле + круглая GO. Размеры/отступы — как
+    // .m-bar/.m-bar-top/.m-urlrow mobile.css (кнопки 36dp, gap 8, паддинги
+    // 6/10/0 и 8/10); цвета — токены tokens.css: surface/base/elevated/акцент.
     val header = LinearLayout(act)
     header.orientation = LinearLayout.VERTICAL
     header.setBackgroundColor(Color.parseColor("#111d2b")) // --bg-surface
 
-    fun toolButton(label: String, title: String, tint: String = "#BDFE4F"): Button {
+    fun toolButton(label: String, title: String, tint: String = "#F2F7EE"): Button {
       val b = Button(act)
       b.text = label
       b.contentDescription = title
       b.setBackgroundColor(Color.TRANSPARENT)
       b.setTextColor(Color.parseColor(tint))
-      b.setPadding(dp(10), 0, dp(10), 0)
+      b.textSize = 16f
+      b.gravity = Gravity.CENTER
+      b.setPadding(0, 0, 0, 0)
       b.minimumWidth = 0
       b.minWidth = 0
       b.minimumHeight = 0
@@ -840,23 +839,24 @@ object MobileWebHelper {
       return b
     }
 
-    // ряд 1: ‹ назад | логотип (растягивается) | ✕ закрыть | ⋮ меню — как
-    // ряд кнопок .m-bar-top (⌂ + логотип + … + ⋮) мобильной ветки
+    // .m-icon: круглая прозрачная 36dp
+    fun iconLp(marginEndDp: Int = 0) = LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+      marginEnd = dp(marginEndDp)
+    }
+
+    // ряд 1 — как .m-bar-top старта (⌂ + логотип (растягивается) + … + ⋮):
+    // «назад»/закрытие — системной кнопкой/жестом (backCallback и прежде
+    // вёл историю WebView), «⌂» — домой (goHome закрывает оверлей)
     val bar = LinearLayout(act)
     bar.orientation = LinearLayout.HORIZONTAL
-    bar.setPadding(dp(4), dp(4), dp(4), 0)
+    bar.setPadding(dp(10), dp(6), dp(10), 0)
 
-    val back = toolButton("‹", "Назад")
-    back.layoutParams = LinearLayout.LayoutParams(
-      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-    back.setOnClickListener {
-      val wv = webView
-      if (wv != null && wv.canGoBack()) wv.goBack()
-    }
-    bar.addView(back)
+    val homeBtn = toolButton("⌂", "На стартовый экран")
+    homeBtn.setOnClickListener { goHome() }
+    bar.addView(homeBtn, iconLp(8))
 
     // логотип duoPulse — как .m-logo шапки мобильной ветки (duo обычным,
-    // Pulse жирным акцентом)
+    // Pulse жирным акцентом, 15px), растягивается на свободную ширину
     val logo = TextView(act)
     val mark = SpannableStringBuilder("duoPulse")
     mark.setSpan(ForegroundColorSpan(Color.parseColor("#F2F7EE")), 0, 3,
@@ -865,81 +865,89 @@ object MobileWebHelper {
       Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     mark.setSpan(StyleSpan(Typeface.BOLD), 3, 8, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     logo.text = mark
-    logo.textSize = 14f
+    logo.textSize = 15f
     logo.gravity = Gravity.CENTER_VERTICAL
     logo.setPadding(dp(8), 0, 0, 0)
-    logo.layoutParams = LinearLayout.LayoutParams(
-      0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-    bar.addView(logo)
+    bar.addView(logo, LinearLayout.LayoutParams(
+      0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginEnd = dp(8) })
 
-    val exit = toolButton("✕", "Закрыть", "#F2F7EE")
-    exit.layoutParams = LinearLayout.LayoutParams(
-      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-    exit.setOnClickListener { close() }
-    bar.addView(exit)
+    // «▶ duo» на страницах YouTube-видео — как «duo»-кнопка старта
+    // (.m-duo-btn: pill 30dp, рамка акцента 0.35, elevated-фон)
+    val duo = Button(act)
+    duo.text = "▶ duo"
+    duo.contentDescription = "Открыть во встроенном плеере"
+    duo.transformationMethod = null // «duo» без автокапитализации кнопки
+    duo.setTextColor(Color.parseColor("#BDFE4F"))
+    duo.textSize = 13f
+    duo.gravity = Gravity.CENTER
+    duo.setPadding(dp(12), 0, dp(12), 0)
+    duo.minimumWidth = 0
+    duo.minWidth = 0
+    duo.minimumHeight = 0
+    duo.minHeight = 0
+    duo.background = GradientDrawable().apply {
+      cornerRadius = dp(15).toFloat()
+      setColor(Color.parseColor("#1d282b")) // --bg-elevated
+      setStroke(dp(1), Color.argb(89, 189, 254, 79))
+    }
+    duo.visibility = View.GONE
+    duo.setOnClickListener {
+      val id = youTubeVideoId(webView?.url ?: "") ?: return@setOnClickListener
+      openVideoInPlayer(id)
+    }
+    bar.addView(duo, LinearLayout.LayoutParams(
+      LinearLayout.LayoutParams.WRAP_CONTENT, dp(30)).apply { marginEnd = dp(8) })
+    duoBtn = duo
 
-    val menuBtn = toolButton("⋮", "Меню", "#F2F7EE")
-    menuBtn.layoutParams = LinearLayout.LayoutParams(
-      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    val menuBtn = toolButton("⋮", "Меню")
     menuBtn.setOnClickListener { showMenu(act, it) }
-    bar.addView(menuBtn)
+    bar.addView(menuBtn, iconLp())
 
     bar.layoutParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
     header.addView(bar)
 
-    // ряд 2: адрес-чип — как omnibox (.m-bar input: скругление 18, фон
-    // --bg-base, рамка акцента 0.18); «▶ duo» на страницах YouTube-видео
+    // ряд 2 — как .m-urlrow старта: омнибокс-ПОЛЕ (36dp, скругление 18,
+    // фон --bg-base, рамка акцента 0.18, в фокусе — акцент) + круглая
+    // акцентная GO (.m-go). Поле всегда редактируемое и показывает текущий
+    // адрес — омнибокс старта ведёт себя так же (duopulse-202)
     val urlRow = LinearLayout(act)
     urlRow.orientation = LinearLayout.HORIZONTAL
     urlRow.setPadding(dp(10), dp(8), dp(10), dp(8))
 
-    val addr = TextView(act)
-    addr.setTextColor(Color.parseColor("#F2F7EE")) // --text-primary
-    addr.textSize = 14f
-    addr.maxLines = 1
-    addr.ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
-    addr.gravity = Gravity.CENTER_VERTICAL
-    addr.setPadding(dp(12), 0, dp(12), 0)
-    addr.background = GradientDrawable().apply {
+    fun omniboxBg(focused: Boolean) = GradientDrawable().apply {
       cornerRadius = dp(18).toFloat()
       setColor(Color.parseColor("#0a0e17")) // --bg-base
-      setStroke(dp(1), Color.argb(46, 189, 254, 79))
+      setStroke(dp(1), if (focused) Color.parseColor("#BDFE4F")
+        else Color.argb(46, 189, 254, 79))
     }
-    addr.layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f)
-    addr.contentDescription = "Адресная строка"
-    // duopulse-192: тап по чипу = омнибокс (жалоба «строка ввода адреса не
-    // кликабельна») — чип сменяется полем ввода (beginAddrEdit)
-    addr.setOnClickListener { beginAddrEdit() }
-    // duopulse-191: долгое нажатие адреса = «Копировать ссылку» (тот же
-    // буфер/тост, что пункт меню «⋮») — быстрый доступ без раскрытия меню
-    addr.setOnLongClickListener {
-      val u = webView?.url ?: ""
-      if (u.isNotEmpty()) copyUrl(act, u)
-      true
-    }
-    urlRow.addView(addr)
-    urlText = addr
 
-    // поле правки адреса (duopulse-192): тот же чип-стиль, GO — переход,
-    // уход фокуса — вернуть чип без перехода; подменяет чип в ряду
     val edit = EditText(act)
     edit.setTextColor(Color.parseColor("#F2F7EE")) // --text-primary
-    edit.textSize = 14f
+    edit.setHintTextColor(Color.parseColor("#8a94a6")) // --text-secondary
+    edit.textSize = 15f
     edit.hint = "Адрес или поиск"
     edit.maxLines = 1
     edit.setSingleLine()
     edit.imeOptions = EditorInfo.IME_ACTION_GO
     edit.inputType = InputType.TYPE_CLASS_TEXT or
       InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    edit.background = omniboxBg(false)
     edit.setPadding(dp(12), 0, dp(12), 0)
-    edit.background = GradientDrawable().apply {
-      cornerRadius = dp(18).toFloat()
-      setColor(Color.parseColor("#0a0e17")) // --bg-base
-      setStroke(dp(1), Color.argb(46, 189, 254, 79))
+    edit.contentDescription = "Адресная строка"
+    // тап/фокус — как омнибокс Chrome: адрес выделен целиком, ввод
+    // заменяет; пока поле в фокусе, смены URL его не затирают
+    edit.setOnFocusChangeListener { _, hasFocus ->
+      addrEditing = hasFocus
+      edit.background = omniboxBg(hasFocus)
+      edit.setPadding(dp(12), 0, dp(12), 0)
+      if (hasFocus) edit.post { edit.selectAll() }
     }
-    edit.layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f)
-    edit.visibility = View.GONE
+    edit.setOnClickListener {
+      val imm = edit.context
+        .getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+      imm.showSoftInput(edit, 0)
+    }
     edit.setOnEditorActionListener { v, actionId, _ ->
       if (actionId == EditorInfo.IME_ACTION_GO) {
         commitAddrEdit(v.text.toString())
@@ -948,25 +956,29 @@ object MobileWebHelper {
         false
       }
     }
-    edit.setOnFocusChangeListener { _, hasFocus ->
-      // фокус ушёл (клавиатура скрыта/тап мимо) — вернуть чип без перехода
-      if (!hasFocus && addrEditing) endAddrEdit()
-    }
-    urlRow.addView(edit)
+    urlRow.addView(edit, LinearLayout.LayoutParams(0, dp(36), 1f))
     addrEdit = edit
 
-    val duo = toolButton("▶ duo", "Открыть во встроенном плеере")
-    duo.visibility = View.GONE
-    val duoLp = LinearLayout.LayoutParams(
-      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT)
-    duoLp.marginStart = dp(8)
-    duo.layoutParams = duoLp
-    duo.setOnClickListener {
-      val id = youTubeVideoId(webView?.url ?: "") ?: return@setOnClickListener
-      openVideoInPlayer(id)
+    // GO — как .m-go старта: круглая 36dp акцентная, тёмная стрелка
+    val goBtn = Button(act)
+    goBtn.text = "→"
+    goBtn.contentDescription = "Перейти"
+    goBtn.setTextColor(Color.parseColor("#0a0e17")) // --bg-base
+    goBtn.textSize = 16f
+    goBtn.gravity = Gravity.CENTER
+    goBtn.setPadding(0, 0, 0, 0)
+    goBtn.minimumWidth = 0
+    goBtn.minWidth = 0
+    goBtn.minimumHeight = 0
+    goBtn.minHeight = 0
+    goBtn.background = GradientDrawable().apply {
+      shape = GradientDrawable.OVAL
+      setColor(Color.parseColor("#BDFE4F")) // --accent-neon
     }
-    urlRow.addView(duo)
-    duoBtn = duo
+    goBtn.setOnClickListener { commitAddrEdit(edit.text.toString()) }
+    urlRow.addView(goBtn, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+      marginStart = dp(8)
+    })
 
     urlRow.layoutParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
@@ -1001,6 +1013,9 @@ object MobileWebHelper {
     val wv = WebView(act)
     wv.settings.javaScriptEnabled = true
     wv.settings.domStorageEnabled = true
+    // подложка страницы — тёмная (duopulse-202): без белой вспышки до
+    // первой отрисовки сайта, как старт приложения
+    wv.setBackgroundColor(Color.parseColor("#0a0e17"))
     // дефолтный (мобильный) UA WebView (duopulse-192): база переключения
     // на десктопный для «расширенного» YouTube и обратно
     defaultUa = wv.settings.userAgentString
