@@ -30,10 +30,12 @@ m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,y
 !    движке. Продолжаем линию 044: клиентская adSlots-обрезка ломает
 !    SABR/SSAI-хендшейк в DuoPulse — гасим точным исключением.
 m.youtube.com,music.youtube.com,tv.youtube.com,www.youtube.com,youtubekids.com,youtube-nocookie.com#@#+js(json-prune, playerResponse.adPlacements playerResponse.playerAds playerResponse.adSlots adPlacements playerAds adSlots legacyImportant)
-! 2) Адаптация сетевого правила uBO quick-fixes (#29059, SSAI-медиа-запросы
-!    с неправдоподобным expire): апстрим несёт опцию method=get, которую
-!    adblock-rs не разбирает (UnrecognisedOption — правило падает целиком);
-!    здесь то же правило без method= (videoplayback — всегда GET).
-!    ДИАПАЗОНЫ ЦИФР апстрим правит по календарю (179x → 18xx с января 2027):
-!    при релизе сверять с живым quick-fixes.txt.
-/\.googlevideo\.com\/videoplayback\?expire=(?:[02-9]\d+|1[1-68-9]\d+|17[1-7]\d+)&/$xhr,3p,domain=www.youtube.com
+! 2) Сетевое правило uBO quick-fixes (#29059, SSAI-медиа-запросы с
+!    неправдоподобным expire) УДАЛЕНО (duopulse-200): 403 на ад-медию
+!    оставляет плеер без потока — 24 с ретраев, затем ad-showing, который
+!    нечем прожигать (механизм 089 ждёт медиа), лестница перезагрузок —
+!    контент на 80-й секунде вместо 6,5 с («YouTube умирает», жалоба
+!    20.11). Преролл убирает прожиг 089, ему медиа нужна. Живой trusted-
+!    quick-fixes несёт ту же пару правил — она погашена код-уровневым
+!    исключением is_youtube_media (should_block): googlevideo/videoplayback
+!    не блокируется ни одним движком.

@@ -536,6 +536,21 @@ impl AdblockService {
         if engine.is_none() && trusted_engine.is_none() {
             return false;
         }
+        // duopulse-200: видео-медию googlevideo НЕ блокируем никогда —
+        // кросс-движковое исключение выше любых списков. SSAI-преролл YouTube
+        // несёт медиа с «неправдоподобным expire» (год 2136), и правила под
+        // него есть в uBO quick-fixes (живой trusted-текст) и в нашем compat
+        // (ветка 080): 403 на ад-медию оставляет плеер без данных — 24 с
+        // экспоненциальных ретраев, затем ad-showing без потока, который
+        // нечем «прожигать» (механизм 089 ждёт медиа), лестница перезагрузок
+        // — контент на 80-й секунде (замер стенда карточки: Edge/без списков
+        // — 6,5 с). Преролл убирает прожиг 089 (playbackRate 16 + затемнение),
+        // ему медиа нужна; блокировка медиа ломает собственный механизм.
+        // @@-исключение в main-движке здесь не помогает: trusted-движок
+        // матчится отдельно и перекрывается только на уровне кода.
+        if is_youtube_media(uri) {
+            return false;
+        }
         // Источник запроса: для навигации — сама цель (семантика $document),
         // для подресурсов — Referer, при его отсутствии — URL вкладки.
         let source = if request_type == "document" {
@@ -995,6 +1010,12 @@ impl AdblockService {
             let Some(text) = text else {
                 continue; // кэша нет — первый запуск, дождёмся сети
             };
+            // duopulse-200: quickfix без youtube-скриптлетов (см. функцию)
+            let text = if def.name == "duopulse-quickfix" {
+                sanitize_quickfix_text(&text)
+            } else {
+                text
+            };
             states.push(ListState {
                 name: def.name.clone(),
                 source: def.source.clone(),
@@ -1106,6 +1127,13 @@ impl AdblockService {
                     },
                 });
                 continue;
+            };
+            // duopulse-200: quickfix без youtube-скриптлетов (см. функцию) —
+            // до count_rules/digest, чтобы метки кэша были самосогласованы
+            let text = if def.name == "duopulse-quickfix" {
+                sanitize_quickfix_text(&text)
+            } else {
+                text
             };
             let rules = count_rules(&text);
             if error.is_empty() {
@@ -1485,6 +1513,55 @@ fn normalize_site(input: &str) -> Result<String, String> {
         return Err(format!("некорректный адрес сайта «{input}»"));
     }
     Ok(host)
+}
+
+/// Медиа-запрос стримов YouTube: CDN googlevideo, путь /videoplayback
+/// (duopulse-200 — код-уровневое исключение из всех движков, см.
+/// [`AdblockService::should_block`]).
+fn is_youtube_media(uri: &str) -> bool {
+    let Some(rest) = uri
+        .strip_prefix("https://")
+        .or_else(|| uri.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    (host == "googlevideo.com" || host.ends_with(".googlevideo.com"))
+        && path.starts_with("videoplayback")
+}
+
+/// duopulse-200: из текста uBO quick-fixes убираем скриптлетные правила
+/// (`##+js(…)`) для хостов YouTube — и живые, и встроенный оффлайн-снапшот.
+/// Ансамбль uBO (rpnt с циклами loadVideoById, trusted-edit-inbound-object,
+/// trusted-replace-xhr-response) рассчитан на связку «блок ад-медиа +
+/// скриптлеты» и в DuoPulse воюет с собственным механизмом прожига 089:
+/// свежая сессия на клипе-миксе тратит 20–70 с на циклы перезагрузок плеера
+/// до контента (замер карточки: без quickfix-скриптлетов контент с 15-й с,
+/// Edge — 6,5 с; линия та же, что у гашения json-prune в compat, карточка
+/// 044: клиентская война с плеером ломает SABR/SSAI-хендшейк). Сетевые
+/// правила списка остаются (медиу googlevideo дополнительно гасит
+/// код-уровневое исключение [`is_youtube_media`]).
+fn sanitize_quickfix_text(text: &str) -> String {
+    fn youtube_family(host: &str) -> bool {
+        let h = host.trim().trim_start_matches('~').to_ascii_lowercase();
+        h == "youtube.com"
+            || h.ends_with(".youtube.com")
+            || h == "youtu.be"
+            || h.ends_with(".youtu.be")
+            || h == "youtube-nocookie.com"
+            || h.ends_with(".youtube-nocookie.com")
+    }
+    text.lines()
+        .filter(|l| {
+            let scriptlet = l.contains("##+js(") || l.contains("#@#+js(");
+            if !scriptlet {
+                return true; // не скриптлет — не трогаем
+            }
+            let hosts = l.split('#').next().unwrap_or("");
+            !hosts.split(',').any(youtube_family)
+        })
+        .collect::<Vec<&str>>()
+        .join("\n")
 }
 
 /// Исключение действует на сайт-источник: точное совпадение хоста или
@@ -2156,6 +2233,80 @@ mod tests {
             ("image", "https://thumb-ah.flixcdn.com/xc/Y5/heat-preview/a-352x220.jpg"),
         ] {
             assert!(!s.should_block(page, url, ty, page), "ложный блок: {url}");
+        }
+    }
+
+    #[test]
+    fn youtube_media_never_blocked_even_by_trusted_expire_rules() {
+        // duopulse-200: правило «SSAI-медиа с неправдоподобным expire» (живой
+        // uBO quick-fixes, наша compat-ветка 080) в ЛЮБОМ движке не должно
+        // рвать видеопоток: 403 на ад-медию вешает плеер на ретраях, а
+        // прожиг 089 ждёт медиа — «YouTube умирает» (замер карточки:
+        // контент на 80-й секунде вместо 6,5 с).
+        let s = service();
+        let rule = "/\\.googlevideo\\.com\\/videoplayback\\?expire=(?:[02-9]\\d+|1[1-68-9]\\d+|17[1-7]\\d+)&/$xhr,3p,method=get,domain=www.youtube.com";
+        s.set_engine(engine(&[rule, "||doubleclick.net^"]));
+        s.set_trusted_engine(engine(&[rule]));
+        let page = Some("https://www.youtube.com/watch?v=lITL-sPvlQk");
+        for (ty, url) in [
+            // SSAI-ад-медиа (год 2136) и нормальный контент — оба мимо блоков
+            ("xhr", "https://rr4---sn-q4flrnee.googlevideo.com/videoplayback?expire=5252702204&ei=bf7&mv=m"),
+            ("media", "https://rr2---sn-q4flrnsd.googlevideo.com/videoplayback?expire=1795267200&ei=pnR"),
+            ("xhr", "https://rr2---sn-q4flrnsd.googlevideo.com/videoplayback?expire=5249772189&ei=pnR"),
+            ("media", "https://www.googlevideo.com/videoplayback?expire=5252702204&ei=x"),
+        ] {
+            assert!(!s.should_block(page, url, ty, page), "медиа заблокирована: {url}");
+        }
+        // Соседние блоки движка работают как раньше: реклама/пиксели режутся
+        assert!(s.should_block(page, "https://static.doubleclick.net/instream/ad_status.js", "script", page));
+        let s2 = service();
+        s2.set_engine(engine(&["/ads/*"]));
+        s2.set_trusted_engine(engine(&[rule]));
+        assert!(!s2.should_block(page, "https://x.googlevideo.com/videoplayback?expire=5252702204&", "xhr", page));
+        assert!(s2.should_block(None, "https://a.test/ads/pixel.js", "script", None));
+        // Не-медиа пути googlevideo не попадают под исключение
+        let s3 = service();
+        s3.set_engine(engine(&["||googlevideo.com^"]));
+        assert!(s3.should_block(page, "https://rr1.googlevideo.com/other/path", "xhr", page));
+        assert!(!s3.should_block(page, "https://rr1.googlevideo.com/videoplayback?x=1", "xhr", page));
+    }
+
+    #[test]
+    fn quickfix_sanitizer_drops_youtube_scriptlets_only() {
+        // duopulse-200: youtube-скриптлеты quick-fixes (rpnt/trusted-* с
+        // циклами loadVideoById) не доходят до движков; прочее — живёт.
+        let text = [
+            "! заголовок",
+            "www.youtube.com##+js(rpnt, script, /serverContract/,violent-payload)",
+            "tv.youtube.com##+js(trusted-replace-xhr-response, x, y, /player/)",
+            "m.youtube.com,music.youtube.com##+js(trusted-edit-inbound-object, JSON.stringify)",
+            "example.com##+js(no-fetch-if, /ads/)",
+            "||ads.example.net^",
+            "/\\.googlevideo\\.com\\/videoplayback\\?expire=(?:[02-9]\\d+)&/$xhr,3p",
+            "www.youtube.com#@#+js(json-prune, adPlacements)",
+        ]
+        .join("\n");
+        let out = sanitize_quickfix_text(&text);
+        assert!(!out.contains("rpnt"), "youtube rpnt выпилен");
+        assert!(!out.contains("trusted-replace-xhr-response"));
+        assert!(!out.contains("trusted-edit-inbound-object"));
+        assert!(!out.contains("#@#+js("), "youtube-исключения скриптлетов тоже");
+        assert!(out.contains("example.com##+js(no-fetch-if"), "чужие скриптлеты живы");
+        assert!(out.contains("||ads.example.net^"), "сетевые правила живы");
+        assert!(out.contains("videoplayback"), "медиа-правила живы (гасит is_youtube_media)");
+        // встроенный снапшот после фильтра — без youtube-скриптлетов
+        let snap = sanitize_quickfix_text(QUICKFIX_RULES);
+        for line in snap.lines() {
+            if line.contains("##+js(") || line.contains("#@#+js(") {
+                let hosts = line.split('#').next().unwrap_or("");
+                assert!(
+                    !hosts.split(',').any(|h| {
+                        let h = h.trim().to_ascii_lowercase();
+                        h == "youtube.com" || h.ends_with(".youtube.com")
+                    }),
+                    "youtube-скриптлет остался: {line}"
+                );
+            }
         }
     }
 
@@ -3216,31 +3367,30 @@ mod tests {
     }
 
     #[test]
-    fn compat_expire_rule_blocks_ssai_media_requests() {
-        // Адаптация сетевого правила uBO quick-fixes #29059 (compat.txt):
-        // SSAI-медиа-сегменты идут с неправдоподобным expire (regex апстрима
-        // отсекает правдоподобный диапазон текущей эпохи); оригинал падает
-        // в adblock-rs на опции method= — адаптация без неё.
+    fn compat_ssai_media_not_blocked_after_200() {
+        // duopulse-200: сетевое правило uBO quick-fixes #29059 (SSAI-медиа с
+        // неправдоподобным expire) удалено из compat и погашено код-уровневым
+        // исключением is_youtube_media: блок ад-медиа вешал плеер (ретраи
+        // + непрожигаемый ad-showing + перезагрузки = 80 с до контента),
+        // преролл убирает прожиг 089 — ему медиа нужна.
         let s = service();
         s.set_engine(trusted_engine(&[COMPAT_RULES]));
+        // в самом compat правила больше нет — проверим текстом
         assert!(
-            s.should_block(
-                Some("https://www.youtube.com/watch?v=x"),
-                "https://rr5---sn-4g5lznle.googlevideo.com/videoplayback?expire=2094204800&mn=sn-x",
-                "xhr",
-                Some("https://www.youtube.com/"),
-            ),
-            "SSAI-подобный expire (2094…) блокируется"
+            !COMPAT_RULES.contains("videoplayback?expire"),
+            "compat снова несёт expire-правило — оно погашено только кодом"
         );
-        assert!(
-            !s.should_block(
-                Some("https://www.youtube.com/watch?v=x"),
-                "https://rr5---sn-4g5lznle.googlevideo.com/videoplayback?expire=1793900000&mn=sn-x",
-                "xhr",
-                Some("https://www.youtube.com/"),
-            ),
-            "правдоподобный expire (эпоха+6ч) не тронут"
-        );
+        for expire in ["2094204800", "5252702204", "1793900000"] {
+            assert!(
+                !s.should_block(
+                    Some("https://www.youtube.com/watch?v=x"),
+                    &format!("https://rr5---sn-4g5lznle.googlevideo.com/videoplayback?expire={expire}&mn=sn-x"),
+                    "xhr",
+                    Some("https://www.youtube.com/"),
+                ),
+                "медиа с expire={expire} не блокируется"
+            );
+        }
     }
 
     #[test]
