@@ -1,0 +1,329 @@
+{
+  "wireMagic": "pb3",
+  "pens": [ {
+  
+  } ],
+  "wsWinStyles": [ {
+  
+  }, {
+    "mhModeHint": 0,
+    "juJustifCode": 0,
+    "sdScrollDir": 3
+  } ],
+  "wpWinPositions": [ {
+  
+  }, {
+    "apPoint": 6,
+    "ahHorPos": 20,
+    "avVerPos": 100,
+    "rcRows": 2,
+    "ccCols": 40
+  }, {
+    "apPoint": 7,
+    "ahHorPos": 50,
+    "avVerPos": 100,
+    "rcRows": 2,
+    "ccCols": 40
+  } ],
+  "events": [ {
+    "tStartMs": 0,
+    "id": 1,
+    "wpWinPosId": 2,
+    "wsWinStyleId": 1
+  }, {
+    "tStartMs": 1964,
+    "dDurationMs": 4996,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[musique]\n1 2 1 2"
+    } ]
+  }, {
+    "tStartMs": 4880,
+    "dDurationMs": 4840,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Ah voilà là, on s'entend ?\nOn baisse la musique, on enlève les"
+    } ]
+  }, {
+    "tStartMs": 8200,
+    "dDurationMs": 5560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "filtres.\nDis-leur la vérité. [musique]"
+    } ]
+  }, {
+    "tStartMs": 11880,
+    "dDurationMs": 6600,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Derrière ma fenêtre, [chant] Paris\ns'éteint doucement.",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 16000,
+    "dDurationMs": 7240,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "J'ai dessiné des sourires sur le\npare-avant. [chant]"
+    } ]
+  }, {
+    "tStartMs": 19960,
+    "dDurationMs": 7440,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "On me dit \"Comme tu brilles.\" On me dit\n\"Tout va bien.\" Mais je danse toute"
+    } ]
+  }, {
+    "tStartMs": 26000,
+    "dDurationMs": 7480,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "seule au milieu [chant]\nde mon chagrin. Je [musique] suis"
+    } ]
+  }, {
+    "tStartMs": 29280,
+    "dDurationMs": 8560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "l'oiseau fragile dans une cage dorée qui\nchante pour qu'on l'aime, qui [musique]"
+    } ]
+  }, {
+    "tStartMs": 35520,
+    "dDurationMs": 4360,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "chante pour oublier.\nMais oui, elle chante bien Madame"
+    } ]
+  }, {
+    "tStartMs": 39120,
+    "dDurationMs": 4840,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Faisant\nson numéro"
+    } ]
+  }, {
+    "tStartMs": 42000,
+    "dDurationMs": 7240,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "zéro défaut [musique] sur la toile, mais\nle cœur à zéro.",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 46520,
+    "dDurationMs": 8120,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "On applaudit l'artiste, on adore le\ndécor, mais quand la [chant] lumière"
+    } ]
+  }, {
+    "tStartMs": 51800,
+    "dDurationMs": 5185,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "coupe, qui sait qui pleure ? C'est ?\nNon, c'est moi."
+    } ]
+  }, {
+    "tStartMs": 55480,
+    "dDurationMs": 3840,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Alors je tourne,\n[musique]",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 57080,
+    "dDurationMs": 6080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "je tourne dans le faux.\nJe cache mes blessures sous le plus",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 61570,
+    "dDurationMs": 9510,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[musique] beau des manteaux.\n! ! On y croit presque !"
+    } ]
+  }, {
+    "tStartMs": 66920,
+    "dDurationMs": 7640,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Oh, qui viendra me sauver de ce théâtre\nd'ombres où je me suis ?",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 73240,
+    "dDurationMs": 4240,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Personne, ma belle. [musique] Tout le\nmonde regarde ailleurs.",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 92720,
+    "dDurationMs": 7400,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Faut pas leur en vouloir. Les gens\n[musique] aiment les histoires. Une"
+    } ]
+  }, {
+    "tStartMs": 96800,
+    "dDurationMs": 9520,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "larme bien maquillée, c'est joli. Dans\nle miroir, moi aussi, je mets ma veste,"
+    } ]
+  }, {
+    "tStartMs": 103400,
+    "dDurationMs": 9000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "mon nœud papillon droit. Je dis \"Merci,\nça va super.\" Alors que [musique] j'ai"
+    } ]
+  }, {
+    "tStartMs": 108920,
+    "dDurationMs": 7560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "si froid. Calculons la moyenne 100 amis\nsur l'écran, mais zéro dans la pièce"
+    } ]
+  }, {
+    "tStartMs": 115360,
+    "dDurationMs": 4252,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "quand arrive [musique]\nle mauvais temps."
+    } ]
+  }, {
+    "tStartMs": 117600,
+    "dDurationMs": 5732,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Ah ? Bah oui, c'est mathématique. Plus\nla photo est belle,",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 121492,
+    "dDurationMs": 6080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "plus la vie [musique] est tragique.\nAlors pourquoi tu ris quand tu as mal au"
+    } ]
+  }, {
+    "tStartMs": 127012,
+    "dDurationMs": 3920,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "? [chant]\nParce que si je m'arrête, ma belle, j'ai"
+    } ]
+  }, {
+    "tStartMs": 129692,
+    "dDurationMs": 7840,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "beaucoup trop peur.\nEnlève ton masque, regarde-moi vraiment."
+    } ]
+  }, {
+    "tStartMs": 134532,
+    "dDurationMs": 6560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "1 2 3 Attention, c'est pas brillant.\nAlors on tourne, [musique] on tourne",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 140012,
+    "dDurationMs": 4520,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "dans le faux.\nOn jette nos armures."
+    } ]
+  }, {
+    "tStartMs": 142572,
+    "dDurationMs": 4204,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "On enlève nos\nmanteaux. [musique]",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 147332,
+    "dDurationMs": 3960,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Plus [chant] besoin de briller.\n[musique]"
+    } ]
+  }, {
+    "tStartMs": 149652,
+    "dDurationMs": 4560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Enfin, ça fait du bien d'arrêter de\ntricher.",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 151892,
+    "dDurationMs": 7560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Regarde-nous danser, deux hommes\ndémaquillés [chant]",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 155332,
+    "dDurationMs": 7120,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "dans le [musique] silence pur de notre\nvérité."
+    } ]
+  }, {
+    "tStartMs": 164132,
+    "dDurationMs": 3880,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Sans bruit, sans poussière.\nTu as ?",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 167681,
+    "dDurationMs": 3091,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[musique]\nQuand on crie moins fort, on s'entend",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 170012,
+    "dDurationMs": 3760,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "beaucoup mieux.\nJe ne tourne plus,"
+    } ]
+  }, {
+    "tStartMs": 175012,
+    "dDurationMs": 3560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "je me pose enfin."
+    } ]
+  }, {
+    "tStartMs": 178612,
+    "dDurationMs": 6810,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Voilà rideau.\nOn éteint le téléphone. Bonne nuit.",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 183402,
+    "dDurationMs": 2020,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[musique]",
+      "isSpeakerChange": 1
+    } ]
+  } ]
+}

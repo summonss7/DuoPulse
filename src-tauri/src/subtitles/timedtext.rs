@@ -14,9 +14,10 @@
 //!   Дорожка без `aAppend` (ручные дорожки и часть сессий автодорожек —
 //!   состав событий ASR варьируется, duopulse-200/209): ручное событие —
 //!   cue своей длительности (многострочные диалоги стеком); ASR-события
-//!   режутся на строки по пословному `tOffsetMs` сегментов (или поровну
-//!   по длительности окна), концы зажаты соседями — иначе перекрытия
-//!   длительностей склеивались движком показа в cue на всё окно/клип.
+//!   режутся на строки по пословному `tOffsetMs` сегментов (или весом по
+//!   длине строк длительности окна), концы зажаты соседями — иначе перекрытия
+//!   длительностей склеивались движком показа в cue на всё окно/клип
+//!   (однострочный показ ASR — duopulse-215: стопки строк «не уловить суть»).
 //!
 //! Формат выбирается по первому непробельному символу: `{` — JSON3, иначе XML.
 //! Битые элементы/XML/JSON — предупреждение, разбор продолжается.
@@ -302,30 +303,55 @@ fn parse_json3_plain(content: &[Json3Event]) -> Vec<Cue> {
         if !ev.segs.iter().any(|s| s.offset_ms.is_some()) {
             let text = ev.text();
             if !ev.window || !text.contains('\n') {
-                // Ручная дорожка/однострочное событие — как раньше.
+                // Ручная дорожка/однострочное событие — как раньше; концы cue
+                // ОКНА ASR зажимаем соседом-событием: dDurationMs окон
+                // перекрывается (окно катится), незажатый хвост движок
+                // показа смёржил бы со следующей строкой в 2-строчную стопку
+                // (duopulse-215).
+                let mut end = ev_end;
+                if ev.window {
+                    if let Some(ns) = next_start {
+                        end = end.min(ns);
+                    }
+                }
                 cues.push(Cue {
                     start_ms: ev.start_ms,
-                    end_ms: ev_end,
+                    end_ms: end,
                     text,
                 });
                 continue;
             }
-            // ASR-окно без пословного тайминга: поровну по строкам
-            // (нулевая длительность — как есть, пост-фильтр отбросит).
+            // ASR-окно без пословного тайминга: длительность режем по строкам
+            // ВЕСОМ их длины — речь занимает время пропорционально символам
+            // ровнее, чем поровну («короткая строка висела полокна»); концы
+            // зажаты соседом-событием (перекрытия окон — см. выше; нулевая
+            // длительность — как есть, пост-фильтр отбросит).
             if ev.dur_ms > 0 {
                 let lines: Vec<&str> =
                     text.split('\n').filter(|l| !l.trim().is_empty()).collect();
-                let n = lines.len().max(1) as i64;
-                let step = (ev.dur_ms + n - 1) / n;
+                let total: usize = lines.iter().map(|l| l.chars().count().max(1)).sum();
                 let mut start = ev.start_ms;
-                for line in lines {
-                    let end = start.saturating_add(step).min(ev_end);
-                    cues.push(Cue {
-                        start_ms: start,
-                        end_ms: end,
-                        text: line.to_string(),
-                    });
-                    start = end;
+                for (j, line) in lines.iter().enumerate() {
+                    let mut end = if j + 1 == lines.len() {
+                        ev_end.max(start + 1)
+                    } else {
+                        let share = (ev.dur_ms as f64
+                            * line.chars().count().max(1) as f64
+                            / total.max(1) as f64)
+                            .ceil() as i64;
+                        start.saturating_add(share.max(1))
+                    };
+                    if let Some(ns) = next_start {
+                        end = end.min(ns);
+                    }
+                    if end > start {
+                        cues.push(Cue {
+                            start_ms: start,
+                            end_ms: end,
+                            text: line.to_string(),
+                        });
+                        start = end;
+                    }
                 }
             } else {
                 cues.push(Cue {
@@ -480,6 +506,10 @@ mod tests {
     /// duopulse-209): вариант с aAppend — пословный rolling.
     const LIVE_RO_ASR_JSON3: &str =
         include_str!("../../../e2e/fixtures/subtitles/timedtext-ro-asr-live.json3");
+    /// Живое тело fr:asr (клип HiG7Z11yHr4, веб-сессия 22.11, duopulse-215):
+    /// вариант «катящихся окон» — без aAppend/оффсетов, строки через '\n'.
+    const LIVE_FR_ASR_WINDOWS_JSON3: &str =
+        include_str!("../../../e2e/fixtures/subtitles/timedtext-fr-asr-windows-live.json3");
 
     #[test]
     fn xml_transcript_fixture_entities_and_newlines() {
@@ -741,10 +771,12 @@ mod tests {
     }
 
     #[test]
-    fn json3_plain_window_without_offsets_even_split() {
+    fn json3_plain_window_without_offsets_weighted_split() {
         // duopulse-200: окно музсекции одним событием без пословного
-        // тайминга (587 знаков / 22 строки) — режем длительность поровну,
-        // чтобы текст не висел весь клип.
+        // тайминга (587 знаков / 22 строки) — режем длительность по строкам,
+        // чтобы текст не висел весь клип. Доли — весом длины строк
+        // (duopulse-215): '[muzică]'(8)/'lasă-mă'(7)/'pleacă'(7) из 22 →
+        // 9000×8/22… (ceil) — не поровну: короткая строка не висит полокна.
         let parsed = parse_json3(
             "{\"events\":[{\"tStartMs\":0,\"dDurationMs\":9000,\"wWinId\":1,\"segs\":[
               {\"utf8\":\"[muzică]\\nlasă-mă\\npleacă\"}]}]}",
@@ -752,13 +784,103 @@ mod tests {
         assert_eq!(
             parsed.cues,
             vec![
-                Cue { start_ms: 0, end_ms: 3_000, text: "[muzică]".into() },
-                Cue { start_ms: 3_000, end_ms: 6_000, text: "lasă-mă".into() },
-                Cue { start_ms: 6_000, end_ms: 9_000, text: "pleacă".into() },
+                Cue { start_ms: 0, end_ms: 3_429, text: "[muzică]".into() },
+                Cue { start_ms: 3_429, end_ms: 6_429, text: "lasă-mă".into() },
+                Cue { start_ms: 6_429, end_ms: 9_000, text: "pleacă".into() },
             ],
             "{:?}",
             parsed.cues
         );
+    }
+
+    #[test]
+    fn json3_plain_window_cues_clamped_to_next_event() {
+        // duopulse-215 (жалоба: оригинал ASR «когда построчно, когда по две
+        // строки, когда с задержкой»): вариант сессии без aAppend/оффсетов
+        // отдаёт КАТЯЩИЕСЯ окна — dDurationMs каждого залезает на старт
+        // следующего. До фикса even-split не зажимал концы: движок показа
+        // смёржил перекрытия в 2-строчные стопки на всё окно (скриншот
+        // жалобы: 'Je cache…plus' + '[musique] beau des manteaux.').
+        let parsed = parse_json3(
+            "{\"events\":[
+              {\"tStartMs\":57080,\"dDurationMs\":6080,\"wWinId\":1,\"segs\":[
+                {\"utf8\":\"je tourne dans le faux.\\nJe cache mes blessures sous le plus\"}]},
+              {\"tStartMs\":61570,\"dDurationMs\":9510,\"wWinId\":1,\"segs\":[
+                {\"utf8\":\"[musique] beau des manteaux.\\n! ! On y croit presque !\"}]}]}",
+        );
+        assert_eq!(
+            parsed.cues,
+            vec![
+                // строка 1 окна 1 — доля её длины (23/58) длительности
+                Cue { start_ms: 57_080, end_ms: 59_492, text: "je tourne dans le faux.".into() },
+                // последняя строка окна — до соседа-события (61 570), не до конца окна (63 160)
+                Cue { start_ms: 59_492, end_ms: 61_570, text: "Je cache mes blessures sous le plus".into() },
+                Cue { start_ms: 61_570, end_ms: 66_691, text: "[musique] beau des manteaux.".into() },
+                Cue { start_ms: 66_691, end_ms: 71_080, text: "! ! On y croit presque !".into() },
+            ],
+            "{:?}",
+            parsed.cues
+        );
+        // Перекрытий нет — движок показа не смёржит цепочку в стопку строк.
+        for pair in parsed.cues.windows(2) {
+            assert!(pair[0].end_ms <= pair[1].start_ms, "{:?}", parsed.cues);
+        }
+    }
+
+    #[test]
+    fn json3_plain_single_line_window_clamped_to_next() {
+        // Однострочное окно ASР без '\n' — тоже катится: незажатый конец
+        // смёрживался со строкой следующего окна (duopulse-215).
+        let parsed = parse_json3(
+            "{\"events\":[
+              {\"tStartMs\":1964,\"dDurationMs\":2916,\"wWinId\":1,\"segs\":[
+                {\"utf8\":\"[musique]\"}]},
+              {\"tStartMs\":2880,\"dDurationMs\":4080,\"wWinId\":1,\"segs\":[
+                {\"utf8\":\"1 2 1 2\"}]}]}",
+        );
+        assert_eq!(
+            parsed.cues,
+            vec![
+                // конец — старт соседа (2880), не конец окна (4880)
+                Cue { start_ms: 1_964, end_ms: 2_880, text: "[musique]".into() },
+                Cue { start_ms: 2_880, end_ms: 6_960, text: "1 2 1 2".into() },
+            ],
+            "{:?}",
+            parsed.cues
+        );
+    }
+
+    #[test]
+    fn json3_live_fr_asr_windows_body_single_line_cues() {
+        // Живое тело fr:asr клипа HiG7Z11yHr4 (веб-сессия 22.11, захват
+        // пробником duopulse-215): 40 окон без aAppend/оффсетов, строки
+        // через '\n'. Инварианты фикса 215: каждая строка окна — отдельный
+        // cue (стопок '\n' нет), перекрытий нет (движок не смёржит),
+        // хвост катящегося окна зажат стартом соседа.
+        let parsed = parse_json3(LIVE_FR_ASR_WINDOWS_JSON3);
+        assert!(parsed.cues.len() >= 70, "cues={}", parsed.cues.len());
+        let mut prev_end = i64::MIN;
+        for cue in &parsed.cues {
+            assert!(!cue.text.contains('\n'), "стопка строк: {:?}", cue.text);
+            assert!(cue.end_ms > cue.start_ms, "вырожденный: {:?}", cue);
+            assert!(cue.start_ms >= prev_end, "перекрытие: {:?}", parsed.cues);
+            prev_end = cue.end_ms;
+        }
+        // Место жалобы (окно 61 570): строки '[musique] beau des manteaux.'
+        // и '! ! On y croit presque !' — раздельные cue, вторая начинается
+        // не раньше ~65 с (до фикса стопка висела с 61,6 с).
+        let manteaux = parsed
+            .cues
+            .iter()
+            .find(|c| c.text.contains("manteaux"))
+            .expect("строка manteaux");
+        let croit = parsed
+            .cues
+            .iter()
+            .find(|c| c.text.contains("y croit"))
+            .expect("строка on y croit");
+        assert_eq!(manteaux.start_ms, 61_570);
+        assert!(croit.start_ms >= 65_000, "croit={:?}", croit);
     }
 
     #[test]
