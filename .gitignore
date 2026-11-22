@@ -86,3 +86,5 @@ e2e/mobile/vpn-route-smoke-last-run.json
 e2e/mobile/vpn-ui-smoke-last-run.json
 # Рантайм-артефакт стенда дефолта дуо-набора (e2e/mobile/duo-default-smoke.mjs, duopulse-186)
 e2e/mobile/duo-default-smoke-last-run.json
+# Рантайм-артефакт стенда инкогнито web-оверлея (e2e/mobile/incognito-overlay-smoke.mjs, duopulse-211)
+e2e/mobile/incognito-overlay-smoke-last-run.json

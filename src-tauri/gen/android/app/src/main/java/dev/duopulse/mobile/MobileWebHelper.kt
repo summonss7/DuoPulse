@@ -43,6 +43,10 @@ import java.net.URLEncoder
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.webkit.Profile
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import java.io.ByteArrayInputStream
 
 /*
@@ -217,6 +221,24 @@ object MobileWebHelper {
   private var overlay: FrameLayout? = null
   private var webView: WebView? = null
   private var duoBtn: Button? = null
+
+  /** Инкогнито-оверлей (duopulse-211, жалоба «в режиме инкогнито все запросы
+   *  перенаправляет в хром»): прежде режим выкидывал каждый адрес в системный
+   *  браузер — теперь оверлей открывается на ИЗОЛИРОВАННОМ профиле WebView
+   *  (куки/хранилища отдельны от основного профиля iframe-плеера). Имя
+   *  профиля стабильно: остатки прошлой сессии (kill процесса) сносится
+   *  deleteProfile перед createProfile — чистый старт. Системный WebView
+   *  без MULTI_PROFILE (API<33 / старый рантайм) — общий профиль; следы
+   *  чистит выход из режима (mobile_private_cleanup), куки на время
+   *  сессии общие с плеером — честный деград, лучше Chrome. */
+  private const val PRIVATE_PROFILE = "duopulse-private"
+
+  /** Текущий оверлей — инкогнито (профиль назначается при создании WebView,
+   *  смена режима у живого оверлея — пересборка, см. open). */
+  private var privateMode = false
+
+  /** androidx-профиль инкогнито-оверлея (null — общий профиль). */
+  private var privateProfile: Profile? = null
 
   /** Очки-инкогнито шапки (duopulse-207): подсветка по состоянию режима. */
   private var glassesIcon: GlassesIcon? = null
@@ -583,12 +605,17 @@ object MobileWebHelper {
     return sb.append("\"").toString()
   }
 
-  @JvmStatic fun open(context: Context, url: String): String {
+  @JvmStatic fun open(context: Context, url: String, mode: String): String {
     val act = MainActivity.current ?: return "error: активность не готова"
     act.runOnUiThread {
       val root = act.findViewById<FrameLayout>(android.R.id.content) ?: return@runOnUiThread
+      // duopulse-211: режим задаётся при создании (профиль WebView) — живой
+      // оверлей другого режима пересобираем; на практике вход/выход из
+      // инкогнито закрывает оверлей раньше (setIncognito → mobile_web_close)
+      val wantPrivate = mode == "1"
+      if (overlay != null && privateMode != wantPrivate) close()
       var ov = overlay
-      if (ov == null) ov = build(act, root)
+      if (ov == null) ov = build(act, root, wantPrivate)
       hidden = false
       syncChrome(url)
       queryPrivateState()
@@ -932,15 +959,47 @@ object MobileWebHelper {
       stopLoading()
       loadUrl("about:blank")
       onResume() // teardown из спрятанного (onPause) состояния — убрать паузу перед destroy
-      // слушателей и куки не трогаем: системный профиль общий с iframe-плеером,
-      // инкогнито чистит его при выходе (mobile_private_cleanup)
+      // слушателей и куки общего профиля не трогаем: он разделён с
+      // iframe-плеером, инкогнито на деграде чистит его при выходе из
+      // режима (mobile_private_cleanup)
       destroy()
+    }
+    // Инкогнито-оверлей (duopulse-211): изолированный профиль снести —
+    // закрытие приватной сессии следов не оставляет. Куки/хранилища чистим
+    // НАПРЯМУЮ всегда: deleteProfile часто отказывает «in-use» — рендерер
+    // отпускает профиль асинхронно после destroy(); сам профиль добьёт
+    // отложенный ретрай (а если и он не успел — deleteProfile при следующем
+    // входе, см. build)
+    if (privateMode) {
+      val profile = privateProfile
+      privateProfile = null
+      privateMode = false
+      try {
+        @Suppress("DEPRECATION") // профильная замена clearAll недоступна в androidx 1.14
+        profile?.cookieManager?.removeAllCookies(android.webkit.ValueCallback { })
+        profile?.webStorage?.deleteAllData()
+      } catch (e: Exception) {
+        Log.d(TAG, "private-profile: куки/хранилища (${e.message})")
+      }
+      try {
+        ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE)
+      } catch (e: Exception) {
+        Log.d(TAG, "private-profile: deleteProfile (${e.message}) — ретрай")
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+          try {
+            ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE)
+          } catch (re: Exception) {
+            Log.d(TAG, "private-profile: ретрай (${re.message}) — дочистит вход")
+          }
+        }, 1500)
+      }
     }
     overlay = null
   }
 
   @SuppressLint("SetJavaScriptEnabled")
-  private fun build(act: MainActivity, root: FrameLayout): FrameLayout {
+  private fun build(act: MainActivity, root: FrameLayout, wantPrivate: Boolean): FrameLayout {
+    privateMode = wantPrivate
     val dp = { v: Int -> (v * act.resources.displayMetrics.density).toInt() }
     val ov = FrameLayout(act)
     // фон оверлея — --bg-base (duopulse-202): тёмная тема старта, без
@@ -1298,6 +1357,38 @@ object MobileWebHelper {
     col.addView(header)
 
     val wv = WebView(act)
+    // Инкогнито (duopulse-211): изолированный профиль — строго ДО любого
+    // другого использования WebView (иначе IllegalStateException); куки и
+    // хранилища этого WebView отдельны от основного профиля плеера
+    privateProfile = null
+    if (wantPrivate && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+      try {
+        val store = ProfileStore.getInstance()
+        // остатки прошлой приватной сессии (kill процесса между teardown и
+        // чисткой) сносим — старт всегда чистый; «профиль используется»
+        // (рендерер прошлого WebView ещё не отпустил) — напрямую чистим
+        // куки/хранилища старого профиля до переиспользования
+        try { store.deleteProfile(PRIVATE_PROFILE) } catch (e: Exception) {
+          Log.d(TAG, "private-profile: прошлый не удалён (${e.message})")
+          try {
+            val old = store.getProfile(PRIVATE_PROFILE)
+            @Suppress("DEPRECATION")
+            old?.cookieManager?.removeAllCookies(android.webkit.ValueCallback { })
+            old?.webStorage?.deleteAllData()
+          } catch (ce: Exception) {
+            Log.d(TAG, "private-profile: прошлого не чистить (${ce.message})")
+          }
+        }
+        privateProfile = store.getOrCreateProfile(PRIVATE_PROFILE)
+        WebViewCompat.setProfile(wv, PRIVATE_PROFILE)
+        Log.d(TAG, "private-profile: изолированный профиль назначен")
+      } catch (e: Exception) {
+        privateProfile = null
+        Log.d(TAG, "private-profile: недоступен (${e.message}) — общий профиль")
+      }
+    } else if (wantPrivate) {
+      Log.d(TAG, "private-profile: MULTI_PROFILE не поддержан — общий профиль")
+    }
     wv.settings.javaScriptEnabled = true
     wv.settings.domStorageEnabled = true
     // подложка страницы — тёмная (duopulse-202): без белой вспышки до

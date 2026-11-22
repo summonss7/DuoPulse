@@ -15,14 +15,16 @@
 use crate::mobile_open::is_openable_url;
 
 /// mobile.web_open: открыть http/https-адрес в нативном web-оверлее.
+/// incognito (duopulse-211) — оверлей на изолированном профиле WebView:
+/// прежде режим выкидывал все запросы в системный браузер (жалоба).
 /// Возврат — "opened"; отказы хелпера ("error: …") прокидываются как Err.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
-pub fn mobile_web_open(url: String) -> Result<String, String> {
+pub fn mobile_web_open(url: String, incognito: Option<bool>) -> Result<String, String> {
     if !is_openable_url(&url) {
         return Err(format!("схема не разрешена: {url}"));
     }
-    jni_impl::call("open", &url)
+    jni_impl::call("open", &url, if incognito.unwrap_or(false) { "1" } else { "" })
 }
 
 /// mobile.web_close: закрыть оверлей и освободить WebView (UI зовёт при
@@ -30,26 +32,28 @@ pub fn mobile_web_open(url: String) -> Result<String, String> {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
 pub fn mobile_web_close() -> Result<String, String> {
-    jni_impl::call("close", "")
+    jni_impl::call("close", "", "")
 }
 
 #[cfg(target_os = "android")]
 mod jni_impl {
     use crate::mobile_jni::{app_class, jstr, with_jni};
 
-    /// Вызов статического метода MobileWebHelper (Context, String) → String —
-    /// поверхность как у MobileOpenHelper: open/close, исключения гасятся
-    /// в Kotlin и возвращаются строкой.
-    pub fn call(method: &str, url: &str) -> Result<String, String> {
+    /// Вызов статического метода MobileWebHelper (Context, String, String)
+    /// → String — поверхность как у MobileOpenHelper: open/close (режим
+    /// инкогнито — вторая строка, duopulse-211), исключения гасятся в
+    /// Kotlin и возвращаются строкой.
+    pub fn call(method: &str, url: &str, mode: &str) -> Result<String, String> {
         with_jni(|env, context| {
             let helper = app_class(env, context, "dev.duopulse.mobile.MobileWebHelper")?;
             let jurl = jstr(env, url)?;
+            let jmode = jstr(env, mode)?;
             let r = env
                 .call_static_method(
                     &helper,
                     method,
-                    "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
-                    &[context.into(), (&jurl).into()],
+                    "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                    &[context.into(), (&jurl).into(), (&jmode).into()],
                 )
                 .map_err(|e| format!("helper: {e}"))?
                 .l()
@@ -66,7 +70,7 @@ mod jni_impl {
 /// держим сигнатуру, чтобы команда компилировалась.
 #[cfg(all(not(target_os = "android"), target_os = "ios"))]
 mod jni_impl {
-    pub fn call(method: &str, _url: &str) -> Result<String, String> {
+    pub fn call(method: &str, _url: &str, _mode: &str) -> Result<String, String> {
         Err(format!("web-оверлей поддержан только на Android ({method})"))
     }
 }

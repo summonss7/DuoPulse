@@ -8135,3 +8135,37 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   - Релизы 0.1.92 обеих платформ: android-build.sh (подписанный APK 38.1 МБ в канал Aila) и
     npm run release (stable+canary+GitHub Pages+хаб+C:\DuoPulse).
 - Коммит: 015a0da (fix(mobile): duopulse-210 — …полное сообщение в git log).
+
+## 2026-11-22 10:00 — duopulse-211: инкогнито больше не выкидывает запросы в Chrome (мобильная ветка)
+- Начало работы: 2026-11-22 09:26
+- Окончание работы: 2026-11-22 10:00
+- Что сделано:
+  - Жалоба «в режиме инкогнито все запросы перенаправляет в хром и открывает в нем» — причина в
+    мобильной ветке (duopulse-207): openInApp (src/mobile/mobile.ts) в инкогнито уводил КАЖДЫЙ
+    адрес в системный браузер (web-оверлей считался несовместимым с режимом из-за общего профиля
+    WebView). Десктоп (инкогнито-вкладки 096) не затронут.
+  - Фикс: инкогнито-оверлей открывается В ПРИЛОЖЕНИИ на ИЗОЛИРОВАННОМ профиле WebView —
+    androidx.webkit ProfileStore/WebViewCompat.setProfile (webkit 1.14 уже в зависимостях),
+    фича-чек MULTI_PROFILE; профиль «duopulse-private» сносится при закрытии оверлея
+    (teardown: чистка профильных cookieManager/WebStorage напрямую — deleteProfile сразу после
+    destroy() отказывает «in-use» — плюс отложенный ретрай deleteProfile; чистый старт —
+    deleteProfile перед createProfile). Деград без MULTI_PROFILE (WebView старее): общий профиль,
+    следы чистит выход из режима (mobile_private_cleanup), но открытие — в приложении.
+  - Изменения: src/mobile/mobile.ts (openInApp — флаг вместо openExternal), src-tauri/src/
+    mobile_web.rs (mobile_web_open + incognito, JNI-сигнатура 3-арг), MobileWebHelper.kt
+    (open/build/teardown — профиль, пересборка оверлея при смене режима).
+  - Новый смоук e2e/mobile/incognito-overlay-smoke.mjs (14 проверок: открытие в приложении не в
+    Chrome по topResumedActivity/pid, изоляция профилей по кукам, «следов не остаётся», регресс
+    обычного пути); описание — AGENTS.md (e2e-инструменты), README — поведение инкогнито-оверлея.
+  - Выявлено и оформлено карточкой duopulse-214 (todo): YouTube-видео в инкогнито открываются
+    встроенным плеером на общем профиле — приватность видео-сеанса негарантирована.
+  - Версия 0.1.93; релизы обеих платформ: android-build.sh (подписанный APK в канал Aila,
+    apk-ассет в манифесте рядом с exe) и npm run release (stable+canary+GitHub Pages+хаб+
+    C:\DuoPulse).
+- Как проверено:
+  - vitest 749/749, tsc чист; debug-APK (x86_64) на эмуляторе DuoPulse207 (API 36):
+    incognito-overlay-smoke 14/14 (первый прогон 13/14 поймал «deleteProfile in-use» —
+    исправлено, повторный 14/14); logcat: «private-profile: изолированный профиль назначен».
+  - Каналы обновлений: Aila manifest 0.1.93 (exe+sig+latest.json+android-apk), GitHub Pages фид
+    (503 на момент проверки — CDN-деплой, файл запушен).
+- Коммит: см. ниже (запись добавлена до коммита; хеш — в сообщении диспетчера/журнале карточки).

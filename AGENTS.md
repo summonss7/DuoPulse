@@ -207,6 +207,23 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   версию, m.youtube/app=desktop срезан/разметки нет, рестарт+goto →
   m.youtube. Результат —
   e2e/mobile/yt-mobile-force-smoke-last-run.json (gitignore, рантайм-артефакт).
+- `e2e/mobile/incognito-overlay-smoke.mjs` — стенд ИНКОГНИТО web-оверлея
+  (карточка 211: прежний код выкидывал все запросы режима в системный
+  браузер): debug-APK + CDP 9223 + локальная cookie-страница (порт 8898,
+  уникальный ?r= на открытие — мёртвые CDP-цели прошлых WebView висят в
+  /json вечно); 14 проверок: очки старта включают режим; omnibox-Enter в
+  инкогнито открывает оверлей В ПРИЛОЖЕНИИ (topResumedActivity DuoPulse,
+  pid com.android.chrome не меняется); logcat DuoPulseWeb
+  «private-profile: изолированный профиль назначен» (MULTI_PROFILE,
+  androidx ProfileStore; деграда — общий профиль); изоляция профилей
+  (кука приватного не видна обычному оверлею — прямой invoke
+  mobile_web_open incognito:false); следов не остаётся (повторный
+  инкогнито-оверлей куки не видит — профиль снесён teardown'ом; ловушка:
+  deleteProfile «in-use» сразу после destroy — чистка профильных
+  cookieManager/webStorage напрямую + отложенный ретрай); после выхода из
+  режима обычный оверлей жив. Результат —
+  e2e/mobile/incognito-overlay-smoke-last-run.json (gitignore,
+  рантайм-артефакт).
 
 - `e2e/subs/embed-subs-probe.mjs` — стенд ДОРОЖЕК СУБТИТРОВ ПЛЕЕР-ФРЕЙМОВ
   кино-сайтов (карточка 199): живая страница фильма uakinogo.io, таб плеера

@@ -723,20 +723,18 @@ async function openExternal(url: string): Promise<void> {
  *  «▶ duo»/меню «⋮», duopulse-145). Прежде всё
  *  не-видео уходило в системный браузер (Chrome) — страницы с
  *  X-Frame-Options в iframe не встраиваются; оверлей снимает ограничение.
+ *  Инкогнито (duopulse-211) — оверлей на изолированном профиле WebView,
+ *  внутри приложения, а не в системном браузере.
  *  Активное видео под оверлеем — на паузу (звучать за выдачей оно не
  *  должно, duopulse-139); вкладка остаётся в переключателе. */
 async function openInApp(url: string): Promise<void> {
-  // Инкогнито (duopulse-207): web-оверлей живёт на системном профиле WebView
-  // (куки общие с плеером) — режим и оверлей несовместимы, включение режима
-  // оверлей закрывает (setIncognito). Прежде поиск из инкогнито молча
-  // открывал оверлей на общем профиле; теперь — системным браузером.
-  if (incognito) {
-    await openExternal(url);
-    return;
-  }
   if (tabs.active) tabs.newTab();
   try {
-    const r = await invoke<string>("mobile_web_open", { url });
+    // Инкогнито (duopulse-211): оверлей открывается на ИЗОЛИРОВАННОМ профиле
+    // WebView (MobileWebHelper, MULTI_PROFILE) — прежде режим выкидывал все
+    // запросы в системный браузер (жалоба «перенаправляет в хром»); системный
+    // WebView без multi-profile — общий профиль, следы чистит выход из режима
+    const r = await invoke<string>("mobile_web_open", { url, incognito });
     if (r === "opened") {
       note(t("Открыл в приложении: {url}", { url: isoLtr(url) }));
       return;
