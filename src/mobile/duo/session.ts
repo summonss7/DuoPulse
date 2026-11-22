@@ -135,6 +135,112 @@ export async function loadCuesByUrl(invoke: DuoInvoke, url: string, signal?: { a
  *  имеет права молча висеть «занятым»; зависший вызов отбрасываем ошибкой. */
 export const GTX_CALL_TIMEOUT_MS = 30_000;
 
+/** Хосты gtx для веб-фетча (duopulse-208; порядок свой, не GTX_HOSTS Rust):
+ *  канонический translate.googleapis.com сперва, clients5 — запасная рёбра
+ *  (лимиты у рёбер независимые). */
+export const GTX_WEB_HOSTS: readonly string[] = [
+  "translate.googleapis.com",
+  "clients5.google.com",
+];
+
+/** Разбор dj=1-ответа gtx: sentences[].trans, слепленные в одну строку —
+ *  переносы строк пачки Google сохраняет внутри trans (семантика
+ *  parse_gtx_dj Rust: предложение без trans рушит весь разбор). */
+export function parseGtxDjBody(body: string): string | null {
+  let v: { sentences?: Array<{ trans?: unknown }> };
+  try {
+    v = JSON.parse(body) as { sentences?: Array<{ trans?: unknown }> };
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(v.sentences)) return null;
+  let out = "";
+  for (const s of v.sentences) {
+    if (typeof s?.trans !== "string") return null;
+    out += s.trans;
+  }
+  return out;
+}
+
+/** Сеансовый кэш веб-gtx (зеркалит gtx_cache Core): повторные сборки набора
+ *  (смена кегля/позиции) не должны молотить рейт-лимит повторными пачками. */
+const gtxWebCache = new Map<string, string[]>();
+const GTX_WEB_CACHE_MAX = 200;
+
+/** Один GET gtx фетчем UI-webview (duopulse-208): браузерный TLS-профиль
+ *  Android System WebView Google не бот-блокирует, тогда как ureq-профиль
+ *  Core ловит 429 «Sorry» (репро на эмуляторе; CORS эндпоинта открыт —
+ *  Access-Control-Allow-Origin: *). Сеть/парс не пошли — null: вызывающий
+ *  уходит на Core-транспорт; HTTP-статус — честная ошибка без фолбэка
+ *  (лимит уровня адреса бьёт оба профиля, ретраи Core лишь продлят «занято»). */
+async function gtxWebGet(
+  from: string,
+  to: string,
+  joined: string,
+  signal?: { aborted: boolean },
+  timeoutMs: number = GTX_CALL_TIMEOUT_MS,
+): Promise<string | null> {
+  let httpErr: string | null = null;
+  for (const host of GTX_WEB_HOSTS) {
+    const url =
+      `https://${host}/translate_a/single?client=gtx&dj=1` +
+      `&sl=${encodeURIComponent(from)}&tl=${encodeURIComponent(to)}&dt=t&q=${encodeURIComponent(joined)}`;
+    let resp: Response;
+    try {
+      resp = await raceCall(fetch(url), signal, timeoutMs);
+    } catch (e) {
+      if (signal?.aborted) throw e; // отмену не считаем транспортным отказом
+      return null; // сеть/прокси WebView — остаёмся на Core-транспорте
+    }
+    if (resp.status !== 200) {
+      httpErr = `gtx HTTP ${resp.status} (${host})`;
+      continue;
+    }
+    const parsed = parseGtxDjBody(await resp.text());
+    if (parsed !== null) return parsed;
+  }
+  if (httpErr) throw new Error(httpErr);
+  return null;
+}
+
+/** Сброс сеансового кэша веб-gtx (изоляция тестов). */
+export function clearGtxWebCache(): void {
+  gtxWebCache.clear();
+}
+
+/** Перевести пачку строк веб-фетчем: пакетный GET (строки через \n), при
+ *  несовпадении числа строк — построчный добор (Google смёржил короткие;
+ *  схема translate_batch Rust). null — веб-транспорт не пошёл, пачка
+ *  отправляется Core-путём. */
+async function gtxWebBatch(
+  texts: string[],
+  from: string,
+  to: string,
+  signal?: { aborted: boolean },
+  timeoutMs: number = GTX_CALL_TIMEOUT_MS,
+): Promise<string[] | null> {
+  const key = `${from}\u0001${to}\u0001${texts.join("\u0001")}`;
+  const hit = gtxWebCache.get(key);
+  if (hit) return hit;
+  const joined = await gtxWebGet(from, to, texts.join("\n"), signal, timeoutMs);
+  if (joined === null) return null;
+  let out: string[];
+  if (joined.split("\n").length === texts.length) {
+    out = joined.split("\n");
+  } else {
+    out = [];
+    for (const txt of texts) {
+      if (signal?.aborted) throw new Error(t("перевод отменён"));
+      const one = await gtxWebGet(from, to, txt, signal, timeoutMs);
+      if (one === null) return null;
+      out.push(one.trim());
+    }
+  }
+  if (gtxWebCache.size >= GTX_WEB_CACHE_MAX) gtxWebCache.clear();
+  gtxWebCache.set(key, out);
+  return out;
+}
+
 /** Гонка вызова перевода с таймаутом и абортом: плоский signal ({aborted})
  *  событий не шлёт — опрашиваем; поздний ответ зависшего invoke гасим. */
 function raceCall<T>(p: Promise<T>, signal: { aborted: boolean } | undefined, timeoutMs: number): Promise<T> {
@@ -165,7 +271,9 @@ function raceCall<T>(p: Promise<T>, signal: { aborted: boolean } | undefined, ti
   });
 }
 
-/** Перевести cue-таблицу Google gtx (Rust duo_translate_texts): пачки
+/** Перевести cue-таблицу Google gtx: сперва веб-фетч UI-webview
+ * (duopulse-208 — браузерный TLS-профиль обходит бот-блок gtx), транспорт
+ * не пошёл — прежний путь Core (Rust duo_translate_texts, ureq): пачки
  * ~1,2 КБ (лимит провайдера 2 КБ не трогаем), переносы внутри cue → пробел
  * (транспорт пачек соединяет строки \n). Прогресс — колбэком. Таймаут
  * вызова — duopulse-182 (зависший офлайн-транспорт не держит конвейер). */
@@ -194,7 +302,10 @@ export async function translateCueTable(
   for (const b of batches) {
     if (signal?.aborted) throw new Error(t("перевод отменён"));
     const chunk = texts.slice(b.from, b.to);
-    const r = (await raceCall(invoke("duo_translate_texts", { texts: chunk, from, to }), signal, timeoutMs)) as string[];
+    let r = await gtxWebBatch(chunk, from, to, signal, timeoutMs);
+    if (r === null) {
+      r = (await raceCall(invoke("duo_translate_texts", { texts: chunk, from, to }), signal, timeoutMs)) as string[];
+    }
     if (!Array.isArray(r) || r.length !== chunk.length) throw new Error(t("перевод вернул не все строки"));
     for (let i = 0; i < r.length; i++) out[b.from + i] = r[i];
     done += chunk.length;

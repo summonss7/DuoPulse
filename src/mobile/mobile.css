@@ -306,11 +306,28 @@
   border-top: 1px solid rgba(189, 254, 79, 0.25);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+  /* duopulse-208: без потолка панель с раскрытыми настройками растёт выше
+     экрана и вылезает поверх верхней панели (контент не клипает абсолют) —
+     шапка с ✕ за экраном, кнопка «duo» под листом: меню «не забрать».
+     Потолок + своя прокрутка; шапка прилипает к верху скролла. */
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .m-duo-head {
   display: flex;
   align-items: center;
   gap: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* фон и скругление: шапка прилипла — контент катится под ней, а верх
+     повторяет родные скруглённые углы листа */
+  background: var(--bg-surface);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 1px 0 rgba(189, 254, 79, 0.25);
+  padding: 2px 0 8px;
+  margin: -2px 0 -2px;
 }
 .m-duo-title {
   flex: 1;

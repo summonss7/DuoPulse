@@ -3,8 +3,8 @@
 // id↔baseUrl (схема id как у normalizeBaseTracks), дефолт оригинала,
 // ретрай 429 при загрузке cue, пачки перевода gtx.
 
-import { describe, expect, it, vi } from "vitest";
-import { defaultOriginal, loadCuesByUrl, parsePlayerResponse, titleOfPlayerResponse, translateCueTable, zipBaseUrls, type DuoInvoke } from "./session";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearGtxWebCache, defaultOriginal, loadCuesByUrl, parseGtxDjBody, parsePlayerResponse, titleOfPlayerResponse, translateCueTable, zipBaseUrls, type DuoInvoke } from "./session";
 import { normalizeBaseTracks, type RawCaptionList } from "../../../content/adapters/youtube";
 
 function rawList(): RawCaptionList {
@@ -187,6 +187,16 @@ describe("loadCuesByUrl", () => {
 });
 
 describe("translateCueTable", () => {
+  // duopulse-208: перевод идёт веб-фетчем сперва — в тестах фетч всегда
+  // «сети нет», чтобы старые проверки гоняли прежний Core-путь (invoke)
+  beforeEach(() => {
+    clearGtxWebCache();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("сети нет"))));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("режет по ~1,2 КБ, переносит тексты пачкой, маппит по индексу", async () => {
     const cues = Array.from({ length: 30 }, (_, i) => cue(i * 100, `line ${i} с длинным текстом`.repeat(3)));
     const seen: string[][] = [];
@@ -251,5 +261,77 @@ describe("translateCueTable", () => {
     await expect(p).rejects.toThrow(/нет ответа/);
     release.fn?.(["поздно"]); // зависший invoke ожил после таймаута — тишина
     await new Promise((r) => setTimeout(r, 50));
+  });
+
+  // ── duopulse-208: веб-фетч gtx (браузерный профиль) прежде Core-ureq ─────
+  const djBody = (lines: string[]): string =>
+    JSON.stringify({ sentences: lines.map((trans) => ({ trans })), src: "en" });
+  const res = (status: number, body?: string): Response =>
+    ({ status, text: async () => body ?? "" }) as unknown as Response;
+
+  it("веб-фетч успешен — Core (invoke) не зовётся", async () => {
+    const fetchMock = vi.fn(async (_url: string) => res(200, djBody(["привет\nмир"])));
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn(async () => ["не должно"]);
+    const out = await translateCueTable(invoke as unknown as DuoInvoke, [cue(0, "hello"), cue(1, "world")], "en", "ru");
+    expect(invoke).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(out.map((c) => c.text)).toEqual(["привет", "мир"]);
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain("translate.googleapis.com/translate_a/single");
+    expect(url).toContain("sl=en&tl=ru");
+    expect(url).toContain(encodeURIComponent("hello\nworld"));
+  });
+
+  it("веб-фетч 429 — честная ошибка без Core-фолбэка (лимит уровня адреса)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => res(429)));
+    const invoke = vi.fn(async () => ["не должно"]);
+    await expect(
+      translateCueTable(invoke as unknown as DuoInvoke, [cue(0, "hi")], "en", "ru"),
+    ).rejects.toThrow(/gtx HTTP 429/);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("сеть веб-фетча упала — фолбэк на Core-путь (invoke)", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))));
+    const invoke: DuoInvoke = async (_c, a) => (a as { texts: string[] }).texts.map((t) => `✓${t}`);
+    const out = await translateCueTable(invoke, [cue(0, "hello")], "en", "ru");
+    expect(out[0].text).toBe("✓hello");
+  });
+
+  it("пачка смёржилась — построчный добор вебом, invoke не зовётся", async () => {
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        call++;
+        // первый вызов — пачка (Google смёржил две строки), далее построчно
+        return res(200, call === 1 ? djBody(["привет мир"]) : djBody([call === 2 ? "привет" : "мир"]));
+      }),
+    );
+    const invoke = vi.fn(async () => ["не должно"]);
+    const out = await translateCueTable(invoke as unknown as DuoInvoke, [cue(0, "hello"), cue(1, "world")], "en", "ru");
+    expect(invoke).not.toHaveBeenCalled();
+    expect(call).toBe(3);
+    expect(out.map((c) => c.text)).toEqual(["привет", "мир"]);
+  });
+
+  it("сеансовый кэш: повторный набор не молотит gtx повторно", async () => {
+    const fetchMock = vi.fn(async () => res(200, djBody(["привет"])));
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke: DuoInvoke = async () => ["не должно"];
+    await translateCueTable(invoke, [cue(0, "hello")], "en", "ru");
+    await translateCueTable(invoke, [cue(0, "hello")], "en", "ru");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("parseGtxDjBody", () => {
+  it("склеивает sentences[].trans, разбор мусора — null", () => {
+    const body = JSON.stringify({ sentences: [{ trans: "раз" }, { trans: "два" }], src: "en" });
+    expect(parseGtxDjBody(body)).toBe("раздва");
+    expect(parseGtxDjBody('{"src":"en"}')).toBeNull(); // нет sentences
+    expect(parseGtxDjBody("не json")).toBeNull();
+    expect(parseGtxDjBody('{"sentences":[{"orig":"x"}]}')).toBeNull(); // без trans
   });
 });
