@@ -8269,3 +8269,47 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   (backups/backup_2026-11-22_18-13-03); релиз 0.1.97 — npm run release, оба канала GitHub +
   хаб Aila + C:\DuoPulse, без android-ассета (мобильный код не менялся).
 - Коммит: 6f51014 feat(subs): duopulse-225 — двойные субтитры на дефолтном плеере uakinogo (cinemar.cc); версия 0.1.97, десктоп-релиз оба канала
+
+## 2026-11-23 01:05 — duopulse-218: фоновая музыка мобильной ветки — музыка играет при переходе в другое приложение
+
+- Начало работы: 2026-11-22 19:36
+- Окончание работы: 2026-11-23 01:05
+- Что сделано (карточка CARDS/218, желание w_qvdnYrciP3zJUmvW «перехожу в другое окно — музыка сразу выключается»):
+  - Механика мобильного Kotlin (src-tauri/gen/android): новый MobileMediaHelper — зонд каждые 2 с
+    (файловое <video> UI-webview; прирост часов duo __duopulseMobileDuo().clock — состояние
+    кросс-доменного YouTube-embed читается по времени; <video>/<audio> web-оверлея),
+    foreground-сервис mediaPlayback (MediaPlaybackService) с перманентным уведомлением «⏸»
+    (пауза — JS postMessage pauseVideo + pause() обоих окон), пол жизни сервиса 8 с +
+    два тихих тика перед остановкой (мгновенный stopService после startForegroundService ронял
+    приложение ForegroundServiceDidNotStartInTimeException — поймано живым прогоном).
+  - «Щит» window-visibility (MediaShieldView): WebView оборачивается на месте; пока музыка
+    играет, dispatchWindowVisibilityChanged(GONE) не проходит вниз — Chromium не прячет
+    страницу и не глушит медиа/рендерер (главная причина мгновенной остановки: окно уходит в
+    GONE за onPause активности, а не сам WebView.onPause); снимается в фоне при остановке
+    музыки — таймеры/рендерер снова троттлятся, батарея не страдает.
+  - Программный реплей после onPause (WryActivity гасит UI-webview, WebView.onResume НЕ
+    возвращает воспроизведение): перезапуск только начатых элементов + playVideo в iframe-ы,
+    с латчами по окнам (8 с) против гонки «включил и сразу ушёл»; играет web-оверлей — реплей
+    tauri-окна не выполняется (один аудио-фокус на приложение: перехват гасил музыку оверлея).
+  - БЕЗ MediaSession и БЕЗ запроса POST_NOTIFICATIONS: активная сессия STATE_PLAYING сама
+    перезахватывала аудио-фокус у AudioFocusDelegate'ов WebView (война фокуса каждые ~2 с),
+    а системный диалог разрешения сам паузит активность — оба пойманы смоуком.
+  - Приоритет рендерера bound (setRendererPriorityPolicy(BOUND,false)) — рендерер наследует
+    приоритет FGS-процесса и не замерзает (известная заморозка duopulse-082).
+  - ПОПУТНО ПОЧИНЕН РЕГРЕСС 0.1.93: mobile_web_close падал NoSuchMethodException — при
+    инкогнито (duopulse-211) JNI-дескриптор стал трёхаргументным, а Kotlin close остался
+    двухаргументным; «⌂ домой» и закрытие web-оверлея не работали у всех носителей 0.1.93–0.1.97.
+  - Манифест: права FOREGROUND_SERVICE(_MEDIA_PLAYBACK), POST_NOTIFICATIONS, сервис
+    mediaPlayback. Десктоп не затронут (правки только gen/android + e2e).
+  - Документация: README (мобильная ветка — фоновая музыка), ROADMAP (запись 2026-11-23),
+    AGENTS.md (e2e-стенд).
+- Как проверено: e2e/mobile/background-audio-smoke.mjs (новый, debug-APK + CDP 9223 +
+  локальный тон-сервер) — 17/17 ЖЁСТКИХ проверок: файловый плеер из VIEW-intent играет,
+  сервис поднят, в другом приложении (Настройки) время и ЗВУК идут (dumpsys audio uid
+  state:started), 15+ с фона без заморозки, HOME — музыка жива, «⏸» останавливает и сервис
+  гаснет, музыка web-оверлея играет в фоне, закрытие оверлея гасит сервис, возврат — UI жив;
+  YouTube-фаза мягко скипнута (бит-блок эмулятора, readyState 0; живой YouTube-путь проверен
+  вручную — часы embed шли в фоне под щитом, звук AAudio state:started). vitest 756/756.
+  Сборки: debug x86_64 (эмулятор) и подписанный release 0.1.98 aarch64 — опубликован в канал
+  Aila (манифест v2) + хаб «Скачать»; версия 0.1.98 = package.json = tauri.conf.json = Cargo.toml.
+- Коммит: afede4d feat(mobile): duopulse-218 — фоновая музыка (щит window-visibility + FGS mediaPlayback + реплей; попутный фикс mobile_web_close 0.1.93+); e2e background-audio-smoke 17/17; версия 0.1.98
