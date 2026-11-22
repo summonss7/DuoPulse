@@ -9,6 +9,14 @@ import { describe, expect, it, vi } from "vitest";
 import { MobileDuo, type DuoStatus } from "./index";
 import type { DuoInvoke } from "./session";
 
+// duopulse-217 (найдено при прогоне тестов): translateCueTable сперва пробует
+// веб-фетч gtx (duopulse-208) — в happy-dom это живая сеть хоста, и конвейер
+// зависит от её достижимости: на машине с рабочим gtx фетч отвечает, мок
+// invoke («duo_translate_texts») не зовётся и 6 тестов падают; на машине в
+// 429-квоте (прогон 216) фетч падал и всё было зелёным. Гасим fetch — путь
+// Core детерминирован, как и задумано моками.
+vi.stubGlobal("fetch", () => Promise.reject(new Error("тест: сети нет")));
+
 function makeDuo(invoke: DuoInvoke) {
   const statuses: DuoStatus[] = [];
   const el = document.createElement("div");

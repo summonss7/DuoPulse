@@ -68,6 +68,11 @@ root.innerHTML = `
       </button>
       <button id="mDuo" class="m-duo-btn" hidden title="Субтитры duo" data-i18n-title="Субтитры duo">duo</button>
       <button id="mMusic" class="m-music-btn" hidden title="Скачать: аудио, видео или субтитры" data-i18n-title="Скачать: аудио, видео или субтитры">⬇</button>
+      <!-- duopulse-217: разворот видео на весь экран (в портрете — с доворотом
+           экрана в ландшафт, как приложение YouTube); повторный тап сворачивает -->
+      <button id="mExpand" class="m-music-btn" hidden title="На весь экран" data-i18n-title="На весь экран" aria-label="На весь экран" data-i18n-aria-label="На весь экран">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3H3v3M10 3h3v3M6 13H3v-3M10 13h3v-3"/></svg>
+      </button>
       <button id="mMenu" class="m-icon" title="Настройки" data-i18n-title="Настройки" aria-label="Настройки" data-i18n-aria-label="Настройки" aria-haspopup="menu" aria-expanded="false">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="8" cy="3" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13" r="1.5"/></svg>
       </button>
@@ -136,6 +141,7 @@ const reopenBtn = root.querySelector<HTMLButtonElement>("#mReopen")!;
 const privateBtn = root.querySelector<HTMLButtonElement>("#mPrivate")!;
 const duoBtn = root.querySelector<HTMLButtonElement>("#mDuo")!;
 const musicBtn = root.querySelector<HTMLButtonElement>("#mMusic")!;
+const expandBtn = root.querySelector<HTMLButtonElement>("#mExpand")!;
 const start = root.querySelector<HTMLElement>("#mStart")!;
 const status = root.querySelector<HTMLElement>("#mStatus")!;
 const content = root.querySelector<HTMLElement>(".m-content")!;
@@ -337,6 +343,79 @@ const history = new MobileHistory({
 
 // ── Вкладки (duopulse-123): каждая — своё видео в своём iframe; активная
 // видна, фоновые на паузе; сессия в localStorage переживает перезапуск
+// Плавающая «⛶»-выход поверх видео в полном экране (duopulse-217): свернуть
+// без возврата телефона в портрет; в обычном виде спрятана. Якорь — .m-content
+// (как плашка duo), в полном экране видео занимает его целиком.
+const fsExit = document.createElement("button");
+fsExit.type = "button";
+fsExit.className = "m-fs-exit";
+fsExit.title = t("Свернуть");
+fsExit.setAttribute("aria-label", t("Свернуть"));
+fsExit.innerHTML =
+  '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3"/></svg>';
+fsExit.hidden = true;
+content.append(fsExit);
+fsExit.addEventListener("click", () => exitFull());
+expandBtn.addEventListener("click", () => (rotateFull ? exitFull() : enterFull(true)));
+
+// ── Поворот телефона и кнопка «⛶»: видео на весь экран (duopulse-217, жалоба
+// «переверну телефон — не разворачивается», «кнопка развернуть не
+// разворачивает») ────────────────────────────────────────────────────────
+// Ландшафт при открытом YouTube-видео — плеер разворачивается на весь экран:
+// класс .m-rotate-full прячет шапку и строку статуса, Kotlin через
+// window.DuopulseUi гасит системные панели и не даёт экрану гаснуть; портрет —
+// прежний вид. Тот же режим поднимает кнопка «⛶» шапки (в портрете доворачивая
+// экран в ландшафт, как приложение YouTube) и снимает плавающая «⛶» поверх
+// видео. Fullscreen API не используем: современный WebView обрабатывает его
+// ВНУТРЕННЕ (собственный тост «swipe down», свои панели и ориентация, системный
+// «назад» убивает приложение), минуя onShowCustomView — потому кнопке плеера
+// fullscreen запрещён вовсе (allow iframe в tabs.ts), разворачивает только
+// наша «⛶». Событие поворота приходит хуком __duopulseRotate из
+// onConfigurationChanged (ландшафт по факту ОС; web-оверлей поверх — не
+// разворачиваем) и дублируется matchMedia (ресайз WebView).
+let rotateFull = false;
+const rotateMq = matchMedia("(orientation: landscape)");
+const uiNative = () =>
+  (window as {
+    DuopulseUi?: { videoFullscreen(on: boolean): void; setLandscape(on: boolean): void };
+  }).DuopulseUi;
+
+function enterFull(viaButton: boolean): void {
+  if (rotateFull) return;
+  rotateFull = true;
+  root.classList.add("m-rotate-full");
+  fsExit.hidden = false;
+  try {
+    uiNative()?.videoFullscreen(true); // панели прочь, экран не гаснет
+    if (viaButton && !rotateMq.matches) uiNative()?.setLandscape(true);
+  } catch {
+    /* мост недоступен — CSS-часть всё равно работает */
+  }
+}
+
+function exitFull(): void {
+  if (!rotateFull) return;
+  rotateFull = false;
+  root.classList.remove("m-rotate-full");
+  fsExit.hidden = true;
+  try {
+    uiNative()?.videoFullscreen(false);
+    uiNative()?.setLandscape(false); // после кнопочного доворота — датчику
+  } catch {
+    /* мост недоступен — CSS-часть всё равно работает */
+  }
+}
+
+/** Реакция на поворот (хук Kotlin / matchMedia): ландшафт с открытым видео —
+ *  полный экран, прочее — прежний вид. */
+function applyRotate(on: boolean): void {
+  if (on && start.hidden) enterFull(false);
+  else exitFull();
+}
+(window as { __duopulseRotate?: (on: boolean) => void }).__duopulseRotate = (on: boolean) =>
+  applyRotate(Boolean(on));
+rotateMq.addEventListener?.("change", () => applyRotate(rotateMq.matches));
+
 // (восстановление — в конце файла, когда все модули готовы).
 const tabs = new MobileTabs({
   content,
@@ -352,8 +431,12 @@ const tabs = new MobileTabs({
 function onTabActive(tab: MobileTab | null): void {
   videoOpen = tab !== null;
   start.hidden = tab !== null;
+  // duopulse-217: вкладка закрыта/открыта — полный экран поворота пересчитать
+  // (закрытое видео в ландшафте не должно держать спрятанные панели)
+  applyRotate(rotateMq.matches);
   duoBtn.hidden = tab === null;
   musicBtn.hidden = tab === null;
+  expandBtn.hidden = tab === null;
   duoPanel?.remove();
   duoPanel = null;
   if (!tab) {

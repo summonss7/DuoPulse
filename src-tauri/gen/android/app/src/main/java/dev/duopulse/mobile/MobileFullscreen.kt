@@ -1,8 +1,11 @@
 package dev.duopulse.mobile
 
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -31,6 +34,8 @@ import androidx.core.view.WindowInsetsControllerCompat
  * (configChanges в манифесте уже включает orientation).
  */
 object MobileFullscreen {
+  private const val TAG = "DuoPulseFs"
+
   private var customView: View? = null
   private var customCallback: WebChromeClient.CustomViewCallback? = null
   private var backCallback: OnBackPressedCallback? = null
@@ -52,6 +57,14 @@ object MobileFullscreen {
   ): WebChromeClient =
     object : WebChromeClient() {
       override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+        Log.d(TAG, "custom-view: overlay 2-arg")
+        show(act, owner, view, callback)
+      }
+
+      override fun onShowCustomView(
+        view: View, requestedOrientation: Int, callback: CustomViewCallback
+      ) {
+        Log.d(TAG, "custom-view: overlay 3-arg")
         show(act, owner, view, callback)
       }
 
@@ -77,6 +90,14 @@ object MobileFullscreen {
     val base = RustWebChromeClient(act, webViewId)
     return object : WebChromeClient() {
       override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+        Log.d(TAG, "custom-view: tauri 2-arg")
+        show(act, owner, view, callback)
+      }
+
+      override fun onShowCustomView(
+        view: View, requestedOrientation: Int, callback: CustomViewCallback
+      ) {
+        Log.d(TAG, "custom-view: tauri 3-arg")
         show(act, owner, view, callback)
       }
 
@@ -175,11 +196,81 @@ object MobileFullscreen {
       act.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
       WindowInsetsControllerCompat(act.window, view)
         .show(WindowInsetsCompat.Type.systemBars())
+      // duopulse-217: вышли из HTML-fullscreen, а телефон ещё в ландшафте с
+      // открытым видео — полный экран поворота должен вернуть спрятанные
+      // панели (hide только что их показал)
+      syncRotation()
     }
   }
 
   /** Разрушение оверлея/активности — снять fullscreen, не дожидаясь onHideCustomView. */
   fun dismiss() {
     if (customView != null) hide()
+    // duopulse-217: активность уходит — её back-колбэк полного экрана тоже
+    rotateBackCallback = null
+  }
+
+  /** duopulse-217: системный «назад» в полном экране поворота — свернуть
+   *  видео, а не закрывать приложение (колбэк WryActivity при пустой истории
+   *  WebView финиширует активность). Выход — той же дверью, что поворот в
+   *  портрет: фронтенд снимет класс и вернёт панели/ориентацию. */
+  private var rotateBackCallback: OnBackPressedCallback? = null
+
+  private fun ensureRotateBack(act: MainActivity) {
+    if (rotateBackCallback != null) return
+    val cb = object : OnBackPressedCallback(false) {
+      override fun handleOnBackPressed() {
+        MainActivity.tauriWebView?.evaluateJavascript(
+          "window.__duopulseRotate && window.__duopulseRotate(false)", null)
+      }
+    }
+    act.onBackPressedDispatcher.addCallback(act, cb)
+    rotateBackCallback = cb
+  }
+
+  /** duopulse-217 (жалоба «поворот телефона не разворачивает видео»):
+   *  системные панели для «полного экрана поворота» — CSS-режим фронтенда
+   *  (класс .m-rotate-full по ландшафту/кнопке «⛶»). То же, что у
+   *  HTML-fullscreen (иммерсивный режим, экран не гаснет), но без
+   *  onShowCustomView: поворот — не жест, Fullscreen API из
+   *  onConfigurationChanged WebView не пускает, а кнопочный путь WebView
+   *  теперь обрабатывает внутренне (мимо ChromeClient). */
+  fun systemBars(act: MainActivity, hideBars: Boolean) {
+    if (act.isFinishing) return
+    ensureRotateBack(act)
+    rotateBackCallback?.isEnabled = hideBars
+    if (hideBars) {
+      act.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      WindowInsetsControllerCompat(act.window, act.window.decorView).apply {
+        hide(WindowInsetsCompat.Type.systemBars())
+        systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+      }
+    } else {
+      act.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      WindowInsetsControllerCompat(act.window, act.window.decorView)
+        .show(WindowInsetsCompat.Type.systemBars())
+    }
+  }
+
+  /** duopulse-217: кнопка «⛶» шапки в портрете — доворот экрана в ландшафт
+   *  (как приложение YouTube: прежний портретный фулскрин выглядел
+   *  «не сработавшим» — ландшафтное видео в чёрных полях того же размера);
+   *  сворачивание возвращает ориентацию датчику. */
+  fun landscapeLock(act: MainActivity, on: Boolean) {
+    act.requestedOrientation =
+      if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+      else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+  }
+
+  /** duopulse-217: синхронизировать полный экран поворота с UI-webview —
+   *  зовётся из onConfigurationChanged (поворот) и show/hide/teardown
+   *  web-оверлея (меняется то, что видит пользователь). Ландшафт без
+   *  оверлея поверх — фронтенд разворачивает видео, прочее — прежний вид. */
+  fun syncRotation() {
+    val act = MainActivity.current ?: return
+    val wv = MainActivity.tauriWebView ?: return
+    val landscape = act.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val apply = landscape && !MobileWebHelper.isOverlayShown()
+    wv.evaluateJavascript("window.__duopulseRotate && window.__duopulseRotate($apply)", null)
   }
 }

@@ -387,7 +387,11 @@ export class MobileTabs {
     f.className = "m-tab";
     f.title = t("Страница");
     f.hidden = true;
-    f.allow = "autoplay; fullscreen; encrypted-media; picture-in-picture";
+    // duopulse-217: fullscreen ЗАПРЕЩЁН — современный WebView обрабатывает
+    // Fullscreen API iframe внутренне (собственный тост/панели/ориентация,
+    // системный «назад» закрывает приложение), минуя onShowCustomView;
+    // кнопка «⛶» шапки разворачивает видео сама (m-rotate-full)
+    f.allow = "autoplay; encrypted-media; picture-in-picture";
     f.referrerPolicy = "no-referrer-when-downgrade";
     this.host.content.append(f);
     return f;

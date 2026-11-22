@@ -224,6 +224,25 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   режима обычный оверлей жив. Результат —
   e2e/mobile/incognito-overlay-smoke-last-run.json (gitignore,
   рантайм-артефакт).
+- `e2e/mobile/rotate-fullscreen-smoke.mjs` — стенд ПОЛНОГО ЭКРАНА ПОВОРОТА
+  мобильной ветки (карточка 217): debug-APK + CDP 9223; поворот телефона в
+  ландшафт при открытом YouTube-видео разворачивает плеер на весь экран
+  (класс .m-rotate-full: шапка/статус спрятаны, системные панели гасит
+  Kotlin-мост DuopulseUi — поворот не жест, Fullscreen API WebView не
+  пускает), портрет возвращает вид; кнопка «⛶» шапки и плавающая «⛶» поверх
+  видео разворачивают/сворачивают (в портрете — с доворотом экрана в
+  SENSOR_LANDSCAPE, как приложение YouTube); системный «назад» выходит из
+  полного экрана, НЕ закрывая приложение (rotateBackCallback); web-оверлей
+  поверх снимает полный экран (syncRotation в show/hide/teardown/open).
+  Грабли: Fullscreen API embed-плеера современный WebView обрабатывает
+  ВНУТРЕННЕ (тост «swipe down», свои панели/ориентация, «назад» убивает
+  приложение), минуя onShowCustomView — потому iframe-allow без fullscreen;
+  первичный ImmersiveModeConfirmation глотает «назад» — стенд ставит
+  settings secure/global immersive_mode_confirmations=confirmed ДО входа в
+  иммерсивный режим; «видео играет» — долбёжка тапами (unmute-баннер ест
+  первый). Проверка панелей — InsetsSource type=statusBars в dumpsys window.
+  Результат — e2e/mobile/rotate-fullscreen-smoke-last-run.json (gitignore,
+  рантайм-артефакт).
 
 - `e2e/subs/embed-subs-probe.mjs` — стенд ДОРОЖЕК СУБТИТРОВ ПЛЕЕР-ФРЕЙМОВ
   кино-сайтов (карточка 199): живая страница фильма uakinogo.io, таб плеера

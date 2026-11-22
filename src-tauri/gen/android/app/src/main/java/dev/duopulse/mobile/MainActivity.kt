@@ -1,7 +1,9 @@
 package dev.duopulse.mobile
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 
@@ -51,12 +53,43 @@ class MainActivity : TauriActivity() {
     // RustWebChromeClient гасит fullscreen-view; подменяем наследником с поддержкой
     webView.webChromeClient =
       MobileFullscreen.tauriChromeClient(this, (webView as RustWebView).id, webView)
+    // duopulse-217: мост «полного экрана поворота» — фронтенд (класс
+    // .m-rotate-full по ландшафту) дергает нативные панели/доворот экрана.
+    // Регистрируем ДО загрузки страницы; методы приходят с фоновой нити
+    // WebView — UI-работа в runOnUiThread у моста
+    webView.addJavascriptInterface(UiBridge(), "DuopulseUi")
     // duopulse-179: автовоспроизведение <video> без жеста ВНУТРИ WebView —
     // тап «Открыть с помощью» в файловом менеджере и так жест пользователя
     webView.settings.mediaPlaybackRequiresUserGesture = false
     // duopulse-122: document-start скрипт youtube-фреймов — загрузчик качает
     // медиа fetch'ем внутри youtube-документа (см. MobileDownloadHelper)
     MobileDownloadHelper.registerFetcher(webView)
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    // duopulse-217 (жалоба «переворачиваю телефон — не разворачивается»):
+    // поворот в ландшафт при открытом видео — плеер на весь экран, обратно
+    // в портрет — прежний вид; разворачивает фронтенд, панели гасит Kotlin
+    MobileFullscreen.syncRotation()
+  }
+
+  // duopulse-217: window.DuopulseUi из UI-webview (виден и кросс-доменным
+  // фреймам страницы — поверхность намеренно минимальна и безвредна: панели
+  // и ориентация). videoFullscreen — CSS-fullscreen поворота, setLandscape —
+  // доворот по кнопке «на весь экран» плеера
+  private class UiBridge {
+    @JavascriptInterface
+    fun videoFullscreen(on: Boolean) {
+      val act = MainActivity.current ?: return
+      act.runOnUiThread { MobileFullscreen.systemBars(act, on) }
+    }
+
+    @JavascriptInterface
+    fun setLandscape(on: Boolean) {
+      val act = MainActivity.current ?: return
+      act.runOnUiThread { MobileFullscreen.landscapeLock(act, on) }
+    }
   }
 
   override fun onNewIntent(intent: Intent) {

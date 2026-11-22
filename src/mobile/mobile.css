@@ -207,6 +207,46 @@
   background: var(--bg-base);
 }
 
+/* ── Поворот телефона: видео на весь экран (duopulse-217) ─────────────
+   Ландшафт при открытом видео — шапка, строка статуса и баннер обновлений
+   прячутся, вкладка-плеер занимает весь экран; системные панели гасит
+   Kotlin (DuopulseUi.videoFullscreen), safe-area-паддинги не нужны.
+   Портрет снимает класс — прежний вид. */
+#mobile.m-rotate-full {
+  padding: 0;
+}
+#mobile.m-rotate-full .m-bar,
+#mobile.m-rotate-full .m-update,
+#mobile.m-rotate-full .m-status {
+  display: none;
+}
+
+/* duopulse-217: плавающая «⛶» поверх видео в полном экране — свернуть без
+   возврата телефона в портрет. Полупрозрачная, угол не мешает контенту
+   плеера; [hidden] прячет явно (display у кнопки — flex). */
+.m-fs-exit {
+  position: absolute;
+  top: max(env(safe-area-inset-top, 0px), 10px);
+  right: max(env(safe-area-inset-right, 0px), 10px);
+  z-index: 30;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(189, 254, 79, 0.35);
+  background: rgba(10, 14, 23, 0.55);
+  color: var(--text-primary);
+}
+.m-fs-exit:active {
+  border-color: var(--accent-neon);
+}
+.m-fs-exit[hidden] {
+  display: none;
+}
+
 /* ── Строка статуса ───────────────────────────────────────────────────── */
 .m-status {
   padding: 6px 12px;

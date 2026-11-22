@@ -626,9 +626,16 @@ object MobileWebHelper {
       loadWithUa(target)
       ov.visibility = View.VISIBLE
       backCallback.isEnabled = true
+      // duopulse-217: оверлей открыт поверх UI — полный экран поворота снять
+      MobileFullscreen.syncRotation()
     }
     return "opened"
   }
+
+  /** Виден ли web-оверлей пользователю (duopulse-217): спрятанный за
+   *  встроенным плеером (hidden) не считается — решает видимость UI-webview
+   *  для полного экрана поворота (MobileFullscreen.syncRotation). */
+  @JvmStatic fun isOverlayShown(): Boolean = overlay != null && !hidden
 
   /** Показать спрятанный оверлей (системный «назад» из встроенного плеера):
    *  активная вкладка-плеер под ним уходит на паузу (__duopulseOverlayShown). */
@@ -644,6 +651,8 @@ object MobileWebHelper {
     queryPrivateState()
     MainActivity.tauriWebView?.evaluateJavascript(
       "window.__duopulseOverlayShown && window.__duopulseOverlayShown()", null)
+    // duopulse-217: оверлей стал виден — полный экран поворота не нужен
+    MobileFullscreen.syncRotation()
   }
 
   /** Спрятать оверлей за встроенным плеером (duopulse-139): выдача живёт —
@@ -655,6 +664,8 @@ object MobileWebHelper {
     webView?.onPause()
     ov.visibility = View.INVISIBLE
     backCallback.isEnabled = true
+    // duopulse-217: плеер снова перед пользователем — ландшафт разворачивает
+    MobileFullscreen.syncRotation()
   }
 
   /** Открыть видео во встроенном плеере мобильной ветки (tabs.open в
@@ -995,6 +1006,9 @@ object MobileWebHelper {
       }
     }
     overlay = null
+    // duopulse-217: оверлея больше нет — если ландшафт, вернуть полный экран
+    // поворота видео (act null — активность умирает, синк не нужен)
+    if (act != null) MobileFullscreen.syncRotation()
   }
 
   @SuppressLint("SetJavaScriptEnabled")
