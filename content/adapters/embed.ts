@@ -74,7 +74,8 @@ function embedBaseLang(lang: string): string {
 /** Решение об автопереводе дорожки плеер-фрейма (duopulse-196: дуо на
  * «других видеохостингах» — кино-плееры отдают только оригинал без tlang,
  * вторую строку-перевод поднимает облако; цель — правило дуо
- * defaultTranslationTarget: русский → en, прочие → ru). Чистая функция —
+ * defaultTranslationTarget: русский/украинский → en, прочие → ru,
+ * duopulse-216). Чистая функция —
  * применение и телеметрия в duopulse-content; согласие и отказ — тот же
  * паттерн, что у файлового автоперевода (duopulse-177). */
 export interface AutoTranslateEmbedArgs {

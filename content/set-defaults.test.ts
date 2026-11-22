@@ -44,6 +44,9 @@ describe("defaultSetIds (Alt+D на пустом наборе)", () => {
     expect(defaultSetIds(list([{ lang: "fr", original: true }], ["de", "ru"]))[1]).toBe("ru");
     // подтег не мешает: «ru-RU» — тоже русский
     expect(defaultSetIds(list([{ lang: "ru-RU", original: true }], ["ro", "en"]))[1]).toBe("en");
+    // duopulse-216: украинский оригинал — как русский, перевод на en
+    expect(defaultSetIds(list([{ lang: "uk", original: true }], ["ro", "en"]))[1]).toBe("en");
+    expect(defaultSetIds(list([{ lang: "uk-UA", original: true }], ["ro", "en"]))[1]).toBe("en");
   });
 
   it("duopulse-196: цели правила нет в списке — прежний порядок preferred", () => {
@@ -106,6 +109,12 @@ describe("defaultTranslationTarget (правило дуо, duopulse-196)", () =>
     expect(defaultTranslationTarget("de")).toBe("ru");
     expect(defaultTranslationTarget("und")).toBe("ru");
     expect(defaultTranslationTarget("")).toBe("ru");
+  });
+
+  it("duopulse-216: украинский — как русский, всегда en", () => {
+    expect(defaultTranslationTarget("uk")).toBe("en");
+    expect(defaultTranslationTarget("UK")).toBe("en");
+    expect(defaultTranslationTarget("uk-UA")).toBe("en");
   });
 });
 

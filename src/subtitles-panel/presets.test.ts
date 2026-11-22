@@ -30,6 +30,14 @@ describe("presetSets", () => {
     expect(presetSets([base({ original: true })], []).map((s) => s.key)).toEqual(["solo"]);
   });
 
+  it("duopulse-216: украинский оригинал — «Дуо uk+en» (перевод на английский)", () => {
+    const sets = presetSets(
+      [base({ id: "yt:uk", lang: "uk", name: "українська", original: true })],
+      [tlang("ru"), tlang("en")],
+    );
+    expect(sets.find((s) => s.key === "duo")!.ids).toEqual(["yt:uk", "en"]);
+  });
+
   it("оригинал без флага original — первая дорожка списка", () => {
     const sets = presetSets([base({ lang: "fr", id: "yt:fr" }), base({ lang: "de" })], [tlang("ru")]);
     expect(sets[0].ids).toEqual(["yt:fr"]);

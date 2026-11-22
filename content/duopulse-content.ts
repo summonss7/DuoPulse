@@ -388,8 +388,9 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
    * autoTranslateFileDecision (согласие lastDuoEnabled — та же логика, что
    * на YouTube, автоперевод не молча: прогресс и строка набора видны в
    * панели; снял строку — за это видео больше не предлагаем). Цель —
-   * правило дуо duopulse-196 (defaultTranslationTarget: русский файл → en,
-   * прочие → ru), прежде — язык интерфейса из настроек. */
+   * правило дуо duopulse-196 (defaultTranslationTarget: русский/украинский
+   * файл → en, прочие → ru; duopulse-216), прежде — язык интерфейса из
+   * настроек. */
   const maybeAutoTranslateFileTrack = (): void => {
     const target = defaultTranslationTarget(fileTracks[0]?.lang ?? "und");
     const decision = autoTranslateFileDecision({

@@ -188,3 +188,57 @@ describe("MobileDuo: цель авто-перевода — правило ду�
     expect(gtxCalls.length).toBe(before); // правило не втянуло обратно в gtx
   });
 });
+
+describe("MobileDuo: субтитры всегда включены + правило ru/uk → en (duopulse-216)", () => {
+  it("open() нового видео поднимает выключенный показ и переводит украинский на en", async () => {
+    localStorage.clear();
+    // показ выключали на прошлом видео — персист «выкл» (перевод — авто)
+    localStorage.setItem("duopulse.duo.mobile.v1", JSON.stringify({ enabled: false, translation: "auto" }));
+    const gtxTo: string[] = [];
+    const invoke: DuoInvoke = (cmd, args) => {
+      if (cmd === "duo_yt_player")
+        return Promise.resolve({
+          videoDetails: { videoId: "abc12345678", title: "UA video" },
+          playabilityStatus: { status: "OK" },
+          captions: {
+            playerCaptionsTracklistRenderer: {
+              captionTracks: [
+                { languageCode: "uk", kind: "asr", baseUrl: "https://x/tt?lang=uk", name: { simpleText: "Ukrainian (auto)" }, isTranslatable: true },
+              ],
+              translationLanguages: [],
+              audioTracks: [],
+            },
+          },
+        });
+      if (cmd === "duo_fetch_cues")
+        return Promise.resolve({ status: 200, cues: [{ startMs: 0, endMs: 900, text: "привіт" }] });
+      if (cmd === "duo_translate_texts") {
+        gtxTo.push((args as { to: string }).to);
+        return Promise.resolve(["hello"]);
+      }
+      return Promise.resolve({});
+    };
+    const { duo, statuses } = makeDuo(invoke);
+    expect(duo.currentSettings.enabled).toBe(false); // до видео — как выключили
+    await duo.open("abc12345678");
+    // плеер-iframe в happy-dom недоступен — движок тикает от фейковых часов
+    (duo as unknown as { engine: { attach(v: unknown): void } }).engine.attach({
+      currentTime: 0,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+    // новое видео стартует с дуо (паритет десктопу duopulse-203) и персистит «вкл»
+    expect(duo.currentSettings.enabled).toBe(true);
+    expect(JSON.parse(localStorage.getItem("duopulse.duo.mobile.v1")!).enabled).toBe(true);
+    // украинский оригинал — авто-перевод на английский (duopulse-216)
+    await vi.waitFor(() =>
+      expect(statuses.some((s) => /перевожу|перевод \d/.test(s.text ?? ""))).toBe(true), 1500);
+    expect(gtxTo[0]).toBe("en");
+    // порядок строк плашки (паритет duopulse-206): ПЕРЕВОД — верхней строкой,
+    // оригинал — нижней (duopulse-216)
+    await vi.waitFor(() => {
+      const rowsEls = [...document.querySelectorAll(".m-duo-overlay .m-duo-row")];
+      expect(rowsEls.map((r) => r.textContent)).toEqual(["hello", "привіт"]);
+    }, 1500);
+  });
+});

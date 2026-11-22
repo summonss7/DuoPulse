@@ -272,6 +272,14 @@ export class MobileDuo {
     this.videoId = videoId;
     const seq = ++this.seq;
     this.applyRetried = false; // новая duo-сессия — автоповтор снова доступен
+    // duopulse-216 (правило хозяина, паритет десктопу duopulse-203):
+    // субтитры всегда включены — каждое новое видео стартует с дуо, даже
+    // если показ выключали на прошлом («выкл» панели действует на текущее
+    // видео, новая duo-сессия снова поднимает показ и персистит «вкл»).
+    if (!this.settings.enabled) {
+      this.settings.enabled = true;
+      saveDuoSettings(this.settings);
+    }
     this.emit({ text: t("duo: читаю дорожки…"), busy: true });
     try {
       // hl = язык UI приложения (duopulse-186): его же передаём как uiLang в

@@ -30,9 +30,9 @@ export type TranslationChoice = string | null;
 
 /** Перевод «Авто» — дефолт и значение по правилу дуо duopulse-196
  * (мобильный паритет — duopulse-201): цель выбирает
- * defaultTranslationTarget(content/set-defaults) — русский оригинал →
- * gtx:en, прочие → gtx:ru. Явный выбор языка/дорожки в панели главнее:
- * правило не перетирает. */
+ * defaultTranslationTarget(content/set-defaults) — русский/украинский
+ * оригинал → gtx:en, прочие → gtx:ru (duopulse-216). Явный выбор
+ * языка/дорожки в панели главнее: правило не перетирает. */
 export const AUTO_TRANSLATION = "auto";
 
 export interface DuoMobileSettings {
@@ -124,10 +124,10 @@ export function parseTranslationChoice(choice: TranslationChoice): { kind: "none
 }
 
 /** Разбор выбора перевода ДЛЯ ПОКАЗА (duopulse-201): «auto» резолвится
- * правилом дуо duopulse-196 — defaultTranslationTarget: русский оригинал →
- * gtx:en, прочие → gtx:ru (подтег не мешает: «ru-RU» — тоже русский);
- * явный gtx:<lang>/track:<id>/null — как выбрал пользователь, правило не
- * перетирает. */
+ * правилом дуо duopulse-196 — defaultTranslationTarget: русский/украинский
+ * оригинал → gtx:en, прочие → gtx:ru (подтег не мешает: «ru-RU»/«uk-UA» —
+ * те же языки; украинский — duopulse-216); явный gtx:<lang>/track:<id>/null
+ * — как выбрал пользователь, правило не перетирает. */
 export function resolveTranslationChoice(
   choice: TranslationChoice,
   originalLang: string,

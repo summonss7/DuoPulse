@@ -89,6 +89,11 @@ describe("resolveTranslationChoice — правило дуо duopulse-196 на �
     expect(resolveTranslationChoice(AUTO_TRANSLATION, "und")).toEqual({ kind: "gtx", lang: "ru" });
   });
 
+  it("duopulse-216: украинский оригинал — как русский, авто → gtx:en", () => {
+    expect(resolveTranslationChoice(AUTO_TRANSLATION, "uk")).toEqual({ kind: "gtx", lang: "en" });
+    expect(resolveTranslationChoice(AUTO_TRANSLATION, "uk-UA")).toEqual({ kind: "gtx", lang: "en" });
+  });
+
   it("явный выбор в панели главнее правила — не перетирается", () => {
     expect(resolveTranslationChoice("gtx:uk", "ru")).toEqual({ kind: "gtx", lang: "uk" });
     expect(resolveTranslationChoice("gtx:en", "ru")).toEqual({ kind: "gtx", lang: "en" });

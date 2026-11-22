@@ -12,13 +12,15 @@ import type { AdapterTrackList } from "./adapters/types";
  * второй строкой; язык из настроек (defaults.preferredLangs) — ещё раньше. */
 export const PREFERRED_TRANSLATION_LANGS: readonly string[] = ["en", "ro", "ru", "ar"];
 
-/** Целевой язык перевода дефолт-набора (duopulse-196, правило хозяина):
- * русский оригинал → всегда английский, прочие языки (en/ro/ar/fr/de/…)
- * → всегда русский; подтег не мешает («ru-RU» — тоже русский). Правило
+/** Целевой язык перевода дефолт-набора (duopulse-196, правило хозяина;
+ * duopulse-216: украинский — как русский): оригинал на русском ИЛИ
+ * украинском → всегда английский, прочие языки (en/ro/ar/fr/de/…)
+ * → всегда русский; подтег не мешает («ru-RU»/«uk-UA» — те же языки). Правило
  * первично, порядок preferred — фолбэк, когда цель правила в списке
  * переводов платформы нет. */
 export function defaultTranslationTarget(originalLang: string): string {
-  return originalLang.trim().toLowerCase().split("-")[0] === "ru" ? "en" : "ru";
+  const base = originalLang.trim().toLowerCase().split("-")[0];
+  return base === "ru" || base === "uk" ? "en" : "ru";
 }
 
 /** Дефолтный набор: [оригинал] или [оригинал, перевод]. Оригинал — дорожка

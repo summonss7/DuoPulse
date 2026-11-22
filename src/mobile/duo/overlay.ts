@@ -6,7 +6,14 @@
 
 import type { ActiveRow } from "../../../content/engine/subtitles-engine";
 import { defaultDuoSettings, mobilePlateStyle, type DuoMobileSettings } from "./state";
-import { cssFontFamily, plateBackground, plateFontSizeCss, rowStyleFor, type SubtitleStyle } from "../../../content/overlay/style";
+import {
+  cssFontFamily,
+  plateBackground,
+  plateFontSizeCss,
+  rowDisplayOrder,
+  rowStyleFor,
+  type SubtitleStyle,
+} from "../../../content/overlay/style";
 
 /** Оверлей над iframe: контейнер-плашка + строки набора. */
 export class DuoOverlay {
@@ -39,15 +46,22 @@ export class DuoOverlay {
   /** Строки активного набора ([] — скрыть). */
   setRows(rows: ActiveRow[]): void {
     this.root.hidden = rows.length === 0;
-    const texts = rows.map((r) => r.text);
+    // duopulse-216 (паритет десктопу duopulse-206): ПЕРЕВОД — верхняя
+    // строка при любом языке видео (русское/украинское видео — английская
+    // строка сверху, иностранное — русская), оригинал — нижней. Порядок —
+    // по РОЛИ дорожки (rowDisplayOrder), цвет/кегль строки — тоже по роли
+    // (перевод остаётся вторым стилем гайда), отступ-класс — по месту
+    // (нижняя строка); ручной swapRows на мобильной ветке нет.
+    const order = rowDisplayOrder(rows.map((r) => r.role), false);
+    const texts = order.map((i) => rows[i].text);
     if (texts.join("\u{1}") === this.lastTexts.join("\u{1}")) return;
     this.lastTexts = texts;
     this.plate.textContent = "";
-    texts.forEach((text, i) => {
+    order.forEach((roleIdx, i) => {
       const div = document.createElement("div");
-      const rowStyle = rowStyleFor(i, this.style);
+      const rowStyle = rowStyleFor(roleIdx, this.style);
       div.className = "m-duo-row" + (i > 0 ? " m-duo-row-trans" : "");
-      div.textContent = text;
+      div.textContent = rows[roleIdx].text;
       div.style.color = rowStyle.color;
       this.plate.appendChild(div);
     });
