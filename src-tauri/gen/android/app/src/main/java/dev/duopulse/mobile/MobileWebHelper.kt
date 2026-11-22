@@ -210,6 +210,13 @@ object MobileWebHelper {
   /** videoId ([\w-]{6,20}) — общий формат id YouTube. */
   private const val ID_RE = "[\\w-]{6,20}"
 
+  /** Зонд «играет ли медиа на странице» (duopulse-218): незапауженный и
+   *  незавершённый <video>/<audio> с начатым воспроизведением. */
+  private const val MEDIA_PROBE =
+    "(function(){var a=document.querySelectorAll('video,audio');" +
+      "for(var i=0;i<a.length;i++){var m=a[i];" +
+      "if(!m.paused&&!m.ended&&m.currentTime>0)return true}return false})()"
+
   /** Внешние схемы, которые отдаём системе (duopulse-191): карточка
    *  приложения в выдаче Google — market:// (Play Store), mailto:/tel: —
    *  почта/звонилка, мессенджеры. Остальные (javascript:, file:, blob:,
@@ -900,21 +907,72 @@ object MobileWebHelper {
   }
 
   /** Перезагрузить страницу оверлея после смены прокси WebView
-   *  (duopulse-170, MobileProxyHelper): прокси действует на новые запросы —
-   *  открытая страница перечитывается уже через выбранный маршрут. Вызовы
-   *  идут из колбэка ProxyController на UI-ните; скрытый оверлей тоже
-   *  перезагружаем — выдача обновится к возвращению. */
+   * (duopulse-170, MobileProxyHelper): прокси действует на новые запросы —
+   * открытая страница перечитывается уже через выбранный маршрут. Вызовы
+   * идут из колбэка ProxyController на UI-ните; скрытый оверлей тоже
+   * перезагружаем — выдача обновится к возвращению. */
   @JvmStatic fun reloadForProxy() {
     val act = MainActivity.current ?: return
     act.runOnUiThread { webView?.reload() }
   }
 
+  // ── duopulse-218: фоновой музыке нужен доступ к WebView оверлея ────────
+
+  /** Зонд «играет ли медиа на странице» (MobileMediaHelper): незапауженный
+   *  <video>/<audio> топ-документа. Спрятанный за плеером оверлей — на
+   *  намеренной паузе (hide), его не спрашиваем. Колбэк — на UI-нити. */
+  fun probeMedia(cb: (Boolean) -> Unit) {
+    val wv = webView
+    if (wv == null || hidden) {
+      cb(false)
+      return
+    }
+    val act = MainActivity.current
+    if (act == null) {
+      cb(false)
+      return
+    }
+    act.runOnUiThread {
+      if (webView == null || hidden) cb(false)
+      else webView?.evaluateJavascript(MEDIA_PROBE) { r -> cb(r == "true") }
+    }
+  }
+
+  /** Заголовок страницы оверлея (сессия/уведомление фоновой музыки):
+   *  геттер WebView — только UI-нить, вызовы MobileMediaHelper оттуда и идут. */
+  fun mediaTitle(): String? {
+    val wv = webView ?: return null
+    return if (wv.url?.startsWith("http") == true) wv.title else null
+  }
+
+  /** Вернуть WebView оверлея из onPause при уходе в фон с играющей музыкой
+   *  (duopulse-218): спрятанный за плеером остаётся на паузе (так задумано),
+   *  видимый — играет дальше. */
+  fun resumeForBackground() {
+    if (hidden) return
+    webView?.onResume()
+  }
+
+  /** Пауза всей медиа оверлея (кнопка «⏸» уведомления фоновой музыки). */
+  fun pauseMedia() {
+    val wv = webView ?: return
+    val act = MainActivity.current ?: return
+    act.runOnUiThread {
+      webView?.evaluateJavascript(
+        "(function(){document.querySelectorAll('video,audio')" +
+          ".forEach(function(m){try{m.pause()}catch(e){})})()", null)
+    }
+  }
+
   /** Закрытие из Rust (mobile_web_close). Поверхность JNI у open/close общая
-   *  — (Context, String) → String (jni_impl в mobile_web.rs): второй параметр
-   *  у close не используется, но обязателен дескриптору. До duopulse-145
-   *  метод звался с одним параметром — NoSuchMethodException, «⌂ домой» не
-   *  закрывал спрятанный оверлей (выдача «воскресала» системным «назад»). */
-  @JvmStatic fun close(context: Context, unused: String): String {
+   *  — (Context, String, String) → String (jni_impl в mobile_web.rs: дескриптор
+   *  один на оба метода): параметры у close не используются, но обязателены
+   *  дескриптору. РЕГРЕСС duopulse-211 пойман смоуком duopulse-218: дескриптор
+   *  стал трёхаргументным (режим инкогнито у open), а close остался
+   *  двухаргументным — NoSuchMethodException на КАЖДОМ mobile_web_close
+   *  («⌂ домой» и закрытие оверлея не работали с 0.1.93). До того — та же
+   *  история с одним параметром (duopulse-145: выдача «воскресала» «назад»). */
+  @JvmStatic fun close(context: Context, unused: String, unused2: String): String {
     val act = MainActivity.current ?: return "error: активность не готова"
     act.runOnUiThread { close() }
     return "closed"
@@ -966,6 +1024,7 @@ object MobileWebHelper {
     // снимаем оверлей с активити, потом гасим WebView
     (ov.parent as? FrameLayout)?.removeView(ov)
     ov.removeAllViews()
+    wv?.let { MobileMediaHelper.unshield(it) }
     wv?.apply {
       stopLoading()
       loadUrl("about:blank")
@@ -1405,6 +1464,9 @@ object MobileWebHelper {
     }
     wv.settings.javaScriptEnabled = true
     wv.settings.domStorageEnabled = true
+    // duopulse-218: приоритет рендерера — как у приложения, без сброса в фоне
+    // (фоновая музыка: FGS поднимает процесс, рендерер наследует)
+    MobileMediaHelper.bindRenderer(wv)
     // подложка страницы — тёмная (duopulse-202): без белой вспышки до
     // первой отрисовки сайта, как старт приложения
     wv.setBackgroundColor(Color.parseColor("#0a0e17"))
@@ -1621,6 +1683,8 @@ object MobileWebHelper {
     wv.layoutParams = LinearLayout.LayoutParams(
       LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
     col.addView(wv)
+    // duopulse-218: щит window-visibility — фоновая музыка оверлея
+    MobileMediaHelper.shield(wv)
     webView = wv
 
     ov.addView(col)

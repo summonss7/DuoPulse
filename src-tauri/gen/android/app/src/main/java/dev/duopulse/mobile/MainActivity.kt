@@ -21,6 +21,8 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     current = this
+    // duopulse-218: зонд фоновой музыки (веб-окна + MediaSession + сервис)
+    MobileMediaHelper.start()
     // duopulse-119: PDF из «Открыть с помощью» (ACTION_VIEW) — холодный старт
     MobilePdfHelper.handle(this, intent)
     // duopulse-179: видео из «Открыть с помощью» (ACTION_VIEW video/*)
@@ -31,6 +33,8 @@ class MainActivity : TauriActivity() {
     if (current === this) {
       MobileFullscreen.dismiss()
       MobileWebHelper.destroy()
+      // duopulse-218: веб-окна умирают вместе с активностью — музыку глушим
+      MobileMediaHelper.shutdown()
       // duopulse-135: wry не вызывает WebView.destroy() — при «назад»-выходе
       // WebView умирает вместе с activity, и натив Chromium при detach лочит
       // уже разрушенный мьютекс (FORTIFY abort). Гасим явно, до super/onDestroy:
@@ -49,6 +53,11 @@ class MainActivity : TauriActivity() {
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
     tauriWebView = webView
+    // duopulse-218: приоритет рендерера — как у приложения (фоновая музыка
+    // держит процесс FGS-сервисом, рендерер наследует и не замерзает); щит
+    // window-visibility — гасит GONE пока играет фоновая музыка
+    MobileMediaHelper.bindRenderer(webView)
+    MobileMediaHelper.shield(webView)
     // duopulse-134: HTML-fullscreen (кнопка «на весь экран»): сгенерированный
     // RustWebChromeClient гасит fullscreen-view; подменяем наследником с поддержкой
     webView.webChromeClient =
@@ -72,6 +81,23 @@ class MainActivity : TauriActivity() {
     // поворот в ландшафт при открытом видео — плеер на весь экран, обратно
     // в портрет — прежний вид; разворачивает фронтенд, панели гасит Kotlin
     MobileFullscreen.syncRotation()
+  }
+
+  // duopulse-218: уход в фон с играющей музыкой. Первая половина ДО super —
+  // щит window-visibility поднимается до того, как окно уйдёт в GONE (в
+  // super WryActivity гасит UI-webview, а за onPause окно скрывается и
+  // Вид-система разносит событие вниз по дереву — Chromium глушит медиа);
+  // вторая ПОСЛЕ — вернуть webview'ы из паузы и поднять foreground-сервис,
+  // пока старт ещё разрешён (между onPause и onStop)
+  override fun onPause() {
+    val keep = MobileMediaHelper.onActivityPauseBegin()
+    super.onPause()
+    if (keep) MobileMediaHelper.onActivityPauseEnd()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    MobileMediaHelper.onActivityResume()
   }
 
   // duopulse-217: window.DuopulseUi из UI-webview (виден и кросс-доменным

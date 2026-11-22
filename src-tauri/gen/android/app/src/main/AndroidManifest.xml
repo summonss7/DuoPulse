@@ -5,6 +5,12 @@
          (FileProvider + ACTION_VIEW из Kotlin-хелпера MobileUpdateHelper;
          без этого Android 8+ блокирует установку неизвестных источников) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- duopulse-218: фоновая музыка браузера — foreground-сервис mediaPlayback
+         держит процесс (Android 11+ замораживает cached) и рендерер WebView;
+         POST_NOTIFICATIONS — уведомление «музыка играет в фоне» (Android 13+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -74,8 +80,14 @@
           android:exported="false"
           android:grantUriPermissions="true">
           <meta-data
-            android:name="android.support.FILE_PROVIDER_PATHS"
-            android:resource="@xml/file_paths" />
+              android:name="android.support.FILE_PROVIDER_PATHS"
+              android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- duopulse-218: сервис фоновой музыки (MobileMediaHelper) -->
+        <service
+            android:name=".MediaPlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>
