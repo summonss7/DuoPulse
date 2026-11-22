@@ -8232,4 +8232,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   (геометрия iframe = вьюпорт, шапка display:none, панели по InsetsSource statusBars, pid жив после
   «назад»); vitest 753/753; typecheck чист; backup.bat до изменений; релиз 0.1.96 — оба канала
   (android-build.sh release в канал Aila, npm run release — Windows-канал + хаб + C:\DuoPulse).
-- Коммит: см. ниже (запись дополнена хешем после коммита).
+- Коммит: 21228bc feat(mobile): duopulse-217 — полный экран видео по повороту телефона и кнопке «⛶» (мост DuopulseUi, доворот SENSOR_LANDSCAPE, «назад» без смерти приложения); версия 0.1.96, релизы оба канала.
