@@ -8167,5 +8167,5 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
     incognito-overlay-smoke 14/14 (первый прогон 13/14 поймал «deleteProfile in-use» —
     исправлено, повторный 14/14); logcat: «private-profile: изолированный профиль назначен».
   - Каналы обновлений: Aila manifest 0.1.93 (exe+sig+latest.json+android-apk), GitHub Pages фид
-    (503 на момент проверки — CDN-деплой, файл запушен).
+    (первый запрос — 503 CDN-деплоя, через ~10 минут — 200).
 - Коммит: 0b11053 (fix(mobile): duopulse-211 — инкогнито открывает запросы в приложении, не в Chrome: web-оверлей на изолированном профиле WebView; incognito-overlay-smoke 14/14, vitest 749; версия 0.1.93, релизы оба канала).
