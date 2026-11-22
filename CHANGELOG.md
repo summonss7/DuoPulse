@@ -8351,4 +8351,5 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   491 passed / 0 failed (расширен тест group_sort_modes_and_manual_move:
   title_desc/added_asc). Мост gen:bridge перегенерирован, страж
   contract_file_is_up_to_date зелёный.
-- Коммит: <HASH>
+- Коммит: 89afcf5 feat(bookmarks): duopulse-219 — мобильная строка закладок
+  под адресом + сортировка закладок в обеих версиях
