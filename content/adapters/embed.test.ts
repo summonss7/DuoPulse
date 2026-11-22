@@ -10,6 +10,8 @@ import {
   FrameVideoProxy,
   autoTranslateEmbedDecision,
   langOfTrackName,
+  observePlayerApiXhr,
+  parseCinemarSubtitles,
   parseMakePlayerCc,
 } from "./embed";
 import type { Cue, Track } from "../types";
@@ -238,10 +240,12 @@ describe("autoTranslateEmbedDecision (duopulse-196)", () => {
     expect(autoTranslateEmbedDecision(args({ translateTracks: [cloud] })).run).toBe(false);
   });
 
-  it("не оригинал/без cue/неизвестный язык — не переводить", () => {
+  it("без cue/неизвестный язык — не переводить; без сигнала оригинала — переводить (duopulse-225)", () => {
+    // cinemar языка аудио не даёт: solo-дорожка дефолт-набора с ролью
+    // translation — всё равно строка-оригинал, вторую строку поднимает облако
     expect(
       autoTranslateEmbedDecision(args({ platformTracks: [embedTrack({ role: "translation" })] })).run,
-    ).toBe(false);
+    ).toBe(true);
     expect(autoTranslateEmbedDecision(args({ platformTracks: [embedTrack({ cues: [] })] })).run).toBe(false);
     expect(
       autoTranslateEmbedDecision(args({ platformTracks: [embedTrack({ lang: "und" })], targetLang: "ru" })).run,
@@ -277,5 +281,93 @@ describe("FrameVideoProxy + движок (сквозные часы)", () => {
     proxy.update(3.5, false, 1);
     expect(engine.state().activeRows.map((r) => r.text)).toEqual(["There"]);
     proxy.dispose();
+  });
+});
+
+describe("parseCinemarSubtitles (duopulse-225)", () => {
+  const resolve = (u: string): string => new URL(u, "https://cinemar.cc").href;
+  /** Живой ответ POST /api/playlist/load (Дьявол носит Прада 2, дубляж
+   * TVShows): Русский + English, URL относительны origin плеера. */
+  const PAYLOAD = JSON.stringify({
+    file: "https://cfnd.cinemap.cc/…/hls.m3u8",
+    duration: 7216,
+    subtitle:
+      "[Русский]/static/subtitle/543/114543/bf4950/rus.vtt,[English]/static/subtitle/543/114543/bf4950/eng.vtt",
+  });
+
+  it("вынимает дорожки из поля subtitle, URL — абсолютные, язык по имени", () => {
+    const tracks = parseCinemarSubtitles(PAYLOAD, resolve);
+    expect(tracks.map((t) => `${t.lang}:${t.name}`)).toEqual(["ru:Русский", "en:English"]);
+    expect(tracks[0].url).toBe("https://cinemar.cc/static/subtitle/543/114543/bf4950/rus.vtt");
+    expect(tracks[1].url).toBe("https://cinemar.cc/static/subtitle/543/114543/bf4950/eng.vtt");
+    // языка аудио плеер не сообщает — сигнала оригинала нет
+    expect(tracks.every((t) => !t.original)).toBe(true);
+    // id — стабильный префикс, не пересекающийся с нумерацией makePlayer
+    expect(tracks.map((t) => t.id)).toEqual(["embed:cinemar:0", "embed:cinemar:1"]);
+  });
+
+  it("не-JSON / без subtitle / абсолютные URL — устойчиво", () => {
+    expect(parseCinemarSubtitles("не json", resolve)).toEqual([]);
+    expect(parseCinemarSubtitles(JSON.stringify({ file: "https://x/hls.m3u8" }), resolve)).toEqual([]);
+    const abs = parseCinemarSubtitles(
+      JSON.stringify({ subtitle: "[English]https://cdn.example/e.vtt" }),
+      resolve,
+    );
+    expect(abs).toHaveLength(1);
+    expect(abs[0].url).toBe("https://cdn.example/e.vtt");
+  });
+});
+
+describe("observePlayerApiXhr (duopulse-225)", () => {
+  /** Минимальный XHR-двойник: обёртка должна работать поверх любого базового
+   * класса (реальный — happy-dom XHR без сети в тесте не нужен). */
+  class FakeXHR {
+    responseText = "";
+    private listener: (() => void) | null = null;
+    openedUrl = "";
+    sentBody: unknown = null;
+    addEventListener(_type: string, l: () => void): void {
+      this.listener = l;
+    }
+    open(_method: string, url: string | URL): void {
+      this.openedUrl = String(url);
+    }
+    send(body?: unknown): void {
+      this.sentBody = body ?? null;
+    }
+    fireLoad(): void {
+      this.listener?.();
+    }
+  }
+
+  it("ответ playlist/load уходит в apply; чужие URL и повторная обёртка — нет", () => {
+    const saved = window.XMLHttpRequest;
+    const payloads: string[] = [];
+    try {
+      window.XMLHttpRequest = FakeXHR as unknown as typeof XMLHttpRequest;
+      observePlayerApiXhr((p) => payloads.push(p));
+      const first = window.XMLHttpRequest;
+      // повторный вызов не оборачивает второй раз
+      observePlayerApiXhr((p) => payloads.push(p));
+      expect(window.XMLHttpRequest).toBe(first);
+
+      const xhr = new (window.XMLHttpRequest as unknown as new () => FakeXHR & { dpUrl?: string })();
+      xhr.responseText = '{"subtitle":"[English]/e.vtt"}';
+      xhr.open("POST", "/api/playlist/load");
+      xhr.send(null);
+      expect(xhr.sentBody).toBeNull(); // send проброшен базовому классу
+      xhr.fireLoad();
+      expect(payloads).toEqual(['{"subtitle":"[English]/e.vtt"}']);
+
+      // чужой URL — слушатель не вешается
+      const other = new (window.XMLHttpRequest as unknown as new () => FakeXHR & { dpUrl?: string })();
+      other.responseText = '{"subtitle":"[English]/e.vtt"}';
+      other.open("POST", "/api/other");
+      other.send(null);
+      other.fireLoad();
+      expect(payloads).toHaveLength(1);
+    } finally {
+      window.XMLHttpRequest = saved;
+    }
   });
 });

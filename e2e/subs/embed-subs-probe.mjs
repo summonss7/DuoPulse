@@ -21,6 +21,10 @@
 //  6. [soft] облачный перевод дорожки (gtx с хоста; 429 — мягкий фейл).
 //
 // Запуск:  node e2e/subs/embed-subs-probe.mjs [url]
+//   DUOPULSE_E2E_PROVIDER — номер таба плеера (data-provider; «1» = embf по
+//   умолчанию, «0» = дефолтный таб uakinogo — cinemar.cc, duopulse-225:
+//   дорожки приходят ответом POST /api/playlist/load, перехват — агент фрейма);
+//   DUOPULSE_E2E_LANG — ожидаемый язык дорожки (по умолчанию en).
 // Результат — e2e/subs/embed-subs-last-run.json (gitignore, рантайм);
 // скриншоты — %TEMP%/duopulse-199-*.png.
 import { execFile, spawn } from "node:child_process";
@@ -32,6 +36,9 @@ const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const EXE = path.join(ROOT, "src-tauri", "target", "debug", "duopulse.exe");
 const CDP_PORT = 9233;
 const URL_ = process.argv[2] || "https://uakinogo.io/novinki/116356-chelovek-pauk-novyy-den.html";
+const PROVIDER = process.env.DUOPULSE_E2E_PROVIDER || "1";
+const FRAME_HOST = (process.env.DUOPULSE_E2E_FRAME_HOST || (PROVIDER === "0" ? "cinemar.cc" : "embf.net")).replace(/\./g, "\\.");
+const WANT_LANG = process.env.DUOPULSE_E2E_LANG || "en";
 const SECS = Number(process.env.DUOPULSE_E2E_SECS) || 150;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -199,19 +206,20 @@ async function probeRun() {
     } catch (e) { console.log(`  (браузерный CDP недоступен: ${e.message})`); }
 
     // Плеер-контейнер в вьюпорт (lazy-iframe грузится при скролле) → таб
-    // «Плеер 1» (data-provider=1, embf) кликом — сайт сам меняет src iframe.
+    // «Плеер 1» (data-provider=1, embf) кликом — сайт сам меняет src iframe;
+    // PROVIDER=0 — дефолтный таб (cinemar.cc, duopulse-225), клик идемпотентен.
     await sleep(9000); // страница + rocket-loader
     await evalIn(page, `document.querySelector('.player-container')?.scrollIntoView({ block: 'center' })`);
     await sleep(2500);
     const switched = await evalIn(page, `(() => {
-      const li = document.querySelector('.js-player-tabs li[data-provider="1"]');
+      const li = document.querySelector('.js-player-tabs li[data-provider="${PROVIDER}"]');
       if (!li) return "нет таба";
       li.click();
       return "клик";
     })()`);
-    console.log(`  таб плеера №2: ${switched}`);
+    console.log(`  таб плеера data-provider=${PROVIDER}: ${switched}`);
 
-    // OOPIF-таргет embf: появляется после клика (до 30 с).
+    // OOPIF-таргет плеера: появляется после клика (до 30 с).
     const browserTargets = [];
     let playerSid = null;
     const syncTargets = async () => {
@@ -227,7 +235,7 @@ async function probeRun() {
     };
     for (let i = 0; i < 30 && !playerSid; i++) {
       await syncTargets();
-      const tid = browserTargets.find((x) => x.type === "iframe" && /embf\.net/.test(x.url))?.targetId;
+      const tid = browserTargets.find((x) => x.type === "iframe" && new RegExp(FRAME_HOST).test(x.url))?.targetId;
       if (tid) {
         try {
           const r = await browser.send("Target.attachToTarget", { targetId: tid, flatten: true });
@@ -245,15 +253,41 @@ async function probeRun() {
         return r?.result?.value ?? null;
       } catch { playerSid = null; return null; }
     };
-    check("плеер №2: OOPIF-таргет api.embf.net поднялся", !!playerSid,
-      playerSid ? browserTargets.find((x) => /embf\.net/.test(x.url))?.url?.slice(0, 60) : "не найден за 30 с");
+    check(`плеер data-provider=${PROVIDER}: OOPIF-таргет ${FRAME_HOST.replace(/\\/g, "")} поднялся`, !!playerSid,
+      playerSid ? browserTargets.find((x) => new RegExp(FRAME_HOST).test(x.url))?.url?.slice(0, 60) : "не найден за 30 с");
 
     // (2) агент во фрейме: init-скрипт бандла исполняется во всех фреймах.
     await sleep(3000); // видео создаётся плеером не сразу
     const agent = await playerEval(`typeof window.__duopulseFrameAgent`);
     check("агент DuoPulse во фрейме плеера (__duopulseFrameAgent)", agent === "object", String(agent));
 
-    // (3) топ-бандл: дорожки эмбеда пришли relay'ем (до 30 с — плеер строится).
+    // duopulse-225 (cinemar): субтитры принадлежат ДУБЛЯЖУ — дефолтный
+    // может идти без них; открываем список дубляжей плеера и выбираем
+    // требуемый (ответ playlist/load с новым data несёт дорожки).
+    if (PROVIDER === "0") {
+      const DUB = process.env.DUOPULSE_E2E_DUB || "Дубляж (TVShows)";
+      await sleep(4000); // playlist UI плеера построен
+      const opened = await playerEval(`(() => {
+        const t = document.querySelector('.playlist-title');
+        if (!t) return "нет кнопки списка";
+        t.click();
+        return "открыт";
+      })()`);
+      console.log(`  список дубляжей: ${opened}`);
+      await sleep(1200);
+      const picked = await playerEval(`(() => {
+        const btn = [...document.querySelectorAll('.playlist button')].find(
+          (b) => (b.textContent || '').trim() === ${JSON.stringify(DUB)});
+        if (!btn) return "нет дубляжа";
+        btn.click();
+        return "клик";
+      })()`);
+      console.log(`  дубляж «${DUB}»: ${picked}`);
+      await sleep(4000); // playlist/load → перехват агента → пере-анонс
+    }
+
+    // (3) топ-бандл: дорожки эмбеда пришли relay'ем (до 30 с — плеер строится;
+    // cinemar — после ответа playlist/load, перехваченного агентом).
     let embed = null;
     for (let i = 0; i < 30 && !embed; i++) {
       const st = JSON.parse((await evalIn(page, SUBS_STATE)) || "null");
@@ -261,15 +295,15 @@ async function probeRun() {
       else await sleep(1000);
     }
     const embedTracks = embed?.tracks ?? [];
-    const enTrack = embedTracks.find((t) => t.lang === "en");
+    const enTrack = embedTracks.find((t) => t.lang === WANT_LANG);
     check(
-      "топ-бандл видит дорожки плеера (>=3, есть en)",
-      embedTracks.length >= 3 && !!enTrack,
+      `топ-бандл видит дорожки плеера (>=1, есть ${WANT_LANG})`,
+      embedTracks.length >= 1 && !!enTrack,
       embedTracks.map((t) => `${t.id}(${t.name})`).join(", ") || "пусто",
     );
 
-    // (4) выбор англ. дорожки: загрузка агентом фрейма + разбор Core-парсером.
-    const enId = enTrack?.id ?? "embed:en:0";
+    // (4) выбор дорожки: загрузка агентом фрейма + разбор Core-парсером.
+    const enId = enTrack?.id ?? `embed:${WANT_LANG}:0`;
     await evalIn(page, `window.__duopulseContent.selectTracks([${JSON.stringify(enId)}])`);
     let applied = null;
     for (let i = 0; i < 30 && !applied; i++) {
@@ -279,7 +313,7 @@ async function probeRun() {
       else await sleep(1000);
     }
     check(
-      "англ. дорожка загружена через фрейм и применена (cues>100, enabled)",
+      "дорожка загружена через фрейм и применена (cues>100, enabled)",
       !!applied && applied.engine.tracks.find((x) => x.id === enId).cues > 100,
       applied ? `cues=${applied.engine.tracks.find((x) => x.id === enId).cues}, videoKey=${String(applied.videoKey).slice(0, 40)}` : "не дождались",
     );

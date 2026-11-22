@@ -823,6 +823,20 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
         embedAnnounced = sig;
         reportDetected(video, (trackList?.base.length ?? 0) > 0);
         if (trackList) postTracksToCore(video.videoKey, trackList);
+        // Дорожки пришли ПОЗЖЕ детекта видео (duopulse-225: cinemar отдаёт
+        // список только у части дубляжей — смена дубляжа приносит ответ
+        // playlist/load): у видео без пользовательского набора показ
+        // поднимается сам, как у нового видео (duopulse-203). Пользователь
+        // уже выключал/собирал набор — setMemory не пуст, не навязываемся.
+        if (
+          trackList !== null &&
+          !enabled &&
+          !hasSetTracks() &&
+          pendingEnable === null &&
+          setMemory.get(video.videoKey) === undefined
+        ) {
+          enableSubs("video-auto");
+        }
       }
       // Ждущее включение (video-auto/Alt+D до списка — паттерн duopulse-079).
       if (pendingEnable !== null && !hasSetTracks()) {

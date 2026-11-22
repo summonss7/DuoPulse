@@ -8233,3 +8233,39 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   «назад»); vitest 753/753; typecheck чист; backup.bat до изменений; релиз 0.1.96 — оба канала
   (android-build.sh release в канал Aila, npm run release — Windows-канал + хаб + C:\DuoPulse).
 - Коммит: 21228bc feat(mobile): duopulse-217 — полный экран видео по повороту телефона и кнопке «⛶» (мост DuopulseUi, доворот SENSOR_LANDSCAPE, «назад» без смерти приложения); версия 0.1.96, релизы оба канала.
+
+## 22.11.2026 19:30 — duopulse-225: двойные субтитры на дефолтном плеере uakinogo (cinemar.cc)
+- Начало работы: 22.11.2026 17:59
+- Окончание работы: 22.11.2026 19:30
+- Что сделано:
+  - Разбор жалобы: на фильмах uakinogo.io дефолтный таб «Смотреть онлайн» крутит плеер
+    cinemar.cc, который интеграция duopulse-199 не покрывала (парсер знала только инлайн-конфиг
+    makePlayer у api.embf.net — таб «Плеер 1»). Оттого плашки duo не было видно вовсе; «свои»
+    субтитры плеера — баг сайта: слой рендерится в контейнере контролов и гаснет через ~5 с
+    покоя мыши (в Chrome то же самое).
+  - Реверс cinemar: субтитров в разметке нет — список («[Русский]/static/…rus.vtt,[English]/
+    …eng.vtt», URL относительны origin плеера) приходит ответом POST /api/playlist/load, причём
+    ПРИНАДЛЕЖИТ ДУБЛЯЖУ: у дефолтного дубляжа (Dragon Money Studio) поле пустое, у «Дубляж
+    (TVShows)» из пожелания — Русский + English (проверено curl-репликацией запроса).
+  - content/adapters/embed.ts: parseCinemarSubtitles (чистый парсер поля subtitle, id
+    «embed:cinemar:N») + observePlayerApiXhr — обёртка XMLHttpRequest в агенте фрейма ДО скриптов
+    плеера (init-скрипт), ответы /api/playlist/load приплюсовываются к анонсу дорожек; валидный
+    ответ с пустым subtitle сносит дорожки прежнего дубляжа.
+  - duopulse-content.ts: поздний приход дорожек (смена дубляжа после детекта видео) сам поднимает
+    показ у видео без пользовательского набора (паритет duopulse-203); autoTranslateEmbedDecision
+    (duopulse-196) — автоперевод solo-дорожки облаком разрешён и без роли original: cinemar язык
+    аудио не сообщает, solo дефолт-набора (en-предпочтение duopulse-184) = строка-оригинал.
+  - e2e/subs/embed-subs-probe.mjs: DUOPULSE_E2E_PROVIDER=0 — дефолтный таб cinemar, стенд сам
+    открывает список дубляжей плеера и выбирает DUOPULSE_E2E_DUB («Дубляж (TVShows)»), ожидание
+    дорожки/языка параметризованы (DUOPULSE_E2E_LANG).
+  - Документация: README (строка «Дорожки плееров кино-сайтов»), ROADMAP (пункт 2026-11-22 в
+    разделе duopulse-199), AGENTS.md (описание стенда).
+- Как проверено: vitest 756/756 (66 файлов; +3 теста cinemar: парсер, XHR-обёртка, автоперевод
+  без сигнала оригинала); typecheck чист; cargo build debug; живой прогон
+  `DUOPULSE_E2E_PROVIDER=0 node e2e/subs/embed-subs-probe.mjs …/114288-dyavol-nosit-prada-2.html`
+  — 5/5 (OOPIF cinemar, агент, дорожки «Русский»+«English», cues=2561, реплики меняются на
+  плашке поверх фрейма; первая «[♪ Dua Lipa "End Of An Era" playing]»); одноразовый CDP-пробник
+  подтвердил /api/playlist/load и обёртку ObservedXHR во фрейме; backup.bat до изменений
+  (backups/backup_2026-11-22_18-13-03); релиз 0.1.97 — npm run release, оба канала GitHub +
+  хаб Aila + C:\DuoPulse, без android-ассета (мобильный код не менялся).
+- Коммит: (хеш подшит следующим коммитом changelog)

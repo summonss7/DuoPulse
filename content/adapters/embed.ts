@@ -99,11 +99,18 @@ export interface AutoTranslateEmbedDecision {
 export function autoTranslateEmbedDecision(args: AutoTranslateEmbedArgs): AutoTranslateEmbedDecision {
   // Сценарий «дефолт-набор»: ровно одна платформенная дорожка — оригинал
   // плеер-фрейма (пользователь ещё не собирал свой состав), файлов нет.
+  // Роль original уверена только при сигнале плеера (embf помечает
+  // «Eng.Original» в audio.names); cinemar (duopulse-225) языка аудио не
+  // даёт — solo-дорожка дефолт-набора (en-предпочтение duopulse-184) и есть
+  // строка-оригинал, перевод поднимаем и без роли.
   const solo =
     args.platformTracks.length === 1
       ? args.platformTracks[0]
       : null;
-  const source = solo && solo.source === "embed" && solo.role === "original" ? solo : null;
+  const source =
+    solo && solo.source === "embed" && (solo.role === "original" || solo.role === "translation")
+      ? solo
+      : null;
   const target = embedBaseLang(args.targetLang);
   const run =
     args.consent &&
@@ -292,6 +299,81 @@ function findObjectEnd(src: string, pos: number): number | null {
   return null;
 }
 
+/** Дорожки из ответа POST /api/playlist/load плеера cinemar (duopulse-225):
+ * поле subtitle — список «[Название]url» через запятую, URL относительны
+ * origin плеера (https://cinemar.cc/static/subtitle/…/eng.vtt); конфиг в
+ * разметке субтитров не несёт — список приходит только этим API-ответом.
+ * resolve — абсолютный URL (в агенте new URL(url, location.origin));
+ * чистая функция — тесты без DOM. id — префикс «cinemar»: не пересекается
+ * с нумерацией parseMakePlayerCc и стабилен при позднем приходе. */
+export function parseCinemarSubtitles(
+  payload: string,
+  resolve: (url: string) => string,
+): EmbedTrackInfo[] {
+  let data: { subtitle?: unknown };
+  try {
+    data = JSON.parse(payload) as { subtitle?: unknown };
+  } catch {
+    return [];
+  }
+  const sub = typeof data.subtitle === "string" ? data.subtitle : "";
+  const out: EmbedTrackInfo[] = [];
+  const seen = new Set<string>();
+  for (const m of sub.matchAll(/\[([^\]]*)\]\s*(https?:\/\/[^,\s]+|[^,\s]+)/g)) {
+    const name = m[1].trim();
+    if (!name || !m[2]) continue;
+    let url: string;
+    try {
+      url = resolve(m[2]);
+    } catch {
+      continue;
+    }
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    seen.add(url);
+    out.push({
+      id: `embed:cinemar:${out.length}`,
+      lang: langOfTrackName(name),
+      name,
+      url,
+      original: false, // язык аудио плеер не сообщает — en-предпочтение duopulse-184
+    });
+  }
+  return out;
+}
+
+/** Наблюдение XHR плеер-фрейма: ответы POST /api/playlist/load (cinemar)
+ * выносят дорожки субтитров. Init-скрипт бандла исполняется ДО скриптов
+ * страницы — обёртка успевает до первого запроса плеера. Поле-маркер
+ * __duopulse страхует от двойной обёртки (агент + чужой патч). */
+export function observePlayerApiXhr(apply: (payload: string) => void): void {
+  const orig = window.XMLHttpRequest;
+  if ((orig as unknown as { __duopulse?: boolean }).__duopulse) return;
+  class ObservedXHR extends orig {
+    private dpUrl = "";
+    open(method: string, url: string | URL, async?: boolean, username?: string | null, password?: string | null): void {
+      this.dpUrl = String(url);
+      // lib.dom: async обязательный только во второй перегрузке — пробрасываем
+      // как пришло (плееры зовут оба варианта).
+      if (async === undefined) super.open(method, url);
+      else super.open(method, url, async, username, password);
+    }
+    send(body?: Document | XMLHttpRequestBodyInit | null): void {
+      if (this.dpUrl.includes("/api/playlist/load")) {
+        this.addEventListener("load", () => {
+          try {
+            apply(String(this.responseText));
+          } catch {
+            /* чужой ответ — мимо */
+          }
+        });
+      }
+      super.send(body);
+    }
+  }
+  (ObservedXHR as unknown as { __duopulse?: boolean }).__duopulse = true;
+  window.XMLHttpRequest = ObservedXHR;
+}
+
 // --- агент во фрейме ----------------------------------------------------------
 
 /** Документ — фрейм (не top-level): сюда контент-канал Core не достаёт,
@@ -332,6 +414,38 @@ export function startFrameAgent(): void {
   let videoEl: HTMLVideoElement | null = null;
   let lastClockSent = 0;
 
+  // Дорожки из API плеера (cinemar, duopulse-225): приходят ответом
+  // playlist/load независимо от инлайн-конфига; анонс объединяет списки.
+  let cinemarTracks: EmbedTrackInfo[] = [];
+  let cinemarSig = "";
+  const applyCinemarPayload = (payload: string): void => {
+    // Ответ playlist/load узнаём по полю subtitle (у части дубляжей он пуст —
+    // это тоже валидный ответ и он сносит дорожки прежнего дубляжа); мусор
+    // (не-JSON, чужие ответы) — мимо.
+    let data: { subtitle?: unknown };
+    try {
+      data = JSON.parse(payload) as { subtitle?: unknown };
+    } catch {
+      return;
+    }
+    if (typeof data.subtitle !== "string") return;
+    const tracks = parseCinemarSubtitles(payload, (u) => new URL(u, location.origin).href);
+    const sig = tracks.map((t) => t.url).join("|");
+    if (sig === cinemarSig) return; // тот же состав (ретрай/смена качества)
+    cinemarSig = sig;
+    cinemarTracks = tracks;
+    if (currentKey) announce(); // видео уже анонсировано — пере-анонс с дорожками
+  };
+
+  /** Полный список дорожек фрейма: инлайн-конфиг + API-ответ (дедуп по URL). */
+  const collectTracks = (): EmbedTrackInfo[] => {
+    const tracks = parseMakePlayerCc(document);
+    if (cinemarTracks.length === 0) return tracks;
+    const seen = new Set(tracks.map((t) => t.url));
+    for (const t of cinemarTracks) if (!seen.has(t.url)) tracks.push(t);
+    return tracks;
+  };
+
   const sendClock = (force = false): void => {
     if (!videoEl || !currentKey) return;
     const now = Date.now();
@@ -349,8 +463,9 @@ export function startFrameAgent(): void {
     if (!currentKey) return;
     // Треки перечитываем на каждый анонс: конфиг статичен, но детект видео
     // приходит и позже DCL (плеер строит DOM скриптом), а <track> плеер может
-    // добавить со задержкой.
-    const tracks = parseMakePlayerCc(document);
+    // добавить со задержкой; дорожки API (cinemar) приплюсовываются приходом
+    // ответа playlist/load.
+    const tracks = collectTracks();
     reportedTracks = tracks.length;
     post({
       type: "video",
@@ -383,10 +498,9 @@ export function startFrameAgent(): void {
       currentKey = video.videoKey;
       currentUrl = video.url;
       attachClock(video.el);
-      announce();
-      // Поздние <track>/конфиг (плеер достраивает DOM): один пере-анонс.
+      announce();      // Поздние <track>/конфиг (плеер достраивает DOM): один пере-анонс.
       window.setTimeout(() => {
-        if (currentKey === video.videoKey && parseMakePlayerCc(document).length !== reportedTracks) {
+        if (currentKey === video.videoKey && collectTracks().length !== reportedTracks) {
           announce();
         }
       }, 2000);
@@ -398,6 +512,10 @@ export function startFrameAgent(): void {
     },
   });
   detector.start();
+
+  // Дорожки из API плеера (cinemar, duopulse-225): обёртка XHR ставится до
+  // скриптов страницы (init-скрипт), ответ playlist/load несёт список .vtt.
+  observePlayerApiXhr(applyCinemarPayload);
 
   // Сердцебиение: events зависли (плеер глушит timeupdate в фоне) —
   // top-прокси держит свежие часы раз в секунду.
