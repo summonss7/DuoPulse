@@ -29,6 +29,9 @@
 // подгруппами, закладки остаются, как на странице управления); позиция
 // нативного меню — клиентская точка окна (фикс «на три сантиметра ниже
 // клика» — chrome_menu.rs раньше передавал экранные координаты).
+// duopulse-219: правый клик по пустому месту — ещё и «Сортировать…»
+// (алфавит/обратный/по дате добавления; порядок пишет bmbar_reorder),
+// меню папки — режим живой сортировки группы (group_set_sort).
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
@@ -106,6 +109,32 @@ export function chipReorder(
  * (строка ↔ панель папки) идёт через системный OLE-drag — text/plain
  * доезжает, но группу-источник знает только этот payload. */
 export const BM_DRAG_MIME = "application/x-duopulse-bm";
+
+/** Режим сортировки чипов строки (duopulse-219, «Сортировать…» в контекстном
+ * меню строки): алфавит / обратный алфавит / дата добавления новые-старые
+ * первыми. Порядок пишет bmbar_reorder (безгрупповые чипы усыновляются
+ * группой по умолчанию — та же семантика, что у drag&drop duopulse-147). */
+export type BarSortMode = "title" | "title_desc" | "added" | "added_asc";
+
+/** Urls чипов строки в порядке режима (чистая, тестится): состав — как у
+ * bmBarModel (группа по умолчанию + безгрупповые), тайбрейк — url, порядок
+ * устойчив. localeCompare с base — «без учёта регистра», как COLLATE NOCASE. */
+export function barSortUrls(
+  defaultMembers: HistoryBookmark[],
+  ungrouped: HistoryBookmark[],
+  mode: BarSortMode,
+): string[] {
+  const all = [...defaultMembers, ...ungrouped];
+  const byUrl = (a: HistoryBookmark, b: HistoryBookmark): number =>
+    a.url < b.url ? -1 : a.url > b.url ? 1 : 0;
+  const byTitle = (a: HistoryBookmark, b: HistoryBookmark): number =>
+    a.title.trim().localeCompare(b.title.trim(), undefined, { sensitivity: "base" }) || byUrl(a, b);
+  if (mode === "title") all.sort(byTitle);
+  else if (mode === "title_desc") all.sort((a, b) => byTitle(b, a));
+  else if (mode === "added") all.sort((a, b) => b.addedAt - a.addedAt || byUrl(a, b));
+  else all.sort((a, b) => a.addedAt - b.addedAt || byUrl(a, b));
+  return all.map((b) => b.url);
+}
 
 /** Похоже ли на drag закладки (чистая, тестится): свой тип или просто
  * текст — External-ветка dragover/drop строки и панели папки. */
@@ -302,6 +331,11 @@ export async function refreshBmBar(): Promise<void> {
     defGroupId = defId;
     defMemberUrls = new Set(defMembers.map((b) => b.url));
     groupsById = new Map(groups.map((g) => [g.id, g]));
+    // для сортировки строки (duopulse-219): сырые списки с added_at и текущий
+    // порядок чипов (пропуск no-op записи, когда порядок уже целевой)
+    sortDefMembers = defMembers;
+    sortUngrouped = ungRes.bookmarks;
+    chipUrlsOrder = model.chips.map((c) => c.url);
     render(model);
     const el = bar();
     el.hidden = !model.visible;
@@ -317,6 +351,10 @@ let defGroupId: number | null = null;
 let defMemberUrls = new Set<string>();
 /** Все группы (проверки переноса папок, canGroupMoveTo). */
 let groupsById = new Map<number, BookmarkGroupInfo>();
+/** Сырые списки строки и текущий порядок чипов (сортировка duopulse-219). */
+let sortDefMembers: HistoryBookmark[] = [];
+let sortUngrouped: HistoryBookmark[] = [];
+let chipUrlsOrder: string[] = [];
 /** Имена чипов последнего рендера (стартовое значение input правки). */
 let chipTitleByUrl = new Map<string, string>();
 
@@ -496,6 +534,18 @@ export function initBmBar(): void {
     else if (a.menu === "bmgroup" && a.act === "delete" && typeof a.groupId === "number")
       deleteFolder(a.groupId);
     else if (a.menu === "bmbar" && a.act === "newgroup") createGroupFromBar();
+    // duopulse-219: сортировка чипов строки (bmbar:sort) и живая сортировка
+    // папки (bmgroup:sort — режим группы, панель папки следует сама)
+    else if (a.menu === "bmbar" && a.act === "sort" && typeof a.sortBy === "string")
+      sortBarChips(a.sortBy as BarSortMode);
+    else if (a.menu === "bmgroup" && a.act === "sort" && typeof a.groupId === "number" && typeof a.sortBy === "string")
+      void bridge.history
+        .groupSetSort({ id: a.groupId, sortBy: a.sortBy })
+        .then(refreshBmBar)
+        .catch((e) => {
+          err(e);
+          void refreshBmBar();
+        });
   });
 
   // --- drag&drop (duopulse-147) -------------------------------------------
@@ -738,6 +788,22 @@ function createGroupFromBar(): void {
       void refreshBmBar();
     }
   })();
+}
+
+/** Отсортировать чипы строки (menu-action bmbar:sort, duopulse-219): новый
+ *  порядок пишется bmbar_reorder — безгрупповые чипы усыновляются группой
+ *  по умолчанию (семантика drag&drop duopulse-147), сортировка группы
+ *  становится ручной. Уже целевой порядок — записи нет. */
+function sortBarChips(mode: BarSortMode): void {
+  const urls = barSortUrls(sortDefMembers, sortUngrouped, mode);
+  if (urls.join("\n") === chipUrlsOrder.join("\n")) return;
+  void bridge.history
+    .bmbarReorder({ urls })
+    .then(refreshBmBar)
+    .catch((e) => {
+      err(e);
+      void refreshBmBar();
+    });
 }
 
 /** Инлайн-правка имени чипа (menu-action bmchip:rename, duopulse-149):

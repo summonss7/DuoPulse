@@ -200,6 +200,86 @@
   border-color: var(--accent-neon);
 }
 
+/* ── duopulse-219: строка закладок под адресом (паритет десктопной
+   bmbar): чипы с бейджем-буквой домена, папки-группы; горизонтальный
+   скролл, пустая или выключенная — скрыта ── */
+.m-bmbar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0 10px 8px;
+  flex: none;
+  touch-action: pan-x; /* чипы скроллятся вбок, жест не конфликтует */
+  scrollbar-width: none;
+}
+
+.m-bmbar::-webkit-scrollbar {
+  display: none;
+}
+
+.m-bmbar[hidden] {
+  display: none;
+}
+
+.m-bmbar-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 150px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--bg-warm-2);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.m-bmbar-chip:active {
+  opacity: 0.8;
+}
+
+.m-bmbar-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-style: normal;
+  color: #fff;
+  flex: none;
+}
+
+.m-bmbar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-bmbar-folder svg {
+  color: var(--accent-neon);
+  flex: none;
+}
+
+.m-bm-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.m-bm-sort:active {
+  background: var(--hover-neutral);
+}
+
 .m-tab {
   flex: 1;
   width: 100%;

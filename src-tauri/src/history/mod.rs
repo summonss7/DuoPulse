@@ -803,7 +803,10 @@ impl HistoryStore {
                     .map_err(|_| format!("группа {gid} не найдена"))?;
                 let order = match sort_by.as_str() {
                     "title" => "b.title COLLATE NOCASE, b.url".to_string(),
+                    // duopulse-219: обратный алфавит и старые первыми
+                    "title_desc" => "b.title COLLATE NOCASE DESC, b.url".to_string(),
                     "added" => "b.added_at DESC, b.url".to_string(),
+                    "added_asc" => "b.added_at, b.url".to_string(),
                     _ => "i.position, b.url".to_string(),
                 };
                 params.push(gid);
@@ -2194,7 +2197,11 @@ fn group_labels(
 fn normalize_sort_by(s: &str) -> &'static str {
     match s.trim() {
         "title" => "title",
+        // duopulse-219: обратный алфавитный и «старые первыми» (пожелание:
+        // сортировка закладок по алфавиту / в обратном порядке / по дате)
+        "title_desc" => "title_desc",
         "added" => "added",
+        "added_asc" => "added_asc",
         _ => "manual",
     }
 }
@@ -3228,6 +3235,28 @@ mod tests {
                 "https://g.example/",
                 "https://w.example/"
             ]
+        );
+        // duopulse-219: обратный алфавит — зеркальный к title
+        store.group_set_sort(read.id, "title_desc").unwrap();
+        assert_eq!(
+            urls(GroupFilter::Group(read.id)),
+            vec![
+                "https://w.example/",
+                "https://m.example/",
+                "https://g.example/"
+            ],
+            "Википедия > mdn > GitHub — зеркальный к title"
+        );
+        // duopulse-219: по дате, старые первыми — зеркальный к added
+        store.group_set_sort(read.id, "added_asc").unwrap();
+        assert_eq!(
+            urls(GroupFilter::Group(read.id)),
+            vec![
+                "https://w.example/",
+                "https://g.example/",
+                "https://m.example/"
+            ],
+            "added_at 1000 < 2000 < 3000 — старые первыми"
         );
         // неизвестный режим — «вручную» (не ошибка)
         store.group_set_sort(read.id, "мусор").unwrap();

@@ -8,10 +8,15 @@
 // (099): закладка может состоять в нескольких группах; из вида конкретной
 // группы тяга на чип — перенос (убрать из текущей + добавить в целевую),
 // из «Все» — добавление в целевую (остальные членства не трогаем).
+// duopulse-219: строка закладок ПОД адресом (паритет десктопной bmbar,
+// пожелание «переходить по закладкам прямо оттуда») — по умолчанию включена,
+// переключатель в меню «⋮»; и сортировка списка закладок (алфавит/обратно/
+// по дате) — кнопка «⇅» в шапке экрана.
 
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
 import { MAX_GROUP_DEPTH, groupPath, groupTreeOrder } from "../chrome/groups-tree";
+import { bmBarModel, badgeHue, badgeHost, badgeLetter } from "../chrome/bmbar";
 import { t } from "../i18n";
 
 /** Что выбрал пользователь в ряду чипов: «Все» или конкретная группа. */
@@ -54,6 +59,58 @@ export function dropTargetOf(chip: HTMLElement): number | null {
  *  столе Android; короче — конфликт со скроллом списка). */
 export const LONG_PRESS_MS = 350;
 
+// ── duopulse-219: сортировка списка и строка под адресом ───────────────────
+
+/** Режим сортировки экрана закладок: manual — как загружено (позиции группы
+ *  / свежие первыми в «Все»), остальные — пересортируют показ; режим живёт
+ *  в localStorage (настройка вида, не данных). */
+export type BmSortMode = "manual" | "title" | "title_desc" | "added" | "added_asc";
+
+/** Ключ localStorage строки под адресом: "off" — скрыта (по умолчанию вкл). */
+const BMBAR_PREF = "duopulse.mobile.bmbar";
+/** Ключ localStorage режима сортировки экрана закладок. */
+const BMSORT_PREF = "duopulse.mobile.bmsort";
+
+/** Строка закладок под адресом включена (чистая, тестится): по умолчанию —
+ *  да (пожелание Артёма), «off» в localStorage её прячет. */
+export function bmBarEnabled(get: (k: string) => string | null = (k) => {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}): boolean {
+  return get(BMBAR_PREF) !== "off";
+}
+
+/** Прочитать сохранённый режим сортировки (чистая, тестится): мусор — manual. */
+export function bmSortModeOf(get: (k: string) => string | null = (k) => {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+}): BmSortMode {
+  const v = get(BMSORT_PREF);
+  return v === "title" || v === "title_desc" || v === "added" || v === "added_asc" ? v : "manual";
+}
+
+/** Пересортировать список для показа (чистая, тестится): manual — копия как
+ *  загружено; алфавит — localeCompare base (как COLLATE NOCASE ядра),
+ *  тайбрейк url; даты — новые/старые первыми. Исходный массив не трогаем. */
+export function sortBookmarksView(list: HistoryBookmark[], mode: BmSortMode): HistoryBookmark[] {
+  const out = list.slice();
+  const byUrl = (a: HistoryBookmark, b: HistoryBookmark): number =>
+    a.url < b.url ? -1 : a.url > b.url ? 1 : 0;
+  const byTitle = (a: HistoryBookmark, b: HistoryBookmark): number =>
+    a.title.trim().localeCompare(b.title.trim(), undefined, { sensitivity: "base" }) || byUrl(a, b);
+  if (mode === "title") out.sort(byTitle);
+  else if (mode === "title_desc") out.sort((a, b) => byTitle(b, a));
+  else if (mode === "added") out.sort((a, b) => b.addedAt - a.addedAt || byUrl(a, b));
+  else if (mode === "added_asc") out.sort((a, b) => a.addedAt - b.addedAt || byUrl(a, b));
+  return out;
+}
+
 /** Порог «палец шевельнулся» до активации — это скролл, тягу не начинаем. */
 const MOVE_CANCEL_PX = 10;
 
@@ -85,6 +142,10 @@ export class MobileBookmarks {
   private bookmarks: HistoryBookmark[] = [];
   private sel: GroupSel = "all";
   private starred = false;
+  /** Строка закладок под адресом (duopulse-219) и режим сортировки списка. */
+  private readonly barRow: HTMLElement;
+  private sortBtn!: HTMLButtonElement;
+  private sortMode: BmSortMode = "manual";
   /** Признак для звёздочки: сейчас открыто видео (url/title — из host). */
 
   /** Старт-экран был спрятан до открытия экрана закладок: при закрытии
@@ -125,6 +186,9 @@ export class MobileBookmarks {
           <b>${t("Закладки")}</b>
         </button>
         <span class="m-bm-hint">${t("удерживайте закладку и тяните на группу")}</span>
+        <button class="m-bm-sort" title="${t("Сортировка")}" aria-label="${t("Сортировка")}">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M5 13l-2.5-2.5M5 13l2.5-2.5M11 13V3M11 3 8.5 5.5M11 3l2.5 2.5"/></svg>
+        </button>
       </div>
       <div class="m-bm-chips" role="tablist"></div>
       <div class="m-bm-list"></div>
@@ -144,9 +208,20 @@ export class MobileBookmarks {
     this.chips = this.view.querySelector(".m-bm-chips")!;
     this.listEl = this.view.querySelector(".m-bm-list")!;
     this.sheet = this.sheetWrap.querySelector(".m-sheet")!;
+    this.sortBtn = this.view.querySelector(".m-bm-sort")!;
     this.root = this.view;
 
+    // duopulse-219: строка закладок под адресом — в шапке, рядом после
+    // .m-urlrow (последний ряд шапки); в тест-фикстуре родитель попроще —
+    // цепляем к нему, логика та же. Пустая/выключенная — hidden.
+    this.barRow = document.createElement("div");
+    this.barRow.id = "mBmBar";
+    this.barRow.className = "m-bmbar";
+    this.barRow.hidden = true;
+    urlrow.parentElement?.insertBefore(this.barRow, urlrow.nextSibling);
+
     this.back.addEventListener("click", () => this.closeView());
+    this.sortBtn.addEventListener("click", () => this.openSortSheet());
     this.sheetWrap.querySelector(".m-sheet-backdrop")!.addEventListener("click", () => this.closeSheet());
     this.star.addEventListener("click", () => void this.onStar());
     document.addEventListener("keydown", (e) => {
@@ -188,7 +263,107 @@ export class MobileBookmarks {
       bookmarks: this.bookmarks,
       starred: this.starred,
       drag: this.drag.active,
+      sortMode: this.sortMode,
+      barHidden: this.barRow.hidden,
+      barChips: this.barRow.children.length,
     });
+
+    // duopulse-219: стартовый показ строки под адресом и режим сортировки
+    this.sortMode = bmSortModeOf();
+    void this.refreshBar();
+  }
+
+  // ── строка закладок под адресом (duopulse-219) ───────────────────────────
+
+  /** Перерисовать строку под адресом по свежим данным Core: чипы — группа
+   *  по умолчанию + безгрупповые (модель десктопной строки), папки — корневые
+   *  группы и дети «Избранного»; тап по чипу — открыть, по папке — экран
+   *  закладок в этой группе. Выключена настройкой или пустая — скрыта. */
+  async refreshBar(): Promise<void> {
+    if (!bmBarEnabled()) {
+      this.barRow.hidden = true;
+      return;
+    }
+    try {
+      const [{ groups }, ung] = await Promise.all([
+        this.api.history.groupList(),
+        this.api.history.bookmarkList({ query: null, groupId: -1, offset: 0, limit: 500 }),
+      ]);
+      const defId = groups.find((g) => g.isDefault)?.id ?? null;
+      const defMembers =
+        defId !== null
+          ? (await this.api.history.bookmarkList({ query: null, groupId: defId, offset: 0, limit: 500 })).bookmarks
+          : [];
+      this.renderBar(bmBarModel(groups, defMembers, ung.bookmarks));
+    } catch {
+      this.barRow.hidden = true; // история недоступна — строку не показываем
+    }
+  }
+
+  private renderBar(model: ReturnType<typeof bmBarModel>): void {
+    const chip = (url: string, title: string): HTMLButtonElement => {
+      const label = title.trim();
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = label ? "m-bmbar-chip" : "m-bmbar-chip m-bmbar-icon";
+      el.dataset.url = url;
+      el.title = label ? `${label}\n${url}` : url;
+      // бейдж-буква с цветом домена — как чипы десктопной строки
+      const host = badgeHost(url);
+      const ico = document.createElement("i");
+      ico.className = "m-bmbar-badge";
+      ico.textContent = badgeLetter(label, host);
+      ico.style.background = `linear-gradient(145deg, hsl(${badgeHue(host || url)} 46% 46%), hsl(${badgeHue(host || url)} 46% 33%))`;
+      el.append(ico);
+      if (label) {
+        const span = document.createElement("span");
+        span.className = "m-bmbar-label";
+        span.textContent = label;
+        el.append(span);
+      }
+      el.addEventListener("click", () => this.host.open(url));
+      return el;
+    };
+    const folder = (id: number, name: string): HTMLButtonElement => {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = "m-bmbar-chip m-bmbar-folder";
+      el.innerHTML =
+        '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M1.8 4.2c0-.6.5-1.1 1.1-1.1h3l1.4 1.6h5.8c.6 0 1.1.5 1.1 1.1v6.9c0 .6-.5 1.1-1.1 1.1H2.9c-.6 0-1.1-.5-1.1-1.1z"/></svg>';
+      const span = document.createElement("span");
+      span.className = "m-bmbar-label";
+      span.textContent = name;
+      el.append(span);
+      el.title = name;
+      el.addEventListener("click", () => void this.openGroup(id));
+      return el;
+    };
+    this.barRow.replaceChildren(
+      ...model.chips.map((c) => chip(c.url, c.title)),
+      ...model.folders.map((f) => folder(f.id, f.name)),
+    );
+    this.barRow.hidden = !(model.chips.length > 0 || model.folders.length > 0);
+  }
+
+  /** Показать/спрятать строку под адресом (переключатель меню «⋮»):
+   *  настройка — localStorage, переживает перезапуск; в инкогнито-очистке
+   *  WebView теряется — возвращается дефолт «включена». */
+  setBarEnabled(on: boolean): void {
+    try {
+      if (on) localStorage.removeItem(BMBAR_PREF);
+      else localStorage.setItem(BMBAR_PREF, "off");
+    } catch {
+      /* без localStorage — настройка живёт до перезапуска */
+    }
+    if (on) void this.refreshBar();
+    else this.barRow.hidden = true;
+  }
+
+  /** Открыть экран закладок сразу в группе (тап по папке строки, duopulse-219):
+   *  поворот вида без отдельного API — sel + обычный openView/reload. */
+  async openGroup(groupId: number): Promise<void> {
+    this.sel = groupId;
+    await this.openView();
   }
 
   // ── вид списка ──────────────────────────────────────────────────────────
@@ -215,14 +390,17 @@ export class MobileBookmarks {
   }
 
   /** Обновить экран после синка аккаунта Aila (duopulse-112): перечитать
-   *  открытый список и звёздочку — данные могли прийти из облака. */
+   *  открытый список и звёздочку — данные могли прийти из облака. Строку под
+   *  адресом обновляем и при закрытом экране (duopulse-219: синк меняет чипы). */
   async refreshIfOpen(): Promise<void> {
+    void this.refreshBar();
     if (this.view.hidden) return;
     await this.reload();
     await this.syncVideo();
   }
 
-  /** Перечитать группы + закладки текущего вида. */
+  /** Перечитать группы + закладки текущего вида; показ списка — в режиме
+   *  сортировки экрана (duopulse-219), строка под адресом — тоже свежая. */
   async reload(): Promise<void> {
     try {
       const [{ groups }, res] = await Promise.all([
@@ -235,7 +413,7 @@ export class MobileBookmarks {
         }),
       ]);
       this.groups = groups;
-      this.bookmarks = res.bookmarks;
+      this.bookmarks = sortBookmarksView(res.bookmarks, this.sortMode);
       this.renderChips();
       this.renderList();
       if (this.sel !== "all" && !groups.some((g) => g.id === this.sel)) {
@@ -245,6 +423,39 @@ export class MobileBookmarks {
     } catch (e) {
       this.host.note(t("Закладки: {error}", { error: e instanceof Error ? e.message : String(e) }));
     }
+    void this.refreshBar();
+  }
+
+  /** Шит режима сортировки списка (duopulse-219): настройка вида — данные и
+   *  порядок групп не меняются; активный режим отмечен галочкой. */
+  private openSortSheet(): void {
+    this.closeSheet();
+    const modes: readonly [BmSortMode, string][] = [
+      ["manual", "Как загружено"],
+      ["title", "По алфавиту"],
+      ["title_desc", "По алфавиту (обратно)"],
+      ["added", "По дате добавления (сначала новые)"],
+      ["added_asc", "По дате добавления (сначала старые)"],
+    ];
+    for (const [mode, label] of modes) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "m-sheet-item";
+      b.textContent = `${mode === this.sortMode ? "✓ " : ""}${t(label)}`;
+      b.addEventListener("click", () => {
+        this.sortMode = mode;
+        try {
+          if (mode === "manual") localStorage.removeItem(BMSORT_PREF);
+          else localStorage.setItem(BMSORT_PREF, mode);
+        } catch {
+          /* без localStorage — режим живёт до перезапуска */
+        }
+        this.closeSheet();
+        this.renderList();
+      });
+      this.sheet.append(b);
+    }
+    this.sheetWrap.hidden = false;
   }
 
   private renderChips(): void {
@@ -524,6 +735,7 @@ export class MobileBookmarks {
       try {
         await this.api.history.bookmarkRemove({ url: video.url });
         await this.syncVideo();
+        void this.refreshBar(); // строка под адресом (duopulse-219)
         this.host.note(t("Закладка удалена"));
       } catch (e) {
         this.host.note(t("Закладка: {error}", { error: String(e) }));
@@ -549,6 +761,7 @@ export class MobileBookmarks {
       void this.api.history
         .bookmarkAdd({ url, title, groupId })
         .then(() => this.syncVideo())
+        .then(() => this.refreshBar()) // строка под адресом (duopulse-219)
         .then(() => this.host.note(t("Добавлено в закладки")))
         .catch((e) => this.host.note(t("Закладка: {error}", { error: String(e) })));
     };
@@ -585,6 +798,7 @@ export class MobileBookmarks {
           .groupAdd({ name })
           .then((g) => this.api.history.bookmarkAdd({ url, title, groupId: g.id }))
           .then(() => this.syncVideo())
+          .then(() => this.refreshBar()) // строка под адресом (duopulse-219)
           .then(() => this.host.note(t("Добавлено в «{name}»", { name })))
           .catch((e) => this.host.note(t("Закладка: {error}", { error: String(e) })));
       };

@@ -726,7 +726,7 @@ export interface HistoryGroupAddParams {
   parentId?: number | null;
 }
 /**
- * Группа закладок для UI: имя, позиция среди сестёрских групп, режим сортировки (manual | title | added), флаг «по умолчанию», число закладок и вложенность (duopulse-151): родитель (null — корень) и глубина 1–3.
+ * Группа закладок для UI: имя, позиция среди сестёрских групп, режим сортировки (manual | title | title_desc | added | added_asc — duopulse-219), флаг «по умолчанию», число закладок и вложенность (duopulse-151): родитель (null — корень) и глубина 1–3.
  */
 export interface BookmarkGroupInfo {
   count: number;
@@ -743,7 +743,7 @@ export interface BookmarkGroupInfo {
   parentId?: number | null;
   position: number;
   /**
-   * manual | title | added.
+   * manual | title | title_desc | added | added_asc.
    */
   sortBy: string;
 }
@@ -781,12 +781,12 @@ export interface HistoryGroupReorderParams {
   id: number;
 }
 /**
- * history.group_set_sort: режим сортировки группы — manual | title | added.
+ * history.group_set_sort: режим сортировки группы — manual | title | title_desc | added | added_asc (duopulse-219: обратный алфавит и «старые первыми»).
  */
 export interface HistoryGroupSetSortParams {
   id: number;
   /**
-   * manual | title | added.
+   * manual | title | title_desc | added | added_asc.
    */
   sortBy: string;
 }

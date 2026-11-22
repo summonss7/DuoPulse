@@ -944,4 +944,14 @@ export const dict: Record<string, string> = {
   "Устройство стерео: тон выйдет из обоих фронтов — включите 5.1/7.1 в настройках звука Windows":
     "Dispozitiv stereo: tonul va ieși din ambele boxe frontale — activați 5.1/7.1 în setările de sunet Windows",
   "Канал есть только в раскладке 7.1": "Canalul există doar în configurația 7.1",
+  "Закладки под адресом:": "Semnede carte sub bara de adrese:",
+  "Сортировка": "Sortare",
+  "Как загружено": "Așa cum a fost încărcat",
+  "По алфавиту": "Alfabetic",
+  "По алфавиту (обратно)": "Alfabetic (invers)",
+  "По дате добавления (сначала новые)": "După data adăugării (întâi cele noi)",
+  "По дате добавления (сначала старые)": "După data adăugării (întâi cele vechi)",
+  "По имени (обратно)": "După nume (invers)",
+  "По дате (сначала новые)": "După dată (întâi cele noi)",
+  "По дате (сначала старые)": "După dată (întâi cele vechi)",
 };

@@ -32,7 +32,7 @@ import {
 } from "./platform";
 import { MobileDuo, type DuoStatus } from "./duo";
 import { asrModelProgressText, subscribeAsrModelProgress, subscribeAsrProgress } from "./duo/asr";
-import { MobileBookmarks } from "./bookmarks";
+import { MobileBookmarks, bmBarEnabled } from "./bookmarks";
 import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
 import { MobileHistory } from "./history";
 import { MobileDiagnostics } from "./diagnostics";
@@ -112,6 +112,9 @@ root.innerHTML = `
         <label class="m-engine"><span data-i18n="Поиск:">Поиск:</span> <select id="mEngine"></select></label>
         <label class="m-engine"><span data-i18n="Язык:">Язык:</span> <select id="mLang"></select></label>
         <label class="m-engine"><span data-i18n="Блокировщик рекламы:">Блокировщик рекламы:</span> <select id="mAdblock"></select></label>
+        <!-- duopulse-219: строка закладок под адресом (как в Windows-версии),
+             по умолчанию включена — переключатель здесь -->
+        <label class="m-engine"><span data-i18n="Закладки под адресом:">Закладки под адресом:</span> <select id="mBmbar"></select></label>
         <div id="mAila"></div>
         <button id="mMenuBookmarks" class="m-check-update" data-i18n="Закладки">Закладки</button>
         <button id="mHistory" class="m-check-update" data-i18n="История">История</button>
@@ -785,6 +788,22 @@ void invoke<{ enabled: boolean }>("mobile_adblock_status")
   });
 adblockSel.addEventListener("change", () => {
   void invoke("mobile_adblock_set_enabled", { on: adblockSel.value === "on" }).catch(() => {});
+});
+
+// ── Строка закладок под адресом (duopulse-219, пожелание «как в windows-
+// версии, по умолчанию включено»): чипы закладок под строкой поиска, тап —
+// переход. Настройка вида — localStorage (клавиша модуля bookmarks),
+// дефолт «вкл»; применение — setBarEnabled модуля закладок.
+const bmbarSel = root.querySelector<HTMLSelectElement>("#mBmbar")!;
+for (const [v, label] of [["on", t("Вкл")], ["off", t("Выкл")]] as const) {
+  const opt = document.createElement("option");
+  opt.value = v;
+  opt.textContent = label;
+  bmbarSel.append(opt);
+}
+bmbarSel.value = bmBarEnabled() ? "on" : "off";
+bmbarSel.addEventListener("change", () => {
+  bookmarks.setBarEnabled(bmbarSel.value === "on");
 });
 
 /** Открыть адрес системным браузером (mobile.open_url → Intent ACTION_VIEW):

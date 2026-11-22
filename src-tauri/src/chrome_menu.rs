@@ -21,8 +21,10 @@
 //! прежним оверлеем, фронтенд (tabbar.ts/star.ts) не зависит от бэкенда.
 //! Идентификаторы пунктов: «tab:<act>» и «star:g:<id группы>» /
 //! «star:newgroup», «bmchip:rename:<url>» / «bmchip:delete:<url>» /
-//! «bmgroup:rename:<id группы>» (строка закладок, duopulse-149/160) и
+//! «bmgroup:rename:<id группы>» (строка закладок, duopulse-149/160),
 //! «bmbar:newgroup» (правый клик по пустому месту строки, duopulse-160),
+//! «bmbar:sort:<режим>» (сортировка чипов строки) и
+//! «bmgroup:sort:<id группы>:<режим>» (живая сортировка папки) — duopulse-219,
 //! а также меню ПАНЕЛИ папки: «bmrow:section» / «bmrow:rename:<url>» /
 //! «bmrow:delete:<url>» / «bmsection:new» (duopulse-189) — их выбор
 //! уходит не в UI-webview, а в панель-webview (emit_to chrome-panel).
@@ -184,16 +186,58 @@ fn build_bm_item_menu(app: &AppHandle, kind: &str, key: &str) -> Result<Menu<tau
         None,
     )?)
     .map_err(|e| format!("меню: {e}"))?;
+    // папке — режим сортировки группы (duopulse-219): живой sort_by группы,
+    // применяется к содержимому папки на строке, в панели и на странице
+    // управления; id несёт и группу, и режим — «bmgroup:sort:<id>:<mode>»
+    if kind == "bmgroup" {
+        menu.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
+            .map_err(|e| format!("меню: {e}"))?;
+        for (mode, label) in [
+            ("manual", "Сортировка: вручную"),
+            ("title", "Сортировка: по алфавиту"),
+            ("title_desc", "Сортировка: по алфавиту (обратно)"),
+            ("added", "Сортировка: по дате (сначала новые)"),
+            ("added_asc", "Сортировка: по дате (сначала старые)"),
+        ] {
+            menu.append(&item(
+                app,
+                &format!("bmgroup:sort:{key}:{mode}"),
+                label,
+                true,
+                None,
+            )?)
+            .map_err(|e| format!("меню: {e}"))?;
+        }
+    }
     Ok(menu)
 }
 
 /// Меню пустого места строки закладок (duopulse-160: «нажать правую кнопку
-/// и создать новую группу»): один пункт — группа создаётся сразу на строке
-/// (пустые папки видимы) и получает инлайн-правку имени в UI.
+/// и создать новую группу») + сортировка чипов (duopulse-219, пожелание:
+/// «отсортировать по алфавиту / в обратной последовательности / по дате
+/// добавления»): порядок пишет UI командой bmbar_reorder (безгрупповые чипы
+/// усыновляются группой по умолчанию — семантика drag&drop duopulse-147).
 fn build_bmbar_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, String> {
     let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
     menu.append(&item(app, "bmbar:newgroup", "Новая группа…", true, None)?)
         .map_err(|e| format!("меню: {e}"))?;
+    menu.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
+        .map_err(|e| format!("меню: {e}"))?;
+    for (mode, label) in [
+        ("title", "Сортировать по алфавиту"),
+        ("title_desc", "Сортировать по алфавиту (обратный порядок)"),
+        ("added", "Сортировать по дате добавления (сначала новые)"),
+        ("added_asc", "Сортировать по дате добавления (сначала старые)"),
+    ] {
+        menu.append(&item(
+            app,
+            &format!("bmbar:sort:{mode}"),
+            label,
+            true,
+            None,
+        )?)
+        .map_err(|e| format!("меню: {e}"))?;
+    }
     Ok(menu)
 }
 
@@ -679,6 +723,16 @@ pub fn emit_action(app: &AppHandle, id: &str) {
         serde_json::json!({ "menu": "bmgroup", "act": "rename", "groupId": g.parse::<i64>().unwrap_or(-1) })
     } else if let Some(g) = id.strip_prefix("bmgroup:delete:") {
         serde_json::json!({ "menu": "bmgroup", "act": "delete", "groupId": g.parse::<i64>().unwrap_or(-1) })
+    } else if let Some(rest) = id.strip_prefix("bmgroup:sort:") {
+        // duopulse-219: «bmgroup:sort:<id группы>:<режим>» — живая сортировка
+        // группы (group_set_sort); порядок аргументов не путать с bmbar:sort
+        let (g, mode) = rest.split_once(':').unwrap_or((rest, ""));
+        serde_json::json!({
+            "menu": "bmgroup", "act": "sort",
+            "groupId": g.parse::<i64>().unwrap_or(-1), "sortBy": mode
+        })
+    } else if let Some(mode) = id.strip_prefix("bmbar:sort:") {
+        serde_json::json!({ "menu": "bmbar", "act": "sort", "sortBy": mode })
     } else if id == "bmbar:newgroup" {
         serde_json::json!({ "menu": "bmbar", "act": "newgroup" })
     } else if id == "bmrow:section" {

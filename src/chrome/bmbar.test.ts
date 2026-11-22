@@ -13,6 +13,7 @@ import {
   badgeLetter,
   badgeHue,
   bmBarModel,
+  barSortUrls,
   chipReorder,
   chipView,
   folderReorderAllowed,
@@ -226,6 +227,46 @@ describe("duopulse-160: drag через webview-границу и новая г�
     expect(
       parseDragPayload((m) => (m === BM_DRAG_MIME ? JSON.stringify({ group: 3 }) : "")),
     ).toBe(null);
+  });
+
+  // ── duopulse-219: сортировка чипов строки (контекстное меню) ───────────
+  const bm = (url: string, title: string, addedAt: number) => ({ url, title, addedAt, groups: [] });
+  const def = [
+    bm("https://w.example/", "Википедия", 3000),
+    bm("https://g.example/", "GitHub", 2000),
+  ];
+  const ung = [bm("https://m.example/", "mdn", 1000)];
+
+  it("barSortUrls: алфавит (base, без регистра) и зеркальный обратный", () => {
+    expect(barSortUrls(def, ung, "title")).toEqual([
+      "https://g.example/",
+      "https://m.example/",
+      "https://w.example/",
+    ]);
+    expect(barSortUrls(def, ung, "title_desc")).toEqual([
+      "https://w.example/",
+      "https://m.example/",
+      "https://g.example/",
+    ]);
+  });
+
+  it("barSortUrls: дата добавления — новые/старые первыми, тайбрейк url", () => {
+    expect(barSortUrls(def, ung, "added")).toEqual([
+      "https://w.example/",
+      "https://g.example/",
+      "https://m.example/",
+    ]);
+    expect(barSortUrls(def, ung, "added_asc")).toEqual([
+      "https://m.example/",
+      "https://g.example/",
+      "https://w.example/",
+    ]);
+  });
+
+  it("barSortUrls: одинаковые имена/даты — устойчивый порядок по url", () => {
+    const a = [bm("https://b.example/", "one", 5), bm("https://a.example/", "one", 5)];
+    expect(barSortUrls(a, [], "title")).toEqual(["https://a.example/", "https://b.example/"]);
+    expect(barSortUrls(a, [], "added")).toEqual(["https://a.example/", "https://b.example/"]);
   });
 
   it("uniqueGroupName: свободное имя как есть, занятое — счётчик-суффикс", () => {

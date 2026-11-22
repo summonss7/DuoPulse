@@ -958,4 +958,14 @@ export const dict: Record<string, string> = {
   "Устройство стерео: тон выйдет из обоих фронтов — включите 5.1/7.1 в настройках звука Windows":
     "Stereo device: the tone will come from both fronts — enable 5.1/7.1 in Windows sound settings",
   "Канал есть только в раскладке 7.1": "Channel exists only in the 7.1 layout",
+  "Закладки под адресом:": "Bookmarks under the address bar:",
+  "Сортировка": "Sorting",
+  "Как загружено": "As loaded",
+  "По алфавиту": "Alphabetical",
+  "По алфавиту (обратно)": "Alphabetical (reverse)",
+  "По дате добавления (сначала новые)": "By date added (newest first)",
+  "По дате добавления (сначала старые)": "By date added (oldest first)",
+  "По имени (обратно)": "By name (reverse)",
+  "По дате (сначала новые)": "By date (newest first)",
+  "По дате (сначала старые)": "By date (oldest first)",
 };

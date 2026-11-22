@@ -395,7 +395,9 @@ function renderGroupbar(): void {
   for (const [value, label] of [
     ["manual", "Вручную"],
     ["title", "По имени"],
-    ["added", "По дате"],
+    ["title_desc", "По имени (обратно)"],
+    ["added", "По дате (сначала новые)"],
+    ["added_asc", "По дате (сначала старые)"],
   ] as const) {
     const opt = document.createElement("option");
     opt.value = value;

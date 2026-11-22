@@ -208,7 +208,7 @@ pub struct BookmarkGroupRow {
     pub id: i64,
     pub name: String,
     pub position: u32,
-    /// manual | title | added.
+    /// manual | title | title_desc | added | added_asc.
     pub sort_by: String,
     pub is_default: bool,
     /// Родитель в файле (id машины-источника; null — корень; duopulse-151).
@@ -219,7 +219,8 @@ pub struct BookmarkGroupRow {
 // --- карточка duopulse-058: группы избранного --------------------------------
 
 /// Группа закладок для UI: имя, позиция среди сестёрских групп, режим
-/// сортировки (manual | title | added), флаг «по умолчанию», число закладок
+/// сортировки (manual | title | title_desc | added | added_asc — duopulse-219),
+/// флаг «по умолчанию», число закладок
 /// и вложенность (duopulse-151): родитель (null — корень) и глубина 1–3.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -227,7 +228,7 @@ pub struct BookmarkGroupInfo {
     pub id: i64,
     pub name: String,
     pub position: u32,
-    /// manual | title | added.
+    /// manual | title | title_desc | added | added_asc.
     pub sort_by: String,
     pub is_default: bool,
     pub count: u32,
@@ -302,12 +303,14 @@ pub struct HistoryGroupRemoveParams {
     pub id: i64,
 }
 
-/// history.group_set_sort: режим сортировки группы — manual | title | added.
+/// history.group_set_sort: режим сортировки группы — manual | title |
+/// title_desc | added | added_asc (duopulse-219: обратный алфавит и «старые
+/// первыми»).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryGroupSetSortParams {
     pub id: i64,
-    /// manual | title | added.
+    /// manual | title | title_desc | added | added_asc.
     pub sort_by: String,
 }
 
