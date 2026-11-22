@@ -19,21 +19,25 @@
 //    потому дефолт — поведение 191, а десктоп-фазы идут В КОНЦЕ сценария.
 //
 // Сценарий (debug-APK на эмуляторе, CDP webview_devtools_remote):
-//   A (дефолт, как 191): 1) app=desktop-адрес → m.youtube.com, параметр
-//      срезан, readyState complete, десктоп-разметки нет; 2) клик по видео
-//      мобильной выдачи → встроенный плеер; 3) тап по адресному чипу → поле
-//      ввода с адресом → «example.com» GO → https://example.com/; 4) ввод
-//      запроса «duopulse 192» → выдача Google;
-//   B (расширенный): 5) тумблер ON через меню «⋮»; 6) app=desktop →
-//      www.youtube.com с десктоп-UA и ytd-app; 7) рестарт приложения (тумблер
-//      ON пережил) + ЛОКАЛЬНЫЙ 302-редирект (имитирует google.com/goto,
-//      стартует с мобильного UA на свежем процессе) → www десктопом —
-//      перехват onPageStarted.
-//   C (duopulse-207, шапка — полное зеркало старта): 8) состав шапки —
-//      ⌂/очки-инкогнито/⬇/⋮ + поле/★/GO и их порядок; 9) звёздочка
-//      закладки — тап ★/☆ (тот же стор, что у меню «⋮»); 10) «⬇» на обычной
-//      странице — тост-подсказка; 11) очки — инкогнито ON (оверлей закрылся,
-//      m-private) и выход кнопкой старта.
+//   A (ДЕФОЛТ duopulse-210 — десктопный YouTube): 1) app=desktop-адрес →
+//      www.youtube.com с десктоп-UA и ytd-app; 2) клик по видео десктопной
+//      выдачи (SPA) → встроенный плеер; 3) тап по адресному чипу → поле
+//      ввода с адресом → «example.com» GO → https://example.com/ (живой
+//      переход YouTube→прочие = смена UA, прежде гасившая навигацию);
+//      4) ввод запроса «duopulse 210» → выдача Google; 5) ЛОКАЛЬНЫЙ
+//      302-редирект (имитирует google.com/goto органики) с мобильного UA →
+//      перехват onPageStarted перезапрашивает десктопным UA → www десктопом
+//      (регресс жалобы 210-2 «нажатие на ссылку не переходит»);
+//   C (duopulse-207/210, шапка — зеркало старта): 6) состав шапки —
+//      ⌂/вкладки(бейдж)/очки/⬇(при видео)/⋮ + поле/★/GO и их порядок;
+//      7) звёздочка закладки — тап ★/☆; 8) «⬇» на обычной странице —
+//      тост-подсказка; 9) очки — инкогнито ON (оверлей закрылся, m-private)
+//      и выход кнопкой старта; 10) кнопка вкладок — лист вкладок старта
+//      (оверлей спрятан, «назад» возвращает);
+//   B (мобильная версия — пункт «⋮» «Мобильная версия YouTube», 210):
+//      11) переключение в мобильную; 12) app=desktop → m.youtube.com,
+//      параметр срезан, десктоп-разметки нет (поведение 191); 13) рестарт
+//      приложения (режим пережил) + локальный goto-редирект → m.youtube.
 // Запуск (APK установлен, эмулятор поднят):
 //   node e2e/mobile/yt-mobile-force-smoke.mjs
 // Переопределения: YT_FORCE_URL, CDP_PORT, REDIR_PORT. Результат —
@@ -244,31 +248,33 @@ try {
   await startApp();
   ui = await uiPage();
 
-  // ── сброс состояния: прошлый прогон оставляет тумблер ON (персистенс
-  //    SharedPreferences переживает рестарты) — выключаем через меню «⋮»,
-  //    чтобы фаза A стартовала с заводским дефолтом (мобильный YouTube)
+  // ── сброс состояния: duopulse-210 — дефолт ДЕСКТОПНЫЙ YouTube; прошлый
+  //    прогон мог оставить мобильный режим (персистенс SharedPreferences
+  //    переживает рестарты) — включаем десктопный через меню «⋮» (пункт
+  //    называет ЦЕЛЬ: при десктопе предлагает «Мобильная версия YouTube»),
+  //    чтобы фаза A стартовала с заводским дефолтом
   await openOverlay("https://example.com/");
   await overlayState(25000, 2000);
   if (tapNode((n) => n.desc === "Меню" || n.text === "⋮", "кнопка ⋮")) {
     await sleep(700);
-    if (!tapNode((n) => (n.text || "").startsWith("✓") && (n.text || "").includes("Десктопный YouTube"), "✓ Десктопный YouTube → OFF")) {
-      adb("shell", "input", "tap", "540", "1200"); // уже OFF — закрыть меню
+    if (!tapNode((n) => (n.text || "").includes("Десктопная версия YouTube"), "Десктопная версия YouTube → ON")) {
+      adb("shell", "input", "tap", "540", "1200"); // уже десктоп — закрыть меню
     }
     await sleep(800);
   }
 
-  // ── Фаза A: дефолт — поведение 191 (мобильный YouTube) ─────────────────
+  // ── Фаза A: ДЕФОЛТ duopulse-210 — десктопный YouTube ──────────────────
   await openOverlay(FORCE_URL);
-  const a1 = await overlayState(45000, 4000);
-  shot("a1-mobile-youtube");
-  check("A1 оверлей на m.youtube.com (app=desktop срезан)",
-    /^https:\/\/m\.youtube\.com\//.test(a1.url || "") && !(a1.url || "").includes("app=desktop"),
-    a1.url || "цель не отвечает");
-  check("A1 десктопная разметка не грузится", a1.desktop === false, `ytd-app=${a1.desktop}, ready=${a1.ready}`);
-  check("A1 рендерер жив (complete)", a1.ready === "complete", `readyState=${a1.ready}`);
+  const a1 = await overlayState(120000, 4000);
+  shot("a1-desktop-youtube");
+  check("A1 дефолт: оверлей на www.youtube.com (десктоп)",
+    /^https:\/\/www\.youtube\.com\//.test(a1.url || ""), a1.url || "цель не отвечает");
+  check("A1 UA десктопный", !(a1.ua || "").includes("Android") && (a1.ua || "").includes("Windows"), (a1.ua || "").slice(0, 60));
+  check("A1 десктопная разметка грузится (ytd-app)", a1.desktop === true, `ytd-app=${a1.desktop}, ready=${a1.ready}`);
 
-  // 2) клик по видео мобильной выдачи → встроенный плеер (duopulse-139)
-  await openOverlay("https://m.youtube.com/results?search_query=duopulse&hl=uk");
+  // 2) клик по видео десктопной выдачи (SPA-переход) → встроенный плеер
+  //    (консоль-хук DPURL, duopulse-139/210)
+  await openOverlay("https://www.youtube.com/results?search_query=duopulse&hl=uk");
   await overlayState(45000, 4000);
   let videoHref = "";
   for (let i = 0; i < 20 && !videoHref; i++) {
@@ -287,11 +293,11 @@ try {
       await sleep(2000);
       omni = await ui.c.evalJs(`(document.querySelector('#mOmnibox') || {value:''}).value`).catch(() => "");
     }
-    check("A2 видео из мобильной выдачи → встроенный плеер", omni.includes("watch?v="), omni.slice(0, 80));
+    check("A2 видео из десктопной выдачи (SPA) → встроенный плеер", omni.includes("watch?v="), omni.slice(0, 80));
     adb("shell", "input", "keyevent", "4"); // из плеера — к выдаче
     await sleep(1500);
   } else {
-    check("A2 видео из мобильной выдачи → встроенный плеер", false, "в выдаче m.youtube не нашлось видео-ссылки");
+    check("A2 видео из десктопной выдачи (SPA) → встроенный плеер", false, "в выдаче www.youtube не нашлось видео-ссылки");
   }
 
   // 3) адресная строка кликабельна: тап по чипу → поле ввода с текущим
@@ -329,7 +335,7 @@ try {
       if (!g) await sleep(500);
     }
     if (g) {
-      adb("shell", "input", "text", "duopulse%s192"); // %s = пробел
+      adb("shell", "input", "text", "duopulse%s210"); // %s = пробел
       await sleep(600);
       adb("shell", "input", "keyevent", "66");
       const a4 = await overlayState(40000, 3000);
@@ -341,15 +347,33 @@ try {
     check("A4 ввод запроса → поиск Google", false, "чип не найден");
   }
 
-  // ── Фаза C (duopulse-207): шапка оверлея — ПОЛНОЕ зеркало старта ──────
-  // очки-инкогнито + «⬇» загрузки перед «⋮» + звёздочка закладки в строке
-  // адреса (жалоба: «нет звёздочки, нет двух кнопок перед тремя точками»)
+  // 5) goto-редирект десктоп-режимом (регресс жалобы 210-2 «нажатие на
+  //    ссылку [органики YouTube] не переходит»): после Google UA мобильный;
+  //    локальный 302 на youtube.com/?app=desktop стартует МИМО наших хуков —
+  //    onPageStarted обязан сменить UA и ПЕРЕЗАПРОСИТЬ (прежде смена UA
+  //    гасила навигацию — страница «отскакивала» обратно к выдаче)
+  await openOverlay(`http://10.0.2.2:${REDIR_PORT}/goto`);
+  const a5 = await overlayState(120000, 4000);
+  shot("a5-goto-desktop");
+  check("A5 goto-редирект → www.youtube.com десктопом (не отскочил)",
+    /^https:\/\/www\.youtube\.com\//.test(a5.url || "") && a5.desktop === true && !(a5.ua || "").includes("Android"),
+    `${a5.url || "цель не отвечает"} ytd-app=${a5.desktop} ready=${a5.ready}`);
+
+  // ── Фаза C (duopulse-207/210): шапка оверлея — зеркало старта ─────────
+  // вкладки(бейдж) + очки-инкогнито + «⬇» (при открытом видео, состояние
+  // живое из __duopulseHeaderState) + звёздочка закладки в строке адреса
   {
     await openOverlay("https://example.com/");
     await overlayState(25000, 2000);
+    // живое состояние старта: есть ли видео (⬇ видно ⇔ видео, как #mMusic)
+    const headerState = await ui.c.evalJs(
+      "window.__duopulseHeaderState ? JSON.stringify(window.__duopulseHeaderState()) : null"
+    ).catch(() => null);
+    const videoOpen = !!(headerState && JSON.parse(headerState).video);
     const nodes = uiNodes();
     const byDesc = (d) => nodes.find((n) => n.desc === d);
     const home = byDesc("На стартовый экран");
+    const tabs = byDesc("Вкладки");
     const glasses = byDesc("Инкогнито");
     const music = byDesc("Скачать: аудио, видео или субтитры");
     const menu = nodes.find((n) => n.desc === "Меню" || n.text === "⋮");
@@ -357,38 +381,40 @@ try {
     const star = nodes.find((n) => n.desc === "В избранное" || n.desc === "Убрать из избранного");
     const go = byDesc("Перейти");
     shot("c1-full-bar");
-    check("C1 полный состав шапки (⌂/очки/⬇/⋮/поле/★/GO)",
-      !!(home && glasses && music && menu && edit && star && go),
-      `⌂=${!!home} очки=${!!glasses} ⬇=${!!music} ⋮=${!!menu} поле=${!!edit} ★=${!!star} GO=${!!go}`);
-    check("C1 порядок: очки и ⬇ перед «⋮», ★ между полем и GO",
-      !!(glasses && music && menu && edit && star && go &&
-        glasses.x < menu.x && music.x < menu.x && music.x > glasses.x &&
+    check("C1 полный состав шапки (⌂/вкладки/очки/[⬇ при видео]/⋮/поле/★/GO)",
+      !!(home && tabs && glasses && menu && edit && star && go) &&
+        (!!music === videoOpen),
+      `⌂=${!!home} вкладки=${!!tabs} очки=${!!glasses} ⬇=${!!music}(видео=${videoOpen}) ⋮=${!!menu} поле=${!!edit} ★=${!!star} GO=${!!go}`);
+    check("C1 порядок: вкладки и очки перед «⋮», ★ между полем и GO",
+      !!(tabs && glasses && menu && edit && star && go &&
+        tabs.x < glasses.x && glasses.x < menu.x &&
         edit.x < star.x && star.x < go.x),
-      `x: очки=${glasses?.x} ⬇=${music?.x} ⋮=${menu?.x} поле=${edit?.x} ★=${star?.x} GO=${go?.x}`);
+      `x: вкладки=${tabs?.x} очки=${glasses?.x} ⋮=${menu?.x} поле=${edit?.x} ★=${star?.x} GO=${go?.x}`);
 
-    // звёздочка: тап → ★ («Убрать из избранного»), повтор → ☆ (стор чист)
+    // звёздочка (иконка duopulse-210 — без текста, состояние по desc):
+    // тап → закладка («Убрать из избранного»), повтор → снята («В избранное»)
     if (star) {
       adb("shell", "input", "tap", String(star.x), String(star.y));
       let st = null;
       for (let i = 0; i < 6 && !st; i++) {
         await sleep(400);
-        st = uiNodes().find((n) => n.text === "★" && n.desc === "Убрать из избранного");
+        st = uiNodes().find((n) => n.desc === "Убрать из избранного");
       }
-      check("C2a тап ★ — страница в закладках (★/«Убрать из избранного»)", !!st);
+      check("C2a тап ★ — страница в закладках (иконка залита)", !!st);
       if (st) {
         adb("shell", "input", "tap", String(st.x), String(st.y));
         let back = null;
         for (let i = 0; i < 6 && !back; i++) {
           await sleep(400);
-          back = uiNodes().find((n) => n.text === "☆" && n.desc === "В избранное");
+          back = uiNodes().find((n) => n.desc === "В избранное");
         }
-        check("C2b повторный тап — закладка снята (☆)", !!back);
+        check("C2b повторный тап — закладка снята (контур)", !!back);
       } else {
-        check("C2b повторный тап — закладка снята (☆)", false, "звезда не включилась");
+        check("C2b повторный тап — закладка снята (контур)", false, "звезда не включилась");
       }
     } else {
-      check("C2a тап ★ — страница в закладках (★/«Убрать из избранного»)", false, "узел ★ не найден");
-      check("C2b повторный тап — закладка снята (☆)", false, "узел ★ не найден");
+      check("C2a тап ★ — страница в закладках (иконка залита)", false, "узел ★ не найден");
+      check("C2b повторный тап — закладка снята (контур)", false, "узел ★ не найден");
     }
 
     // «⬇» на не-видео странице: тост-подсказка (кнопка не молчит).
@@ -429,7 +455,11 @@ try {
       }
       check("C3 «⬇» на обычной странице — тост-подсказка", toast);
     } else {
-      check("C3 «⬇» на обычной странице — тост-подсказка", false, "узел ⬇ не найден");
+      // duopulse-210: ⬇ видна ⇔ открыто видео (зеркало старта) — фаза C
+      // после openOverlay/newTab видео-вкладки может не быть; тогда честная
+      // проверка — кнопки НЕТ (не «всегда видна», как было в 207)
+      check("C3 «⬇» скрыта без видео (зеркало старта)", videoOpen === false,
+        `⬇=${!!music} видео=${videoOpen}`);
     }
 
     // очки-инкогнито: тап → режим ON (body.m-private UI-webview) и оверлей
@@ -457,43 +487,66 @@ try {
       check("C4a очки включают инкогнито (m-private, оверлей закрылся)", false, "узел очков не найден");
       check("C4b выход из инкогнито кнопкой старта", false, "узел очков не найден");
     }
+
+    // кнопка вкладок (duopulse-210): тап — лист вкладок старта открылся
+    // (оверлей спрятан: нативного «⋮» нет), системный «назад» возвращает
+    // оверлей. C4 мог закрыть оверлей — поднимаем заново
+    await openOverlay("https://example.com/");
+    await overlayState(25000, 2000);
+    if (tapNode((n) => n.desc === "Вкладки", "кнопка вкладок")) {
+      let sheetOpen = false;
+      let overlayGone = false;
+      for (let i = 0; i < 10 && !(sheetOpen && overlayGone); i++) {
+        await sleep(700);
+        sheetOpen = await ui.c.evalJs(
+          "window.__duopulseMobileTabs ? window.__duopulseMobileTabs().switcherOpen === true : false"
+        ).catch(() => false);
+        overlayGone = !uiNodes().some((n) => n.desc === "Меню");
+      }
+      check("C5 вкладки: лист старта открылся, оверлей спрятан",
+        sheetOpen === true && overlayGone === true,
+        `лист=${sheetOpen} оверлей остался=${!overlayGone}`);
+      adb("shell", "input", "keyevent", "4"); // «назад» — скрытый оверлей
+      await sleep(1200);
+      const back = uiNodes().some((n) => n.desc === "Меню");
+      check("C5 «назад» вернул оверлей", back === true);
+    } else {
+      check("C5 вкладки: лист старта открылся, оверлей спрятан", false, "кнопка вкладок не найдена");
+      check("C5 «назад» вернул оверлей", false, "кнопка вкладок не найдена");
+    }
   }
 
-  // ── Фаза B: «расширенный» YouTube тумблером (десктоп-фазы — в конце:
-  // после десктопных страниц WebView оверлея может клиниться до рестарта) ─
-  // фаза C закрыла оверлей (цикл инкогнито) — поднимаем заново
+  // ── Фаза B: мобильная версия YouTube (duopulse-210 — пункт «⋮» называет
+  // цель перехода; прежний «расширенный» режим и есть дефолт фазы A) ─────
   await openOverlay("https://example.com/");
   await overlayState(25000, 2000);
-  // 5) меню «⋮» → «○ Десктопный YouTube» → ON
+  // 11) меню «⋮» → «Мобильная версия YouTube» → мобильный режим
   const menuTapped = tapNode((n) => n.desc === "Меню" || n.text === "⋮", "кнопка ⋮");
   await sleep(700);
   const toggled = menuTapped &&
-    tapNode((n) => (n.text || "").includes("Десктопный YouTube") && (n.text || "").startsWith("○"), "○ Десктопный YouTube");
-  check("B5 тумблер «Десктопный YouTube» переключен в ON", toggled);
+    tapNode((n) => (n.text || "").includes("Мобильная версия YouTube"), "Мобильная версия YouTube");
+  check("B5 переключение на мобильную версию YouTube", toggled);
   await sleep(1200);
 
-  // 6) app=desktop грузится ДЕСКТОПОМ: www остаётся www, UA десктопный,
-  //    десктоп-разметка (до 191 — скелетон; на эмуляторе десктоп-страницы
-  //    медленные — щедрый таймаут)
+  // 12) app=desktop срезается (поведение 191): m.youtube, мобильный UA,
+  //     десктоп-разметки нет
   await openOverlay(FORCE_URL);
-  const b6 = await overlayState(120000, 4000);
-  shot("b6-desktop-youtube");
-  check("B6 расширенный: оверлей на www.youtube.com", /^https:\/\/www\.youtube\.com\//.test(b6.url || ""), b6.url || "цель не отвечает");
-  check("B6 UA десктопный", !(b6.ua || "").includes("Android") && (b6.ua || "").includes("Windows"), (b6.ua || "").slice(0, 60));
-  check("B6 десктопная разметка грузится (ytd-app)", b6.desktop === true, `ytd-app=${b6.desktop}, ready=${b6.ready}`);
+  const b6 = await overlayState(60000, 4000);
+  shot("b6-mobile-youtube");
+  check("B6 мобильная: оверлей на m.youtube.com (app=desktop срезан)",
+    /^https:\/\/m\.youtube\.com\//.test(b6.url || "") && !(b6.url || "").includes("app=desktop"),
+    b6.url || "цель не отвечает");
+  check("B6 мобильная: десктопной разметки нет", b6.desktop === false, `ytd-app=${b6.desktop}, ready=${b6.ready}`);
 
-  // 7) перезапуск + серверный редирект (как google.com/goto органики):
-  //    свежий процесс, тумблер ON пережил рестарт (SharedPreferences);
-  //    goto стартует app=desktop МИМО наших хуков с мобильного UA —
-  //    onPageStarted обязан перезапросить десктопным UA (иначе пара
-  //    «десктопный Polymer + мобильный UA» = вис 191)
+  // 13) перезапуск (режим пережил, SharedPreferences) + goto-редирект
+  //     органики → m.youtube мобильной (перехват onPageStarted 191)
   await startApp();
   ui = await uiPage();
   await openOverlay(`http://10.0.2.2:${REDIR_PORT}/goto`);
-  const b7 = await overlayState(120000, 4000);
+  const b7 = await overlayState(60000, 4000);
   shot("b7-after-redirect");
-  check("B7 рестарт+редирект: тумблер ON жив, www десктопом",
-    /^https:\/\/www\.youtube\.com\//.test(b7.url || "") && b7.desktop === true && !(b7.ua || "").includes("Android"),
+  check("B7 рестарт+редирект: мобильный режим жив, m.youtube",
+    /^https:\/\/m\.youtube\.com\//.test(b7.url || "") && b7.desktop === false,
     `${b7.url || "цель не отвечает"} ytd-app=${b7.desktop} ready=${b7.ready}`);
 
   ui.c.close();

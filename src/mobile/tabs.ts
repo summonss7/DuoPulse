@@ -428,6 +428,12 @@ export class MobileTabs {
     this.btn.title = this.order.length ? t("Вкладки ({n})", { n: this.order.length }) : t("Вкладки");
   }
 
+  /** Открыть лист вкладок извне (duopulse-210: кнопка вкладок шапки
+   *  web-оверлея — тот же лист, что у кнопки старта). */
+  openSwitcher(): void {
+    this.setSwitcher(true);
+  }
+
   private setSwitcher(open: boolean): void {
     this.wrap.hidden = !open;
     if (open) this.renderSwitcher();

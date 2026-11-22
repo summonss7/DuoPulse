@@ -66,6 +66,13 @@ export class MobileDuo {
   /** Последний снимок настроек ASR (панель спрашивает при открытии). */
   private asrSettingsSnap: MobileAsrSettings | null = null;
 
+  /** Автоповтор applySet уже сделан для этой duo-сессии (duopulse-210):
+   *  один на видео — ретраи не должны молотить рейт-лимит YouTube. */
+  private applyRetried = false;
+
+  /** Число дорожек, отданных движку последним applySet (e2e-снапшот). */
+  private engineTracks = 0;
+
   constructor(
     private readonly contentEl: HTMLElement,
     /** Плеер какой вкладки сейчас активен (вкладок много — duopulse-123). */
@@ -264,6 +271,7 @@ export class MobileDuo {
     this.close(false);
     this.videoId = videoId;
     const seq = ++this.seq;
+    this.applyRetried = false; // новая duo-сессия — автоповтор снова доступен
     this.emit({ text: t("duo: читаю дорожки…"), busy: true });
     try {
       // hl = язык UI приложения (duopulse-186): его же передаём как uiLang в
@@ -298,6 +306,8 @@ export class MobileDuo {
     this.seq++;
     this.engine.detach();
     this.engine.setTracks([]);
+    this.engineTracks = 0;
+    this.applyRetried = false;
     this.clock?.detach();
     this.clock = null;
     this.videoId = null;
@@ -370,6 +380,7 @@ export class MobileDuo {
     this.engine.setOffset(this.settings.offsetMs);
     if (!this.settings.enabled) {
       this.engine.setTracks([]);
+      this.engineTracks = 0;
       return;
     }
     void this.applySet(++this.seq);
@@ -379,6 +390,7 @@ export class MobileDuo {
     const list = this.list;
     if (!list || !this.settings.enabled || !this.settings.originalId) {
       this.engine.setTracks([]);
+      this.engineTracks = 0;
       if (list && this.settings.enabled && !this.settings.originalId) {
         this.emit({ text: t("duo: нет дорожки оригинала"), busy: false, error: true });
       }
@@ -416,6 +428,7 @@ export class MobileDuo {
         },
       ];
       this.engine.setTracks(tracks);
+      this.engineTracks = tracks.length;
       // Цель перевода: «auto» (дефолт) — по правилу дуо duopulse-196
       // (русский оригинал → gtx:en, прочие → gtx:ru, duopulse-201); явный
       // выбор в панели главнее — не перетираем.
@@ -448,6 +461,7 @@ export class MobileDuo {
             name: `Google → ${choice.lang}`,
           });
           this.engine.setTracks(tracks);
+      this.engineTracks = tracks.length;
           this.emit({ text: null, busy: false });
         } catch (e) {
           if (signal.aborted) return;
@@ -473,6 +487,7 @@ export class MobileDuo {
             cues: transCues,
           });
           this.engine.setTracks(tracks);
+      this.engineTracks = tracks.length;
           this.emit({ text: null, busy: false });
         } else {
           this.emit({ text: null, busy: false });
@@ -483,8 +498,48 @@ export class MobileDuo {
     } catch (e) {
       if (signal.aborted) return;
       this.engine.setTracks([]);
+      this.engineTracks = 0;
       this.emit({ text: t("duo: {message}", { message: messageOf(e) }), busy: false, error: true });
+      // duopulse-210: стартовый прогон нередко падает на сетевом затыке
+      // (429/таймаут cue) и субтитры «перестали показываться» до ручного
+      // тумблера — честный автоповтор ОДИН раз на видео через 9 с
+      if (!this.applyRetried) {
+        this.applyRetried = true;
+        const mySeq = this.seq;
+        window.setTimeout(() => {
+          if (mySeq !== this.seq) return; // сессия сменилась/закрылась
+          if (!this.videoId || !this.settings.enabled) return;
+          this.emit({ text: t("duo: повторяю загрузку субтитров…"), busy: true });
+          void this.applySet(++this.seq);
+        }, 9000);
+      }
     }
+  }
+
+  /** Снимок для e2e-стендов (window.__duopulseMobileDuo, duopulse-210). */
+  snapshot(): {
+    videoId: string | null;
+    enabled: boolean;
+    tracks: number;
+    clock: number | null;
+    plateRows: number;
+    status: DuoStatus | null;
+  } {
+    return {
+      videoId: this.videoId,
+      enabled: this.settings.enabled,
+      tracks: this.engineTracks,
+      clock: this.clock?.currentTime ?? null,
+      plateRows: document.querySelectorAll(".m-duo-plate .m-duo-row").length,
+      status: this.lastStatus,
+    };
+  }
+
+  /** Последний статус (панель показывает его при открытии — duopulse-210:
+   *  прежде ошибка, случившаяся ДО открытия панели, была невидима, отказ
+   *  выглядел «субтитры просто не работают»). */
+  get lastDuoStatus(): DuoStatus | null {
+    return this.lastStatus;
   }
 
   remove(): void {

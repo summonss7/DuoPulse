@@ -136,7 +136,7 @@ import java.io.ByteArrayInputStream
  * и «поле ☆ GO».
  *
  * duopulse-192 (доработка 191: «верхнее меню не такое, строка ввода адреса
- * не кликабельна — со всеми сайтами из поиска; YouTube верни расширенную»):
+ *  не кликабельна — со всеми сайтами из поиска; YouTube верни расширенную»):
  *  - тап по адресному чипу = омнибокс: чип сменяется полем ввода с текущим
  *    адресом, GO — URL-догадка (схема/домен/локальные — пара resolveMobileInput
  *    platform.ts) или поиск Google; YouTube-видео из ввода, как и клик по
@@ -146,12 +146,28 @@ import java.io.ByteArrayInputStream
  *    Polymer грузится с ДЕСКТОП-UA (вис 191 был у пары «десктопный сайт +
  *    мобильный UA»; с правильной парой главная грузится за секунды),
  *    m.youtube.com переписывается на www, серверный редирект goto ловится
- *    в onPageStarted UA-мисматчем → перезапрос. ДЕФОЛТ ВЫКЛ: стенд 192
- *    показал, что после десктопных страниц WebView оверлея клинится до
- *    конца сессии (главная ок, следующие навигации мертвы) — «виснет
- *    браузер» жалобы; дефолт — поведение 191 (app=desktop срезается,
- *    мобильный UA, m.youtube). Видео-страницы по-прежнему идут во
- *    встроенный плеер с duo-субтитрами, режим сайта их не касается.
+ *    в onPageStarted UA-мисматчем → перезапрос.
+ *
+ * duopulse-210 (жалоба «мобильная версия не нравится, сбои поиска, окна
+ * разные»): ДЕФОЛТ — десктопный YouTube (прошлый дефолт-выкл берёг от
+ * «клина», корнем которого был НЕ десктопный сайт, а смена userAgentString
+ * ГАСЯЩАЯ идущую навигацию — Android WebView останавливает загрузку на
+ * смене UA; «клин 192» = UA застрял десктопным, каждый уход с YouTube
+ * отменялся сбросом UA, см. loadWithUa). Теперь:
+ *  - loadWithUa: каждое изменение UA сопровождается собственным перезапуском
+ *    адреса (stopLoading + следующий такт UI-нити) — переходы
+ *    google.com/goto → youtube (302, стартует мимо shouldOverride) и уход
+ *    с YouTube обратно живы;
+ *  - кнопка «⋮» — пункт «Мобильная версия YouTube»/«Десктопная версия
+ *    YouTube» (переход на противоположную, жалобa: «кнопка перехода на
+ *    мобильную»);
+ *  - SPA-переход сайта YouTube на /watch (поиск внутри YouTube) ловит
+ *    консоль-хук DPURL — видео забирает встроенный плеер, как клик по
+ *    ссылке из выдачи Google (прежде — страница m/www.youtube в оверлее);
+ *  - шапка — зеркальная старту и по ВИДУ иконок: ⌂/вкладки/⋮/★/→/щит —
+ *    линейные Path-иконки (перенос SVG старта, как GlassesIcon), а не
+ *    текстовые глифы; кнопка вкладок с бейджем — та же sheet-вкладок,
+ *    «⬇» и щит VPN — по живому состоянию старта (хук __duopulseHeaderState).
  */
 object MobileWebHelper {
   private const val TAG = "DuoPulseWeb"
@@ -160,13 +176,21 @@ object MobileWebHelper {
    *  живут рядом с их UI, без JNI-моста в settings.json Core. */
   private const val PREFS = "duopulse_web"
 
-  /** «Десктопный YouTube» (duopulse-192, просьба вернуть «расширенную»):
-   *  дефолт ВЫКЛ — даже с десктоп-UA десктопный YouTube клинит WebView
-   *  оверлея (стенд 192: главная грузится за 4 с, но ВСЕ следующие
-   *  навигации сессии умирают — тот самый «виснет браузер» жалобы);
-   *  «расширенная» включается тумблером «⋮» — на мощных устройствах
-   *  работает, состояние переживает рестарт). */
-  private const val PREF_YT_DESKTOP = "yt_desktop"
+  /** «Десктопный YouTube» (duopulse-192; duopulse-210 — дефолт ВКЛ по
+   *  жалобе «мобильная версия вообще не нравится»): «клин 192», из-за
+   *  которого дефолт держали выключенным, коренился в отмене навигации
+   *  сменой userAgentString (см. loadWithUa), а не в десктопном сайте —
+   *  с починенным перезапуском десктопный YouTube живёт в оверлее
+   *  стабильно. Ключ ПЕРЕИМЕНОВАН (yt_desktop → yt_desktop2): у всех
+   *  носителей старой сборки записан false — это был дефолт 192, а не
+   *  осознанный выбор мобильной версии; чтение старого ключа оставило бы
+   *  их на мобильной вопреки просьбе нового дефолта. Состояние переживает
+   *  рестарт. */
+  private const val PREF_YT_DESKTOP = "yt_desktop2"
+
+  /** Дефолт режима YouTube (duopulse-210): десктопный сайт как в просьбе
+   *  Артёма; переключение — пунктом «⋮» («Мобильная версия YouTube»). */
+  private const val YT_DESKTOP_DEFAULT = true
 
   /** Хвосты рекламных/трекинговых хостов для лёгкого адблока (суффикс-матч
    *  по host подресурсов; главные фреймы не режем — сайт должен открыться).
@@ -197,13 +221,21 @@ object MobileWebHelper {
   /** Очки-инкогнито шапки (duopulse-207): подсветка по состоянию режима. */
   private var glassesIcon: GlassesIcon? = null
 
+  /** Кнопка вкладок шапки (duopulse-210 — зеркало старта): бейдж-счётчик
+   *  обновляется из __duopulseHeaderState, тап — лист вкладок старта. */
+  private var tabsBadge: TextView? = null
+
+  /** Щит VPN шапки (duopulse-210): виден только при активном тоннеле —
+   *  как индикатор .m-vpn-shield старта; тап — лист VPN. */
+  private var shieldBtn: View? = null
+
   /** «⬇» загрузки шапки (duopulse-207): YouTube-видео — плеер + лист
    *  аудио/видео/субтитров, прочая страница — тост-подсказка. */
   private var musicBtn: Button? = null
 
-  /** Звёздочка закладки в строке адреса (duopulse-207): ☆/★, тот же стор
-   *  закладок, что у меню «⋮» и экрана ветки. */
-  private var starBtn: Button? = null
+  /** Звёздочка закладки в строке адреса (duopulse-207; иконка — 210): тот
+   *  же стор закладок, что у меню «⋮» и экрана ветки. */
+  private var starBtn: StarIcon? = null
 
   /** Омнибокс-поле адреса шапки (duopulse-202): всегда редактируемое,
    *  как на старте приложения, — показывает текущий URL, тап выделяет
@@ -300,15 +332,14 @@ object MobileWebHelper {
     return host == "youtube.com" || host.endsWith(".youtube.com")
   }
 
-  /** Тумблер «Десктопный YouTube» (duopulse-192): SharedPreferences; дефолт
-   *  ВЫКЛ — мобильная версия 191 (десктопный сайт клинит WebView оверлея,
-   *  см. комментарий у PREF_YT_DESKTOP). */
+  /** Тумблер «Десктопный YouTube» (duopulse-192; дефолт ВКЛ — duopulse-210):
+   *  SharedPreferences. */
   private fun ytDesktop(ctx: Context): Boolean =
     try {
       ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        .getBoolean(PREF_YT_DESKTOP, false)
+        .getBoolean(PREF_YT_DESKTOP, YT_DESKTOP_DEFAULT)
     } catch (e: Exception) {
-      false
+      YT_DESKTOP_DEFAULT
     }
 
   private fun setYtDesktop(ctx: Context, on: Boolean) {
@@ -337,19 +368,6 @@ object MobileWebHelper {
   private fun ytDesktopSafe(): Boolean =
     MainActivity.current?.let { ytDesktop(it) } ?: true
 
-  /** Выставить UA под адрес ДО запроса (duopulse-192): open/клики/ввод
-   *  проходят наши хуки; серверные редиректы (google.com/goto) догоняет
-   *  onPageStarted. Смена UA не перезагружает текущую страницу. */
-  private fun applyUaFor(url: String) {
-    val wv = webView ?: return
-    val base = defaultUa ?: return
-    val target = uaFor(url, base)
-    if (wv.settings.userAgentString != target) {
-      wv.settings.userAgentString = target
-      Log.d(TAG, "ua-switch: ${target.take(60)}… ← ${url.take(80)}")
-    }
-  }
-
   /** UA WebView не соответствует целевому для адреса (duopulse-192): адрес
    *  стартовал без нашего хука (серверный редирект) — сигналя перезапуску. */
   private fun uaMismatched(url: String): Boolean {
@@ -358,11 +376,33 @@ object MobileWebHelper {
     return wv.settings.userAgentString != uaFor(url, base)
   }
 
+  /** Загрузить адрес, при необходимости сменив UA (duopulse-210): смена
+   *  userAgentString ГАСИТ идущую навигацию (Android WebView останавливает
+   *  загрузку на изменении настройки — живой репро: клик органики YouTube
+   *  из выдачи Google при десктоп-режиме «отскакивал» обратно к выдаче).
+   *  Потому каждое изменение UA сопровождаем собственным перезапуском:
+   *  stopLoading → смена UA → loadUrl на СЛЕДУЮЩЕМ такте UI-нити (новая
+   *  навигация стартует уже с устоявшимся UA). UA не меняется — просто
+   *  loadUrl. Второй проход идёт с совпавшим UA — цикла нет. */
+  private fun loadWithUa(url: String) {
+    val wv = webView ?: return
+    val base = defaultUa ?: return
+    val target = uaFor(url, base)
+    if (wv.settings.userAgentString == target) {
+      wv.loadUrl(url)
+      return
+    }
+    wv.stopLoading()
+    wv.settings.userAgentString = target
+    Log.d(TAG, "ua-switch: ${target.take(60)}… ← ${url.take(80)}")
+    wv.post { if (webView === wv) wv.loadUrl(url) }
+  }
+
   /** Адрес главного фрейма YouTube под режимом (duopulse-191/192):
    *  мобильный режим (тумблер выкл) — выбросить app=desktop: десктопный
    *  Polymer на мобильном UA вешает WebView скелетоном (191); «расширенный»
    *  (вкл, дефолт) — наоборот, m.youtube.com переписать на www (тот же сайт
-   *  загрузится десктопной версией с десктоп-UA, см. applyUaFor). Страницы
+   *  загрузится десктопной версией с десктоп-UA, см. loadWithUa). Страницы
    *  видео не трогаем (их забирает встроенный плеер). null — не трогать. */
   private fun youTubeModeUrl(url: String): String? {
     val u = try {
@@ -441,21 +481,55 @@ object MobileWebHelper {
     val q = raw.trim()
     if (q.isEmpty()) return
     val target = resolveInput(q)
-    applyUaFor(target)
     youTubeVideoId(target)?.let { id ->
       openVideoInPlayer(id)
       return
     }
-    webView?.loadUrl(target)
+    // duopulse-210: смена UA (YouTube↔прочие) гасит идущую навигацию —
+    // перезапуск адреса берёт на себя loadWithUa
+    loadWithUa(target)
   }
 
   /** Показ адреса и кнопок шапки — на каждой смене URL. Пока поле в
-   * фокусе (правка), ввод пользователя не затираем — только кнопки. */
+   *  фокусе (правка), ввод пользователя не затираем — только кнопки. */
   private fun syncChrome(url: String?) {
     if (!addrEditing) addrEdit?.setText(url ?: "")
     val hasVideo = url != null && youTubeVideoId(url) != null
     duoBtn?.visibility = if (hasVideo) View.VISIBLE else View.GONE
     syncStar(url)
+    syncHeaderState()
+  }
+
+  /** Живое состояние шапки старта (duopulse-210): вкладки/видео/VPN из
+   *  UI-webview (хук __duopulseHeaderState mobile.ts) — состав ряда 1
+   *  оверлея повторяет старт, а не живёт своей жизнью. */
+  private fun syncHeaderState() {
+    val tw = MainActivity.tauriWebView ?: return
+    tw.evaluateJavascript(
+      "window.__duopulseHeaderState ? window.__duopulseHeaderState() : null"
+    ) { v ->
+      if (v == "null" || v.isEmpty()) return@evaluateJavascript
+      try {
+        val o = org.json.JSONObject(v)
+        val tabs = o.optInt("tabs", 0)
+        val video = o.optBoolean("video", false)
+        val vpn = o.optBoolean("vpn", false)
+        tabsBadge?.let { b ->
+          // как старта (tabs.ts): бейдж скрыт только при нуле вкладок
+          if (tabs > 0) {
+            b.text = if (tabs > 99) "99" else tabs.toString()
+            b.visibility = View.VISIBLE
+          } else {
+            b.visibility = View.GONE
+          }
+        }
+        // ⬇ — как старт: есть только при открытом видео (duopulse-210)
+        musicBtn?.visibility = if (video) View.VISIBLE else View.GONE
+        shieldBtn?.visibility = if (vpn) View.VISIBLE else View.GONE
+      } catch (e: Exception) {
+        Log.d(TAG, "header-state: ${e.message}")
+      }
+    }
   }
 
   /** Звёздочка закладки (duopulse-207): состояние страницы — тот же стор,
@@ -471,8 +545,7 @@ object MobileWebHelper {
     }
     b.visibility = View.VISIBLE
     val on = MobileBookmarksNative.has(trusted)
-    b.text = if (on) "★" else "☆"
-    b.setTextColor(Color.parseColor(if (on) "#BDFE4F" else "#F2F7EE"))
+    b.setOn(on)
     b.contentDescription = if (on) "Убрать из избранного" else "В избранное"
   }
 
@@ -520,10 +593,10 @@ object MobileWebHelper {
       syncChrome(url)
       queryPrivateState()
       // duopulse-191/192: адрес под режимом YouTube — мобильный срезает
-      // app=desktop, «расширенный» держит десктоп (с десктоп-UA до запроса)
+      // app=desktop, «расширенный» держит десктоп (с десктоп-UA до запроса;
+      // duopulse-210 — перезапуск/смена UA одной функцией)
       val target = youTubeModeUrl(url) ?: url
-      applyUaFor(target)
-      webView?.loadUrl(target)
+      loadWithUa(target)
       ov.visibility = View.VISIBLE
       backCallback.isEnabled = true
     }
@@ -538,6 +611,10 @@ object MobileWebHelper {
     webView?.onResume()
     ov.visibility = View.VISIBLE
     backCallback.isEnabled = true
+    // состояние шапки старта могло измениться, пока оверлей был спрятан
+    // за плеером (открыто/закрыто видео, вкладки) — duopulse-210
+    syncHeaderState()
+    queryPrivateState()
     MainActivity.tauriWebView?.evaluateJavascript(
       "window.__duopulseOverlayShown && window.__duopulseOverlayShown()", null)
   }
@@ -663,12 +740,15 @@ object MobileWebHelper {
     items += "⧉  Копировать ссылку" to { copyUrl(act, url) }
     items += "↗  Поделиться…" to { share(act, url) }
     items += "⌘  Открыть в браузере" to { openInBrowser(act, url) }
-    // «Расширенный» YouTube (duopulse-192, просьба Артёма): десктопный сайт
-    // с десктоп-UA (мобильный UA + десктопный Polymer = вис 191); выкл —
-    // прежнее поведение 191 (app=desktop срезается, m.youtube). Видео-страницы
-    // режим не касается — их всегда забирает встроенный плеер duo
+    // Версия YouTube (duopulse-192; duopulse-210 — дефолт десктопная, пункт
+    // называет ЦЕЛЬ перехода — «кнопка перехода на мобильную» из жалобы):
+    // десктоп — десктопный сайт с десктоп-UA (мобильный UA + десктопный
+    // Polymer = вис 191); мобильная — поведение 191 (app=desktop срезается,
+    // m.youtube). Видео-страницы режим не касается — их всегда забирает
+    // встроенный плеер duo
     val ytDesk = ytDesktop(act)
-    items += (if (ytDesk) "✓" else "○") + "  Десктопный YouTube" to {
+    items += (if (ytDesk) "▦" else "□") + "  " +
+      (if (ytDesk) "Мобильная версия YouTube" else "Десктопная версия YouTube") to {
       val on = !ytDesk
       setYtDesktop(act, on)
       Toast.makeText(
@@ -677,13 +757,13 @@ object MobileWebHelper {
         else "YouTube — мобильная версия",
         Toast.LENGTH_SHORT
       ).show()
-      // на YouTube — перечитать адрес уже в новом режиме
+      // на YouTube — перечитать адрес уже в новом режиме (duopulse-210 —
+      // UA-перезапуск одной функцией)
       val wv2 = webView
       if (wv2 != null && youTubeHost(wv2.url ?: "")) {
         val cur = wv2.url ?: ""
         val target = youTubeModeUrl(cur) ?: cur
-        applyUaFor(target)
-        wv2.loadUrl(target)
+        loadWithUa(target)
       }
     }
     // Тумблер полного блокировщика (duopulse-144): галка — состояние из
@@ -836,6 +916,8 @@ object MobileWebHelper {
     glassesIcon = null
     musicBtn = null
     starBtn = null
+    tabsBadge = null
+    shieldBtn = null
     progress = null
     defaultUa = null
     hidden = false
@@ -912,14 +994,29 @@ object MobileWebHelper {
       marginEnd = dp(marginEndDp)
     }
 
-    // ряд 1 — как .m-bar-top старта (⌂ + логотип (растягивается) + … + ⋮):
-    // «назад»/закрытие — системной кнопкой/жестом (backCallback и прежде
-    // вёл историю WebView), «⌂» — домой (goHome закрывает оверлей)
+    // ряд 1 — зеркало .m-bar-top старта ПО СОСТАВУ (duopulse-210): ⌂ + логотип
+    // (растягивается) + вкладки(бейдж) + щит VPN (при тоннеле) + очки +
+    // [▶ duo] [⬇] (при видео) + ⋮; «назад»/закрытие — системной кнопкой/жестом
+    // (backCallback и прежде вёл историю WebView), «⌂» — домой (goHome)
     val bar = LinearLayout(act)
     bar.orientation = LinearLayout.HORIZONTAL
     bar.setPadding(dp(10), dp(6), dp(10), 0)
+    // бейдж вкладок выступает за кнопку (как .m-tabs-badge) — не резать
+    bar.clipChildren = false
+    bar.clipToPadding = false
 
-    val homeBtn = toolButton("⌂", "На стартовый экран")
+    // круглая прозрачная иконка-кнопка — как .m-icon старта (36dp, ripple)
+    val rippleId = TypedValue().let {
+      act.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, it, true)
+      it.resourceId
+    }
+    fun iconBtn(icon: View, title: String): View {
+      icon.contentDescription = title
+      icon.setBackgroundResource(rippleId)
+      return icon
+    }
+
+    val homeBtn = iconBtn(HomeIcon(act), "На стартовый экран")
     homeBtn.setOnClickListener { goHome() }
     bar.addView(homeBtn, iconLp(8))
 
@@ -932,12 +1029,61 @@ object MobileWebHelper {
     mark.setSpan(ForegroundColorSpan(Color.parseColor("#BDFE4F")), 3, 8,
       Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     mark.setSpan(StyleSpan(Typeface.BOLD), 3, 8, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    logo.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     logo.text = mark
     logo.textSize = 15f
     logo.gravity = Gravity.CENTER_VERTICAL
     logo.setPadding(dp(8), 0, 0, 0)
     bar.addView(logo, LinearLayout.LayoutParams(
       0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginEnd = dp(8) })
+
+    // вкладки (duopulse-210) — как #mTabsBtn старта: иконка + бейдж-счётчик
+    // (акцентная пилюля на углу кнопки), тап — тот же лист вкладок старта
+    // (хук __duopulseShowTabs UI-webview)
+    val tabsBox = FrameLayout(act)
+    tabsBox.clipChildren = false
+    tabsBox.addView(iconBtn(TabsIcon(act), "Вкладки"), FrameLayout.LayoutParams(
+      FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+    val badge = TextView(act)
+    badge.setTextColor(Color.parseColor("#0a0e17")) // --bg-base
+    badge.textSize = 11f
+    badge.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    badge.gravity = Gravity.CENTER
+    badge.setPadding(dp(4), 0, dp(4), 0)
+    badge.background = GradientDrawable().apply {
+      shape = GradientDrawable.OVAL
+      setColor(Color.parseColor("#BDFE4F")) // --accent-neon
+    }
+    badge.visibility = View.GONE
+    tabsBox.addView(badge, FrameLayout.LayoutParams(
+      FrameLayout.LayoutParams.WRAP_CONTENT, dp(16), Gravity.TOP or Gravity.END).apply {
+      marginEnd = dp(-5)
+      topMargin = dp(-2)
+    })
+    tabsBox.setOnClickListener {
+      // лист вкладок живёт в UI-webview ПОД оверлеем — прячем оверлей
+      // (как «Закладки»/«Настройки» меню, duopulse-193); «назад» вернёт
+      hide()
+      MainActivity.tauriWebView?.evaluateJavascript(
+        "window.__duopulseShowTabs && window.__duopulseShowTabs()", null)
+    }
+    bar.addView(tabsBox, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+      topMargin = dp(2)
+      marginEnd = dp(8)
+    })
+    tabsBadge = badge
+
+    // щит VPN (duopulse-210) — как .m-vpn-shield старта: виден при активном
+    // тоннеле (состояние — __duopulseHeaderState), тап — лист VPN старта
+    val shield = iconBtn(ShieldIcon(act), "VPN")
+    shield.visibility = View.GONE
+    shield.setOnClickListener {
+      hide() // лист VPN — в UI-webview под оверлеем, как у старта
+      MainActivity.tauriWebView?.evaluateJavascript(
+        "window.__duopulseShowVpn && window.__duopulseShowVpn()", null)
+    }
+    bar.addView(shield, iconLp(8))
+    shieldBtn = shield
 
     // очки-инкогнито (duopulse-207) — как .m-private-btn старта: иконка 18dp
     // в круге 36dp (перенос SVG — юникод-«очки» это эмодзи и ломает дизайн);
@@ -982,7 +1128,9 @@ object MobileWebHelper {
 
     // «⬇» загрузка (duopulse-207) — как .m-music-btn старта: pill 34×30,
     // рамка акцента 0.35, elevated-фон; видео — плеер + лист загрузок,
-    // прочее — тост (кнопка всегда видна: шапка не «меняется», жалоба 207)
+    // прочее — тост. duopulse-210: видимость — по живому состоянию старта
+    // (кнопка есть ⇔ открыто видео, как #mMusic; без видео старта её нет —
+    // зеркало по составу, а не «всегда»)
     val music = Button(act)
     music.text = "⬇"
     music.contentDescription = "Скачать: аудио, видео или субтитры"
@@ -1011,13 +1159,16 @@ object MobileWebHelper {
           Toast.LENGTH_LONG).show()
       }
     }
+    music.visibility = View.GONE
     bar.addView(music, LinearLayout.LayoutParams(dp(34), dp(30)).apply {
       gravity = Gravity.CENTER_VERTICAL
       marginEnd = dp(8)
     })
     musicBtn = music
 
-    val menuBtn = toolButton("⋮", "Меню")
+    // ⋮ (duopulse-210) — линейная иконка, как #mMenu старта (текстовый
+    // глиф рендерился тяжёлее прочих линий шапки)
+    val menuBtn = iconBtn(DotsIcon(act), "Меню")
     menuBtn.setOnClickListener { showMenu(act, it) }
     bar.addView(menuBtn, iconLp())
 
@@ -1077,9 +1228,12 @@ object MobileWebHelper {
     urlRow.addView(edit, LinearLayout.LayoutParams(0, dp(36), 1f))
     addrEdit = edit
 
-    // звёздочка закладки (duopulse-207) — между адресом и GO, как mStar
-    // старта: ☆/★, состояние/тап — тот же стор закладок, что у меню «⋮»
-    val star = toolButton("☆", "В избранное")
+    // звёздочка закладки (duopulse-207; иконка — duopulse-210) — между
+    // адресом и GO, как mStar старта: контур/заливка, состояние/тап — тот
+    // же стор закладок, что у меню «⋮»
+    val star = StarIcon(act)
+    star.contentDescription = "В избранное"
+    star.setBackgroundResource(rippleId)
     star.setOnClickListener {
       val wv = webView ?: return@setOnClickListener
       val url = trustedUrl(wv) ?: return@setOnClickListener
@@ -1096,22 +1250,18 @@ object MobileWebHelper {
     })
     starBtn = star
 
-    // GO — как .m-go старта: круглая 36dp акцентная, тёмная стрелка
-    val goBtn = Button(act)
-    goBtn.text = "→"
+    // GO — как .m-go старта: круглая 36dp акцентная, тёмная СТРЕЛКА-иконка
+    // (duopulse-210 — линейный SVG вместо текстового «→»)
+    val goBtn = FrameLayout(act)
     goBtn.contentDescription = "Перейти"
-    goBtn.setTextColor(Color.parseColor("#0a0e17")) // --bg-base
-    goBtn.textSize = 16f
-    goBtn.gravity = Gravity.CENTER
-    goBtn.setPadding(0, 0, 0, 0)
-    goBtn.minimumWidth = 0
-    goBtn.minWidth = 0
-    goBtn.minimumHeight = 0
-    goBtn.minHeight = 0
     goBtn.background = GradientDrawable().apply {
       shape = GradientDrawable.OVAL
       setColor(Color.parseColor("#BDFE4F")) // --accent-neon
     }
+    val goArrow = GoArrowIcon(act)
+    goArrow.setTint(Color.parseColor("#0a0e17")) // --bg-base
+    goBtn.addView(goArrow, FrameLayout.LayoutParams(
+      FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
     goBtn.setOnClickListener { commitAddrEdit(edit.text.toString()) }
     urlRow.addView(goBtn, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
       marginStart = dp(8)
@@ -1179,8 +1329,7 @@ object MobileWebHelper {
           // app=desktop, расширенный переписывает m → www — и грузим с
           // правильным UA (до запроса)
           youTubeModeUrl(request.url.toString())?.let { clean ->
-            applyUaFor(clean)
-            view.loadUrl(clean)
+            loadWithUa(clean)
             return true
           }
           // Переход на YouTube-видео с выдачи/другого сайта (duopulse-139) — не
@@ -1189,8 +1338,13 @@ object MobileWebHelper {
             openVideoInPlayer(id)
             return true
           }
-          // UA под цель до запроса (duopulse-192): youtube↔прочие сайты
-          applyUaFor(request.url.toString())
+          // UA под цель до запроса (duopulse-192): youtube↔прочие сайты.
+          // duopulse-210: смена UA гасит эту навигацию — забираем адрес себе
+          // и перезапускаем уже с устоявшимся UA (loadWithUa)
+          if (uaMismatched(request.url.toString())) {
+            loadWithUa(request.url.toString())
+            return true
+          }
         }
         return false
       }
@@ -1226,26 +1380,26 @@ object MobileWebHelper {
         progress?.let { it.progress = 5; it.visibility = View.VISIBLE }
         // duopulse-191/192: серверный редирект (google.com/goto → 302) не
         // проходит shouldOverrideUrlLoading — YouTube под режимом ловим и
-        // здесь: адрес под режимом, затем UA (очищенный/переписанный адрес
-        // повторной переработки не требует — цикла нет)
+        // здесь: адрес под режимом + UA (duopulse-210 — перезапуск и смену
+        // UA ведёт loadWithUa: смена UA в одиночку гасила бы навигацию)
         youTubeModeUrl(url)?.let { clean ->
-          applyUaFor(clean)
-          view.loadUrl(clean)
+          loadWithUa(clean)
           return
         }
         // duopulse-192: редирект мог привести на десктопный YouTube до нашего
         // ведома (goto несёт app=desktop) — запрос уже ушёл с мобильным UA,
         // той паре и обязан вис 191: выставить десктоп-UA и перезапросить
         // (второй проход идёт правильным UA — цикла нет). Уход с YouTube —
-        // просто вернуть мобильный UA будущим загрузкам (без перезапуска).
+        // вернуть мобильный UA (duopulse-210: ТОЖЕ с перезапуском — голый
+        // сброс UA отменял навигацию, «клин до конца сессии» карточки 192)
         if (youTubeHost(url) && ytDesktopSafe()) {
           if (uaMismatched(url)) {
-            applyUaFor(url)
-            view.loadUrl(url)
+            loadWithUa(url)
             return
           }
         } else if (defaultUa != null && view.settings.userAgentString != defaultUa) {
-          view.settings.userAgentString = defaultUa
+          loadWithUa(url)
+          return
         }
         // чип адреса — сразу (duopulse-192), не дожидаясь onPageFinished
         syncChrome(url)
@@ -1545,6 +1699,126 @@ object MobileWebHelper {
           // битый JSON с чужой страницы — тихо, страница не страдает
         }
       }
+    }
+  }
+
+  /** Линейная иконка шапки (duopulse-210): перенос SVG старта (viewBox
+   *  16×16, stroke из исходника, ROUND cap/join) в Canvas-рисование —
+   *  текстовые глифы (⌂/⋮/☆/→) рендерятся системным шрифтом толще и
+   *  «другим браузером» на фоне тонких линий .m-bar (жалоба 210-1).
+   *  18dp иконка по центру кнопки 36dp — как 18px SVG в кнопке старта. */
+  private open class LineIcon(act: Context, private val strokeUnits: Float) : View(act) {
+    protected val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+      style = android.graphics.Paint.Style.STROKE
+      strokeCap = android.graphics.Paint.Cap.ROUND
+      strokeJoin = android.graphics.Paint.Join.ROUND
+      color = Color.parseColor("#F2F7EE") // --text-primary
+    }
+
+    fun setTint(color: Int) {
+      paint.color = color
+      invalidate()
+    }
+
+    override fun onDraw(c: android.graphics.Canvas) {
+      val box = 18f * resources.displayMetrics.density
+      val pad = (width - box) / 2f
+      paint.strokeWidth = strokeUnits // юниты viewBox — масштаб canvas.scale
+      c.save()
+      c.translate(pad, pad)
+      c.scale(box / 16f, box / 16f)
+      iconDraw(c)
+      c.restore()
+    }
+
+    /** Рисование в координатах viewBox 16×16 (краска уже настроена). */
+    protected open fun iconDraw(c: android.graphics.Canvas) {}
+  }
+
+  /** ⌂ домой — SVG #mHome старта: домик с дверной выемкой. */
+  private class HomeIcon(act: Context) : LineIcon(act, 1.6f) {
+    override fun iconDraw(c: android.graphics.Canvas) {
+      val path = android.graphics.Path().apply {
+        moveTo(2.5f, 7f); lineTo(8f, 2.5f); lineTo(13.5f, 7f); lineTo(13.5f, 13.5f)
+        lineTo(9.5f, 13.5f); lineTo(9.5f, 9.5f); lineTo(6.5f, 9.5f); lineTo(6.5f, 13.5f)
+        lineTo(2.5f, 13.5f); close()
+      }
+      c.drawPath(path, paint)
+    }
+  }
+
+  /** Вкладки — SVG #mTabsBtn старта: подложка-прякладка + линия ряда. */
+  private class TabsIcon(act: Context) : LineIcon(act, 1.6f) {
+    override fun iconDraw(c: android.graphics.Canvas) {
+      c.drawRoundRect(2f, 3f, 14f, 13f, 1.5f, 1.5f, paint)
+      c.drawLine(2f, 7f, 14f, 7f, paint)
+    }
+  }
+
+  /** ⋮ меню — SVG #mMenu старта: три точки заливкой. */
+  private class DotsIcon(act: Context) : LineIcon(act, 1.6f) {
+    override fun iconDraw(c: android.graphics.Canvas) {
+      val fill = android.graphics.Paint(paint).apply { style = android.graphics.Paint.Style.FILL }
+      for (y in intArrayOf(3, 8, 13)) c.drawCircle(8f, y.toFloat(), 1.5f, fill)
+    }
+  }
+
+  /** → GO — SVG .m-go старта: стрелка stroke 1.8 (тёмная на акцентном круге). */
+  private class GoArrowIcon(act: Context) : LineIcon(act, 1.8f) {
+    init { paint.color = Color.parseColor("#0a0e17") } // --bg-base на акценте
+
+    override fun iconDraw(c: android.graphics.Canvas) {
+      c.drawLine(3f, 8f, 12f, 8f, paint)
+      val path = android.graphics.Path().apply {
+        moveTo(9f, 4.5f); lineTo(12.5f, 8f); lineTo(9f, 11.5f)
+      }
+      c.drawPath(path, paint)
+    }
+  }
+
+  /** ☆/★ закладка — SVG #mStar старта: контур text-primary / заливка
+   *  accent-neon (setOn, как dataset.on у старта). */
+  private class StarIcon(act: Context) : LineIcon(act, 1.6f) {
+    private var on = false
+    private val fill = android.graphics.Paint()
+
+    fun setOn(onState: Boolean) {
+      on = onState
+      invalidate()
+    }
+
+    override fun iconDraw(c: android.graphics.Canvas) {
+      val path = android.graphics.Path().apply {
+        moveTo(8f, 2.2f); lineTo(9.7f, 5.8f); lineTo(13.6f, 6.3f)
+        lineTo(10.7f, 9f); lineTo(11.5f, 12.9f); lineTo(8f, 11f)
+        lineTo(4.5f, 12.9f); lineTo(5.3f, 9f); lineTo(2.4f, 6.3f)
+        lineTo(6.3f, 5.8f); close()
+      }
+      if (on) {
+        fill.set(paint)
+        fill.style = android.graphics.Paint.Style.FILL
+        fill.color = Color.parseColor("#BDFE4F") // --accent-neon
+        c.drawPath(path, fill)
+      } else {
+        c.drawPath(path, paint)
+      }
+    }
+  }
+
+  /** Щит VPN — SVG .m-vpn-shield старта (виден при активном тоннеле). */
+  private class ShieldIcon(act: Context) : LineIcon(act, 1.6f) {
+    override fun iconDraw(c: android.graphics.Canvas) {
+      val path = android.graphics.Path().apply {
+        moveTo(8f, 1.8f); lineTo(13f, 3.6f); lineTo(13f, 7.5f)
+        cubicTo(13f, 10.7f, 10.9f, 13f, 8f, 14.2f)
+        cubicTo(5.1f, 13f, 3f, 10.7f, 3f, 7.5f)
+        lineTo(3f, 3.6f); close()
+      }
+      c.drawPath(path, paint)
+      val check = android.graphics.Path().apply {
+        moveTo(5.6f, 7.8f); lineTo(7.4f, 9.6f); lineTo(10.4f, 6.2f)
+      }
+      c.drawPath(check, paint)
     }
   }
 

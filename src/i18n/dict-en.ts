@@ -698,6 +698,7 @@ export const dict: Record<string, string> = {
   "duo · субтитры": "duo · subtitles",
   "duo: {message}": "duo: {message}",
   "duo: грузю субтитры…": "duo: loading subtitles…",
+  "duo: повторяю загрузку субтитров…": "duo: retrying subtitle load…",
   "duo: дорожка оригинала недоступна": "duo: original track unavailable",
   "duo: нет дорожки оригинала": "duo: no original track",
   "duo: перевод {pct}%": "duo: translating {pct}%",

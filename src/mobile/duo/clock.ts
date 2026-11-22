@@ -48,12 +48,17 @@ export function freezeStep(lastAdvanceAt: number, now: number, timeDelta: number
 const API_SRC = "https://www.youtube.com/iframe_api";
 const POLL_MS = 150;
 
-/** Однократная загрузка скрипта API (общий промис на страницу). */
+/** Однократная загрузка скрипта API (общий промис на страницу). Сбой не
+ *  «отравляет» страницу (duopulse-210): отклонённый промис из кэша бил бы
+ *  ВСЕ последующие подключения часов до перезапуска приложения — субтитры
+ *  «переставали показываться» после одного сетевого затыка на старте.
+ *  Теперь неудачная попытка кэш очищает — следующий wireClock грузит
+ *  скрипт заново. */
 function loadYtApi(win: YtWindow): Promise<YtNamespace> {
   if (win.YT?.Player) return Promise.resolve(win.YT);
   const w = win as { __duoYtApiPromise?: Promise<YtNamespace> };
   if (w.__duoYtApiPromise) return w.__duoYtApiPromise;
-  w.__duoYtApiPromise = new Promise((resolve, reject) => {
+  const p = new Promise<YtNamespace>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(t("IFrame API не загрузился"))), 15_000);
     const prev = win.onYouTubeIframeAPIReady;
     win.onYouTubeIframeAPIReady = () => {
@@ -71,7 +76,13 @@ function loadYtApi(win: YtWindow): Promise<YtNamespace> {
     };
     win.document.head.appendChild(s);
   });
-  return w.__duoYtApiPromise;
+  w.__duoYtApiPromise = p;
+  // неудача — кэш снять: повторное подключение (новое видео/heal) начнёт
+  // загрузку заново, а не получит готовый отказ навсегда
+  p.catch(() => {
+    if (w.__duoYtApiPromise === p) w.__duoYtApiPromise = undefined;
+  });
+  return p;
 }
 
 type Listener = () => void;

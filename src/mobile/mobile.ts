@@ -525,8 +525,16 @@ duoBtn.addEventListener("click", () => {
     );
     content.appendChild(duoPanel.root);
     duoPanel.refreshList(duo.trackList);
+    // duopulse-210: последний статус duo — в панель при открытии: отказ
+    // (429/сеть), случившийся ДО открытия панели, прежде был невидим и
+    // выглядел «субтитры просто не работают»
+    const last = duo.lastDuoStatus;
+    if (last) duoPanel.setStatus(last);
   })();
 });
+// диагностика e2e-стендов (duopulse-210): снапшот duo-сессии
+(window as { __duopulseMobileDuo?: () => unknown }).__duopulseMobileDuo = () =>
+  duo.snapshot();
 
 // ── Загрузки с YouTube (duopulse-121 → 122): «⬇» на экране видео открывает
 // лист выбора — аудио (m4a/opus), видео (mp4, склейка со звуком) и субтитры
@@ -858,7 +866,28 @@ home.addEventListener("click", goHome);
 (window as { __duopulseOpenSettings?: () => void }).__duopulseOpenSettings = () => {
   setMenu(true);
 };
-for (const b of root.querySelectorAll<HTMLButtonElement>(".m-quick")) {
+// Входы шапки web-оверлея (duopulse-210 — зеркало старта): кнопка вкладок
+// открывает тот же лист, щит VPN — лист VPN, а хук __duopulseHeaderState
+// отдаёт живой состав шапки старта (вкладки/видео/VPN) — ряд 1 оверлея
+// повторяет старт, а не живёт своей жизнью.
+(window as { __duopulseShowTabs?: () => void }).__duopulseShowTabs = () => {
+  tabs.openSwitcher();
+};
+(window as { __duopulseShowVpn?: () => void }).__duopulseShowVpn = () => {
+  setMenu(false);
+  vpn.setSheet(true);
+};
+(window as { __duopulseHeaderState?: () => { tabs: number; video: boolean; vpn: boolean } })
+  .__duopulseHeaderState = () => ({
+  tabs: tabs.count,
+  video: videoOpen,
+  vpn: !root.querySelector<HTMLElement>(".m-vpn-shield")?.hidden,
+});
+// duopulse-210: только кнопки-ссылки стартового экрана (data-url); кнопка
+// «Закладки» (bookmarks.ts) тоже носит класс .m-quick, но БЕЗ data-url —
+// прежний цикл вешал на неё navigate("") и тап открывал пустой поиск
+// Google поверх приложения (видео и закладки «исчезали»).
+for (const b of root.querySelectorAll<HTMLButtonElement>(".m-quick[data-url]")) {
   b.addEventListener("click", () => {
     omnibox.value = b.dataset.url ?? "";
     void navigate(b.dataset.url ?? "");
