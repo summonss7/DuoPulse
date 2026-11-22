@@ -11,6 +11,12 @@
 //!   duopulse-094, duopulse-113): слово появляется в момент речи, на
 //!   экране всегда ОДНА строка — набираемая; завершённая (уже проговорённая)
 //!   строка держится только до первого слова следующей, стопки строк нет.
+//!   Дорожка без `aAppend` (ручные дорожки и часть сессий автодорожек —
+//!   состав событий ASR варьируется, duopulse-200/209): ручное событие —
+//!   cue своей длительности (многострочные диалоги стеком); ASR-события
+//!   режутся на строки по пословному `tOffsetMs` сегментов (или поровну
+//!   по длительности окна), концы зажаты соседями — иначе перекрытия
+//!   длительностей склеивались движком показа в cue на всё окно/клип.
 //!
 //! Формат выбирается по первому непробельному символу: `{` — JSON3, иначе XML.
 //! Битые элементы/XML/JSON — предупреждение, разбор продолжается.
@@ -218,9 +224,15 @@ pub fn parse_json3(input: &str) -> ParsedCues {
         let Some(segs) = event.get("segs").and_then(|v| v.as_array()) else {
             continue;
         };
-        let text: String = segs
+        let seg_list: Vec<Json3Seg> = segs
             .iter()
-            .filter_map(|s| s.get("utf8").and_then(|v| v.as_str()))
+            .filter_map(|s| {
+                let utf8 = s.get("utf8").and_then(|v| v.as_str())?;
+                Some(Json3Seg {
+                    offset_ms: s.get("tOffsetMs").and_then(|v| v.as_i64()),
+                    utf8: utf8.to_string(),
+                })
+            })
             .collect();
         content.push(Json3Event {
             start_ms,
@@ -229,24 +241,26 @@ pub fn parse_json3(input: &str) -> ParsedCues {
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0),
             append: truthy(event.get("aAppend")),
-            text,
+            // wWinId на контентном событии — маркер ASR-окна автодорожки
+            // (у событий ручных дорожек его нет).
+            window: event.get("wWinId").is_some(),
+            segs: seg_list,
         });
     }
     let cues = if content.iter().any(|e| e.append) {
         parse_json3_rolling(&content)
     } else {
-        // Ручные дорожки: каждое событие — отдельный cue своей длительности.
-        content
-            .into_iter()
-            .map(|e| Cue {
-                start_ms: e.start_ms,
-                end_ms: e.start_ms.saturating_add(e.dur_ms),
-                text: e.text,
-            })
-            .collect()
+        parse_json3_plain(&content)
     };
     let cues = finalize_cues(cues, &mut warnings);
     ParsedCues { cues, warnings, top_cue_starts: Vec::new() }
+}
+
+/// Сегмент события JSON3: текст + пословный тайминг автодорожек
+/// (`tOffsetMs` — offset от начала события; у ручных дорожек его нет).
+struct Json3Seg {
+    offset_ms: Option<i64>,
+    utf8: String,
 }
 
 /// Контентное событие JSON3 (текст события = склейка utf8 его segs).
@@ -254,7 +268,124 @@ struct Json3Event {
     start_ms: i64,
     dur_ms: i64,
     append: bool,
-    text: String,
+    /// Событие принадлежит ASR-окну (wWinId): автодорожка, не ручной диалог.
+    window: bool,
+    segs: Vec<Json3Seg>,
+}
+
+impl Json3Event {
+    /// Склейка текста segs (порядок исходный, «\n» сохранены).
+    fn text(&self) -> String {
+        self.segs.iter().map(|s| s.utf8.as_str()).collect()
+    }
+}
+
+/// Дорожка БЕЗ aAppend (ручные дорожки и часть сессий автодорожек —
+/// карточки duopulse-200/209: состав событий ASR варьируется от сессии
+/// к сессии). Три случая:
+///
+/// - События с пословным `tOffsetMs` (ASR): каждая СТРОКА события —
+///   самостоятельный cue; конец строки — начало следующей строки или
+///   следующего события, НЕ длительность окна (`dDurationMs` окна/фразы
+///   перекрывает соседей — движок показа склеил бы цепочку в один cue
+///   на всё окно: текст «застывал» на минуты, duopulse-209).
+/// - ASR-окно (wWinId) без оффсетов: строки режут длительность события
+///   поровну — иначе «окно» музыкальной секции висело весь клип
+///   (587 знаков / 22 строки одним cue, duopulse-200).
+/// - Ручные дорожки (без оффсетов и wWinId): событие — один cue своей
+///   длительности, многострочные диалоги — стеком, как нативный плеер.
+fn parse_json3_plain(content: &[Json3Event]) -> Vec<Cue> {
+    let mut cues: Vec<Cue> = Vec::new();
+    for (i, ev) in content.iter().enumerate() {
+        let next_start = content.get(i + 1).map(|e| e.start_ms);
+        let ev_end = ev.start_ms.saturating_add(ev.dur_ms);
+        if !ev.segs.iter().any(|s| s.offset_ms.is_some()) {
+            let text = ev.text();
+            if !ev.window || !text.contains('\n') {
+                // Ручная дорожка/однострочное событие — как раньше.
+                cues.push(Cue {
+                    start_ms: ev.start_ms,
+                    end_ms: ev_end,
+                    text,
+                });
+                continue;
+            }
+            // ASR-окно без пословного тайминга: поровну по строкам
+            // (нулевая длительность — как есть, пост-фильтр отбросит).
+            if ev.dur_ms > 0 {
+                let lines: Vec<&str> =
+                    text.split('\n').filter(|l| !l.trim().is_empty()).collect();
+                let n = lines.len().max(1) as i64;
+                let step = (ev.dur_ms + n - 1) / n;
+                let mut start = ev.start_ms;
+                for line in lines {
+                    let end = start.saturating_add(step).min(ev_end);
+                    cues.push(Cue {
+                        start_ms: start,
+                        end_ms: end,
+                        text: line.to_string(),
+                    });
+                    start = end;
+                }
+            } else {
+                cues.push(Cue {
+                    start_ms: ev.start_ms,
+                    end_ms: ev_end,
+                    text,
+                });
+            }
+            continue;
+        }
+        // Пословный тайминг: строки события со своим временем. Оффсет
+        // строки — tOffsetMs её первого сегмента (нет у первого —
+        // наследуется от предыдущего известного).
+        let mut lines: Vec<(i64, String)> = Vec::new();
+        let mut cur_off: Option<i64> = None;
+        let mut cur = String::new();
+        for seg in &ev.segs {
+            let parts: Vec<&str> = seg.utf8.split('\n').collect();
+            for (k, part) in parts.iter().enumerate() {
+                if k == 0 {
+                    if cur_off.is_none() {
+                        cur_off = seg.offset_ms;
+                    }
+                    cur.push_str(part);
+                } else {
+                    if !cur.trim().is_empty() {
+                        lines.push((cur_off.unwrap_or(0), cur.clone()));
+                    }
+                    cur.clear();
+                    // Строка начинается с этого сегмента, если он принёс
+                    // текст; голый «\n» — только разрыв: оффсет возьмётся
+                    // от первого слова новой строки (как в rolling-ветке).
+                    cur_off = if part.is_empty() { None } else { seg.offset_ms };
+                    cur.push_str(part);
+                }
+            }
+        }
+        if !cur.trim().is_empty() {
+            lines.push((cur_off.unwrap_or(0), cur.clone()));
+        }
+        for (j, (off, line)) in lines.iter().enumerate() {
+            let start = ev.start_ms.saturating_add(*off);
+            let mut end = match lines.get(j + 1) {
+                // Конец строки — начало следующей строки события…
+                Some((next_off, _)) => ev.start_ms.saturating_add(*next_off),
+                // …последней — конец события, но не дальше соседа-события
+                // (перекрытия окон склеивались движком в мега-cue).
+                None => ev_end.max(start + 1),
+            };
+            if let Some(ns) = next_start {
+                end = end.min(ns);
+            }
+            cues.push(Cue {
+                start_ms: start,
+                end_ms: end,
+                text: line.clone(),
+            });
+        }
+    }
+    cues
 }
 
 /// Пословный режим автосубтитров (aAppend, карточки duopulse-094, duopulse-113):
@@ -288,7 +419,8 @@ fn parse_json3_rolling(content: &[Json3Event]) -> Vec<Cue> {
         if !ev.append && !cur.trim().is_empty() {
             commit(&mut held, &mut cur);
         }
-        let parts: Vec<&str> = ev.text.split('\n').collect();
+        let text = ev.text();
+        let parts: Vec<&str> = text.split('\n').collect();
         for (pi, part) in parts.iter().enumerate() {
             cur.push_str(part);
             if pi + 1 < parts.len() {
@@ -344,6 +476,10 @@ mod tests {
     const ASR_JSON3: &str = include_str!("../../../e2e/fixtures/subtitles/timedtext-asr.json3");
     const JSON3_BROKEN: &str =
         include_str!("../../../e2e/fixtures/subtitles/timedtext-broken.json3");
+    /// Живое тело дорожки ro:asr (клип lITL-sPvlQk, веб-сессия 22.11,
+    /// duopulse-209): вариант с aAppend — пословный rolling.
+    const LIVE_RO_ASR_JSON3: &str =
+        include_str!("../../../e2e/fixtures/subtitles/timedtext-ro-asr-live.json3");
 
     #[test]
     fn xml_transcript_fixture_entities_and_newlines() {
@@ -504,6 +640,141 @@ mod tests {
         // На экране всегда одна строка — уже проговоренное не показывается.
         for cue in &parsed.cues {
             assert!(!cue.text.contains('\n'), "{:?}", cue.text);
+        }
+    }
+
+    #[test]
+    fn json3_plain_asr_window_with_offsets_splits_lines() {
+        // duopulse-209: сессия без aAppend отдаёт ASR «окнами» — событие
+        // несёт строки целиком, dDurationMs перекрывает соседей. Строки
+        // обязаны стать самостоятельными cue: конец — начало следующей
+        // строки/события, а не длительность окна.
+        let parsed = parse_json3(
+            "{\"events\":[
+              {\"tStartMs\":1000,\"dDurationMs\":9000,\"wWinId\":1,\"segs\":[
+                {\"utf8\":\">> prima\",\"tOffsetMs\":0},
+                {\"utf8\":\" linie\",\"tOffsetMs\":1500},
+                {\"utf8\":\"\\n\",\"tOffsetMs\":3000},
+                {\"utf8\":\"a doua\",\"tOffsetMs\":3200},
+                {\"utf8\":\" linie\",\"tOffsetMs\":4200},
+                {\"utf8\":\"\\n a treia\",\"tOffsetMs\":5000}]},
+              {\"tStartMs\":8000,\"dDurationMs\":2000,\"wWinId\":1,\"segs\":[
+                {\"utf8\":\"next\",\"tOffsetMs\":0}]}]}",
+        );
+        assert_eq!(
+            parsed.cues,
+            vec![
+                Cue {
+                    start_ms: 1_000,
+                    end_ms: 4_200, // начало строки 2, не конец окна (10 c)
+                    text: ">> prima linie".into()
+                },
+                Cue {
+                    start_ms: 4_200,
+                    end_ms: 6_000, // начало строки 3
+                    text: "a doua linie".into()
+                },
+                Cue {
+                    start_ms: 6_000,
+                    end_ms: 8_000, // min(конец события 10 c, сосед 8 c)
+                    text: "a treia".into()
+                },
+                Cue {
+                    start_ms: 8_000,
+                    end_ms: 10_000,
+                    text: "next".into()
+                },
+            ],
+            "{:?}",
+            parsed.cues
+        );
+        // Перекрытий нет — движок показа не склеит цепочку в мега-cue.
+        for w in &parsed.warnings {
+            assert!(!w.message.contains("перекрывает"), "{:?}", parsed.warnings);
+        }
+    }
+
+    #[test]
+    fn json3_plain_asr_phrases_clamped_to_next_event() {
+        // Вариант «фразы» (живое тело 22.11): события без aAppend, segs
+        // с пословным tOffsetMs, dDurationMs фраз залезает на соседа —
+        // до фикса движок склеивал их тексты через \n в cue на всё окно.
+        let parsed = parse_json3(
+            "{\"events\":[
+              {\"tStartMs\":0,\"dDurationMs\":7680,\"wWinId\":1,\"segs\":[
+                {\"utf8\":\">> nu\",\"tOffsetMs\":0},
+                {\"utf8\":\" ne-am\",\"tOffsetMs\":160},
+                {\"utf8\":\" mai\",\"tOffsetMs\":400},
+                {\"utf8\":\" iubit,\",\"tOffsetMs\":640}]},
+              {\"tStartMs\":2080,\"dDurationMs\":5000,\"wWinId\":1,\"segs\":[
+                {\"utf8\":\"nu ne-am mai sunat.\",\"tOffsetMs\":0}]}]}",
+        );
+        assert_eq!(
+            parsed.cues,
+            vec![
+                Cue {
+                    start_ms: 0,
+                    end_ms: 2_080, // зажат началом соседа, не 7 680
+                    text: ">> nu ne-am mai iubit,".into()
+                },
+                Cue {
+                    start_ms: 2_080,
+                    end_ms: 7_080,
+                    text: "nu ne-am mai sunat.".into()
+                },
+            ],
+            "{:?}",
+            parsed.cues
+        );
+    }
+
+    #[test]
+    fn json3_plain_manual_multiline_stays_one_cue() {
+        // Ручные дорожки (нет wWinId/tOffsetMs): двухстрочный диалог —
+        // один cue стеком, как нативный плеер (регресс-охрана фикса 209).
+        let parsed = parse_json3(
+            "{\"events\":[{\"tStartMs\":1000,\"dDurationMs\":2000,\"segs\":[
+              {\"utf8\":\"— Привет\\n— Здравствуйте\"}]}]}",
+        );
+        assert_eq!(parsed.cues.len(), 1);
+        assert_eq!(parsed.cues[0].text, "— Привет\n— Здравствуйте");
+    }
+
+    #[test]
+    fn json3_plain_window_without_offsets_even_split() {
+        // duopulse-200: окно музсекции одним событием без пословного
+        // тайминга (587 знаков / 22 строки) — режем длительность поровну,
+        // чтобы текст не висел весь клип.
+        let parsed = parse_json3(
+            "{\"events\":[{\"tStartMs\":0,\"dDurationMs\":9000,\"wWinId\":1,\"segs\":[
+              {\"utf8\":\"[muzică]\\nlasă-mă\\npleacă\"}]}]}",
+        );
+        assert_eq!(
+            parsed.cues,
+            vec![
+                Cue { start_ms: 0, end_ms: 3_000, text: "[muzică]".into() },
+                Cue { start_ms: 3_000, end_ms: 6_000, text: "lasă-mă".into() },
+                Cue { start_ms: 6_000, end_ms: 9_000, text: "pleacă".into() },
+            ],
+            "{:?}",
+            parsed.cues
+        );
+    }
+
+    #[test]
+    fn json3_live_ro_asr_body_rolling_not_regressed() {
+        // Живое тело дорожки ro:asr клипа lITL-sPvlQk (веб-сессия 22.11,
+        // захват e2e-пробником duopulse-209): сессия с aAppend — пословный
+        // rolling. Фикс 209 не должен его менять: одна строка на cue,
+        // начало — не убывает, гигантских cue нет.
+        let parsed = parse_json3(LIVE_RO_ASR_JSON3);
+        assert!(parsed.cues.len() > 40, "cues={}", parsed.cues.len());
+        let mut prev_start = i64::MIN;
+        for cue in &parsed.cues {
+            assert!(!cue.text.contains('\n'), "{:?}", cue.text);
+            assert!(cue.text.chars().count() < 240, "гигантский cue: {:?}", cue.text);
+            assert!(cue.start_ms >= prev_start, "не монотонно: {:?}", parsed.cues);
+            prev_start = cue.start_ms;
         }
     }
 

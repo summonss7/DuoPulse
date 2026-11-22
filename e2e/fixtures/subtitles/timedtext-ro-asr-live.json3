@@ -1,0 +1,1292 @@
+{
+  "wireMagic": "pb3",
+  "pens": [ {
+  
+  } ],
+  "wsWinStyles": [ {
+  
+  }, {
+    "mhModeHint": 2,
+    "juJustifCode": 0,
+    "sdScrollDir": 3
+  } ],
+  "wpWinPositions": [ {
+  
+  }, {
+    "apPoint": 6,
+    "ahHorPos": 20,
+    "avVerPos": 100,
+    "rcRows": 2,
+    "ccCols": 40
+  } ],
+  "events": [ {
+    "tStartMs": 0,
+    "dDurationMs": 146532,
+    "id": 1,
+    "wpWinPosId": 1,
+    "wsWinStyleId": 1
+  }, {
+    "tStartMs": 3274,
+    "dDurationMs": 2020,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[muzică]"
+    } ]
+  }, {
+    "tStartMs": 11780,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 11790,
+    "dDurationMs": 5170,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[muzică]"
+    } ]
+  }, {
+    "tStartMs": 13750,
+    "dDurationMs": 3210,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 13760,
+    "dDurationMs": 5480,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "\u003e\u003e Un",
+      "isSpeakerChange": 1
+    }, {
+      "utf8": " mesaj",
+      "tOffsetMs": 240
+    }, {
+      "utf8": " într-o",
+      "tOffsetMs": 840
+    }, {
+      "utf8": " sticlă",
+      "tOffsetMs": 1080
+    }, {
+      "utf8": " printre",
+      "tOffsetMs": 1480
+    }, {
+      "utf8": " valuri,",
+      "tOffsetMs": 1880
+    } ]
+  }, {
+    "tStartMs": 16950,
+    "dDurationMs": 2290,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 16960,
+    "dDurationMs": 4655,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "cumva"
+    }, {
+      "utf8": " [cântat]",
+      "tOffsetMs": 70
+    }, {
+      "utf8": " m-a",
+      "tOffsetMs": 560
+    }, {
+      "utf8": " găsit",
+      "tOffsetMs": 760
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 1380
+    }, {
+      "utf8": " la",
+      "tOffsetMs": 1400
+    }, {
+      "utf8": " mal",
+      "tOffsetMs": 1600
+    } ]
+  }, {
+    "tStartMs": 19230,
+    "dDurationMs": 2385,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 19240,
+    "dDurationMs": 2960,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "o"
+    }, {
+      "utf8": " filă",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " de",
+      "tOffsetMs": 560
+    }, {
+      "utf8": " jurnal",
+      "tOffsetMs": 720
+    }, {
+      "utf8": " de",
+      "tOffsetMs": 1480
+    }, {
+      "utf8": " când",
+      "tOffsetMs": 1640
+    }, {
+      "utf8": " ne",
+      "tOffsetMs": 1880
+    }, {
+      "utf8": " iubeam,",
+      "tOffsetMs": 2040
+    } ]
+  }, {
+    "tStartMs": 21605,
+    "dDurationMs": 595,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 21615,
+    "dDurationMs": 2625,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[cântat]"
+    } ]
+  }, {
+    "tStartMs": 22190,
+    "dDurationMs": 2050,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 22200,
+    "dDurationMs": 3960,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ce"
+    }, {
+      "utf8": " frumos",
+      "tOffsetMs": 200
+    }, {
+      "utf8": " era,",
+      "tOffsetMs": 680
+    }, {
+      "utf8": " dar",
+      "tOffsetMs": 1520
+    }, {
+      "utf8": " noi",
+      "tOffsetMs": 1720
+    }, {
+      "utf8": " nu",
+      "tOffsetMs": 1880
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 2035
+    } ]
+  }, {
+    "tStartMs": 24230,
+    "dDurationMs": 1930,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 24240,
+    "dDurationMs": 3925,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "știam."
+    } ]
+  }, {
+    "tStartMs": 26150,
+    "dDurationMs": 2015,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 26160,
+    "dDurationMs": 2080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Încă"
+    }, {
+      "utf8": " aud",
+      "tOffsetMs": 400
+    }, {
+      "utf8": " cum",
+      "tOffsetMs": 720
+    }, {
+      "utf8": " ne",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " promiteam",
+      "tOffsetMs": 1080
+    } ]
+  }, {
+    "tStartMs": 28155,
+    "dDurationMs": 85,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 28165,
+    "dDurationMs": 3075,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "\u003e\u003e [cântat]",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 28230,
+    "dDurationMs": 3010,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 28240,
+    "dDurationMs": 4920,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "\u003e\u003e iubire,",
+      "isSpeakerChange": 1
+    }, {
+      "utf8": " bani",
+      "tOffsetMs": 880
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 1480
+    }, {
+      "utf8": " mii",
+      "tOffsetMs": 1720
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 1890
+    }, {
+      "utf8": " de",
+      "tOffsetMs": 2040
+    } ]
+  }, {
+    "tStartMs": 31230,
+    "dDurationMs": 1930,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 31240,
+    "dDurationMs": 5000,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ani,"
+    }, {
+      "utf8": " dar",
+      "tOffsetMs": 80
+    }, {
+      "utf8": " nu",
+      "tOffsetMs": 240
+    }, {
+      "utf8": " ni",
+      "tOffsetMs": 400
+    }, {
+      "utf8": " s-a",
+      "tOffsetMs": 560
+    }, {
+      "utf8": " întâmplat",
+      "tOffsetMs": 680
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 1480
+    }, {
+      "utf8": " am",
+      "tOffsetMs": 1560
+    }, {
+      "utf8": " zis",
+      "tOffsetMs": 1680
+    } ]
+  }, {
+    "tStartMs": 33150,
+    "dDurationMs": 3090,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 33160,
+    "dDurationMs": 4400,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "am"
+    }, {
+      "utf8": " uitat",
+      "tOffsetMs": 200
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 1040
+    }, {
+      "utf8": " timpul",
+      "tOffsetMs": 1240
+    }, {
+      "utf8": " a",
+      "tOffsetMs": 1600
+    }, {
+      "utf8": " trecut",
+      "tOffsetMs": 1640
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 2520
+    }, {
+      "utf8": " noi",
+      "tOffsetMs": 2720
+    }, {
+      "utf8": " ne-am",
+      "tOffsetMs": 2920
+    } ]
+  }, {
+    "tStartMs": 36230,
+    "dDurationMs": 1330,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 36240,
+    "dDurationMs": 2320,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "schimbat."
+    } ]
+  }, {
+    "tStartMs": 37550,
+    "dDurationMs": 1010,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 37560,
+    "dDurationMs": 2280,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Ce"
+    }, {
+      "utf8": " ne-a",
+      "tOffsetMs": 200
+    }, {
+      "utf8": " rămas",
+      "tOffsetMs": 400
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 430
+    } ]
+  }, {
+    "tStartMs": 38550,
+    "dDurationMs": 1290,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 38560,
+    "dDurationMs": 4280,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "acum?"
+    } ]
+  }, {
+    "tStartMs": 39830,
+    "dDurationMs": 3010,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 39840,
+    "dDurationMs": 6960,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Doar"
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 480
+    }, {
+      "utf8": " poză",
+      "tOffsetMs": 520
+    }, {
+      "utf8": " veche",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " într-un",
+      "tOffsetMs": 1240
+    }, {
+      "utf8": " album,",
+      "tOffsetMs": 1760
+    } ]
+  }, {
+    "tStartMs": 42830,
+    "dDurationMs": 3970,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 42840,
+    "dDurationMs": 6720,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "noi"
+    }, {
+      "utf8": " copii,",
+      "tOffsetMs": 360
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 390
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 840
+    }, {
+      "utf8": " vară",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 1280
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 1720
+    }, {
+      "utf8": " melodie,",
+      "tOffsetMs": 2040
+    } ]
+  }, {
+    "tStartMs": 46790,
+    "dDurationMs": 2770,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 46800,
+    "dDurationMs": 5040,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "o"
+    }, {
+      "utf8": " dulce",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " melancolie.",
+      "tOffsetMs": 680
+    } ]
+  }, {
+    "tStartMs": 49550,
+    "dDurationMs": 2290,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 49560,
+    "dDurationMs": 5280,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Ce"
+    }, {
+      "utf8": " ne-a",
+      "tOffsetMs": 240
+    }, {
+      "utf8": " rămas",
+      "tOffsetMs": 400
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 875
+    }, {
+      "utf8": " acum?",
+      "tOffsetMs": 1000
+    } ]
+  }, {
+    "tStartMs": 51830,
+    "dDurationMs": 3010,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 51840,
+    "dDurationMs": 6960,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Doar"
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 440
+    }, {
+      "utf8": " poză",
+      "tOffsetMs": 520
+    }, {
+      "utf8": " veche",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " într-un",
+      "tOffsetMs": 1240
+    }, {
+      "utf8": " album,",
+      "tOffsetMs": 1760
+    } ]
+  }, {
+    "tStartMs": 54830,
+    "dDurationMs": 3970,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 54840,
+    "dDurationMs": 6785,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "noi"
+    }, {
+      "utf8": " copii,",
+      "tOffsetMs": 360
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 840
+    }, {
+      "utf8": " vară",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 1280
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 1760
+    }, {
+      "utf8": " melodie,",
+      "tOffsetMs": 2040
+    } ]
+  }, {
+    "tStartMs": 58790,
+    "dDurationMs": 2835,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 58800,
+    "dDurationMs": 2825,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "o"
+    }, {
+      "utf8": " dulce",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " melancolie.",
+      "tOffsetMs": 720
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 805
+    } ]
+  }, {
+    "tStartMs": 61990,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 62000,
+    "dDurationMs": 5360,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Habar"
+    }, {
+      "utf8": " n-aveam",
+      "tOffsetMs": 520
+    }, {
+      "utf8": " ce",
+      "tOffsetMs": 1080
+    }, {
+      "utf8": " e",
+      "tOffsetMs": 1360
+    }, {
+      "utf8": " [cântat]",
+      "tOffsetMs": 1535
+    }, {
+      "utf8": " viața,",
+      "tOffsetMs": 1560
+    }, {
+      "utf8": " cum",
+      "tOffsetMs": 2559
+    } ]
+  }, {
+    "tStartMs": 64790,
+    "dDurationMs": 2570,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 64800,
+    "dDurationMs": 4120,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "ne"
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 45
+    }, {
+      "utf8": " va",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " da",
+      "tOffsetMs": 399
+    }, {
+      "utf8": " planurile",
+      "tOffsetMs": 719
+    }, {
+      "utf8": " peste",
+      "tOffsetMs": 1440
+    }, {
+      "utf8": " cap",
+      "tOffsetMs": 1800
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 2360
+    } ]
+  }, {
+    "tStartMs": 67350,
+    "dDurationMs": 1570,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 67360,
+    "dDurationMs": 2725,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "la"
+    }, {
+      "utf8": " un",
+      "tOffsetMs": 240
+    }, {
+      "utf8": " moment",
+      "tOffsetMs": 400
+    }, {
+      "utf8": " [cântat]",
+      "tOffsetMs": 760
+    }, {
+      "utf8": " dat",
+      "tOffsetMs": 800
+    }, {
+      "utf8": " ne-a",
+      "tOffsetMs": 1320
+    } ]
+  }, {
+    "tStartMs": 68910,
+    "dDurationMs": 1175,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 68920,
+    "dDurationMs": 1280,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "înstrăinat,"
+    } ]
+  }, {
+    "tStartMs": 70075,
+    "dDurationMs": 125,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 70085,
+    "dDurationMs": 4075,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "\u003e\u003e [muzică]",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 70190,
+    "dDurationMs": 3970,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 70200,
+    "dDurationMs": 6435,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "\u003e\u003e nu",
+      "isSpeakerChange": 1
+    }, {
+      "utf8": " ne-am",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " mai",
+      "tOffsetMs": 400
+    }, {
+      "utf8": " iubit,",
+      "tOffsetMs": 640
+    }, {
+      "utf8": " nu",
+      "tOffsetMs": 1480
+    }, {
+      "utf8": " ne-am",
+      "tOffsetMs": 1680
+    }, {
+      "utf8": " mai",
+      "tOffsetMs": 1840
+    }, {
+      "utf8": " sunat.",
+      "tOffsetMs": 2080
+    } ]
+  }, {
+    "tStartMs": 74150,
+    "dDurationMs": 2485,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 74160,
+    "dDurationMs": 6560,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Cred"
+    }, {
+      "utf8": " că",
+      "tOffsetMs": 360
+    }, {
+      "utf8": " mai",
+      "tOffsetMs": 520
+    }, {
+      "utf8": " am",
+      "tOffsetMs": 800
+    }, {
+      "utf8": " pe",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " undeva",
+      "tOffsetMs": 1120
+    }, {
+      "utf8": " într-un",
+      "tOffsetMs": 2080
+    } ]
+  }, {
+    "tStartMs": 76625,
+    "dDurationMs": 4095,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 76635,
+    "dDurationMs": 7205,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[muzică]"
+    }, {
+      "utf8": " sertar",
+      "tOffsetMs": 85
+    }, {
+      "utf8": " caseta",
+      "tOffsetMs": 1045
+    }, {
+      "utf8": " ta",
+      "tOffsetMs": 1965
+    }, {
+      "utf8": " cu",
+      "tOffsetMs": 2565
+    }, {
+      "utf8": " melodia",
+      "tOffsetMs": 2765
+    }, {
+      "utf8": " mea",
+      "tOffsetMs": 3485
+    } ]
+  }, {
+    "tStartMs": 80710,
+    "dDurationMs": 3130,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 80720,
+    "dDurationMs": 4880,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "pe"
+    }, {
+      "utf8": " care",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 480
+    }, {
+      "utf8": " ascultam",
+      "tOffsetMs": 600
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 1480
+    }, {
+      "utf8": " când",
+      "tOffsetMs": 1640
+    }, {
+      "utf8": " ne",
+      "tOffsetMs": 1840
+    }, {
+      "utf8": " certam",
+      "tOffsetMs": 2040
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 2960
+    } ]
+  }, {
+    "tStartMs": 83830,
+    "dDurationMs": 1770,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 83840,
+    "dDurationMs": 3930,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "când"
+    }, {
+      "utf8": " ne",
+      "tOffsetMs": 240
+    }, {
+      "utf8": " iubeam.",
+      "tOffsetMs": 440
+    } ]
+  }, {
+    "tStartMs": 85590,
+    "dDurationMs": 2180,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 85600,
+    "dDurationMs": 2240,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Ce"
+    }, {
+      "utf8": " ne-a",
+      "tOffsetMs": 200
+    }, {
+      "utf8": " rămas",
+      "tOffsetMs": 400
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 860
+    }, {
+      "utf8": " acum?",
+      "tOffsetMs": 1040
+    } ]
+  }, {
+    "tStartMs": 87760,
+    "dDurationMs": 80,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 87770,
+    "dDurationMs": 3070,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "\u003e\u003e [cântat]",
+      "isSpeakerChange": 1
+    } ]
+  }, {
+    "tStartMs": 87830,
+    "dDurationMs": 3010,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 87840,
+    "dDurationMs": 6960,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "\u003e\u003e Doar",
+      "isSpeakerChange": 1
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 440
+    }, {
+      "utf8": " poză",
+      "tOffsetMs": 520
+    }, {
+      "utf8": " veche",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " într-un",
+      "tOffsetMs": 1240
+    }, {
+      "utf8": " album,",
+      "tOffsetMs": 1800
+    } ]
+  }, {
+    "tStartMs": 90830,
+    "dDurationMs": 3970,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 90840,
+    "dDurationMs": 6720,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "noi"
+    }, {
+      "utf8": " copii,",
+      "tOffsetMs": 360
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 840
+    }, {
+      "utf8": " vară",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 1280
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 1720
+    }, {
+      "utf8": " melodie,",
+      "tOffsetMs": 1960
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 2826
+    } ]
+  }, {
+    "tStartMs": 94790,
+    "dDurationMs": 2770,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 94800,
+    "dDurationMs": 5080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "o"
+    }, {
+      "utf8": " dulce",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " melancolie.",
+      "tOffsetMs": 720
+    } ]
+  }, {
+    "tStartMs": 97550,
+    "dDurationMs": 2330,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 97560,
+    "dDurationMs": 4080,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Ce"
+    }, {
+      "utf8": " ne-a",
+      "tOffsetMs": 200
+    }, {
+      "utf8": " rămas",
+      "tOffsetMs": 440
+    }, {
+      "utf8": " acum?",
+      "tOffsetMs": 1080
+    } ]
+  }, {
+    "tStartMs": 99870,
+    "dDurationMs": 1770,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 99880,
+    "dDurationMs": 2960,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Doar"
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 336
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 440
+    }, {
+      "utf8": " poză",
+      "tOffsetMs": 480
+    }, {
+      "utf8": " veche",
+      "tOffsetMs": 880
+    }, {
+      "utf8": " într-un",
+      "tOffsetMs": 1200
+    } ]
+  }, {
+    "tStartMs": 101630,
+    "dDurationMs": 1210,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 101640,
+    "dDurationMs": 5160,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "album,"
+    } ]
+  }, {
+    "tStartMs": 102830,
+    "dDurationMs": 3970,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 102840,
+    "dDurationMs": 7680,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "noi"
+    }, {
+      "utf8": " copii,",
+      "tOffsetMs": 360
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 800
+    }, {
+      "utf8": " vară",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 1280
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 1720
+    }, {
+      "utf8": " melodie,",
+      "tOffsetMs": 2040
+    } ]
+  }, {
+    "tStartMs": 106790,
+    "dDurationMs": 3730,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 106800,
+    "dDurationMs": 3720,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "o"
+    }, {
+      "utf8": " dulce",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " [muzică]",
+      "tOffsetMs": 621
+    }, {
+      "utf8": " melancolie.",
+      "tOffsetMs": 720
+    } ]
+  }, {
+    "tStartMs": 133562,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 133572,
+    "dDurationMs": 3979,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "\u003e\u003e Ce",
+      "isSpeakerChange": 1
+    }, {
+      "utf8": " ne-a",
+      "tOffsetMs": 280
+    }, {
+      "utf8": " rămas",
+      "tOffsetMs": 440
+    }, {
+      "utf8": " acum?",
+      "tOffsetMs": 1080
+    } ]
+  }, {
+    "tStartMs": 135882,
+    "dDurationMs": 1669,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 135892,
+    "dDurationMs": 3880,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "Doar"
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 440
+    }, {
+      "utf8": " poză",
+      "tOffsetMs": 520
+    }, {
+      "utf8": " veche",
+      "tOffsetMs": 920
+    }, {
+      "utf8": " într-un",
+      "tOffsetMs": 1200
+    } ]
+  }, {
+    "tStartMs": 137541,
+    "dDurationMs": 2231,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 137551,
+    "dDurationMs": 5261,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "[muzică][cântat]"
+    }, {
+      "utf8": " album.",
+      "tOffsetMs": 101
+    }, {
+      "utf8": " Noi,",
+      "tOffsetMs": 1301
+    }, {
+      "utf8": " copii,",
+      "tOffsetMs": 1661
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 2141
+    } ]
+  }, {
+    "tStartMs": 139762,
+    "dDurationMs": 3050,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 139772,
+    "dDurationMs": 6760,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "vară"
+    }, {
+      "utf8": " și",
+      "tOffsetMs": 360
+    }, {
+      "utf8": " o",
+      "tOffsetMs": 840
+    }, {
+      "utf8": " melodie,",
+      "tOffsetMs": 1120
+    } ]
+  }, {
+    "tStartMs": 142802,
+    "dDurationMs": 3730,
+    "wWinId": 1,
+    "aAppend": 1,
+    "segs": [ {
+      "utf8": "\n"
+    } ]
+  }, {
+    "tStartMs": 142812,
+    "dDurationMs": 3720,
+    "wWinId": 1,
+    "segs": [ {
+      "utf8": "o"
+    }, {
+      "utf8": " dulce",
+      "tOffsetMs": 160
+    }, {
+      "utf8": " melancolie.",
+      "tOffsetMs": 720
+    } ]
+  } ]
+}
