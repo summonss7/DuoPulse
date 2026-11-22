@@ -8268,4 +8268,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   подтвердил /api/playlist/load и обёртку ObservedXHR во фрейме; backup.bat до изменений
   (backups/backup_2026-11-22_18-13-03); релиз 0.1.97 — npm run release, оба канала GitHub +
   хаб Aila + C:\DuoPulse, без android-ассета (мобильный код не менялся).
-- Коммит: (хеш подшит следующим коммитом changelog)
+- Коммит: 6f51014 feat(subs): duopulse-225 — двойные субтитры на дефолтном плеере uakinogo (cinemar.cc); версия 0.1.97, десктоп-релиз оба канала
