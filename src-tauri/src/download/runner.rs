@@ -88,6 +88,31 @@ pub fn clean_name_rules() -> [(&'static str, &'static str); 5] {
     ]
 }
 
+/// Применить правила чистки имени (clean_name_rules, duopulse-150) в Rust —
+/// для субтитров контент-пути, где yt-dlp не участвует и имя даёт страница:
+/// срезаем служебные слова в скобках, схлопываем пробелы, подрезаем концы.
+/// Паттерны — эквивалент clean_name_rules с экранированием [ и ] внутри
+/// классов (regex-крейт требует, Python-регэкс yt-dlp — нет; семантика та же).
+pub fn clean_media_name(title: &str) -> String {
+    use regex::Regex;
+    // скобочная группа целиком: (…) […] {…} （…） 【…】 《…》 〈…〉
+    const RE_BRACKET_GROUP_RUST: &str = r"[\(\[\{（【《〈][^\(\)\{\}\[\]（）《》〈〉【】]*[\)\]\}）】》〉]";
+    let rules: [(&str, &str); 5] = [
+        (RE_BRACKET_GROUP_RUST, ""),
+        (RE_BRACKET_GROUP_RUST, ""), // второй проход — вложенные скобки
+        (r"\s{2,}", " "),
+        (r"^\s*[-–—:|]+\s*|\s*[-–—:|]+\s*$", ""),
+        (r"^\s+|\s+$", ""),
+    ];
+    let mut s = title.to_string();
+    for (re, repl) in rules {
+        if let Ok(r) = Regex::new(re) {
+            s = r.replace_all(&s, repl).into_owned();
+        }
+    }
+    s
+}
+
 /// Аргументы командной строки yt-dlp для спецификации.
 pub fn build_args(spec: &RunSpec) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
@@ -196,6 +221,9 @@ pub fn phase_of(line: &str) -> Option<&'static str> {
 /// duopulse-118: браузерная сессия помечена ботом — плеер не играет и PO-токен
 /// не выдаётся, а extraction у yt-dlp работает). --skip-download + дорожки
 /// языка (ручная, иначе авто); ffmpeg готов — конвертация в srt.
+/// Имя — по правилам media-загрузок (duopulse-150/224): «исполнитель - трек»
+/// из метаданных музыки YouTube, иначе очищенный title; без кода видео и
+/// служебных слов в скобках.
 pub fn build_subs_args(url: &str, lang: &str, out_dir: &str, ffmpeg_dir: Option<&str>) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
     a.push("--no-playlist".into());
@@ -215,8 +243,18 @@ pub fn build_subs_args(url: &str, lang: &str, out_dir: &str, ffmpeg_dir: Option<
     a.push("--print".into());
     a.push("after_move:filepath".into());
     a.push("--no-mtime".into());
+    // duopulse-224: чистим поля имени до подстановки шаблона — как у media
+    for (re, repl) in clean_name_rules() {
+        a.push("--replace-in-metadata".into());
+        a.push(NAME_CLEAN_FIELDS.into());
+        a.push(re.into());
+        a.push(repl.into());
+    }
     a.push("-o".into());
-    a.push(format!("{}/%(title).120B [%(id)s].%(ext)s", out_dir.trim_end_matches('/')));
+    a.push(format!(
+        "{}/%(artist&{{}} - |)s%(track,title).120B.%(ext)s",
+        out_dir.trim_end_matches('/')
+    ));
     if let Some(dir) = ffmpeg_dir {
         a.push("--ffmpeg-location".into());
         a.push(dir.to_string());
@@ -260,6 +298,21 @@ mod tests {
             cookies: None,
             name_suffix: None,
         }
+    }
+
+    #[test]
+    fn clean_media_name_rules() {
+        // duopulse-224: служебные слова в скобках срезаются, пробелы схлопываются
+        assert_eq!(clean_media_name("Song (Official Video)"), "Song");
+        assert_eq!(clean_media_name("Song [MV] {Lyric Video}"), "Song");
+        assert_eq!(clean_media_name("Song   (Live)  "), "Song");
+        assert_eq!(clean_media_name("(Feat. X) Song"), "Song");
+        // вложенные скобки — второй проход
+        assert_eq!(clean_media_name("Song [Foo (Bar)]"), "Song");
+        // осиротевший разделитель после среза — подрезается
+        assert_eq!(clean_media_name("Song - (Official Video)"), "Song");
+        assert_eq!(clean_media_name("Просто название"), "Просто название");
+        assert_eq!(clean_media_name(""), "");
     }
 
     #[test]
@@ -364,7 +417,10 @@ mod tests {
         assert!(a.contains(&"--write-subs".into()) && a.contains(&"--write-auto-subs".into()));
         assert!(a.windows(2).any(|w| w[0] == "--sub-langs" && w[1] == "en"));
         assert!(a.contains(&"--convert-subs".into()) && a.contains(&"srt".into()));
-        assert!(a.windows(2).any(|w| w[0] == "-o" && w[1].contains("[%(id)s].%(ext)s")));
+        // duopulse-224: имя — по правилам media (чистка полей, без [%(id)s])
+        assert!(a.windows(2).any(|w| w[0] == "-o" && w[1].contains("%(track,title).120B.%(ext)s")
+            && !w[1].contains("[%(id)s]")));
+        assert!(a.windows(2).any(|w| w[0] == "--replace-in-metadata" && w[1] == "title,track,artist"));
         let no_ffmpeg = build_subs_args("u", "ru", "D:/x", None);
         assert!(!no_ffmpeg.contains(&"--convert-subs".into()));
 

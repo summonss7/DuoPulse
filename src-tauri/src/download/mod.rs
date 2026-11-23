@@ -754,41 +754,6 @@ fn newest_file_with_marker(dir: &str, marker: &str) -> Option<String> {
     best.map(|(_, n)| n)
 }
 
-/// videoId из watch/shorts/youtu.be-ссылки YouTube (маркер имени файла).
-fn youtube_id_of(url: &str) -> Option<String> {
-    let (path, query) = match url.split_once('?') {
-        Some((p, q)) => (p, Some(q)),
-        None => (url, None),
-    };
-    if let Some(q) = query {
-        for pair in q.split('&') {
-            if let Some(v) = pair.strip_prefix("v=") {
-                let id: String = id_chars(v);
-                if !id.is_empty() {
-                    return Some(id);
-                }
-            }
-        }
-    }
-    for pref in ["/watch/", "/shorts/", "youtu.be/"] {
-        if let Some(pos) = path.find(pref) {
-            let tail = &path[pos + pref.len()..];
-            let id = id_chars(tail);
-            if !id.is_empty() {
-                return Some(id);
-            }
-        }
-    }
-    None
-}
-
-/// Префикс из допустимых в videoId символов (11 шт. обычно; без жёсткой длины).
-fn id_chars(s: &str) -> String {
-    s.chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
-        .collect()
-}
-
 fn newest_file(dir: &str) -> Option<String> {
     let entries = std::fs::read_dir(dir).ok()?;
     let mut best: Option<(std::time::SystemTime, String)> = None;
@@ -809,55 +774,125 @@ fn newest_file(dir: &str) -> Option<String> {
 
 // --- поток задания: субтитры -----------------------------------------------------
 
-/// Чистый текст субтитров (карточка duopulse-130): реплики без тайм-кодов,
-/// подряд идущие повторы (рассинхон автодорожек) схлопываются, пустые —
-/// пропускаются; реплики разделяются пустой строкой.
+/// Чистый текст субтитров (карточка duopulse-130; duopulse-224): реплики без
+/// тайм-кодов и служебной разметки, построчно — каждая строка реплики на своей
+/// строке, без пустых строк-разделителей; подряд идущие повторы строк
+/// (рассинхрон автодорожек) схлопываются, опустевшие после чистки —
+/// пропускаются.
 fn write_plain_txt(cues: &[crate::subtitles::Cue]) -> String {
-    let mut out = String::new();
-    let mut prev: Option<&str> = None;
+    let mut lines: Vec<String> = Vec::new();
     for c in cues {
-        let text = c.text.trim();
-        if text.is_empty() || Some(text) == prev {
-            continue;
+        for ln in c.text.split('\n') {
+            let cleaned = clean_plain_line(ln);
+            if cleaned.is_empty() {
+                continue;
+            }
+            if lines.last().is_some_and(|l| *l == cleaned) {
+                continue;
+            }
+            lines.push(cleaned);
         }
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        out.push_str(text);
-        prev = Some(text);
     }
-    out.push('\n');
+    let mut out = lines.join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
     out
 }
 
-/// .srt (снятый yt-dlp) → чистый текст: прочитать файл, выкинуть счётчики и
-/// строки тайм-кодов («00:00:01,000 --> …»), текст — правилами write_plain_txt.
+/// Одна строка реплики без служебной информации (duopulse-224): теги <…>,
+/// звуковые пометки в квадратных скобках [Музыка]/[Аплодисменты], ноты ♪♫,
+/// стрелочки смены диктора >> и одиночные <>, лишние пробелы — срезаются;
+/// опустевшая строка — пустая (выкинет write_plain_txt).
+fn clean_plain_line(line: &str) -> String {
+    let no_tags = strip_plain_groups(line, |c| c == '<' || c == '>');
+    let no_brackets = strip_plain_groups(&no_tags, |c| c == '[' || c == ']');
+    let mut s = String::with_capacity(no_brackets.len());
+    for c in no_brackets.chars() {
+        // ноты и стрелочки-огрызки после среза групп
+        if matches!(c, '♪' | '♫' | '♩' | '♬' | '>' | '<') {
+            s.push(' ');
+        } else {
+            s.push(c);
+        }
+    }
+    // схлопнуть пробельные разбежки (в т.ч. появившиеся после срезов) и подрезать
+    let mut out = String::with_capacity(s.len());
+    let mut in_space = false;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            in_space = true;
+        } else {
+            if in_space && !out.is_empty() {
+                out.push(' ');
+            }
+            in_space = false;
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Срезать группы «открывающий…закрывающий» (без вложенности): теги <i>…</i>,
+/// пометки [Музыка]; непарный закрывающий посреди текста закрывает группу,
+/// открывающий без пары остаётся текстом (после — чистка одиночных <>).
+fn strip_plain_groups(line: &str, is_open_close: impl Fn(char) -> bool + Copy) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if is_open_close(chars[i]) {
+            // ищем ближайший такой же класс символа вперёд: <…>, [ …]
+            if let Some(rel) = chars[i + 1..].iter().position(|&c| is_open_close(c)) {
+                i += rel + 2;
+                out.push(' ');
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// .srt/.vtt (снятые yt-dlp) → чистый текст: прочитать файл, выкинуть
+/// заголовок WEBVTT и строки-идентификаторы, счётчики и тайм-коды
+/// («00:00:01,000 --> …»); текст — правилами write_plain_txt.
 fn srt_to_plain_txt(path: &str) -> std::io::Result<String> {
     let raw = std::fs::read_to_string(path)?;
     let mut cues = Vec::new();
     let mut cur: Vec<String> = Vec::new();
+    // текст собираем только внутри cue — после строки тайм-кода до пустой:
+    // заголовок WEBVTT, NOTE и идентификаторы cue (без ffmpeg yt-dlp оставляет
+    // .vtt) в текст не попадают
+    let mut in_cue = false;
+    let flush = |cur: &mut Vec<String>, cues: &mut Vec<crate::subtitles::Cue>| {
+        if !cur.is_empty() {
+            cues.push(crate::subtitles::Cue {
+                start_ms: 0,
+                end_ms: 0,
+                text: cur.join("\n"),
+            });
+            cur.clear();
+        }
+    };
     for line in raw.lines() {
         let l = line.trim_end_matches('\u{feff}').trim();
         if l.is_empty() {
-            if !cur.is_empty() {
-                cues.push(crate::subtitles::Cue {
-                    start_ms: 0,
-                    end_ms: 0,
-                    text: cur.join("\n"),
-                });
-                cur.clear();
-            }
+            flush(&mut cur, &mut cues);
+            in_cue = false;
             continue;
         }
-        let is_counter = l.chars().all(|c| c.is_ascii_digit());
-        let is_time = l.contains("-->");
-        if !is_counter && !is_time {
+        if l.contains("-->") {
+            flush(&mut cur, &mut cues); // vtt: идентификатор мог накопиться — мимо
+            in_cue = true;
+            continue;
+        }
+        if in_cue {
             cur.push(l.to_string());
         }
     }
-    if !cur.is_empty() {
-        cues.push(crate::subtitles::Cue { start_ms: 0, end_ms: 0, text: cur.join("\n") });
-    }
+    flush(&mut cur, &mut cues);
     Ok(write_plain_txt(&cues))
 }
 
@@ -927,7 +962,9 @@ fn run_subs_job(
             if !cues.is_empty() {
                 let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("субтитры");
                 let lang = v.get("lang").and_then(|x| x.as_str()).unwrap_or("");
-                let stem = sanitize_filename(&format!("{title}.{lang}"));
+                // duopulse-224: имя — по правилам media-загрузок: без служебных
+                // слов в скобках («(Official Video)» и пр.), чистит clean_media_name
+                let stem = sanitize_filename(&format!("{}.{}", runner::clean_media_name(title), lang));
                 if plain {
                     // без тайм-кодов: чистый текст репликами (карточка duopulse-130)
                     let path = free_path(&dir, &stem, "txt");
@@ -1038,8 +1075,8 @@ fn run_subs_job(
     match status {
         Some(Ok(st)) if st.success() => {
             // --skip-download не порождает after_move:filepath — итог ищем
-            // печатанной строкой «Writing video subtitles to:» либо свежим
-            // файлом с videoId в имени (шаблон -o содержит [%(id)s])
+            // печатной строкой «Writing video subtitles to:» либо свежим
+            // файлом с меткой языка (шаблон -o — media-правила, без кода видео)
             let mut path = last_path.lock().expect("download: лок не отравлен").clone();
             if path.is_none() {
                 path = diag
@@ -1053,8 +1090,14 @@ fn run_subs_job(
                     }));
             }
             if path.is_none() {
-                path = youtube_id_of(&tab_url)
-                    .and_then(|id| newest_file_with_marker(&dir.display().to_string(), &format!("[{id}]")));
+                // duopulse-224: кода видео в имени больше нет (шаблон — как у
+                // media) — ищем свежий файл субтитров по метке языка
+                path = newest_file_with_marker(&dir.display().to_string(), &format!(".{lang}.")).and_then(
+                    |p| {
+                        let is_subs = p.ends_with(".srt") || p.ends_with(".vtt");
+                        is_subs.then_some(p)
+                    },
+                );
             }
             match path {
                 // plain-режим (duopulse-130): снятые yt-dlp .srt переписываем
@@ -1133,8 +1176,30 @@ mod tests {
             end_ms: 0,
             text: t.into(),
         };
+        // duopulse-224: построчно без пустых строк-разделителей
         let txt = write_plain_txt(&[cue("Привет"), cue("Привет"), cue(""), cue("Мир")]);
-        assert_eq!(txt, "Привет\n\nМир\n");
+        assert_eq!(txt, "Привет\nМир\n");
+    }
+
+    #[test]
+    fn plain_txt_strips_service_markup() {
+        let cue = |t: &str| crate::subtitles::Cue {
+            start_ms: 0,
+            end_ms: 0,
+            text: t.into(),
+        };
+        // duopulse-224: [Музыка], теги <i>, ноты ♪, стрелочки >>, лишние пробелы
+        let txt = write_plain_txt(&[
+            cue("[Музыка]"),
+            cue("<i>Привет,</i>  мир"),
+            cue("♪ ♪"),
+            cue(">> Смена диктора"),
+            cue("Песня [版本]"),
+        ]);
+        assert_eq!(txt, "Привет, мир\nСмена диктора\nПесня\n");
+        // многострочная реплика — построчно, опустевшие строки выкинуты
+        let multi = write_plain_txt(&[cue("первая\n[Музыка]\nвторая")]);
+        assert_eq!(multi, "первая\nвторая\n");
     }
 
     #[test]
@@ -1148,23 +1213,20 @@ mod tests {
         .unwrap();
         let txt = srt_to_plain_txt(&p.display().to_string()).unwrap();
         let _ = std::fs::remove_file(&p);
-        assert_eq!(txt, "Привет\n\nМир\n");
+        assert_eq!(txt, "Привет\nМир\n");
     }
 
     #[test]
-    fn youtube_id_of_urls() {
-        assert_eq!(
-            youtube_id_of("https://www.youtube.com/watch?v=jNQXAC9IVRw&list=X"),
-            Some("jNQXAC9IVRw".into())
-        );
-        assert_eq!(
-            youtube_id_of("https://youtu.be/abc-123_x?t=10"),
-            Some("abc-123_x".into())
-        );
-        assert_eq!(
-            youtube_id_of("https://www.youtube.com/shorts/QwerTy12"),
-            Some("QwerTy12".into())
-        );
-        assert_eq!(youtube_id_of("https://example.com/video"), None);
+    fn vtt_to_plain_skips_header_and_cue_ids() {
+        let dir = std::env::temp_dir();
+        let p = dir.join(format!("duopulse-dl-plain-vtt-{}.vtt", std::process::id()));
+        std::fs::write(
+            &p,
+            "WEBVTT\n\nintro\n00:00:01.000 --> 00:00:02.000\nПривет\n\n00:00:02.000 --> 00:00:03.000\nМир\n",
+        )
+        .unwrap();
+        let txt = srt_to_plain_txt(&p.display().to_string()).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(txt, "Привет\nМир\n");
     }
 }
