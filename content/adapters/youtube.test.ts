@@ -14,6 +14,7 @@ import {
   blankYouTubeCaptions,
   buildTranslationUrl,
   extractCaptionList,
+  findPlayerElement,
   installTimedtextCapture,
   normalizeBaseTracks,
   normalizeTranslations,
@@ -79,6 +80,7 @@ const fixtures = loadFixtures();
 function makeWindow(opts: {
   href: string;
   playerResponse?: unknown;
+  shortsPlayerResponse?: unknown;
   initialResponse?: unknown;
   textTracks?: { language?: string; kind?: string; label?: string }[];
   uiLang?: string;
@@ -87,10 +89,19 @@ function makeWindow(opts: {
     opts.playerResponse !== undefined
       ? { getPlayerResponse: () => opts.playerResponse }
       : null;
+  const shortsPlayer: PlayerElement | null =
+    opts.shortsPlayerResponse !== undefined
+      ? { getPlayerResponse: () => opts.shortsPlayerResponse }
+      : null;
   return {
     location: { href: opts.href },
     document: {
-      getElementById: (id: string) => (id === "movie_player" && player ? player : null),
+      getElementById: (id: string) =>
+        id === "movie_player" && player
+          ? player
+          : id === "shorts-player" && shortsPlayer
+            ? shortsPlayer
+            : null,
       ...(opts.uiLang !== undefined ? { documentElement: { lang: opts.uiLang } } : {}),
     },
     fetch: (() => {
@@ -433,6 +444,39 @@ describe("URL-утилиты", () => {
   });
 });
 
+describe("findPlayerElement: выбор плеера страницы (duopulse-220)", () => {
+  const el = (response: unknown): PlayerElement => ({ getPlayerResponse: () => response });
+  const doc = (map: { [id: string]: PlayerElement | null }): { getElementById(id: string): unknown } => ({
+    getElementById: (id: string) => map[id] ?? null,
+  });
+
+  it("Shorts: в DOM оба — берёт shorts-player с ответом текущего видео", () => {
+    const sp = el({ videoDetails: { videoId: "S1" }, captions: {} });
+    const mp = el({}); // скрытая заглушка Shorts: без videoDetails/captions
+    expect(findPlayerElement(doc({ "shorts-player": sp, movie_player: mp }), "S1")).toBe(sp);
+  });
+
+  it("watch: единственный movie_player — выбран как раньше", () => {
+    const mp = el({ videoDetails: { videoId: "W1" } });
+    expect(findPlayerElement(doc({ movie_player: mp }), "W1")).toBe(mp);
+    expect(findPlayerElement(doc({ movie_player: mp }), "W1")).toBe(mp);
+  });
+
+  it("нет совпадения по id — пустая заглушка лучше чужого устаревшего ответа (SPA)", () => {
+    const sp = el({}); // shorts ещё без ответа
+    const mp = el({ videoDetails: { videoId: "OLD" } }); // устаревший watch-ответ
+    expect(findPlayerElement(doc({ "shorts-player": sp, movie_player: mp }), "S1")).toBe(sp);
+  });
+
+  it("элемент без getPlayerResponse и отсутствие обоих — null/единственный", () => {
+    expect(findPlayerElement(doc({}), "S1")).toBeNull();
+    const plain = {} as PlayerElement;
+    expect(findPlayerElement(doc({ "shorts-player": plain }), "S1")).toBeNull();
+    const sp = el({});
+    expect(findPlayerElement(doc({ "shorts-player": sp }), "S1")).toBe(sp);
+  });
+});
+
 describe("адаптер: список дорожек по путям добычи (docs/03 §9)", () => {
   const fx = fixtures.find((f) => f.videoId === "dQw4w9WgXcQ") ?? fixtures[0];
 
@@ -452,6 +496,19 @@ describe("адаптер: список дорожек по путям добыч
     const list = await adapter.listTracks();
     expect(list?.usedPath).toBe("initial");
     expect(list!.base.length).toBeGreaterThan(0);
+  });
+
+  it("duopulse-220: Shorts — дорожки из shorts-player, скрытая movie_player-заглушка не побеждает", async () => {
+    const adapter = new YouTubeAdapter({
+      win: makeWindow({
+        href: "https://www.youtube.com/shorts/SHORT1",
+        shortsPlayerResponse: playerResponseOf({ ...fx, videoId: "SHORT1" }),
+        playerResponse: {}, // скрытый movie_player на Shorts — пустой ответ
+      }),
+    });
+    const list = await adapter.listTracks();
+    expect(list?.usedPath).toBe("player-api");
+    expect(list!.base.length).toBe(fx.captionTracks.length);
   });
 
   it("устаревший ответ (SPA) — ждёт свежий, отдаёт с предупреждением по таймауту", async () => {
@@ -833,6 +890,50 @@ describe("PlayerApiTransport: добыча не запускает видео с
     video.paused = true; // пользователь поставил на паузу, пока шла загрузка
     await expect(t.loadBaseTrack("TEST", "en")).resolves.toBeNull();
     expect(player.setOption).not.toHaveBeenCalled(); // плеер не программировали
+  });
+
+  it("duopulse-220: Shorts — программирует shorts-player, а не скрытую заглушку movie_player", async () => {
+    const shortsPlayer: Record<string, unknown> = {
+      getPlayerResponse: () => ({ videoDetails: { videoId: "SHORT" } }),
+      loadModule: vi.fn(),
+      unloadModule: vi.fn(),
+      setOption: vi.fn(),
+      getOption: () => null,
+      getPlayerState: () => 1,
+      classList: { contains: () => false },
+    };
+    const stubPlayer: Record<string, unknown> = {
+      getPlayerResponse: () => ({}), // пустая заглушка Shorts
+      loadModule: vi.fn(),
+      unloadModule: vi.fn(),
+      setOption: vi.fn(),
+      getOption: () => null,
+      getPlayerState: () => 5,
+      classList: { contains: () => false },
+    };
+    const win = {
+      location: { href: "https://www.youtube.com/shorts/SHORT" },
+      document: {
+        getElementById: (id: string) =>
+          id === "shorts-player" ? shortsPlayer : id === "movie_player" ? stubPlayer : null,
+        hidden: false,
+      },
+      fetch: (() => Promise.resolve({})) as unknown as typeof fetch,
+    } as unknown as PageWindow;
+    const hitCapture = {
+      all: () => [],
+      waitFor: async () => ({ url: "https://x/timedtext?v=SHORT&lang=en", body: "b", at: 0 }),
+      findFor: () => null,
+      findTranslationFor: () => null,
+    } as unknown as TimedtextCaptureSource;
+    const t = new PlayerApiTransport({ win, getVideo: () => ({ paused: false }), capture: hitCapture });
+    await expect(t.begin()).resolves.toBe(true);
+    expect(shortsPlayer.loadModule).toHaveBeenCalled();
+    expect(stubPlayer.loadModule).not.toHaveBeenCalled();
+    const cap = await t.loadBaseTrack("SHORT", "en");
+    expect(cap?.url).toContain("v=SHORT");
+    expect(shortsPlayer.setOption).toHaveBeenCalled();
+    expect(stubPlayer.setOption).not.toHaveBeenCalled();
   });
 });
 

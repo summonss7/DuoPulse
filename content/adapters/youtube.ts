@@ -4,7 +4,8 @@
 //
 // Добыча данных (октябрь 2026, проверено пробами на живом YouTube):
 // - Список дорожек — из player-ответа: путь «player-api»
-//   (movie_player.getPlayerResponse) → путь «initial»
+//   (плеер страницы: movie_player на watch, shorts-player на Shorts —
+//   выбирает findPlayerElement, duopulse-220) → путь «initial»
 //   (window.ytInitialPlayerResponse) → «texttrack» (native TextTrack;
 //   у текущего плеера YouTube пуст — последний resort по docs/03 §3.1).
 // - Прямой fetch baseUrl из captionTracks возвращает 200 с пустым телом:
@@ -469,6 +470,42 @@ export interface PlayerElement {
   classList?: { contains(cls: string): boolean };
 }
 
+/** Найти плеер YouTube в документе. Кандидаты: #shorts-player (страницы
+ * Shorts) и #movie_player (watch). На странице Shorts в DOM живут ОБА:
+ * видимый shorts-player и скрытый (0×0, [hidden]) movie_player, чей
+ * getPlayerResponse — пустая заглушка без videoDetails/captions; слепой
+ * приоритет movie_player оставлял адаптер без дорожек — субтитры на Shorts
+ * не включались ни сами, ни вручную (duopulse-220). Несколько кандидатов:
+ * предпочтение — ответу, чей videoDetails.videoId совпадает с id из URL;
+ * если такого нет (SPA-переход/инициализация), пустая заглушка (без
+ * videoId) лучше чужого устаревшего ответа — список дождётся свежего,
+ * а не залипнет на прошлом видео. */
+export function findPlayerElement(
+  doc: { getElementById(id: string): unknown },
+  expectedVideoId?: string | null,
+): PlayerElement | null {
+  const candidates: PlayerElement[] = [];
+  for (const id of ["shorts-player", "movie_player"]) {
+    const el = doc.getElementById(id) as PlayerElement | null;
+    if (el && !candidates.includes(el) && typeof el.getPlayerResponse === "function") {
+      candidates.push(el);
+    }
+  }
+  if (candidates.length <= 1) return candidates[0] ?? null;
+  const responseOf = (el: PlayerElement): unknown => {
+    try {
+      return el.getPlayerResponse!();
+    } catch {
+      return null;
+    }
+  };
+  if (expectedVideoId) {
+    const match = candidates.find((el) => videoIdOfResponse(responseOf(el)) === expectedVideoId);
+    if (match) return match;
+  }
+  return candidates.find((el) => videoIdOfResponse(responseOf(el)) === null) ?? candidates[0];
+}
+
 export interface YouTubeTransport {
   readonly usedPath: string;
   begin(): Promise<boolean>;
@@ -496,8 +533,9 @@ export class PlayerApiTransport implements YouTubeTransport {
   }
 
   private player(): PlayerElement | null {
-    const el = this.win.document.getElementById("movie_player");
-    return el && typeof (el as PlayerElement).getPlayerResponse === "function" ? (el as PlayerElement) : null;
+    // Shorts: программировать нужно shorts-player (duopulse-220, см.
+    // findPlayerElement — скрытый movie_player-заглушка на Shorts пуст).
+    return findPlayerElement(this.win.document, videoIdFromHref(this.win.location.href));
   }
 
   /** Скрытый документ (Core спрятал webview неактивной вкладки): ленивая
@@ -689,10 +727,13 @@ export class YouTubeAdapter implements Adapter {
   }
 
   private playerResponse(): { response: unknown; path: string } | null {
-    const el = this.opts.win.document.getElementById("movie_player") as PlayerElement | null;
-    if (el && typeof el.getPlayerResponse === "function") {
+    const el = findPlayerElement(
+      this.opts.win.document,
+      videoIdFromHref(this.opts.win.location.href),
+    );
+    if (el) {
       try {
-        const response = el.getPlayerResponse();
+        const response = el.getPlayerResponse?.();
         if (response && typeof response === "object") return { response, path: "player-api" };
       } catch {
         /* плеер недоступен — следующий путь */
