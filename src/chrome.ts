@@ -18,7 +18,6 @@ import "./vpn-panel/vpn-panel";
 import { initDuo } from "./subtitles-panel/duo";
 import { initTranslateSettings } from "./subtitles-panel/translate-settings";
 import { initDownloadButton } from "./download-panel/panel";
-import { initDlIndicator } from "./chrome/dl-indicator";
 
 // Клик по хрому вне якорной кнопки закрывает панель-окно (duopulse-090):
 // клики по странице ловит Core (потеря фокуса панелью), клики по хрому — тут.
@@ -60,11 +59,9 @@ initUpdateBar();
 initDuo();
 // Секция «Перевод» duo-панели: провайдеры DeepL/Google/LibreTranslate (4.1).
 initTranslateSettings();
-// Кнопка «⬇» + панель «Скачать» (карточка duopulse-118).
+// Кнопка «⬇» + панель «Скачать» (карточка duopulse-118); на ней же с
+// duopulse-222 индикатор загрузок duopulse-158 (пульс, пока качается).
 initDownloadButton();
-// Индикатор загрузок в навбаре (карточка duopulse-158): файлы страниц и
-// медиа-задания — пульс, пока качается; клик — панель «Скачать».
-initDlIndicator();
 
 // URL активной вкладки — в адресную строку (кроме моментов ввода); сюда же —
 // звёздочка (SPA-навигация и Ctrl+D из контента тоже приходят tabs.updated).

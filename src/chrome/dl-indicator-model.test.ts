@@ -1,32 +1,46 @@
-// DuoPulse — модель индикатора загрузок навбара (карточка duopulse-158):
-// показ/скрытие кнопки и подсказка по счётчикам активных/свежих загрузок.
-// Файлы и медиа считаются вместе; после завершения кнопка живёт на
-// «свежих файловых» до конца сеанса (инвариант зеркален реестру Core).
+// DuoPulse — модель индикатора загрузок кнопки «⬇» навбара (карточки
+// 158/222): показ/скрытие и подсказка по счётчикам активных загрузок и типу
+// вкладки. Файлы и медиа считаются вместе; на внутренней вкладке кнопка
+// живёт только пока что-то качается — постоянного дубля двух кнопок с одной
+// панелью «Скачать» больше нет (дуопульс-222).
 import { describe, expect, it } from "vitest";
-import { emptyDlIndicatorState, indicatorTitle, indicatorVisible } from "./dl-indicator-model";
+import {
+  dlButtonVisible,
+  emptyDlIndicatorState,
+  indicatorActive,
+  indicatorTitle,
+} from "./dl-indicator-model";
 
-describe("indicatorVisible — показ кнопки загрузок", () => {
-  it("пустое состояние — кнопки нет", () => {
-    expect(indicatorVisible(emptyDlIndicatorState())).toBe(false);
+describe("dlButtonVisible — показ кнопки «⬇»", () => {
+  it("покой на внутренней вкладке — кнопки нет", () => {
+    expect(dlButtonVisible(false, emptyDlIndicatorState())).toBe(false);
   });
 
-  it("качается файл или медиа — кнопка видна", () => {
-    expect(indicatorVisible({ activeFiles: 1, activeMedia: 0, recentFiles: 1 })).toBe(true);
-    expect(indicatorVisible({ activeFiles: 0, activeMedia: 2, recentFiles: 0 })).toBe(true);
+  it("http(s)-вкладка — кнопка видна и без загрузок", () => {
+    expect(dlButtonVisible(true, emptyDlIndicatorState())).toBe(true);
   });
 
-  it("всё закончилось, но файлы в сеансе были — кнопка остаётся", () => {
-    expect(indicatorVisible({ activeFiles: 0, activeMedia: 0, recentFiles: 3 })).toBe(true);
+  it("качается файл или медиа — видна и на внутренней вкладке", () => {
+    expect(dlButtonVisible(false, { activeFiles: 1, activeMedia: 0 })).toBe(true);
+    expect(dlButtonVisible(false, { activeFiles: 0, activeMedia: 2 })).toBe(true);
+  });
+
+  it("всё закончилось на внутренней вкладке — кнопка гаснет (нет дубля, 222)", () => {
+    expect(dlButtonVisible(false, { activeFiles: 0, activeMedia: 0 })).toBe(false);
   });
 });
 
-describe("indicatorTitle — подсказка кнопки", () => {
-  it("покой — базовый текст", () => {
-    expect(indicatorTitle(emptyDlIndicatorState(), "Загрузки")).toBe("Загрузки");
+describe("indicatorActive / indicatorTitle — счётчик и подсказка", () => {
+  it("активные суммируются: файлы + медиа", () => {
+    expect(indicatorActive({ activeFiles: 1, activeMedia: 1 })).toBe(2);
+    expect(indicatorActive(emptyDlIndicatorState())).toBe(0);
   });
 
-  it("активные суммируются: файлы + медиа", () => {
-    const title = indicatorTitle({ activeFiles: 1, activeMedia: 1, recentFiles: 2 }, "Загрузки");
-    expect(title).toContain("2");
+  it("покой — базовый текст", () => {
+    expect(indicatorTitle("Загрузки", emptyDlIndicatorState())).toBe("Загрузки");
+  });
+
+  it("активные — счётчик в подсказке", () => {
+    expect(indicatorTitle("Загрузки", { activeFiles: 1, activeMedia: 1 })).toContain("2");
   });
 });

@@ -4,6 +4,10 @@
 // (yt-dlp поддерживает не только YouTube); панель — child-webview «download»
 // (паттерн duo-панели 090: initDownloadButton в хроме открывает окно,
 // openDownloadPanelContent наполняет его в панельном режиме).
+// Индикатор загрузок (карточка duopulse-158) живёт НА ЭТОЙ ЖЕ кнопке с
+// duopulse-222: пульс-точка и «скачивается: N», пока качаются файлы страниц
+// и медиа-задания; прежняя вторая кнопка-«домик» справа открывала ту же
+// панель и путала («две кнопки делают одно и то же»).
 //
 // Данные: download.status (инструменты/каталог/задания), tabs.list (адрес
 // активной вкладки), subtitles.list_tracks (языки для выгрузки; обновление —
@@ -28,6 +32,12 @@ import type {
 } from "../bridge/gen/types";
 import { anchorPanel, closePanel as closePanelWindow, currentPanel, openPanel } from "../chrome/panel-window";
 import { onTabsChanged } from "../chrome/tabbar";
+import {
+  dlButtonVisible,
+  emptyDlIndicatorState,
+  indicatorActive,
+  indicatorTitle,
+} from "../chrome/dl-indicator-model";
 import {
   AUDIO_FORMAT_OPTIONS,
   QUALITY_OPTIONS,
@@ -72,16 +82,64 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 // --- хром: кнопка --------------------------------------------------------------
 
-/** Кнопка «⬇» в навбаре (режим хрома): видна на http(s)-вкладках, клик —
- *  панель-окно (паттерн duo). Идемпотентна. */
+/** Кнопка «⬇» в навбаре (режим хрома): видна на http(s)-вкладках и пока
+ *  что-то качается (индикатор duopulse-158 слит сюда в duopulse-222 —
+ *  отдельной кнопки-«домика» больше нет), клик — панель-окно (паттерн duo).
+ *  Идемпотентна. */
 export function initDownloadButton(): void {
   const btn = $("dlBtn") as HTMLButtonElement | null;
   if (!btn || btn.dataset.dlInit === "1") return;
   btn.dataset.dlInit = "1";
-  // адрес активной вкладки — кнопка видна только на сетевых страницах
+  // видимость решают двое: тип активной вкладки + живые загрузки; точка
+  // пульсирует (data-active), подсказка дополняется «скачивается: N»
+  const ind = emptyDlIndicatorState();
+  let httpTab = false;
+  const DL_BASE_TITLE = "Скачать с этой страницы: видео, музыку, субтитры или фрагмент";
+  const apply = (): void => {
+    btn.hidden = !dlButtonVisible(httpTab, ind);
+    const active = indicatorActive(ind);
+    btn.dataset.active = active > 0 ? "1" : "0";
+    btn.title = indicatorTitle(t(DL_BASE_TITLE), ind);
+  };
+  // адрес активной вкладки — на сетевых страницах кнопка видна всегда
   onTabsChanged((tabs) => {
     const active = tabs.find((t) => t.active);
-    btn.hidden = !(active?.url ?? "").startsWith("http");
+    httpTab = (active?.url ?? "").startsWith("http");
+    apply();
+  });
+  // стартовое состояние: живые файловые загрузки (перезагрузка UI-webview при
+  // смене языка) и активные медиа-задания ядра
+  void (async () => {
+    try {
+      const [files, status] = await Promise.all([bridge.filedl.status(), bridge.download.status()]);
+      const ACTIVE = new Set(["prepare", "tools", "download", "convert", "subs"]);
+      ind.activeFiles = files.files.filter((f) => f.state === "active").length;
+      ind.activeMedia = status.jobs.filter((j) => ACTIVE.has(j.phase)).length;
+      apply();
+    } catch (e) {
+      console.error("dl-indicator:", e);
+    }
+  })();
+  // файловые загрузки: старт/итог двигают счётчики, прогресс — нет
+  void listen<FileDlStarted>(bridge.events.filedlStarted, () => {
+    ind.activeFiles += 1;
+    apply();
+  });
+  void listen<FileDlFinished>(bridge.events.filedlFinished, () => {
+    ind.activeFiles = Math.max(0, ind.activeFiles - 1);
+    apply();
+  });
+  // медиа-задания: прогресс держит id в множестве активных, итог снимает
+  const mediaActive = new Set<number>();
+  void listen<DownloadProgress>(bridge.events.downloadProgress, (ev) => {
+    mediaActive.add(ev.payload.jobId);
+    ind.activeMedia = mediaActive.size;
+    apply();
+  });
+  void listen<DownloadFinished>(bridge.events.downloadFinished, (ev) => {
+    mediaActive.delete(ev.payload.jobId);
+    ind.activeMedia = mediaActive.size;
+    apply();
   });
   btn.addEventListener("click", () => {
     if (currentPanel() === "download") {
@@ -91,6 +149,7 @@ export function initDownloadButton(): void {
     const { x, y, w, h } = anchorPanel("download", btn, "right");
     openPanel("download", x, y, w, h);
   });
+  apply();
 }
 
 // --- панель: контент -----------------------------------------------------------

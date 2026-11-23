@@ -3678,10 +3678,11 @@ html[data-panel="auth"] .auth-dialog {
   }
 }
 
-/* --- Индикатор загрузок в навбаре (карточка duopulse-158): кнопка «↓»
-     справа; точка пульсирует, пока что-то качается (файлы/медиа), ровный
-     неон — свежие загрузки сеанса; клик — панель «Скачать» --- */
-.dl-ind-btn {
+/* --- Индикатор загрузок на кнопке «⬇» «Скачать» (карточки 158/222: слит
+     в эту кнопку, отдельной кнопки-«домика» с той же панелью больше нет):
+     точка пульсирует, пока что-то качается (файлы страниц / медиа-задания);
+     клик — панель «Скачать» --- */
+.dl-btn {
   position: relative;
 }
 .dl-ind-dot {
@@ -3695,9 +3696,9 @@ html[data-panel="auth"] .auth-dialog {
   box-shadow: 0 0 6px color-mix(in srgb, var(--accent-neon) 60%, transparent);
   pointer-events: none;
 }
-.dl-ind-btn[data-active="1"] .dl-ind-dot {
+.dl-btn[data-active="1"] .dl-ind-dot {
   animation: vpn-dot-pulse 1.2s ease-in-out infinite;
 }
-.dl-ind-btn[data-active="1"] {
+.dl-btn[data-active="1"] {
   color: var(--accent-neon);
 }
