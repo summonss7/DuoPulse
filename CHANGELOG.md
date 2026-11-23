@@ -8500,4 +8500,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   vtt_to_plain_skips_header_and_cue_ids, clean_media_name_rules; обновлены под новое поведение plain_txt_dedupes…,
   srt_to_plain…, subs_args_and_lang_of); cargo clippy — по download/* замечаний нет. README дополнен (раздел
   «Загрузка видео, музыки и субтитров»). Бэкап до правок: backups/backup_2026-11-23_06-02-09.
-- Коммит: <хеш подшит после коммита> — fix(download): duopulse-224 — чистый текст субтитров без служебных пометок и имя по правилам музыки.
+- Коммит: 12869ef — fix(download): duopulse-224 — чистый текст субтитров без служебных пометок и имя по правилам музыки.
