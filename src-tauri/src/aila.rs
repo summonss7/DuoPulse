@@ -834,6 +834,7 @@ mod tests {
                 added_at: 1,
                 updated_at: 2,
                 groups: vec!["Избранное".into()],
+                members: Vec::new(),
             }],
             groups: vec![SyncGroup {
                 name: "Избранное".into(),

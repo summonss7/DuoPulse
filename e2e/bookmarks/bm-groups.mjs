@@ -15,9 +15,13 @@
 //   4) правый клик по пустому месту строки — «Новая группа…» (ENTER),
 //      папка появилась + инлайн-правка; печать «Тест»+ENTER — группа
 //      переименована;
-//   5) панель папки «Медиа»: правый клик по строке — HTML мини-меню
-//      .bm-ctx («Создать раздел…» duopulse-173 + «Переименовать…»/
-//      «Удалить закладку»), скриншот, клик «Удалить закладку» — удалена;
+//   5) панель папки «Медиа»: правый клик по строке — нативное меню
+//      (duopulse-189: системный popup вместо HTML .bm-ctx), состав из CDP
+//      не читается — проверяем поведением: Escape закрывает без
+//      последствий, 1-й пункт «Создать раздел…» (duopulse-173) создаёт
+//      подгруппу в «Медиа», 3-й «Удалить закладку» удаляет закладку
+//      (поиск закладки — groupId:null, все группы: -1 — фильтр «без
+//      группы», сгруппированная закладка им не находится);
 //   6) внешний drop в ОТКРЫТУЮ панель (тело, не подгруппа): E из
 //      «Избранного» переложена в «Медиа»;
 //   7) (duopulse-163) правый клик по папке «Тест» — нативное меню
@@ -156,6 +160,67 @@ const sendKeys = (keys) =>
     "-Command",
     `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${keys}')`,
   ]).catch((e) => console.log("keys:", String(e).slice(0, 120)));
+
+/** Сколько попапов-меню (#32768) открыто у процесса НАШЕГО exe — нативное
+ *  меню из CDP не видно (класс окон ищем EnumWindows по pid; FindWindow
+ *  глобален и на живой машине ловит чужие меню, например Aila). */
+const ourPopups = () =>
+  run("powershell", [
+    "-NoProfile",
+    "-Command",
+    `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class PM {
+  public static int Count = 0;
+  static uint Target;
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  static bool Cb(IntPtr h, IntPtr l) {
+    uint pid; GetWindowThreadProcessId(h, out pid);
+    if (pid == Target) {
+      var sb = new StringBuilder(64);
+      GetClassName(h, sb, 64);
+      if (sb.ToString() == "#32768") Count++;
+    }
+    return true;
+  }
+  public static int Find(uint pid) { Target = pid; Count = 0; EnumWindows(Cb, IntPtr.Zero); return Count; }
+}
+"@
+$proc = Get-CimInstance Win32_Process -Filter "Name='duopulse.exe'" |
+  Where-Object { $_.ExecutablePath -eq '${EXE_PS}' } | Select-Object -First 1
+$p = Get-Process -Id $proc.ProcessId -ErrorAction Stop
+[PM]::Find($p.Id)
+`,
+  ])
+    .then((out) => Number(String(out).trim()))
+    .catch(() => 0);
+
+/** Открыть нативное меню (dispatch — CDP-выражение contextmenu в webview ws)
+ *  и отправить ему клавиши. Клавиши — только по живому попапу (гейт): на
+ *  живой машине Aila перетягивает foreground, а попап не-foreground окна
+ *  Windows закрывает мгновенно — клавиши уходят мимо меню; PS-запуск гейта
+ *  (~1,5 с) заодно доказывает, что окно держит foreground. Попап не пойман —
+ *  ретрай (до 4). true — клавиши ушли в открытое меню. */
+const menuKeys = async (ws, dispatch, keys) => {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await foregroundApp();
+    await ws.evalT(dispatch, 2500).catch(() => {});
+    await sleep(800);
+    if ((await ourPopups()) > 0) {
+      await sendKeys(keys);
+      return true;
+    }
+    await sendKeys("{ESC}");
+    await sleep(500);
+  }
+  return false;
+};
 
 const httpServer = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -309,27 +374,29 @@ try {
 
   // --- 3. правый клик по чипу: нативное меню «Удалить» ------------------------
   step("нативное меню чипа B: «Удалить» (DOWN DOWN ENTER)");
-  await foregroundApp();
-  await uiWs.evalT(
-    `(() => {
-      const b = [...document.querySelectorAll('#bmbar .bm-item:not(.bm-folder)')].find(x => x.dataset.url === "https://b.example/");
-      if (!b) return 'no-chip';
-      const r = b.getBoundingClientRect();
-      b.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: r.top + 4 }));
-      return 'ok';
-    })()`,
-    4000,
-  );
-  await sleep(900); // нативный popup открылся (модален — UI-webview может молчать)
-  await sendKeys("{DOWN}{DOWN}{ENTER}");
-  await sleep(700);
-  const bGone = await waitFor(
-    () =>
-      uiWs.evalT(`window.__duopulse.history.bookmarkList(${JSON.stringify({ query: "b.example", groupId: -1, offset: 0, limit: 10 })})`, 4000).then(
-        (r) => (r && r !== "EVAL-TIMEOUT" && r.bookmarks?.length === 0 ? r : null),
-      ),
-    8000,
-  );
+  const chipMenu = `(() => {
+    const b = [...document.querySelectorAll('#bmbar .bm-item:not(.bm-folder)')].find(x => x.dataset.url === "https://b.example/");
+    if (!b) return 'no-chip';
+    const r = b.getBoundingClientRect();
+    b.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: r.top + 4 }));
+    return 'ok';
+  })()`;
+  // выбор — по гейту живого попапа с ретраями (foreground на живой машине
+  // крадёт Aila: без гейта клавиши уходят мимо меню — флак «чип не исчез»)
+  let bGone = null;
+  let bMenu = false;
+  for (let attempt = 0; attempt < 3 && !bGone; attempt++) {
+    bMenu = await menuKeys(uiWs, chipMenu, "{DOWN}{DOWN}{ENTER}");
+    if (!bMenu) break;
+    bGone = await waitFor(
+      () =>
+        uiWs.evalT(`window.__duopulse.history.bookmarkList(${JSON.stringify({ query: "b.example", groupId: null, offset: 0, limit: 10 })})`, 4000).then(
+          (r) => (r && r !== "EVAL-TIMEOUT" && r.bookmarks?.length === 0 ? r : null),
+        ),
+      6000,
+    );
+    if (!bGone) await sendKeys("{ESC}"); // фокус ушёл между гейтом и клавишами — ретрай
+  }
   const bChipGone = await uiWs.evalT(
     `!document.querySelector('#bmbar .bm-item[data-url="https://b.example/"]')`,
     4000,
@@ -337,7 +404,7 @@ try {
   check(
     "«Удалить» из нативного меню: закладка B удалена, чип исчез",
     !!bGone && bChipGone === true,
-    JSON.stringify({ gone: !!bGone, chip: bChipGone }),
+    JSON.stringify({ menu: bMenu, gone: !!bGone, chip: bChipGone }),
   );
 
   // --- 4. правый клик по пустому месту: «Новая группа…» -----------------------
@@ -400,8 +467,11 @@ try {
   );
   check("папка «Тест» на строке", testOnBar === true);
 
-  // --- 5. панель папки: мини-меню «Удалить закладку» -------------------------
-  step("панель «Медиа»: правый клик — мини-меню, удаление закладки");
+  // --- 5. панель папки: нативное меню строки ---------------------------------
+  // С duopulse-189 меню строки — системный popup (HTML .bm-ctx прятался за
+  // видео у коротких папок), из CDP не читается — три пункта проверяем
+  // поведением: Escape, «Создать раздел…» (duopulse-173), «Удалить закладку».
+  step("панель «Медиа»: правый клик по строке — нативное меню (189/173)");
   await uiWs.evalT(`(() => {
     const f = [...document.querySelectorAll('#bmbar .bm-folder')].find(x => x.dataset.folder === String(${media.id}));
     f?.click();
@@ -420,51 +490,98 @@ try {
   if (panelT) {
     panelWs = connect(panelT.webSocketDebuggerUrl);
     await panelWs.send("Runtime.enable").catch(() => {});
+    // строки приходят после groupList+bookmarkList по IPC и загрузки бандла из
+    // холодного vite dev; на живой машине это плавает — лимит 20 с, в проверке
+    // фактическое время, при провале — снимок состояния панели
+    const rowsT0 = Date.now();
     const rowOk = await waitFor(
       () => panelWs.evalIn(`document.querySelectorAll('.bm-row[data-url]').length`, false).then((n) => (n === 1 ? n : null)),
-      10000,
+      20000,
     );
-    check("панель: строка «Кино»", rowOk === 1, String(rowOk));
-    await panelWs.evalIn(
-      `(() => {
-        const row = document.querySelector('.bm-row[data-url="https://m1.example/"]');
-        const r = row.getBoundingClientRect();
-        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 30, clientY: r.top + r.height / 2 }));
-        return 'ok';
-      })()`,
-    );
-    const ctx = await waitFor(
-      () =>
-        panelWs.evalIn(`(() => {
-          const m = document.querySelector('.bm-ctx');
-          if (!m) return null;
-          return { items: [...m.querySelectorAll('button')].map((b) => b.textContent) };
-        })()`, false).then((v) => v ?? null),
-      6000,
-    );
-    check(
-      "мини-меню: «Создать раздел…» (duopulse-173) + «Переименовать…» + «Удалить закладку»",
-      !!ctx &&
-        ctx.items.length === 3 &&
-        ctx.items[0] === "Создать раздел…" &&
-        ctx.items[1] === "Переименовать…" &&
-        ctx.items[2] === "Удалить закладку",
-      JSON.stringify(ctx),
-    );
+    const rowsMs = Date.now() - rowsT0;
+    const panelState = rowOk
+      ? `${rowsMs} мс`
+      : String(
+          await panelWs
+            .evalT(
+              `JSON.stringify({ ready: document.readyState, rows: document.querySelectorAll('.bm-row').length, host: !!document.getElementById('bmFolder'), perf: Math.round(performance.now()) })`,
+              4000,
+            ),
+        );
+    check("панель: строка «Кино»", rowOk === 1, panelState);
+    const rowMenu = `(() => {
+      const row = document.querySelector('.bm-row[data-url="https://m1.example/"]');
+      if (!row) return 'no-row';
+      const r = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 30, clientY: r.top + r.height / 2 }));
+      return 'ok';
+    })()`;
+    // адреса закладки M1 по ВСЕМ группам (groupId:null — все; -1 — фильтр
+    // «без группы»: сгруппированная закладка им не находится)
+    const m1Everywhere = () =>
+      uiWs
+        .evalT(`${H}.bookmarkList(${JSON.stringify({ query: "m1.example", groupId: null, offset: 0, limit: 10 })})`, 4000)
+        .then((r) => (r && r !== "EVAL-TIMEOUT" ? r.bookmarks.map((b) => b.url) : null));
     const shot = await panelWs.send("Page.captureScreenshot", { format: "png" }).catch(() => null);
     if (shot) {
       fs.writeFileSync(path.join(SHOT_DIR, "duopulse-160-ctx.png"), Buffer.from(shot.data, "base64"));
       console.log("скриншот:", path.join(SHOT_DIR, "duopulse-160-ctx.png"));
     }
-    await panelWs.evalIn(`document.querySelector('.bm-ctx .bm-ctx-danger')?.click()`);
-    await sleep(900);
-    const m1Gone = await uiWs.evalIn(
-      `${H}.bookmarkList(${JSON.stringify({ query: "m1.example", groupId: -1, offset: 0, limit: 10 })})`,
-    );
+    const m1Before = await m1Everywhere();
+    const escOk = await menuKeys(panelWs, rowMenu, "{ESC}");
+    await sleep(500);
+    const m1AfterEsc = await m1Everywhere();
     check(
-      "«Удалить закладку» панели: M1 удалена",
-      m1Gone.bookmarks?.length === 0,
-      JSON.stringify(m1Gone.bookmarks?.map((b) => b.url)),
+      "нативное меню строки открылось (попап #32768) и закрылось Escape без последствий (duopulse-189)",
+      escOk && (m1Before?.length ?? 0) > 0 && JSON.stringify(m1AfterEsc) === JSON.stringify(m1Before),
+      JSON.stringify({ menu: escOk, before: m1Before, after: m1AfterEsc }),
+    );
+
+    const groupsBefore = await uiWs.evalT(`${H}.groupList()`, 4000);
+    const known = new Set((Array.isArray(groupsBefore?.groups) ? groupsBefore.groups : []).map((g) => g.id));
+    // 1-й пункт — «Создать раздел…» (duopulse-173): подгруппа в открытой папке
+    const sectionKeys = await menuKeys(panelWs, rowMenu, "{DOWN}{ENTER}");
+    let section = null;
+    if (sectionKeys) {
+      section = await waitFor(
+        () =>
+          uiWs
+            .evalT(`${H}.groupList()`, 4000)
+            .then((r) =>
+              r && r !== "EVAL-TIMEOUT" && Array.isArray(r.groups)
+                ? (r.groups.find((g) => g.parentId === media.id && !known.has(g.id)) ?? null)
+                : null,
+            ),
+        6000,
+      );
+      await sleep(600); // панель перерисовалась и открыла инлайн-правку имени
+    }
+    await sendKeys("{ESC}"); // инлайн-правка имени раздела — остаётся «Новый раздел»
+    check(
+      "1-й пункт — «Создать раздел…»: подгруппа внутри «Медиа» (duopulse-173)",
+      !!section,
+      JSON.stringify(section ? { name: section.name, parent: section.parentId, depth: section.depth } : { menu: sectionKeys }),
+    );
+
+    // 3-й пункт — «Удалить закладку» (разделитель после «Создать раздел…»
+    // клавиатура пропускает: два DOWN — «Переименовать…», три — удаление):
+    // M1 уходит из всех групп, строки панели нет
+    const deleteKeys = await menuKeys(panelWs, rowMenu, "{DOWN}{DOWN}{DOWN}{ENTER}");
+    let m1Gone = null;
+    if (deleteKeys) {
+      m1Gone = await waitFor(async () => {
+        const urls = await m1Everywhere();
+        return urls && urls.length === 0 ? urls : null;
+      }, 8000);
+    }
+    if (!m1Gone) await sendKeys("{ESC}"); // фокус ушёл между гейтом и клавишами
+    const rowGone = m1Gone
+      ? await panelWs.evalT(`!document.querySelector('.bm-row[data-url="https://m1.example/"]')`, 4000)
+      : false;
+    check(
+      "3-й пункт — «Удалить закладку»: M1 удалена из всех групп, строки панели нет",
+      !!m1Gone && rowGone === true,
+      JSON.stringify({ menu: deleteKeys, urls: m1Gone, row: rowGone }),
     );
 
     // --- 6. внешний drop в открытую панель: E из «Избранного» → «Медиа» ------

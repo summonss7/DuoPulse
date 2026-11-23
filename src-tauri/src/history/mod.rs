@@ -150,10 +150,15 @@ impl HistoryStore {
              -- idx_bg_parent создаётся ниже, после гарантии колонки parent_id:
              -- в старых профилях таблица уже есть без неё, индекс в общем
              -- батче ронял открытие БД (duopulse-152, краш на старте 0.1.47)
+             -- added_at (duopulse-233): когда членство добавлено — арбитр
+             -- «снятие против повторного добавления» при слиянии облачного
+             -- документа; старые профили получают колонку ALTER'ом (0 — время
+             -- неизвестно)
              CREATE TABLE IF NOT EXISTS bookmark_group_items(
                  group_id INTEGER NOT NULL REFERENCES bookmark_groups(id) ON DELETE CASCADE,
                  bookmark_id INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
                  position INTEGER NOT NULL DEFAULT 0,
+                 added_at INTEGER NOT NULL DEFAULT 0,
                  PRIMARY KEY(group_id, bookmark_id)
              );
              CREATE INDEX IF NOT EXISTS idx_bgi_group_pos
@@ -208,6 +213,19 @@ impl HistoryStore {
             "CREATE INDEX IF NOT EXISTS idx_bg_parent ON bookmark_groups(parent_id)",
             [],
         )?;
+        // duopulse-233: added_at членства — арбитр против надгробия снятия.
+        // У старых профилей колонки нет: ALTER даёт 0 («время неизвестно») —
+        // такое членство уступает любому надгробию из облака.
+        let bgi_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(bookmark_group_items)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<_, _>>()?;
+        if !bgi_cols.iter().any(|c| c == "added_at") {
+            conn.execute(
+                "ALTER TABLE bookmark_group_items ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         // Миграция плоского списка (карточка duopulse-058): групп ещё не было —
         // создаётся «Избранное» (is_default, туда же падают Ctrl+D и звёздочка
         // без выбора) и все существующие закладки становятся её членами в
@@ -622,9 +640,11 @@ impl HistoryStore {
     }
 
     /// Ядро добавления (в транзакции вызвавшего): upsert закладки + индекс;
-    /// member — добавить членство группы (INSERT OR IGNORE идемпотентен;
-    /// None — членств не трогать — путь импорта профиля). Ответ — id строки
-    /// и вставлена ли она только что (для счётчика импорта).
+    /// member — добавить членство группы (идемпотентно; повторное
+    /// добавление обновляет added_at — «повторное добавление побеждает
+    /// удаление», duopulse-233; None — членств не трогать — путь импорта
+    /// профиля). Ответ — id строки и вставлена ли она только что (для
+    /// счётчика импорта).
     fn bookmark_add_tx(
         tx: &rusqlite::Transaction<'_>,
         url: &str,
@@ -678,14 +698,7 @@ impl HistoryStore {
             }
         };
         if let Some(gid) = member {
-            tx.execute(
-                "INSERT OR IGNORE INTO bookmark_group_items(group_id, bookmark_id, position)
-                 VALUES (?1, ?2,
-                     (SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_group_items
-                      WHERE group_id = ?1))",
-                rusqlite::params![gid, id],
-            )
-            .map_err(err_sql)?;
+            member_add_tx(tx, gid, id, added_at)?;
         }
         Ok((id, inserted))
     }
@@ -1181,7 +1194,9 @@ impl HistoryStore {
 
     /// Членство закладки в группе вкл/выкл (закладка может быть в нескольких
     /// группах или ни в одной). Снятие всех членств оставляет закладку
-    /// «без группы» (видна в фильтре Ungrouped и в «Все»).
+    /// «без группы» (видна в фильтре Ungrouped и в «Все»). Снятие оставляет
+    /// надгробие member — синк не возвращает членство из облака и снимает
+    /// его на остальных машинах (duopulse-233: перенос = перенос, не копия).
     pub fn group_toggle_bookmark(&self, url: &str, group_id: i64, on: bool) -> Result<(), String> {
         let mut conn = self.conn.lock().expect("history: лок не отравлен");
         let tx = conn.transaction().map_err(err_sql)?;
@@ -1205,20 +1220,9 @@ impl HistoryStore {
             })
             .map_err(|_| format!("закладка {url} не найдена"))?;
         if on {
-            tx.execute(
-                "INSERT OR IGNORE INTO bookmark_group_items(group_id, bookmark_id, position)
-                 VALUES (?1, ?2,
-                     (SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_group_items
-                      WHERE group_id = ?1))",
-                rusqlite::params![group_id, bid],
-            )
-            .map_err(err_sql)?;
+            member_add_tx(&tx, group_id, bid, now_ms())?;
         } else {
-            tx.execute(
-                "DELETE FROM bookmark_group_items WHERE group_id = ?1 AND bookmark_id = ?2",
-                rusqlite::params![group_id, bid],
-            )
-            .map_err(err_sql)?;
+            member_remove_tx(&tx, group_id, bid, now_ms())?;
         }
         tx.commit().map_err(err_sql)
     }
@@ -1325,6 +1329,24 @@ impl HistoryStore {
         };
         rest.retain(|id| !seen.contains(id));
         order.extend(rest);
+        // duopulse-233: added_at членств переживает перенумерацию (0 у живых
+        // строк значил бы «время неизвестно» — надгробие снятия из облака
+        // убило бы их); безгрупповые чипы, «усыновлённые» строкой, получают «сейчас»
+        let kept_at: std::collections::HashMap<i64, i64> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT bookmark_id, added_at FROM bookmark_group_items
+                     WHERE group_id = ?1",
+                )
+                .map_err(err_sql)?;
+            let rows = stmt
+                .query_map([def_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+                .map_err(err_sql)?
+                .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()
+                .map_err(err_sql)?;
+            rows
+        };
+        let now = now_ms();
         tx.execute(
             "DELETE FROM bookmark_group_items WHERE group_id = ?1",
             [def_id],
@@ -1333,13 +1355,18 @@ impl HistoryStore {
         {
             let mut stmt = tx
                 .prepare(
-                    "INSERT INTO bookmark_group_items(group_id, bookmark_id, position)
-                     VALUES (?1, ?2, ?3)",
+                    "INSERT INTO bookmark_group_items(group_id, bookmark_id, position, added_at)
+                     VALUES (?1, ?2, ?3, ?4)",
                 )
                 .map_err(err_sql)?;
             for (idx, bid) in order.iter().enumerate() {
-                stmt.execute(rusqlite::params![def_id, bid, idx as i64])
-                    .map_err(err_sql)?;
+                stmt.execute(rusqlite::params![
+                    def_id,
+                    bid,
+                    idx as i64,
+                    kept_at.get(bid).copied().unwrap_or(now)
+                ])
+                .map_err(err_sql)?;
             }
         }
         tx.execute(
@@ -1423,6 +1450,7 @@ impl HistoryStore {
                         added_at: r.get(3)?,
                         updated_at: r.get(4)?,
                         groups: Vec::new(),
+                        members: Vec::new(),
                     },
                 ))
             })
@@ -1430,14 +1458,15 @@ impl HistoryStore {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(err_sql)?;
         let ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
-        let refs = group_refs_of(&conn, &ids).map_err(err_sql)?;
+        // duopulse-233: членства — имена (для приёмников старых версий) и те
+        // же имена с added_at (арбитр против надгробия снятия)
+        let refs = sync_members_of(&conn, &ids).map_err(err_sql)?;
         let bookmarks = rows
             .into_iter()
             .map(|(id, mut b)| {
-                b.groups = refs
-                    .get(&id)
-                    .map(|v| v.iter().map(|r| r.name.clone()).collect())
-                    .unwrap_or_default();
+                let members = refs.get(&id).cloned().unwrap_or_default();
+                b.groups = members.iter().map(|m| m.group.clone()).collect();
+                b.members = members;
                 b
             })
             .collect();
@@ -1490,7 +1519,10 @@ impl HistoryStore {
     /// заголовок берёт свежий updated_at) и группы (объединение по имени);
     /// надгробие, пережитое более поздним созданием, снимается — повторное
     /// добавление побеждает удаление. Позиции/порядок групп не синкаются
-    /// (локальный выбор), снятие членства — объединение (не удаление).
+    /// (локальный выбор). Членства (duopulse-233): снятие оставляет надгробие
+    /// member «имя группы ␟ url»; арбитр — added_at членства против deleted_at
+    /// надгробия (свежее добавление побеждает, неизвестное время уступает);
+    /// без надгробия членства по-прежнему объединяются по именам групп.
     pub fn merge_sync_doc(&self, remote: &BookmarkSyncDoc) -> Result<BookmarkMergeStats, String> {
         let mut stats = BookmarkMergeStats::default();
         let mut conn = self.conn.lock().expect("history: лок не отравлен");
@@ -1636,6 +1668,25 @@ impl HistoryStore {
             )
             .map_err(err_sql)?;
         }
+        // 4a) снятия членств (duopulse-233): надгробие member свежее добавления —
+        //     локальное членство снимается (перенос закладки в другую группу
+        //     на другой машине доезжает и сюда; членства старых профилей без
+        //     времени уступают любому надгробию)
+        let gone = tx
+            .execute(
+                "DELETE FROM bookmark_group_items
+                 WHERE EXISTS (
+                     SELECT 1 FROM bookmark_groups g
+                     JOIN bookmarks b ON b.id = bookmark_group_items.bookmark_id
+                     JOIN sync_tombstones t
+                       ON t.kind = 'member'
+                      AND t.key = g.name || char(31) || b.url
+                     WHERE g.id = bookmark_group_items.group_id
+                       AND t.deleted_at > bookmark_group_items.added_at)",
+                [],
+            )
+            .map_err(err_sql)?;
+        stats.removed += gone as u64;
         // 4) закладки облака: по url; надгробие свежее добавления — скип.
         for b in &remote.bookmarks {
             let url = b.url.trim();
@@ -1695,23 +1746,57 @@ impl HistoryStore {
                     id
                 }
             };
-            // членства — объединение по именам (докторит рассинхрон групп)
-            for gname in &b.groups {
-                let Some(&gid) = gid_of_name.get(gname.trim()) else {
+            // членства: арбитр — added_at против надгробия снятия (duopulse-233);
+            // документ старой версии времени не несёт (0) — такое членство
+            // уступает надгробию. Иначе — объединение по именам групп
+            let claims: Vec<(String, i64)> = if b.members.is_empty() {
+                b.groups
+                    .iter()
+                    .map(|g| (g.trim().to_string(), 0))
+                    .collect()
+            } else {
+                b.members
+                    .iter()
+                    .map(|m| (m.group.trim().to_string(), m.added_at))
+                    .collect()
+            };
+            for (gname, added_at) in claims {
+                let Some(&gid) = gid_of_name.get(gname.as_str()) else {
                     continue;
                 };
+                let dead = tomb
+                    .get(&(
+                        TOMBSTONE_MEMBER.to_string(),
+                        member_tombstone_key(&gname, url),
+                    ))
+                    .is_some_and(|&d| d > added_at);
+                if dead {
+                    continue; // на отправителе добавлено раньше, чем сняли здесь
+                }
                 tx.execute(
-                    "INSERT OR IGNORE INTO bookmark_group_items(group_id, bookmark_id, position)
+                    "INSERT INTO bookmark_group_items(group_id, bookmark_id, position, added_at)
                      VALUES (?1, ?2,
                          (SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_group_items
-                          WHERE group_id = ?1))",
-                    rusqlite::params![gid, id],
+                          WHERE group_id = ?1), ?3)
+                     ON CONFLICT(group_id, bookmark_id) DO UPDATE SET added_at = MAX(added_at, ?3)",
+                    rusqlite::params![gid, id, added_at],
                 )
                 .map_err(err_sql)?;
             }
         }
         // 5) надгробия, пережитые более поздним созданием, — сняты: повторное
         //    добавление побеждает удаление, надгробие уходит из документа
+        //    (для членств — добавление в ту же группу, duopulse-233)
+        tx.execute(
+            "DELETE FROM sync_tombstones
+             WHERE kind = 'member' AND deleted_at <=
+                 (SELECT i.added_at FROM bookmark_group_items i
+                  JOIN bookmark_groups g ON g.id = i.group_id
+                  JOIN bookmarks b ON b.id = i.bookmark_id
+                  WHERE sync_tombstones.key = g.name || char(31) || b.url)",
+            [],
+        )
+        .map_err(err_sql)?;
         tx.execute(
             "DELETE FROM sync_tombstones WHERE kind = 'bookmark' AND deleted_at <= \
              (SELECT added_at FROM bookmarks WHERE bookmarks.url = sync_tombstones.key)",
@@ -1969,14 +2054,9 @@ impl HistoryStore {
                 );
             }
             for gid in gids {
-                tx.execute(
-                    "INSERT OR IGNORE INTO bookmark_group_items(group_id, bookmark_id, position)
-                     VALUES (?1, ?2,
-                         (SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_group_items
-                          WHERE group_id = ?1))",
-                    rusqlite::params![gid, id],
-                )
-                .map_err(err_sql)?;
+                // импорт — свежее добавление («сейчас»): переживает надгробие
+                // снятия этого членства, пришедшее из облака (duopulse-233)
+                member_add_tx(&tx, gid, id, now_ms())?;
             }
         }
         tx.commit().map_err(err_sql)?;
@@ -2035,9 +2115,86 @@ pub enum GroupFilter {
 
 // --- этап 5 duopulse-111: документ облачного синка закладок ------------------
 
-/// Вид надгробия: закладка (ключ — url) или группа (ключ — имя).
+/// Вид надгробия: закладка (ключ — url), группа (ключ — имя) или снятое
+/// членство (ключ — «имя группы ␟ url», duopulse-233).
 pub const TOMBSTONE_BOOKMARK: &str = "bookmark";
 pub const TOMBSTONE_GROUP: &str = "group";
+pub const TOMBSTONE_MEMBER: &str = "member";
+
+/// Ключ надгробия снятия членства: группы в документе адресуются именами,
+/// закладки — url; разделитель ␟ (U+001F) в именах и url не встречается.
+fn member_tombstone_key(group: &str, url: &str) -> String {
+    format!("{group}\u{1F}{url}")
+}
+
+/// Добавить членство (в транзакции вызвавшего) с временем добавления `at`.
+/// Идемпотентно: существующей строке время лишь растёт (MAX) — «свежее
+/// добавление побеждает»; надгробие снятия, пережитое добавлением, снимается.
+fn member_add_tx(
+    tx: &rusqlite::Transaction<'_>,
+    group_id: i64,
+    bookmark_id: i64,
+    at: i64,
+) -> Result<(), String> {
+    tx.execute(
+        "INSERT INTO bookmark_group_items(group_id, bookmark_id, position, added_at)
+         VALUES (?1, ?2,
+             (SELECT COALESCE(MAX(position) + 1, 0) FROM bookmark_group_items
+              WHERE group_id = ?1), ?3)
+         ON CONFLICT(group_id, bookmark_id) DO UPDATE SET added_at = MAX(added_at, ?3)",
+        rusqlite::params![group_id, bookmark_id, at],
+    )
+    .map_err(err_sql)?;
+    tx.execute(
+        "DELETE FROM sync_tombstones
+         WHERE kind = 'member' AND deleted_at <= ?1
+           AND key = (SELECT name FROM bookmark_groups WHERE id = ?2) || char(31)
+                   || (SELECT url FROM bookmarks WHERE id = ?3)",
+        rusqlite::params![at, group_id, bookmark_id],
+    )
+    .map_err(err_sql)?;
+    Ok(())
+}
+
+/// Снять членство (в транзакции вызвавшего) в момент `at`: строка удаляется,
+/// надгробие member («имя группы ␟ url») уходит в облачный документ —
+/// приёмники снимают своё членство, а свежее повторное добавление
+/// (added_at ≥ deleted_at) побеждает. Ответ — было ли членство.
+fn member_remove_tx(
+    tx: &rusqlite::Transaction<'_>,
+    group_id: i64,
+    bookmark_id: i64,
+    at: i64,
+) -> Result<bool, String> {
+    let gone = tx.execute(
+        "DELETE FROM bookmark_group_items WHERE group_id = ?1 AND bookmark_id = ?2",
+        rusqlite::params![group_id, bookmark_id],
+    )
+    .map_err(err_sql)?;
+    if gone == 0 {
+        return Ok(false);
+    }
+    tx.execute(
+        "INSERT INTO sync_tombstones(kind, key, deleted_at)
+         VALUES ('member',
+                 (SELECT name FROM bookmark_groups WHERE id = ?1) || char(31)
+                     || (SELECT url FROM bookmarks WHERE id = ?2), ?3)
+         ON CONFLICT(kind, key)
+         DO UPDATE SET deleted_at = MAX(deleted_at, ?3)",
+        rusqlite::params![group_id, bookmark_id, at],
+    )
+    .map_err(err_sql)?;
+    Ok(true)
+}
+
+/// Членство облачного документа (duopulse-233): имя группы и added_at —
+/// арбитр против надгробия снятия.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncMember {
+    pub group: String,
+    pub added_at: i64,
+}
 
 /// Закладка облачного документа синка (этап 5 duopulse-111): группы — имена
 /// (id групп на машинах различаются), updated_at — арбитр свежести заголовка
@@ -2052,6 +2209,10 @@ pub struct SyncBookmark {
     pub updated_at: i64,
     #[serde(default)]
     pub groups: Vec<String>,
+    /// Те же группы с временем добавления (duopulse-233); пусто у документов
+    /// старых версий — арбитра нет, время считается неизвестным.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<SyncMember>,
 }
 
 /// Группа облачного документа: имя — ключ слияния, created_at — арбитр
@@ -2067,8 +2228,9 @@ pub struct SyncGroup {
     pub parent: Option<String>,
 }
 
-/// Надгробие удаления: kind — TOMBSTONE_BOOKMARK | TOMBSTONE_GROUP,
-/// key — url | имя группы, deleted_at — когда удалили.
+/// Надгробие удаления: kind — TOMBSTONE_BOOKMARK | TOMBSTONE_GROUP |
+/// TOMBSTONE_MEMBER, key — url | имя группы | «имя группы ␟ url»,
+/// deleted_at — когда удалили.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncTombstone {
@@ -2154,6 +2316,46 @@ fn group_refs_of(
         for row in rows {
             let (bid, rf) = row?;
             map.entry(bid).or_default().push(rf);
+        }
+    }
+    Ok(map)
+}
+
+/// Членства групп для облачного документа (duopulse-233): id закладки →
+/// (имя группы, added_at) по позициям групп. Чанками — лимит переменных
+/// SQLite на старых движках (как group_refs_of).
+fn sync_members_of(
+    conn: &Connection,
+    ids: &[i64],
+) -> rusqlite::Result<std::collections::HashMap<i64, Vec<SyncMember>>> {
+    let mut map: std::collections::HashMap<i64, Vec<SyncMember>> =
+        std::collections::HashMap::new();
+    for chunk in ids.chunks(500) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT i.bookmark_id, g.name, i.added_at
+             FROM bookmark_group_items i JOIN bookmark_groups g ON g.id = i.group_id
+             WHERE i.bookmark_id IN ({placeholders})
+             ORDER BY i.bookmark_id, g.position, g.id"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                SyncMember {
+                    group: r.get(1)?,
+                    added_at: r.get(2)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (bid, member) = row?;
+            map.entry(bid).or_default().push(member);
         }
     }
     Ok(map)
@@ -3600,6 +3802,245 @@ mod tests {
         assert_eq!(a.bookmark_list("", GroupFilter::All, 0, 100).unwrap().1, 2);
     }
 
+    /// Имена групп закладки (по алфавиту) — членства в тестах синка.
+    fn member_groups(store: &HistoryStore, url: &str) -> Vec<String> {
+        let (marks, _) = store.bookmark_list("", GroupFilter::All, 0, 500).unwrap();
+        let mut names: Vec<String> = marks
+            .iter()
+            .find(|m| m.url == url)
+            .map(|m| m.groups.iter().map(|g| g.name.clone()).collect())
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    /// Есть ли надгробие снятия членства «группа ␟ url» в документе.
+    fn has_member_tombstone(doc: &BookmarkSyncDoc, group: &str, url: &str) -> bool {
+        doc.tombstones
+            .iter()
+            .any(|t| t.kind == TOMBSTONE_MEMBER && t.key == member_tombstone_key(group, url))
+    }
+
+    /// duopulse-233: перенос закладки в другую группу не откатывается синком.
+    /// Прежде слияние вливало членства объединением — снятое членство
+    /// возвращалось уже в первом круге (облако ещё помнит его) и перенос
+    /// превращался в копию.
+    #[test]
+    fn sync_doc_membership_removal_survives_stale_cloud() {
+        let a = HistoryStore::open_in_memory().unwrap();
+        let music = a.group_add("Музыка", None).unwrap();
+        let sub = a.group_add("Romanian", Some(music.id)).unwrap();
+        let url = "https://m.example/track";
+        a.bookmark_add_to(url, "Трек", Some(music.id)).unwrap();
+        // облако помнит закладку в родителе (документ до переноса); снятие
+        // строго позже добавления (сравнения — по миллисекундам)
+        let cloud = a.export_sync_doc().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a.group_toggle_bookmark(url, music.id, false).unwrap();
+        a.group_toggle_bookmark(url, sub.id, true).unwrap();
+        assert_eq!(member_groups(&a, url), vec!["Romanian"]);
+
+        // круг синка вливает устаревший облачный документ — членство не возвращается
+        let st = a.merge_sync_doc(&cloud).unwrap();
+        assert_eq!((st.applied, st.removed), (0, 0));
+        assert_eq!(member_groups(&a, url), vec!["Romanian"]);
+        // документ уносит надгробие снятия и членства с временем
+        let doc = a.export_sync_doc().unwrap();
+        assert!(has_member_tombstone(&doc, "Музыка", url));
+        assert_eq!(doc.bookmarks[0].groups, vec!["Romanian".to_string()]);
+        assert_eq!(doc.bookmarks[0].members.len(), 1);
+        assert_eq!(doc.bookmarks[0].members[0].group, "Romanian");
+        assert!(doc.bookmarks[0].members[0].added_at > 0);
+    }
+
+    /// Снятие членства доезжает до остальных машин: перенос на A снимает
+    /// закладку из родителя на B; ответный документ B не воскрешает её на A.
+    #[test]
+    fn sync_doc_membership_removal_reaches_other_machine() {
+        let a = HistoryStore::open_in_memory().unwrap();
+        let b = HistoryStore::open_in_memory().unwrap();
+        let music = a.group_add("Музыка", None).unwrap();
+        let sub = a.group_add("Romanian", Some(music.id)).unwrap();
+        let url = "https://m.example/track";
+        a.bookmark_add_to(url, "Трек", Some(music.id)).unwrap();
+        b.merge_sync_doc(&a.export_sync_doc().unwrap())
+            .unwrap();
+        assert_eq!(member_groups(&b, url), vec!["Музыка"]);
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a.group_toggle_bookmark(url, music.id, false).unwrap();
+        a.group_toggle_bookmark(url, sub.id, true).unwrap();
+        let doc = a.export_sync_doc().unwrap();
+        let st = b.merge_sync_doc(&doc).unwrap();
+        assert_eq!(st.removed, 1, "членство в родителе снято надгробием");
+        assert_eq!(member_groups(&b, url), vec!["Romanian"]);
+        // повторное слияние того же документа — идемпотентно
+        let st = b.merge_sync_doc(&doc).unwrap();
+        assert_eq!((st.applied, st.removed), (0, 0));
+        assert_eq!(member_groups(&b, url), vec!["Romanian"]);
+        // документ B уносит надгробие дальше — на A членство не воскресает
+        let st = a.merge_sync_doc(&b.export_sync_doc().unwrap()).unwrap();
+        assert_eq!((st.applied, st.removed), (0, 0));
+        assert_eq!(member_groups(&a, url), vec!["Romanian"]);
+    }
+
+    /// Повторное добавление в группу побеждает надгробие снятия: свежее
+    /// added_at (≥ deleted_at) возвращаемого членства снимает надгробие на
+    /// обеих машинах.
+    #[test]
+    fn sync_doc_membership_readd_beats_removal() {
+        let a = HistoryStore::open_in_memory().unwrap();
+        let b = HistoryStore::open_in_memory().unwrap();
+        let music = a.group_add("Музыка", None).unwrap();
+        let url = "https://m.example/track";
+        a.bookmark_add_to(url, "Трек", Some(music.id)).unwrap();
+        b.merge_sync_doc(&a.export_sync_doc().unwrap())
+            .unwrap();
+        // A: сняла (надгробие) → добавила снова (свежее надгробия)
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a.group_toggle_bookmark(url, music.id, false).unwrap();
+        let doc_removed = a.export_sync_doc().unwrap();
+        assert!(has_member_tombstone(&doc_removed, "Музыка", url));
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a.group_toggle_bookmark(url, music.id, true).unwrap();
+        assert!(!has_member_tombstone(
+            &a.export_sync_doc().unwrap(),
+            "Музыка",
+            url
+        ));
+        assert_eq!(member_groups(&a, url), vec!["Музыка"]);
+
+        // B: сначала узнаёт о снятии, затем — о повторном добавлении
+        b.merge_sync_doc(&doc_removed).unwrap();
+        assert!(member_groups(&b, url).is_empty());
+        b.merge_sync_doc(&a.export_sync_doc().unwrap())
+            .unwrap();
+        assert_eq!(member_groups(&b, url), vec!["Музыка"]);
+        assert!(!has_member_tombstone(
+            &b.export_sync_doc().unwrap(),
+            "Музыка",
+            url
+        ));
+    }
+
+    /// Документ старой версии (группы-имена без времени) не возвращает
+    /// снятое членство — неизвестное время уступает надгробию; без надгробия
+    /// членства по-прежнему добавляются объединением.
+    #[test]
+    fn sync_doc_legacy_doc_without_member_times_respects_removal() {
+        let a = HistoryStore::open_in_memory().unwrap();
+        let music = a.group_add("Музыка", None).unwrap();
+        let url = "https://m.example/track";
+        a.bookmark_add_to(url, "Трек", Some(music.id)).unwrap();
+        let mut legacy = a.export_sync_doc().unwrap();
+        legacy.bookmarks[0].members.clear(); // как прислала бы версия до 0.1.102
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a.group_toggle_bookmark(url, music.id, false).unwrap();
+        a.merge_sync_doc(&legacy).unwrap();
+        assert!(member_groups(&a, url).is_empty());
+
+        let b = HistoryStore::open_in_memory().unwrap();
+        b.merge_sync_doc(&legacy).unwrap();
+        assert_eq!(member_groups(&b, url), vec!["Музыка"]);
+    }
+
+    /// duopulse-233: профиль до 0.1.102 (членства без added_at) открывается;
+    /// мигрировавшее членство (время неизвестно) снимается надгробием из
+    /// облака, новое членство несёт время и снимает пережитое надгробие.
+    #[test]
+    fn opens_pre_233_profile_and_migrates_membership_times() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE bookmarks(
+                 id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE,
+                 title TEXT NOT NULL DEFAULT '', added_at INTEGER NOT NULL);
+             CREATE TABLE bookmark_groups(
+                 id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 sort_by TEXT NOT NULL DEFAULT 'manual',
+                 is_default INTEGER NOT NULL DEFAULT 0,
+                 created_at INTEGER NOT NULL,
+                 parent_id INTEGER REFERENCES bookmark_groups(id) ON DELETE CASCADE);
+             CREATE TABLE bookmark_group_items(
+                 group_id INTEGER NOT NULL REFERENCES bookmark_groups(id) ON DELETE CASCADE,
+                 bookmark_id INTEGER NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
+                 position INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY(group_id, bookmark_id));
+             CREATE TABLE sync_tombstones(
+                 kind TEXT NOT NULL, key TEXT NOT NULL, deleted_at INTEGER NOT NULL,
+                 PRIMARY KEY(kind, key));",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO bookmark_groups(name, position, sort_by, is_default, created_at)
+                 VALUES ('Избранное', 0, 'manual', 1, 1);
+             INSERT INTO bookmarks(url, title, added_at) VALUES ('https://a.example', 'A', 1);
+             INSERT INTO bookmark_group_items(group_id, bookmark_id, position) VALUES (1, 1, 0);",
+        )
+        .unwrap();
+        let store = HistoryStore::connect(conn).unwrap();
+        let url = "https://a.example";
+        let membership_time = |store: &HistoryStore| -> i64 {
+            let conn = store.conn.lock().expect("history: лок не отравлен");
+            conn.query_row(
+                "SELECT added_at FROM bookmark_group_items WHERE group_id = 1 AND bookmark_id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(membership_time(&store), 0, "старое членство — время неизвестно");
+
+        // на другой машине закладку вынесли из группы: надгробие из облака
+        let doc = BookmarkSyncDoc {
+            v: 1,
+            bookmarks: vec![],
+            groups: vec![],
+            tombstones: vec![SyncTombstone {
+                kind: TOMBSTONE_MEMBER.to_string(),
+                key: member_tombstone_key("Избранное", url),
+                deleted_at: 5,
+            }],
+        };
+        let st = store.merge_sync_doc(&doc).unwrap();
+        assert_eq!(st.removed, 1);
+        assert_eq!(member_groups(&store, url), Vec::<String>::new());
+        assert!(store.is_bookmarked(url), "сама закладка жива");
+
+        // повторное добавление: время появилось, надгробие пережито
+        store.group_toggle_bookmark(url, 1, true).unwrap();
+        assert!(membership_time(&store) > 0);
+        let doc = store.export_sync_doc().unwrap();
+        assert!(!has_member_tombstone(&doc, "Избранное", url));
+        assert_eq!(doc.bookmarks[0].members.len(), 1);
+    }
+
+    /// Перенумерация строки закладок не стирает added_at членств (0 значил бы
+    /// «время неизвестно» — надгробие снятия из облака убило бы живое членство).
+    #[test]
+    fn bmbar_reorder_keeps_membership_time() {
+        let store = HistoryStore::open_in_memory().unwrap();
+        store
+            .bookmark_add_to("https://a.example", "A", None)
+            .unwrap();
+        let time = |store: &HistoryStore| -> i64 {
+            let conn = store.conn.lock().expect("history: лок не отравлен");
+            conn.query_row(
+                "SELECT MAX(added_at) FROM bookmark_group_items",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let before = time(&store);
+        assert!(before > 0);
+        store
+            .bmbar_reorder(&["https://a.example".to_string()])
+            .unwrap();
+        assert_eq!(time(&store), before);
+    }
+
     /// Удаление синкается надгробием: remove на A → B удаляет; документ B
     /// несёт надгробие дальше — на A закладка не воскресает.
     #[test]
@@ -3722,6 +4163,7 @@ mod tests {
                 added_at: 1,
                 updated_at: 1,
                 groups: vec![],
+                members: Vec::new(),
             }],
             groups: vec![],
             tombstones: vec![],
