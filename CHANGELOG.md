@@ -8613,3 +8613,43 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Коммит: a3c733c feat(mobile): duopulse-212 — живое обновление шапки web-оверлея
   (событийный пинг + стенд header-live-smoke); версия НЕ поднималась и НЕ собиралась —
   флажок Артёма build: false (aila-418, 23.11.2026 06:27).
+
+## 2026-11-23 12:15 — 13:10 · duopulse-228 — YouTube не отдал субтитры сессии: фолбэк-добыча дорожек ядром + различимый статус в панели
+
+**Начало:** 23.11.2026 12:15 · **Окончание:** 23.11.2026 13:10
+
+Что изменено (диагноз duopulse-226: YouTube изредка отдаёт деградированной анонимной
+сессии watch-ответ без captions; перезагрузка не помогает, лечит рестарт браузера —
+ротация куки; десктоп читал дорожки только из player-ответа страницы):
+
+- Ядро: новый `src-tauri/src/yt_fallback.rs` — WebMessage «yt-fallback» переспрашивает
+  player у innertube клиентом ANDROID (свежая анонимная сессия; константы/парсеры —
+  единый источник `duo_mobile.rs`, подключён в desktop-бин) и «gtx-translate» — перевод
+  пачки cue-текстов бесплатным gtx (переводы tlang подписью фолбэк-baseUrl не покрыты);
+  сеть ureq тем же путём (SOCKS5-роутер, если поднят), spawn_blocking, ответы —
+  document-событиями duopulse-yt-fallback / duopulse-gtx-translate (паттерн asr-begin).
+- Контент: `content/adapters/core-bridge.ts` (WebMessage reqId → событие, таймауты);
+  адаптер `youtube.ts`: фолбэк ровно один раз за список, ТОЛЬКО при живом страницевом
+  ответе совпавшего videoId без captions; тела фолбэк-дорожек прямым fetch (fmt=json3
+  первым — пословный показ автодорожек одной строкой, затем исходный URL), переводы —
+  gtx-пачками (translateCuesGtx, ≤1,2 КБ/≤50 строк); чистый фолбэк-набор плеер страницы
+  не программирует вовсе. `types.ts`: baseUrl дорожки + note списка.
+- Панель/диагностика: note списка через tracks→Core (list_note в TabSubtitles,
+  subtitles:tracks_ready + контракт v15) → строка #duoListNote в duo-панели (скрыта без
+  note); различает «У видео нет субтитров» / «YouTube не отдал субтитры сессии — дорожки
+  добыты фолбэком (перевод gtx)» / отказ фолбэка с причиной; факт — в [subtitles] tracks
+  журнале Core.
+- Гигиена: 7 новых warnings desktop-бина (мобильные константы/типы duo_mobile) погашены
+  cfg_attr(desktop, allow(dead_code)) + дедупликацией GTX_BATCH_MAX_LINES; прежние 17
+  warnings — карточка duopulse-231.
+
+Как проверено: vitest 816/816 (+14 новых: включение/не-включение фолбэка, загрузка тел
+без программирования плеера, gtx-перевод, чистые translateCuesGtx/trackUrlJson3); tsc
+чист; cargo 36+469 (+5 разбора yt_fallback), новых warnings нет; gen:bridge
+идемпотентен. Живые прогоны: cargo --ignored innertube_fallback_live — дорожки p83syVvdrc4
+(ru ASR) добываются, timedtext по baseUrl без PO-токена, cues>0; CDP-прогон debug-exe
+6/6 — обычный путь живого YouTube не изменился (player-api, 156 переводов, duo-авто
+поднял набор, фолбэк молчит), каналы yt-fallback/gtx-translate в живом приложении
+отвечают (ru/asr; «Привет, мир»/«Доброе утро»), #duoListNote скрыт без note.
+Версия НЕ поднималась, сборки НЕ было — build: false (aila-418). Коммит: см. git log
+(duopulse-228).

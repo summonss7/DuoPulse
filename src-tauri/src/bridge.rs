@@ -855,6 +855,10 @@ pub struct SubtitlesTracksReady {
     pub video_key: String,
     pub base: Vec<crate::subtitles::service::BaseTrackInfo>,
     pub translations: Vec<crate::subtitles::service::TranslationLangInfo>,
+    /// Статус добычи списка (duopulse-228): фолбэк ядра при сессии без
+    /// captions / его отказ; пусто — обычный путь.
+    #[serde(default)]
+    pub note: String,
 }
 
 #[derive(Debug, Clone)]

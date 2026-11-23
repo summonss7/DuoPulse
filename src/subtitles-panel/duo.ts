@@ -86,6 +86,9 @@ interface DuoState {
   tabId: string | null;
   videoKey: string | null;
   canTracks: boolean;
+  /** Статус добычи списка (duopulse-228): «сессия без captions» с исходом
+   *  фолбэка ядра / «у видео нет субтитров»; пусто — обычный путь. */
+  listNote: string;
   enabled: boolean;
   tracks: AppliedTrackInfo[];
   base: BaseTrackInfo[];
@@ -99,6 +102,7 @@ const state: DuoState = {
   tabId: null,
   videoKey: null,
   canTracks: false,
+  listNote: "",
   enabled: true,
   tracks: [],
   base: [],
@@ -170,6 +174,10 @@ function renderButton(): void {
 function renderPanel(): void {
   (document.getElementById("duoEnabled") as HTMLInputElement).checked = state.enabled;
   (document.getElementById("duoMeta") as HTMLElement).textContent = setSummary();
+  // Статус добычи списка (duopulse-228): виден только когда есть что сказать
+  const note = document.getElementById("duoListNote") as HTMLElement;
+  note.textContent = state.listNote;
+  note.hidden = state.listNote === "";
   renderLangs();
   renderPresets();
   renderSet();
@@ -438,6 +446,7 @@ async function refresh(): Promise<void> {
     state.tracks = st.tracks;
     state.base = st.base;
     state.translations = st.translations;
+    state.listNote = st.listNote ?? "";
     state.offsetMs = st.offsetMs;
     state.style = st.style;
     render();
@@ -904,6 +913,7 @@ export function initDuo(): void {
       if (ev.payload.tabId !== state.tabId) return;
       state.base = ev.payload.base;
       state.translations = ev.payload.translations;
+      state.listNote = ev.payload.note ?? "";
       state.canTracks = ev.payload.base.length > 0;
       if (!panel.hidden) renderPanel();
       renderButton();

@@ -86,6 +86,7 @@ import {
   type FileLoadResult,
 } from "./adapters/file";
 import { cloudTrackFrom, cloudTranslateStatus, requestCloudTranslation } from "./adapters/cloud";
+import { requestGtxTranslate, requestYtFallback } from "./adapters/core-bridge";
 import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import {
   EmbedHost,
@@ -159,6 +160,16 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
     win: pageWindow,
     getVideo: () => currentVideo?.el ?? null,
     capture,
+    // duopulse-228: фолбэк-добыча дорожек ядром для деградированных сессий
+    // YouTube (ответ страницы без captions при живом videoDetails) + перевод
+    // пачек cue бесплатным gtx для фолбэк-дорожек (tlang подписью не покрыт).
+    corePlayerFallback: (videoId) => requestYtFallback(document, { post: postToCore }, videoId),
+    gtxTranslate: async (texts, from, to) => {
+      const reply = await requestGtxTranslate(document, { post: postToCore }, texts, from, to);
+      if (!reply) throw new Error("ядро не ответило");
+      if (reply.ok !== true) throw new Error(reply.error ?? "отказ gtx");
+      return reply.lines ?? [];
+    },
   });
 
   const engine = new SubtitlesEngine({
@@ -587,6 +598,9 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
             translatable: b.translatable,
           })),
           translations: list.translations.map((t) => ({ lang: t.lang, name: t.name })),
+          // duopulse-228: статус добычи для панели («сессия без captions»
+          // с исходом фолбэка ≠ «у видео нет субтитров»)
+          note: list.note ?? "",
         });
       }
     });

@@ -60,6 +60,13 @@ mod secrets;
 mod settings;
 mod subtitles;
 mod tabs;
+// Чистые части мобильного duo-модуля (карточка duopulse-228): константы
+// innertube/gtx и парсеры — единый источник с мобильной веткой (сеть там —
+// cfg(mobile), сюда не попадает).
+mod duo_mobile;
+// Фолбэк-добыча дорожек YouTube ядром десктопа (карточка duopulse-228):
+// innertube player + gtx-пачки для деградированных сессий без captions.
+mod yt_fallback;
 mod translate;
 mod translate_menu;
 mod updater;
@@ -725,7 +732,16 @@ unsafe fn referer_of(
 ///   Core скачивает его тем же сетевым путём (SOCKS5-роутер), декодирует,
 ///   транскрибирует (локальный whisper-server / OpenAI-совместимое облако,
 ///   src/asr/pipeline.rs), кэширует и отвечает document-событием
-///   duopulse-asr-track; прогресс — событие subtitles:asr_progress;
+///   duopulse-asr-track; прогресс — событием subtitles:asr_progress;
+/// - «yt-fallback» — фолбэк-добыча дорожек ядром (карточка duopulse-228):
+///   ответ страницы без captions при живом videoDetails (деградированная
+///   анонимная сессия YouTube) — Core переспрашивает player innertube
+///   (ANDROID, свежая сессия без куки страницы; src/yt_fallback.rs) и
+///   отвечает document-событием duopulse-yt-fallback;
+/// - «gtx-translate» — перевод пачки cue-текстов бесплатным gtx
+///   (duopulse-228: переводы tlang на фолбэк-дорожках невозможны — подпись
+///   baseUrl их не покрывает); ответ — document-событие
+///   duopulse-gtx-translate;
 /// - «download-subs» — ответ контент-слоя на duopulse-download-subs (карточка
 ///   duopulse-118: download.begin subs → eval в активную вкладку): cues дорожки
 ///   выбранного языка — заданию загрузки, поток пишет .srt в каталог загрузок;
@@ -802,18 +818,26 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
             } else if parsed["duopulse"] == "tracks" {
                 // Полный список дорожек от YouTube-адаптера (задача 3.3) в
                 // сервис состояния + событие subtitles:tracks_ready (3.7):
-                // панель наполняет выбор языков/переводов.
+                // панель наполняет выбор языков/переводов. note (duopulse-228)
+                // — статус добычи: «сессия без captions» (фолбэк ядром/его
+                // отказ) против «у видео нет субтитров»; журнал ниже.
                 if let Some(video_key) = parsed["videoKey"].as_str() {
                     let base = parse_base_tracks(&parsed["base"]);
                     let translations = parse_translation_langs(&parsed["translations"]);
+                    let note = parsed["note"].as_str().unwrap_or_default().to_string();
                     eprintln!(
-                        "[subtitles] tracks: {video_key} — {} дорожек, {} переводов (путь {}, tab {tab_id})",
+                        "[subtitles] tracks: {video_key} — {} дорожек, {} переводов (путь {}, tab {tab_id}){}",
                         base.len(),
                         translations.len(),
                         parsed["path"].as_str().unwrap_or("?"),
+                        if note.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · {note}")
+                        },
                     );
                     let service = app.state::<subtitles::service::SubtitlesService>();
-                    let st = service.on_tracks(&tab_id, video_key, base, translations);
+                    let st = service.on_tracks(&tab_id, video_key, base, translations, note);
                     let _ = bridge::emit::<bridge::SubtitlesTracksReadyEvent>(
                         &app,
                         &bridge::SubtitlesTracksReady {
@@ -821,6 +845,7 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                             video_key: video_key.to_string(),
                             base: st.base,
                             translations: st.translations,
+                            note: st.list_note.clone(),
                         },
                     );
                 }
@@ -1024,6 +1049,18 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                 // кэш) — src/asr/pipeline.rs; обработчик сразу уходит в
                 // spawn_blocking, прогресс — subtitles:asr_progress.
                 asr::pipeline::handle_asr_begin(&app, &tab_id, &parsed);
+            } else if parsed["duopulse"] == "yt-fallback" {
+                // Фолбэк-добыча дорожек ядром (карточка duopulse-228): ответ
+                // страницы без captions при живом videoDetails — переспросить
+                // player innertube (ANDROID) свежей анонимной сессией; ответ —
+                // document-событием вкладки (паттерн asr-begin), сеть — в
+                // отдельной нити (COM-поток не блокируем).
+                yt_fallback::handle_yt_fallback(&app, &tab_id, &parsed);
+            } else if parsed["duopulse"] == "gtx-translate" {
+                // Перевод пачки cue-текстов бесплатным gtx (duopulse-228):
+                // вторая строка дуо на фолбэк-дорожках, где tlang подписью
+                // baseUrl не покрыт. Ответ — document-событием вкладки.
+                yt_fallback::handle_gtx_translate(&app, &tab_id, &parsed);
             } else if parsed["duopulse"] == "password-candidate" {
                 // Сабмит формы логина (этап 2 duopulse-108): content-слой
                 // нашёл пару логин+пароль. Решение и пароль — в Core

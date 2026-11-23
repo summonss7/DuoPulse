@@ -126,6 +126,11 @@ pub struct TabSubtitles {
     pub base: Vec<BaseTrackInfo>,
     /// Доступные переводы (tlang).
     pub translations: Vec<TranslationLangInfo>,
+    /// Статус добычи списка (duopulse-228): «сессия без captions» и её
+    /// исход (фолбэк ядром/отказ) против «у видео нет субтитров»; пусто —
+    /// обычный путь без замечаний.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub list_note: String,
     /// Сдвиг показа, мс (±10 с, docs/03 §4).
     pub offset_ms: i64,
     /// Стиль плашки.
@@ -177,6 +182,7 @@ impl SubtitlesService {
         video_key: &str,
         base: Vec<BaseTrackInfo>,
         translations: Vec<TranslationLangInfo>,
+        list_note: String,
     ) -> TabSubtitles {
         let mut tabs = self.tabs.lock().expect("subtitles: лок не отравлен");
         let st = tabs
@@ -186,6 +192,7 @@ impl SubtitlesService {
         st.can_tracks = !base.is_empty();
         st.base = base;
         st.translations = translations;
+        st.list_note = list_note;
         st.clone()
     }
 
@@ -202,6 +209,7 @@ impl SubtitlesService {
             st.base.clear();
             st.translations.clear();
             st.can_tracks = false;
+            st.list_note.clear();
         }
         st.video_key = state.video_key.clone();
         st.enabled = state.enabled;
@@ -297,6 +305,7 @@ mod tests {
                 lang: "ru".into(),
                 name: "Русский".into(),
             }],
+            String::new(),
         );
         // set-state того же видео (дроп файла): список адаптера и can_tracks
         // сохраняются — панель строит пресеты из живого списка (e2e 3.7).

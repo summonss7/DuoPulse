@@ -1452,6 +1452,10 @@ export interface TabSubtitles {
    */
   enabled: boolean;
   /**
+   * Статус добычи списка (duopulse-228): «сессия без captions» и её исход (фолбэк ядром/отказ) против «у видео нет субтитров»; пусто — обычный путь без замечаний.
+   */
+  listNote?: string;
+  /**
    * Сдвиг показа, мс (±10 с, docs/03 §4).
    */
   offsetMs: number;
@@ -2168,6 +2172,10 @@ export interface SubtitlesSetApplied {
  */
 export interface SubtitlesTracksReady {
   base: BaseTrackInfo[];
+  /**
+   * Статус добычи списка (duopulse-228): фолбэк ядра при сессии без captions / его отказ; пусто — обычный путь.
+   */
+  note?: string;
   tabId: string;
   translations: TranslationLangInfo[];
   videoKey: string;

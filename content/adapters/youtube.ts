@@ -27,6 +27,17 @@
 //   фолбэк YouTube; равенство — неразличимая рекомендация под зрителя,
 //   пропускаем; пробы 23.11.2026: анонимным сессиям фолбэк-индекс больше не
 //   выдаётся вовсе — шаг глубже некуда, метаданные надёжнее).
+// - Фолбэк ядра (duopulse-228, из диагностики duopulse-226): YouTube изредка
+//   отдаёт деградированной анонимной сессии watch-ответ БЕЗ секции captions
+//   (перезагрузка не помогает — куки сессии живы, лечит только рестарт
+//   браузера). Если страницевой ответ жив (videoId совпал — не Shorts-
+//   заглушка), а captions пуст, адаптер просит ядро переспросить player
+//   innertube-клиентом ANDROID (свежая анонимная сессия; baseUrl его
+//   captionTracks открывают timedtext БЕЗ PO-токена): тела дорожек качаются
+//   прямым fetch (same-origin), переводы tlang подписью baseUrl не покрыты —
+//   вторая строка дуо поднимается бесплатным gtx в ядре (пачками, как
+//   мобильная ветка). Панели статус: «сессия без captions» ≠ «у видео нет
+//   субтитров» (note списка).
 // - Переводы (duopulse-175): наш собственный fetch tlang рейт-лимитится
 //   быстро (429, квота ~45–60 мин), а программирование плеера на перевод
 //   невозможно (setOption track {languageCode:'ru'} игнорируется — плеер
@@ -46,7 +57,7 @@ import type {
   TranslationLangInfo,
 } from "./types";
 import { detectMetaLanguage, type MetaLangTexts } from "./meta-lang";
-import type { Track } from "../types";
+import type { Cue, Track } from "../types";
 import { videoKeyFor } from "../detector/videoKey";
 
 export const YOUTUBE_ADAPTER_VERSION = "2026.11";
@@ -251,6 +262,7 @@ export function normalizeBaseTracks(
       vssId: typeof t.vssId === "string" ? t.vssId : "",
       translatable: t.isTranslatable === true,
       original: originalLangs.has(lang),
+      baseUrl: typeof t.baseUrl === "string" && t.baseUrl ? t.baseUrl : undefined,
     });
   }
   return { base, warnings };
@@ -344,6 +356,16 @@ export function buildTranslationUrl(liveUrl: string, tlang: string): string {
   }
   kept.push(`tlang=${encodeURIComponent(tlang)}`);
   return `${head}?${kept.join("&")}`;
+}
+
+/** URL дорожки с fmt=json3 (duopulse-228, зеркала cue_url_json3 ядра):
+ * baseUrl ANDROID-клиента подписан с fmt=srv3, у автодорожек каждый <p> там —
+ * целое пословное окно; json3 + пословный разбор показывают реплику одной
+ * строкой. Подпись fmt не покрывает — та же свобода, что у tlang/vtt. */
+export function trackUrlJson3(raw: string): string {
+  const hasFmt = /[?&]fmt=/.test(raw);
+  if (!hasFmt) return raw.includes("?") ? `${raw}&fmt=json3` : `${raw}?fmt=json3`;
+  return raw.replace(/([?&]fmt=)[^&]*/, `$1json3`);
 }
 
 // --- перехват timedtext (ставится до скриптов страницы) -----------------------
@@ -687,6 +709,13 @@ export interface YouTubeAdapterOptions {
   capture?: TimedtextCaptureSource;
   /** Ожидание player-ответа при listTracks, мс (SPA-навигация). */
   listTimeoutMs?: number;
+  /** Фолбэк ядра (duopulse-228): секции player-ответа innertube для видео,
+   *  чей страницевой ответ без captions. null — ядра/ответа нет. */
+  corePlayerFallback?: (videoId: string) => Promise<unknown | null>;
+  /** Перевод пачки cue-текстов бесплатным gtx в ядре (duopulse-228) —
+   *  переводы фолбэк-дорожек (tlang подписью baseUrl не покрыт).
+   *  null — ответа нет; throw — отказ сети/квоты. */
+  gtxTranslate?: (texts: string[], from: string, to: string) => Promise<string[]>;
 }
 
 const LIST_POLL_MS = 300;
@@ -697,6 +726,10 @@ export class YouTubeAdapter implements Adapter {
   readonly paths = YOUTUBE_PATHS;
   private readonly opts: YouTubeAdapterOptions;
   private lastList: AdapterTrackList | null = null;
+  /** baseUrl дорожек фолбэк-ответа по id (duopulse-228): прямая загрузка тел
+   *  без программирования плеера. Живёт вместе с lastList — страничный список
+   *  его очищает, фолбэк-список наполняет. */
+  private fallbackUrls = new Map<string, string>();
 
   constructor(opts: YouTubeAdapterOptions) {
     this.opts = opts;
@@ -773,6 +806,10 @@ export class YouTubeAdapter implements Adapter {
     const expectedId = videoIdFromHref(this.opts.win.location.href);
     const deadline = Date.now() + (this.opts.listTimeoutMs ?? 6_000);
     let stale: { list: AdapterTrackList; path: string } | null = null;
+    // duopulse-228: фолбэк ядром пробуем ОДИН раз за список — только когда
+    // страницевой ответ этого видео жив (videoId совпал: не Shorts-заглушка,
+    // не чужой SPA-ответ), а секции captions в нём нет.
+    let fallbackDone = false;
     for (;;) {
       const found = this.playerResponse();
       if (found) {
@@ -781,10 +818,23 @@ export class YouTubeAdapter implements Adapter {
           const list = this.buildList(raw, found.path, found.response);
           const responseId = videoIdOfResponse(found.response);
           if (!expectedId || responseId === expectedId) {
+            this.fallbackUrls.clear(); // страничный список — прямой путь добычи
             this.lastList = list;
             return list;
           }
           stale = { list, path: found.path }; // ответ прошлого видео (SPA) — ждём свежий
+        } else if (
+          expectedId &&
+          videoIdOfResponse(found.response) === expectedId &&
+          this.opts.corePlayerFallback &&
+          !fallbackDone
+        ) {
+          fallbackDone = true;
+          const list = await this.coreFallbackList(expectedId);
+          if (list) {
+            this.lastList = list;
+            return list;
+          }
         }
       }
       if (Date.now() >= deadline) break;
@@ -836,6 +886,59 @@ export class YouTubeAdapter implements Adapter {
       base,
       translations: normalizeTranslations(raw),
       warnings,
+    };
+  }
+
+  /** Список дорожек фолбэком ядра (duopulse-228): секции innertube-ответа
+   *  (videoDetails/audioTracks/captions — ANDROID-клиент) прогоняются тем же
+   *  конвейером нормализации (originalLangsOf видит audioTracks[].original,
+   *  которых web-клиент страницы не отдаёт); baseUrl дорожек запоминаются для
+   *  прямой загрузки тел. Ответ без дорожек/отказ ядра — список с note для
+   *  панели («у видео нет субтитров» ≠ «сессия без captions»); null — ядро не
+   *  ответило (нет канала/таймаут) — вызывающий продолжает прежний путь. */
+  private async coreFallbackList(videoId: string): Promise<AdapterTrackList | null> {
+    type FallbackReply = { ok?: boolean; player?: unknown; error?: string } | null;
+    let reply: FallbackReply = null;
+    try {
+      reply = (await this.opts.corePlayerFallback?.(videoId)) as FallbackReply;
+    } catch {
+      reply = null;
+    }
+    if (!reply) return null;
+    if (reply.ok !== true) {
+      return {
+        adapter: "youtube",
+        version: this.version,
+        usedPath: "core-innertube",
+        base: [],
+        translations: [],
+        warnings: [],
+        note: `YouTube не отдал субтитры сессии; фолбэк не удался: ${reply.error ?? "без причины"}`,
+      };
+    }
+    const player = reply.player;
+    const raw = extractCaptionList(player);
+    if (!raw) {
+      // Фолбэк (свежая анонимная сессия) дорожек тоже не видит — их у видео нет.
+      return {
+        adapter: "youtube",
+        version: this.version,
+        usedPath: "core-innertube",
+        base: [],
+        translations: [],
+        warnings: [],
+        note: "У видео нет субтитров",
+      };
+    }
+    const list = this.buildList(raw, "core-innertube", player);
+    if (list.base.length === 0) {
+      return { ...list, note: "У видео нет субтитров" };
+    }
+    this.fallbackUrls.clear();
+    for (const b of list.base) if (b.baseUrl) this.fallbackUrls.set(b.id, b.baseUrl);
+    return {
+      ...list,
+      note: "YouTube не отдал субтитры сессии — дорожки добыты фолбэком (перевод gtx)",
     };
   }
 
@@ -902,8 +1005,107 @@ export class YouTubeAdapter implements Adapter {
     const fetchImpl: typeof fetch =
       ports.fetchImpl ??
       ((input, init) => this.opts.win.fetch(input as RequestInfo | URL, init));
-    const basesWanted = refs.filter((r) => r.role === "original");
-    const translations = refs.filter((r) => r.role === "translation");
+    // duopulse-228: фолбэк-дорожки (сессия без captions) — тела качаются
+    // напрямую по baseUrl фолбэк-ответа (same-origin, подпись без PO-токена),
+    // переводы — gtx в ядре (tlang подписью baseUrl не покрыт). Плеер страницы
+    // не программируем вовсе; страничные дорожки идут прежним путём ниже.
+    const fallbackBase = (id: string | undefined): string | undefined =>
+      id ? this.fallbackUrls.get(id) : undefined;
+    const isFallbackRef = (r: TrackRef): boolean =>
+      r.role === "original"
+        ? fallbackBase(r.id) !== undefined
+        : fallbackBase(r.baseId) !== undefined;
+    const fallbackRefs = refs.filter(isFallbackRef);
+    const pageRefs = refs.filter((r) => !isFallbackRef(r));
+    const parseStore = async (
+      ref: TrackRef,
+      payload: string,
+      announce: boolean,
+    ): Promise<Track | null> => {
+      try {
+        const { cues } = await ports.parser.parse(payload);
+        if (!cues.length) {
+          if (announce) failures.push({ ref, reason: "дорожка без cue" });
+          return null;
+        }
+        const track: Track = { id: ref.id, source: "youtube", lang: ref.lang, role: ref.role, cues };
+        parsedById.set(ref.id, track);
+        if (announce) ports.onTrack?.(track); // прогрессивная выдача (duopulse-175)
+        return track;
+      } catch (e) {
+        if (announce) failures.push({ ref, reason: `разбор не удался: ${errorMessage(e)}` });
+        return null;
+      }
+    };
+    const fetchFallbackBody = async (baseUrl: string): Promise<string | null> => {
+      // fmt=json3 первым (пословный показ автодорожек одной строкой), затем
+      // исходный URL (ручные дорожки и srv1/srv3), пустое тело — отказ.
+      for (const url of [trackUrlJson3(baseUrl), baseUrl]) {
+        try {
+          const res = await fetchImpl(url, {
+            credentials: "omit",
+            signal: AbortSignal.timeout(20_000),
+          });
+          if (!res.ok) continue;
+          const body = await res.text();
+          if (body) return body;
+        } catch {
+          /* пробуем следующий вариант URL */
+        }
+      }
+      return null;
+    };
+    const loadFallbackBase = async (baseId: string, collect: boolean): Promise<Track | null> => {
+      const ref = this.refForBaseId(baseId);
+      const url = fallbackBase(baseId);
+      if (!ref || !url) return null;
+      const body = await fetchFallbackBody(url);
+      if (body === null) {
+        if (collect) failures.push({ ref, reason: "тело дорожки не получено (фолбэк)" });
+        return null;
+      }
+      return parseStore(ref, body, collect);
+    };
+    const translateFallback = async (ref: TrackRef): Promise<void> => {
+      const baseId = ref.baseId ?? "";
+      const base = parsedById.get(baseId) ?? (await loadFallbackBase(baseId, false));
+      if (!base) {
+        failures.push({ ref, reason: "базовая дорожка не получена (фолбэк)" });
+        return;
+      }
+      const gtx = this.opts.gtxTranslate;
+      if (!gtx) {
+        failures.push({ ref, reason: "перевод gtx недоступен" });
+        return;
+      }
+      try {
+        const cues = await translateCuesGtx(base.cues, base.lang, ref.lang, gtx);
+        const track: Track = { id: ref.id, source: "youtube", lang: ref.lang, role: "translation", cues };
+        parsedById.set(ref.id, track);
+        ports.onTrack?.(track); // прогрессивная выдача (duopulse-175)
+      } catch (e) {
+        failures.push({ ref, reason: `gtx: ${errorMessage(e)}` });
+      }
+    };
+    for (const ref of fallbackRefs) {
+      if (ref.role === "original") await loadFallbackBase(ref.id, true);
+    }
+    const hiddenFallbackBases = Array.from(
+      new Set(
+        fallbackRefs
+          .filter((r) => r.role === "translation" && r.baseId)
+          .map((r) => r.baseId as string),
+      ),
+    ).filter((id) => !fallbackRefs.some((r) => r.role === "original" && r.id === id));
+    for (const id of hiddenFallbackBases) {
+      if (!parsedById.has(id)) await loadFallbackBase(id, false);
+    }
+    for (const ref of fallbackRefs) {
+      if (ref.role === "translation") await translateFallback(ref);
+    }
+
+    const basesWanted = pageRefs.filter((r) => r.role === "original");
+    const translations = pageRefs.filter((r) => r.role === "translation");
 
     const transport =
       this.opts.transport ??
@@ -934,11 +1136,15 @@ export class YouTubeAdapter implements Adapter {
       }
     };
 
+    // Транспорт плеера страницы нужен только страничным дорожкам; чистый
+    // фолбэк-набор (сессия без captions) плеер не программирует вовсе.
     let began = false;
-    try {
-      began = await transport.begin();
-    } catch {
-      began = false;
+    if (pageRefs.length > 0) {
+      try {
+        began = await transport.begin();
+      } catch {
+        began = false;
+      }
     }
     // Переводы, покрытые буфером перехвата (duopulse-175) — применяются
     // первыми и выпадают из fetch-фазы ниже.
@@ -986,7 +1192,7 @@ export class YouTubeAdapter implements Adapter {
       }
       await transport.end();
     } else {
-      for (const ref of refs) failures.push({ ref, reason: "плеер страницы недоступен" });
+      for (const ref of pageRefs) failures.push({ ref, reason: "плеер страницы недоступен" });
     }
 
     // Переводы, не покрытые буфером: параллельный fetch поверх живых URL
@@ -1037,8 +1243,47 @@ export class YouTubeAdapter implements Adapter {
       );
     }
     const tracks = refs.map((r) => parsedById.get(r.id)).filter((t): t is Track => !!t);
-    return { tracks, failures, usedPath: began ? transport.usedPath : "недоступен" };
+    const usedPath = began
+      ? transport.usedPath
+      : pageRefs.length > 0
+        ? "недоступен"
+        : "core-innertube+direct";
+    return { tracks, failures, usedPath };
   }
+}
+
+/** Перевод cue-таблицы gtx в ядре (duopulse-228): пачки ~1,2 КБ и ≤ 50 строк
+ *  (лимит пачки ядра — 60), переносы внутри cue → пробел (пачки соединяют
+ *  строки \n), вежливая пауза между пачками (у gtx рейт-лимит). Временные
+ *  метки и порядок базы сохраняются; пустой перевод строки оставляет оригинал. */
+export async function translateCuesGtx(
+  cues: readonly Cue[],
+  from: string,
+  to: string,
+  gtx: (texts: string[], from: string, to: string) => Promise<string[]>,
+): Promise<Cue[]> {
+  const texts = cues.map((c) => c.text.replace(/\n+/g, " ").trim());
+  const batches: Array<{ from: number; to: number }> = [];
+  let start = 0;
+  for (let i = 0; i < texts.length; i++) {
+    const size = texts.slice(start, i + 1).reduce((n, t) => n + t.length + 1, 0);
+    if ((size > 1200 || i - start >= 50) && i > start) {
+      batches.push({ from: start, to: i });
+      start = i;
+    }
+  }
+  if (start < texts.length) batches.push({ from: start, to: texts.length });
+  const out = new Array<string>(texts.length);
+  for (let b = 0; b < batches.length; b++) {
+    const { from: f, to: t } = batches[b];
+    const lines = await gtx(texts.slice(f, t), from, to);
+    if (!Array.isArray(lines) || lines.length !== t - f) {
+      throw new Error("перевод вернул не все строки");
+    }
+    for (let i = 0; i < lines.length; i++) out[f + i] = lines[i];
+    if (b < batches.length - 1) await sleep(400);
+  }
+  return cues.map((c, i) => ({ ...c, text: out[i] || c.text }));
 }
 
 function errorMessage(e: unknown): string {

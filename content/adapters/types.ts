@@ -34,6 +34,10 @@ export interface BaseTrackInfo {
   /** Дорожка языка оригинала (детект — originalLangsOf адаптера youtube:
    *  audioTracks[].original / .originalLanguage / asr-фолбэк, duopulse-070). */
   original: boolean;
+  /** Прямой baseUrl дорожки, если ответ его дал (duopulse-228: фолбэк ядра
+   *  качает тело без программирования плеера; страницевой путь поле не
+   *  использует и наружу в Core не отдаёт). */
+  baseUrl?: string;
 }
 
 /** Язык машинного перевода (tlang): применяется к базовой дорожке. */
@@ -53,6 +57,10 @@ export interface AdapterTrackList {
   base: BaseTrackInfo[];
   translations: TranslationLangInfo[];
   warnings: string[];
+  /** Статус добычи для панели (duopulse-228): «сессия без captions» и её
+   *  исход (фолбэк ядром/отказ) против «у видео нет субтитров»; пусто —
+   *  обычный путь без замечаний. */
+  note?: string;
 }
 
 /** Результат загрузки выбранных дорожек: успешные в порядке выбора +

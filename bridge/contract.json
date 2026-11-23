@@ -4289,6 +4289,10 @@
             "description": "Показ включён (Alt+D/панель; при false набор помнят обе стороны).",
             "type": "boolean"
           },
+          "listNote": {
+            "description": "Статус добычи списка (duopulse-228): «сессия без captions» и её исход (фолбэк ядром/отказ) против «у видео нет субтитров»; пусто — обычный путь без замечаний.",
+            "type": "string"
+          },
           "offsetMs": {
             "description": "Сдвиг показа, мс (±10 с, docs/03 §4).",
             "format": "int64",
@@ -7237,6 +7241,11 @@
               "$ref": "#/definitions/BaseTrackInfo"
             },
             "type": "array"
+          },
+          "note": {
+            "default": "",
+            "description": "Статус добычи списка (duopulse-228): фолбэк ядра при сессии без captions / его отказ; пусто — обычный путь.",
+            "type": "string"
           },
           "tabId": {
             "type": "string"

@@ -44,15 +44,23 @@ pub const INNERTUBE_CLIENT_VERSION: &str = "20.10.38";
 /// как «настоящий» клиент приложения.
 pub const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                              (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+// Константы/типы ниже обслуживают мобильную сетевую часть (mod net) и
+// мобильные модули; десктопский bin компилирует duo_mobile ради чистых
+// парсеров (yt_fallback, duopulse-228) — на нём они не строятся, но
+// компилируются (проверка типов единая), мёртвость разрешена явно.
 /// TTL кэша player-ответов: baseUrl подписаны с запасом (порядка часов),
 /// час кэша безопасен и экономит запросы при переключениях набора.
+#[cfg_attr(desktop, allow(dead_code))]
 pub const PLAYER_TTL: Duration = Duration::from_secs(3600);
 /// Ёмкость кэша player-ответов (видео за сеанс немного; вытеснение самой
 /// старой записи).
+#[cfg_attr(desktop, allow(dead_code))]
 pub const PLAYER_CACHE_MAX: usize = 8;
 /// Потолок тела ответа timedtext (как ручные файлы десктопа, 4 МБ).
+#[cfg_attr(desktop, allow(dead_code))]
 pub const BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// Ёмкость кэша переводов gtx (пачки за сеанс; сверх — чистим целиком).
+#[cfg_attr(desktop, allow(dead_code))]
 pub const GTX_CACHE_MAX: usize = 4096;
 /// Максимум строк пачки gtx (страховка от URL-переполнения; фронтенд режет
 /// по ~1,5 КБ текста — это ≈ десятки строк).
@@ -63,6 +71,7 @@ pub const GTX_BATCH_MAX_LINES: usize = 60;
 /// Cue для фронтенда (зеркало content Cue, camelCase).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(desktop, allow(dead_code))]
 pub struct DuoCue {
     pub start_ms: i64,
     pub end_ms: i64,
@@ -73,6 +82,7 @@ pub struct DuoCue {
 /// пусты — фронтенд решает, ретраить (429/5xx) или деградировать).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(desktop, allow(dead_code))]
 pub struct DuoCuesResult {
     pub status: u16,
     pub cues: Vec<DuoCue>,
