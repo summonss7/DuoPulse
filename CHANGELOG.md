@@ -8531,3 +8531,46 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   расследования P-08 (CARDS/056). Тесты/сборка не гнались — код проекта не менялся.
 - Коммит: ada6327 — cards: duopulse-226 закрыта (диагноз) + duopulse-228 (todo); отчёт
   отправлен Артёту в «Хаб ИИ» Aila (wish w_1vZceYVkR0fHiG2B).
+
+## 23.11.2026, 07:05 — duopulse-227: на uakinogo.io не работал клик по ссылкам (кликундеры против null-попапов WebView2)
+- Начало работы: 23.11.2026, 06:25
+- Окончание работы: 23.11.2026, 07:05
+- Что сделано:
+  - Диагноз (живой CDP-пробник debug-сборки): клик по ссылке фильма не навигировал,
+    в консоли TypeError «Cannot read properties of null (reading 'document')» из
+    js10.beeparentdo.com. У WebView2 нет popup-окон, NewWindowRequested гасится ядром
+    без SetNewWindow — window.open ВСЕГДА возвращает null. Кликундер uakinogo
+    (deltarockme.com объявляет домён → js10.beeparentdo.com/js/customs/e911500521.js:
+    расшифрован) рассчитан на живое окно: перехват клика по <a> (preventDefault) →
+    window.open('about:blank','…','width=1,height=1') → document.write → по focus —
+    location=реклама и simulateClick (elementFromPoint+initMouseEvent) = компенсация
+    съеденного клика. С null конвейер падает на document.write, компенсации нет, кука
+    успеха не взводится — каждая ссылка «просто тупо не реагирует» (в Chrome окно
+    живое, клик возвращается). С включённым адблоком deltarockme режется (duopulse-
+    sites) и всё работает — жалоба приходит с выключенным блокировщиком и при
+    ротации рекламных домёнов.
+  - Фикс: content/popup-shim.ts (новый, вшит в контентный бандл — ставится в топ и
+    фреймы до ветки frame-агента, не зависит от адблока): обёртка window.open —
+    не-http попапы (about:blank/'' — ровно паттерн кликундеров) получают живую
+    заглушку окна вместо null (document.write и оконные методы — no-op, сеттер
+    location уводит цель попапа нативным open → фоновой вкладкой), а через 500 мс
+    (дольше 400-мс гварда кликундеров от повторного перехвата) на opener
+    разыгрывается focus — скрипт сайта доигрывает свою компенсацию (simulateClick),
+    и ссылка открывается. http(s)-попапы не тронуты: вкладку уже открыло ядро,
+    null = «попап заблокирован» (как в Chrome с блокировщиком, duopulse-057).
+  - sites.txt (duopulse-sites): +||beeparentdo.com^ — вторая ступень той же сети
+    (deltarockme ротируется; сеть — на случай ухода первой ступени мимо списка).
+  - README: строка «Встроенный блокировщик» — кликундер-компенсация (227).
+  - Версия 0.1.99 (package.json = tauri.conf.json = Cargo.toml); релиз 0.1.99 тем же
+    сеансом (правка content/ = десктоп-код, duopulse-120): установщик в builds/
+    duopulse_0.1.99_release, оба канала обновлений (GitHub stable+canary) + хаб
+    «Скачать» Aila + локальная копия C:\DuoPulse обновлены.
+- Как проверено: vitest 797/797 (8 новых — popup-shim: заглушка about:blank, сеттер
+  location вкладкой, отложенный focus 500 мс, http-null, реальный window-passthrough,
+  идемпотентность, сквозной сценарий кликундера с компенсацией клика); typecheck
+  чист; build:content 188.6 КБ; cargo build. Живые CDP-прогоны uakinogo.io после
+  фикса: адблок ВЫКЛ — честный клик по ссылке фильма навигирует на страницу фильма
+  (до фикса — стоял на месте с TypeError), реклама уходит фоновыми вкладками
+  (паритет Chrome); адблок ВКЛ (дефолт) — клик навигирует, регрессий нет.
+- Коммит: 51b4ba2 fix(sites): duopulse-227 — мёртвые клики по ссылкам uakinogo.io
+  (popup-шим window.open + beeparentdo в duopulse-sites); версия 0.1.99
