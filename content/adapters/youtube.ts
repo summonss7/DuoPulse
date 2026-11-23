@@ -20,9 +20,13 @@
 //   базовые дорожки — только через программирование плеера (последовательно).
 // - Язык оригинала — originalLangsOf: audioTracks[].original (TV/ANDROID-
 //   клиенты) → renderer.audioTracks[].originalLanguage → asr-дорожка
-//   (web-клиент, duopulse-070) → defaultCaptionTrackIndex при известном
-//   языке UI страницы (duopulse-184: индекс ≠ язык UI = контентный фолбэк
-//   YouTube; равенство — неразличимая рекомендация под зрителя, пропускаем).
+//   (web-клиент, duopulse-070) → язык метаданных видео (duopulse-221:
+//   название/канал/описание — стоп-слова+диакритика, детект обязан совпасть
+//   с языком имеющейся ручной дорожки) → defaultCaptionTrackIndex при
+//   известном языке UI страницы (duopulse-184: индекс ≠ язык UI = контентный
+//   фолбэк YouTube; равенство — неразличимая рекомендация под зрителя,
+//   пропускаем; пробы 23.11.2026: анонимным сессиям фолбэк-индекс больше не
+//   выдаётся вовсе — шаг глубже некуда, метаданные надёжнее).
 // - Переводы (duopulse-175): наш собственный fetch tlang рейт-лимитится
 //   быстро (429, квота ~45–60 мин), а программирование плеера на перевод
 //   невозможно (setOption track {languageCode:'ru'} игнорируется — плеер
@@ -41,6 +45,7 @@ import type {
   TrackRef,
   TranslationLangInfo,
 } from "./types";
+import { detectMetaLanguage, type MetaLangTexts } from "./meta-lang";
 import type { Track } from "../types";
 import { videoKeyFor } from "../detector/videoKey";
 
@@ -126,16 +131,25 @@ export function videoIdOfResponse(response: unknown): string | null {
  *    НЕ применяется при данных п.2 — на мульти-даб видео asr-дорожка есть
  *    у каждого дубля (en-asr Милана — распознанный ДУБ), «оригиналами» все
  *    быть не могут (duopulse-159: дефолт-набор брал en-asr дуба вместо ru).
- * П.4 (duopulse-184, последний резерв после asr): defaultCaptionTrackIndex
+ * П.4 (duopulse-221, после asr): язык метаданных videoDetails — автор
+ * пишет название и описание на языке контента. Класс жалобы: музыка с
+ * ручными дорожками без asr и одиночным звуком — платформа языка оригинала
+ * НЕ ОТДАЁТ ВООБЩЕ ни одним клиентом (пробы 23.11.2026, Mylène Farmer
+ * Uhi00MoqpNg: en+fr manual, оригинал fr; ни audioTracks[].original у
+ * web/ANDROID/IOS/TV, ни originalLanguage, ни языка у аудио-форматов/DASH),
+ * и дефолт молча брал en. Детект (meta-lang.ts) обязан уверенно победить
+ * второй язык и совпасть с языком ИМЕЮЩЕЙСЯ ручной дорожки — иначе неясен.
+ * П.5 (duopulse-184, последний резерв): defaultCaptionTrackIndex
  * при известном языке UI страницы. Сам по себе индекс — рекомендация под язык
  * ИНТЕРФЕЙСА зрителя (проба: UI ro → индекс дорожки ro) и в общем случае
  * оригиналом не является; НО когда дорожки языка UI нет, YouTube кладёт в
  * индекс фолбэк — язык контента (пробы 18.11.2026, vk_xq1P7vIU: UI ru/ro →
  * индекс en при отсутствии ru/ro-дорожек; UI en при en-дорожке → тоже en,
- * неразличимо — поэтому совпадение с UI отбрасываем). Применяется только
- * когда п.1–п.3 ничего не дали: ручные дорожки без asr (клип Sam Smith —
- * 7 ручных, оригинал en, первым в списке шёл zh-Hans → дефолт-набор брал
- * китайскую дорожку). */
+ * неразличимо — поэтому совпадение с UI отбрасываем). Пробы 23.11.2026:
+ * анонимным сессиям фолбэк-индекс больше не выдаётся (есть дорожка языка
+ * зрителя → индекс её и указывает, нет — индекса нет), шаг почти мёртв и
+ * потому идёт ПОСЛЕ метаданных: его «en-фолбэк» неотличим от дефолтного en
+ * и врал бы на fr/es-оригиналах. */
 export function originalLangsOf(response: unknown, uiLang?: string): Set<string> {
   const out = new Set<string>();
   if (!response || typeof response !== "object") return out;
@@ -178,7 +192,18 @@ export function originalLangsOf(response: unknown, uiLang?: string): Set<string>
   for (const t of raw.captionTracks) {
     if (t.kind === "asr") add(t.languageCode);
   }
-  // П.4: см. докблок выше — индекс ≠ язык UI означает контентный фолбэк.
+  // П.4: см. докблок выше — детект метаданных, совпадающий с языком
+  // имеющейся ручной дорожки (все совпадающие коды: «es» и «es-ES»).
+  if (out.size === 0) {
+    const lang = detectMetaLanguage((response as { videoDetails?: MetaLangTexts }).videoDetails);
+    if (lang) {
+      for (const t of raw.captionTracks) {
+        const code = typeof t.languageCode === "string" ? t.languageCode : "";
+        if (t.kind !== "asr" && code.split("-")[0]?.toLowerCase() === lang) add(code);
+      }
+    }
+  }
+  // П.5: см. докблок выше — индекс ≠ язык UI означает контентный фолбэк.
   if (out.size === 0 && uiLang) {
     const ui = uiLang.split("-")[0]?.toLowerCase() ?? "";
     if (/^[a-z]{2,3}$/.test(ui)) {

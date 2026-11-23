@@ -51,12 +51,20 @@ interface Fixture {
   /** audioTracks рендерера (web-клиент, живая запись — duopulse-070); у
    *  старых фикстур нет: записаны рекордером до захвата этого поля. */
   audioTracks?: Record<string, unknown>[];
+  /** videoDetails-поля для детекта метаданных (duopulse-221). */
+  author?: string;
+  description?: string;
 }
 
 /** Фикстура → player-ответ (обёртка captions-части в структуру ответа). */
 function playerResponseOf(fx: Fixture): Record<string, unknown> {
   return {
-    videoDetails: { videoId: fx.videoId, title: fx.title },
+    videoDetails: {
+      videoId: fx.videoId,
+      title: fx.title,
+      ...(fx.author !== undefined ? { author: fx.author } : {}),
+      ...(fx.description !== undefined ? { shortDescription: fx.description } : {}),
+    },
     captions: {
       playerCaptionsTracklistRenderer: {
         captionTracks: fx.captionTracks,
@@ -304,6 +312,81 @@ describe("извлечение списка из player-ответа (фикст
       audioTracks: [{ captionTrackIndices: [0], hasDefaultTrack: false, defaultCaptionTrackIndex: 0 }],
     });
     expect(originalLangsOf(noIdx, "ru")).toEqual(new Set());
+  });
+
+  // duopulse-221 (Mylène Farmer Uhi00MoqpNg, жалоба «оригинал французский,
+  // а поставило английский»): музыка, ручные en+fr без asr и БЕЗ аудио-
+  // маркеров — язык оригинала не отдаёт ни один клиент (пробы 23.11.2026);
+  // анонимной сессии и фолбэк-индекс не выдаётся. Спасает п.4: язык
+  // метаданных (описание канала на французском) + совпадение с дорожкой fr.
+  const myleneResponse = (audioTracks?: Record<string, unknown>[]): Record<string, unknown> =>
+    playerResponseOf({
+      videoId: "Uhi00MoqpNg",
+      url: "",
+      title: "Mylène Farmer - Ainsi soit je... (Stade de France Live)",
+      author: "Mylène Farmer",
+      description:
+        'Mylène Farmer - "Ainsi soit je... (Stade de France Live)"\n' +
+        'Extrait du film "Mylène Farmer - Stade de France" disponible en DVD, Blu-ray & CD\n' +
+        "Dans les bacs ➛ https://mylenefarmerlive.lnk.to/StadeDeFrance\n" +
+        '--\nSingle disponible dans le best-of "Histoires de" ➛ https://lnk.to/MyleneFarmerHistoiresDe\n--',
+      captionTracks: [
+        { languageCode: "en", vssId: ".en", isTranslatable: true },
+        { languageCode: "fr", vssId: ".fr", isTranslatable: true },
+      ],
+      translationLanguages: [
+        { languageCode: "ru" },
+        { languageCode: "en" },
+        { languageCode: "ro" },
+      ],
+      ...(audioTracks ? { audioTracks } : {}),
+    });
+
+  it("duopulse-221: ручные дорожки без сигналов — оригинал fr по метаданным (uiLang не нужен)", () => {
+    expect(originalLangsOf(myleneResponse(), "ru")).toEqual(new Set(["fr"]));
+    expect(originalLangsOf(myleneResponse())).toEqual(new Set(["fr"]));
+    expect(originalLangsOf(myleneResponse([{ captionTrackIndices: [0, 1] }]), "ro-RO")).toEqual(
+      new Set(["fr"]),
+    );
+  });
+
+  it("duopulse-221: метаданные надёжнее индекс-фолбэка — п.4 прежде п.5", () => {
+    // Сессия со старым поведением (фолбэк-индекс en при UI ru): даже тогда
+    // описание-французский должен побеждать неоднозначный en-индекс.
+    const idxEn = myleneResponse([
+      { captionTrackIndices: [0, 1], hasDefaultTrack: true, defaultCaptionTrackIndex: 0 },
+    ]);
+    expect(originalLangsOf(idxEn, "ru")).toEqual(new Set(["fr"]));
+  });
+
+  it("duopulse-221: детект без совпадения с дорожкой или неясен — пометки нет", () => {
+    // Описание французское, но fr-дорожки нет — помечать нечего.
+    const noFr = playerResponseOf({
+      videoId: "x",
+      url: "",
+      title: "Mylène Farmer - Ainsi soit je... (Stade de France Live)",
+      author: "Mylène Farmer",
+      description:
+        'Extrait du film "Mylène Farmer - Stade de France" disponible en DVD, Blu-ray & CD\nDans les bacs',
+      captionTracks: [
+        { languageCode: "en", vssId: ".en" },
+        { languageCode: "de", vssId: ".de" },
+      ],
+      translationLanguages: [],
+    });
+    expect(originalLangsOf(noFr, "ru")).toEqual(new Set());
+    // Метаданных нет вовсе (записи без videoDetails-текстов) — прежнее поведение.
+    const bare = playerResponseOf({
+      videoId: "x",
+      url: "",
+      title: "",
+      captionTracks: [
+        { languageCode: "en", vssId: ".en" },
+        { languageCode: "fr", vssId: ".fr" },
+      ],
+      translationLanguages: [],
+    });
+    expect(originalLangsOf(bare, "en")).toEqual(new Set());
   });
 
   it("duopulse-184: адаптер помечает en оригиналом и дефолт-набор берёт его (не zh-Hans)", async () => {
