@@ -123,7 +123,7 @@ describe("FrameVideoProxy", () => {
 
 describe("EmbedHost (протокол relay)", () => {
   interface HostEvents {
-    video: { videoKey: string; tracks: number }[];
+    video: { videoKey: string; tracks: number; noSubs: boolean }[];
     gone: string[];
     files: { name: string; text: string }[];
   }
@@ -131,7 +131,7 @@ describe("EmbedHost (протокол relay)", () => {
   function makeHost(): { host: EmbedHost; events: HostEvents } {
     const events: HostEvents = { video: [], gone: [], files: [] };
     const host = new EmbedHost({
-      onVideo: (v) => events.video.push({ videoKey: v.videoKey, tracks: v.tracks.length }),
+      onVideo: (v) => events.video.push({ videoKey: v.videoKey, tracks: v.tracks.length, noSubs: v.noSubs }),
       onGone: (key) => events.gone.push(key),
       onFile: (name, text) => events.files.push({ name, text }),
     });
@@ -149,7 +149,10 @@ describe("EmbedHost (протокол relay)", () => {
     const { host, events } = makeHost();
     msg({ duopulseFrame: true, type: "video", videoKey: "k1", url: "https://p.example/e", tracks: [{ id: "embed:en:0", lang: "en", name: "Eng", url: "https://x/a.vtt", original: true }] });
     msg({ duopulseFrame: true, type: "video", videoKey: "k1", url: "https://p.example/e", tracks: [] });
-    expect(events.video).toEqual([{ videoKey: "k1", tracks: 1 }, { videoKey: "k1", tracks: 0 }]);
+    expect(events.video).toEqual([
+      { videoKey: "k1", tracks: 1, noSubs: false },
+      { videoKey: "k1", tracks: 0, noSubs: false },
+    ]);
     msg({ duopulseFrame: true, type: "clock", videoKey: "k1", t: 5, paused: false, rate: 1 });
     expect(host.state().videoKey).toBe("k1");
     expect(host.state().tracks.map((t) => t.id)).toEqual([]);
@@ -162,6 +165,19 @@ describe("EmbedHost (протокол relay)", () => {
     msg({ duopulseFrame: true, type: "bye", videoKey: "k2" });
     expect(events.files).toEqual([{ name: "movie.en.srt", text: expect.stringContaining("Hi") }]);
     expect(events.gone).toEqual(["k2"]);
+  });
+
+  it("duopulse-230: noSubs — «дубляж без субтитров» доходит до onVideo и state", () => {
+    const { host, events } = makeHost();
+    // Ответ playlist/load с пустым subtitle: агент анонсирует видео
+    // без дорожек с признаком — панель получит note, а не пустоту.
+    msg({ duopulseFrame: true, type: "video", videoKey: "k4", url: "u", tracks: [], noSubs: true });
+    expect(events.video).toEqual([{ videoKey: "k4", tracks: 0, noSubs: true }]);
+    expect(host.state().noSubs).toBe(true);
+    // Смена дубляжа на с дорожками — признак снят (пере-анонс агента).
+    msg({ duopulseFrame: true, type: "video", videoKey: "k4", url: "u", tracks: [{ id: "embed:ru:0", lang: "ru", name: "Русский", url: "https://x/r.vtt", original: false }], noSubs: false });
+    expect(host.state().noSubs).toBe(false);
+    expect(host.state().tracks.map((t) => t.id)).toEqual(["embed:ru:0"]);
   });
 
   it("loadTrack — запрос в фрейм и cues по ответу агента", async () => {

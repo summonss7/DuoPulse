@@ -262,10 +262,13 @@ async function probeRun() {
     check("агент DuoPulse во фрейме плеера (__duopulseFrameAgent)", agent === "object", String(agent));
 
     // duopulse-225 (cinemar): субтитры принадлежат ДУБЛЯЖУ — дефолтный
-    // может идти без них; открываем список дубляжей плеера и выбираем
-    // требуемый (ответ playlist/load с новым data несёт дорожки).
+    // может идти без них (duopulse-230: у «Сердца зверя» дефолтный HDrezka
+    // идёт БЕЗ субтитров, прежний дефолт стенда «Дубляж (TVShows)» сайт
+    // убрал из списка вовсе). DUOPULSE_E2E_DUB — точное имя; без переменной
+    // стенд сам перебирает дубляжи, пока топ-бандл не увидит дорожки
+    // (предпочтение — дорожка ожидаемого языка), и возвращается к лучшему.
     if (PROVIDER === "0") {
-      const DUB = process.env.DUOPULSE_E2E_DUB || "Дубляж (TVShows)";
+      const DUB = process.env.DUOPULSE_E2E_DUB || "";
       await sleep(4000); // playlist UI плеера построен
       const opened = await playerEval(`(() => {
         const t = document.querySelector('.playlist-title');
@@ -275,15 +278,47 @@ async function probeRun() {
       })()`);
       console.log(`  список дубляжей: ${opened}`);
       await sleep(1200);
-      const picked = await playerEval(`(() => {
+      const embedTracksNow = async () => {
+        const st = JSON.parse((await evalIn(page, SUBS_STATE)) || "null");
+        return st?.embed?.tracks ?? [];
+      };
+      const clickDub = async (name) => playerEval(`(() => {
         const btn = [...document.querySelectorAll('.playlist button')].find(
-          (b) => (b.textContent || '').trim() === ${JSON.stringify(DUB)});
+          (b) => (b.textContent || '').trim() === ${JSON.stringify(name)});
         if (!btn) return "нет дубляжа";
         btn.click();
         return "клик";
       })()`);
-      console.log(`  дубляж «${DUB}»: ${picked}`);
-      await sleep(4000); // playlist/load → перехват агента → пере-анонс
+      if (DUB) {
+        console.log(`  дубляж «${DUB}»: ${await clickDub(DUB)}`);
+        await sleep(4000); // playlist/load → перехват агента → пере-анонс
+      } else {
+        const names = JSON.parse((await playerEval(
+          `JSON.stringify([...document.querySelectorAll('.playlist button')].map(b => (b.textContent||'').trim()))`,
+        )) || "[]");
+        let best = null; // {name, hasLang}
+        for (const name of names.slice(0, 8)) {
+          await clickDub(name);
+          for (let i = 0; i < 8; i++) {
+            await sleep(1000);
+            const tr = await embedTracksNow();
+            if (tr.length) {
+              const hasLang = tr.some((t) => t.lang === WANT_LANG);
+              console.log(`  дубляж «${name}»: дорожек ${tr.length}${hasLang ? ` (есть ${WANT_LANG})` : ""}`);
+              if (hasLang) { best = { name, hasLang: true }; break; }
+              if (!best) best = { name, hasLang: false };
+              break;
+            }
+          }
+          if (best?.hasLang) break;
+        }
+        if (best && !best.hasLang) {
+          console.log(`  вернулись к «${best.name}» (дорожек без ${WANT_LANG})`);
+          await clickDub(best.name);
+          await sleep(4000);
+        }
+        if (!best) console.log("  ни один дубляж (первые 8) не дал дорожек");
+      }
     }
 
     // (3) топ-бандл: дорожки эмбеда пришли relay'ем (до 30 с — плеер строится;

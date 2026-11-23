@@ -34,6 +34,20 @@
 ||traffer.net^
 ||traffer.biz^
 ||temptcdn.com^
+! duopulse-230 (23.11): баннерная сеть Epom СТРАНИЦ uakinogo (слоты .kng-rekl
+! — «реклама покерных клубов при открытии страницы», жалоба 230): загрузчик
+! cdn77.srv224.com/ee314b03.js (postscribe-надстройка Epom) + доставка тегов
+! POST'ами srv224.com; сёстры той же сети — aj2517.bid и s2517.com (свежий
+! домён, EasyList уже закрыл). Формально покрыты живым EasyList, но дублируем
+! в нашем вшитом списке: не зависит от выкачки EasyList на старте (окно
+! прогрева движка — свежий профиль успевает загрузить ee314b03.js до списков,
+! живая проба 230) и от будущих перестановок EasyList.
+||srv224.com^
+||aj2517.bid^
+||s2517.com^
+! Пустые слоты Epom (min-height 200px) после блокировки схлопываем —
+! страница не несёт дыру на месте несостоявшегося баннера
+uakinogo.io##.kng-rekl
 /^https?:\/\/cvt-s\d+\.agl\d+\.(?:site|shop)\//
 /^https?:\/\/r\d+\.adstag\d+\.xyz\//
 /^https?:\/\/r\d+\.traffer\.(?:net|biz)\//
@@ -42,6 +56,7 @@
 ! теги adera/angel721/viewtraff + вся цепочка, замеченная в живом прогоне
 ! (kinoroll — редиректор тегов, kingads — VAST/dsp, mygaru — ident-пиксель,
 ! kxcdn/kx1cdn — пиксель srv224; ахcdn — видео-CDN, сюда НЕ входит;
-! traffer/temptcdn — новая сеть прероллов, duopulse-190)
-cinemar.cc,embf.net##+js(no-fetch-if, /aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com|traffer\.net|traffer\.biz|temptcdn\.com/)
-cinemar.cc,embf.net##+js(no-xhr-if, /aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com|traffer\.net|traffer\.biz|temptcdn\.com/)
+! traffer/temptcdn — новая сеть прероллов, duopulse-190; s2517 — сестра
+! srv224/aj2517, duopulse-230)
+cinemar.cc,embf.net##+js(no-fetch-if, /aj2517\.bid|s2517\.com|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com|traffer\.net|traffer\.biz|temptcdn\.com/)
+cinemar.cc,embf.net##+js(no-xhr-if, /aj2517\.bid|s2517\.com|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|kxcdn\.com|kx1cdn\.com|traffer\.net|traffer\.biz|temptcdn\.com/)

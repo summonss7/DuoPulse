@@ -37,7 +37,7 @@ const URL_ = process.argv[2] || "https://uakinogo.io/novinki/116356-chelovek-pau
 // mygaru — ident-пиксель) + новая сеть плеера duopulse-190 (20.11: тег
 // res64.traffer.net → креатив vcdn.traffer.biz, метрика *.temptcdn.com —
 // преролл pokerbet; cfnd.cinemap.cc/ahcdn — CDN видео, НЕ рекламные).
-const AD_HOST_RE = /(^|\.)(deltarockme\.com|agl\d+\.(site|shop)|adstag\d+\.xyz|aj2517\.bid|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|traffer\.net|traffer\.biz|temptcdn\.com|cfnd\.cinemap\.cc)$/i;
+const AD_HOST_RE = /(^|\.)(deltarockme\.com|agl\d+\.(site|shop)|adstag\d+\.xyz|aj2517\.bid|s2517\.com|srv224\.com|kinoroll\.com|kingads\.digital|mygaru\.com|traffer\.net|traffer\.biz|temptcdn\.com|cfnd\.cinemap\.cc)$/i;
 const SECS = Number(process.env.DUOPULSE_E2E_SECS) || 75;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

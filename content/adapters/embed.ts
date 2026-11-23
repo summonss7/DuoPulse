@@ -418,6 +418,11 @@ export function startFrameAgent(): void {
   // playlist/load независимо от инлайн-конфига; анонс объединяет списки.
   let cinemarTracks: EmbedTrackInfo[] = [];
   let cinemarSig = "";
+  // duopulse-230: валидный ответ playlist/load БЕЗ дорожек («subtitle:""») —
+  // признак «этот дубляж идёт без субтитров»; уходит с анонсом наверх для
+  // note в панели (дорожки есть у ДРУГИХ дубляжей — пользователь об этом
+  // не догадывается, список в плеере показывает только названия).
+  let cinemarNoSubs = false;
   const applyCinemarPayload = (payload: string): void => {
     // Ответ playlist/load узнаём по полю subtitle (у части дубляжей он пуст —
     // это тоже валидный ответ и он сносит дорожки прежнего дубляжа); мусор
@@ -430,6 +435,7 @@ export function startFrameAgent(): void {
     }
     if (typeof data.subtitle !== "string") return;
     const tracks = parseCinemarSubtitles(payload, (u) => new URL(u, location.origin).href);
+    cinemarNoSubs = tracks.length === 0;
     const sig = tracks.map((t) => t.url).join("|");
     if (sig === cinemarSig) return; // тот же состав (ретрай/смена качества)
     cinemarSig = sig;
@@ -472,6 +478,7 @@ export function startFrameAgent(): void {
       videoKey: currentKey,
       url: currentUrl ?? location.href,
       tracks: tracks.map((t) => ({ ...t })),
+      noSubs: cinemarNoSubs, // duopulse-230: «дубляж без субтитров» для note
     });
   };
 
@@ -650,6 +657,8 @@ export interface FrameVideo {
   el: HTMLVideoElement;
   proxy: FrameVideoProxy;
   tracks: EmbedTrackInfo[];
+  /** Ответ playlist/load без дорожек — «дубляж без субтитров» (duopulse-230). */
+  noSubs: boolean;
 }
 
 export interface EmbedHostHandlers {
@@ -666,13 +675,15 @@ export interface EmbedHostState {
   frames: number;
   videoKey: string | null;
   tracks: { id: string; lang: string; name: string }[];
+  /** Ответ playlist/load без дорожек (duopulse-230). */
+  noSubs: boolean;
 }
 
 /** Приём сообщений агентов фреймов в top-документе: событие «message»,
  * источник матчится с iframe страницы (их contentWindow уникален). */
 export class EmbedHost {
   private readonly handlers: EmbedHostHandlers;
-  private frame: { el: HTMLIFrameElement; key: string; proxy: FrameVideoProxy; tracks: EmbedTrackInfo[] } | null = null;
+  private frame: { el: HTMLIFrameElement; key: string; proxy: FrameVideoProxy; tracks: EmbedTrackInfo[]; noSubs: boolean } | null = null;
   private pending = new Map<number, (r: { ok: boolean; payload?: string; error?: string }) => void>();
   private reqSeq = 0;
   private watchdog: number | null = null;
@@ -737,8 +748,9 @@ export class EmbedHost {
       : [];
     if (this.frame && this.frame.key !== key) this.frame.proxy.dispose();
     const proxy = this.frame && this.frame.key === key ? this.frame.proxy : new FrameVideoProxy();
-    this.frame = { el, key, proxy, tracks };
-    this.handlers.onVideo({ videoKey: key, url, el: el as unknown as HTMLVideoElement, proxy, tracks });
+    const noSubs = data["noSubs"] === true;
+    this.frame = { el, key, proxy, tracks, noSubs };
+    this.handlers.onVideo({ videoKey: key, url, el: el as unknown as HTMLVideoElement, proxy, tracks, noSubs });
   }
 
   /** iframe по source окна сообщения (protected — подмена в тестах). */
@@ -788,6 +800,7 @@ export class EmbedHost {
       frames: this.frame ? 1 : 0,
       videoKey: this.frame?.key ?? null,
       tracks: (this.frame?.tracks ?? []).map((t) => ({ id: t.id, lang: t.lang, name: t.name })),
+      noSubs: this.frame?.noSubs ?? false,
     };
   }
 }

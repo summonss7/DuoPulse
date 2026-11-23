@@ -713,15 +713,20 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
   /** Дорожки плеер-фрейма текущего видео (пусто — видео не из фрейма или
    * плеер дорожек не отдал). Обновляется EmbedHost до onVideoDetected. */
   let embedTracks: EmbedTrackInfo[] = [];
+  /** duopulse-230: агент фрейма видел ответ playlist/load без дорожек —
+   * «этот дубляж плеера идёт без субтитров» (дорожки есть у других). */
+  let embedNoSubs = false;
   /** Сигнатура последнего анонса embed-дорожек в Core (дедуп повторных
    * onVideo одного ключа: уточнение длительности/пере-анонс агента). */
   let embedAnnounced = "";
 
   /** Список embed-дорожек в каркасе AdapterTrackList — потребление то же,
    * что у YouTube (дефолт-набор Alt+D, панель), но переводы tlang пусты:
-   * вторая строка дуо — облачный перевод или соседняя дорожка плеера. */
+   * вторая строка дуо — облачный перевод или соседняя дорожка плеера.
+   * duopulse-230: дубляж без дорожек даёт ПУСТОЙ список с note — панель
+   * объяснит, что субтитры есть у других дубляжей плеера. */
   const embedAdapterList = (): AdapterTrackList | null =>
-    embedTracks.length === 0
+    embedTracks.length === 0 && !embedNoSubs
       ? null
       : ({
           adapter: "embed",
@@ -738,6 +743,9 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
           })),
           translations: [],
           warnings: [],
+          note: embedTracks.length === 0
+            ? "У этого дубляжа плеера нет субтитров — попробуйте другой дубляж в списке плеера"
+            : undefined,
         });
 
   /** Полный список дорожек — в Core (тот же контракт, что у YouTube-ветки). */
@@ -755,6 +763,9 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
         translatable: b.translatable,
       })),
       translations: [],
+      // duopulse-230: note и эмбед-пути («дубляж без субтитров»), контракт
+      // тот же, что у YouTube-фолбэка (duopulse-228)
+      note: list.note ?? "",
     });
   };
 
@@ -836,9 +847,10 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
     if (video.frameProxy) {
       // Плеер-фрейм (duopulse-199): дорожки пришли вместе с видео — список
       // в Core тем же контрактом; повторные анонсы того же ключа (уточнение
-      // длительности/поздние <track>) дедуплицируются сигнатурой.
+      // длительности/поздние <track>) дедуплицируются сигнатурой; noSubs в
+      // сигнатуре различает «дубляж сменился на без-субтитровый» (230).
       trackList = embedAdapterList();
-      const sig = `${video.videoKey}#${embedTracks.length}`;
+      const sig = `${video.videoKey}#${embedTracks.length}#${embedNoSubs ? 1 : 0}`;
       if (sig !== embedAnnounced) {
         embedAnnounced = sig;
         reportDetected(video, (trackList?.base.length ?? 0) > 0);
@@ -849,7 +861,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
         // поднимается сам, как у нового видео (duopulse-203). Пользователь
         // уже выключал/собирал набор — setMemory не пуст, не навязываемся.
         if (
-          trackList !== null &&
+          (trackList?.base.length ?? 0) > 0 &&
           !enabled &&
           !hasSetTracks() &&
           pendingEnable === null &&
@@ -893,6 +905,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
   const embedHost = new EmbedHost({
     onVideo(frame): void {
       embedTracks = frame.tracks;
+      embedNoSubs = frame.noSubs;
       onVideoDetected({
         el: frame.el,
         videoKey: frame.videoKey,
@@ -902,6 +915,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
     },
     onGone(videoKey): void {
       embedTracks = [];
+      embedNoSubs = false;
       embedAnnounced = "";
       if (currentVideo?.videoKey === videoKey) onVideoGone();
     },
