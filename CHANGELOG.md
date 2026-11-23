@@ -8476,4 +8476,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   id ai_duopulse223_ans). Карточка duopulse-223 закрыта (status: done).
 - Как проверено: grep по src-tauri/bridge (подмена UA отсутствует), протокол ai-hub.md (формат kind:msg),
   JSON дописан python-ом с ensure_ascii=False (ловушка printf из памяти).
-- Коммит: <будет заполнен после коммита карточки и CHANGELOG>.
+- Коммит: e6b8a72 — cards: duopulse-223 — status done + changelog.
