@@ -37,6 +37,7 @@ import { MobileTabs, parseSavedTabs, TABS_KEY, type MobileTab } from "./tabs";
 import { MobileHistory } from "./history";
 import { MobileDiagnostics } from "./diagnostics";
 import { MobileVpn } from "./vpn";
+import { watchHeaderState } from "./header-ping";
 import { MobilePassSave } from "./pass-save";
 import { installMobileAccount } from "./account";
 import { createMobileUpdater, mb, readLastCheck, type UpdaterUi } from "./updater";
@@ -433,6 +434,7 @@ const tabs = new MobileTabs({
  *  экран. null — вкладок нет (все закрыты / «новая вкладка» / старт). */
 function onTabActive(tab: MobileTab | null): void {
   videoOpen = tab !== null;
+  headerWatch.notify(); // duopulse-212: «⬇» шапки оверлея — живое зеркало
   start.hidden = tab !== null;
   // duopulse-217: вкладка закрыта/открыта — полный экран поворота пересчитать
   // (закрытое видео в ландшафте не должно держать спрятанные панели)
@@ -520,6 +522,18 @@ vpnBtn.addEventListener("click", () => {
   vpn.setSheet(true);
 });
 vpn.restoreOnBoot();
+
+// duopulse-212: шапка web-оверлея — живое зеркало старта. Бейдж вкладок и
+// щит VPN уже в DOM (конструкторы выше), videoOpen — внешний флаг
+// (onTabActive); изменение состава пингует Kotlin (mobile_web_header_ping),
+// тот переопросит __duopulseHeaderState у видимого оверлея — см.
+// header-ping.ts.
+const headerWatch = watchHeaderState(
+  root.querySelector(".m-tabs-badge")!,
+  root.querySelector(".m-vpn-shield")!,
+  () => String(videoOpen),
+  () => void invoke<string>("mobile_web_header_ping").catch(() => {}),
+);
 
 // ── Аккаунт Aila (этап 6 duopulse-112): блок в меню «⋮», листы входа и
 // паролей; синк паролей/закладок — общее ядро с десктопом (aila.rs). После

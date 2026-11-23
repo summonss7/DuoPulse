@@ -35,6 +35,18 @@ pub fn mobile_web_close() -> Result<String, String> {
     jni_impl::call("close", "", "")
 }
 
+/// mobile.web_header_ping: состав ряда 1 шапки старта изменился, пока
+/// web-оверлей открыт (duopulse-212 — вкладки/видео/VPN): UI-webview шлёт
+/// пинг при фактическом изменении (мутации бейджа/щита в DOM, смена
+/// videoOpen), Kotlin переопросит __duopulseHeaderState без смены адреса
+/// оверлея. Спрятанный оверлей пинг игнорирует — пустых переопросов
+/// (evaluateJavascript) нет, батарея не жжётся.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub fn mobile_web_header_ping() -> Result<String, String> {
+    jni_impl::call("headerPing", "", "")
+}
+
 #[cfg(target_os = "android")]
 mod jni_impl {
     use crate::mobile_jni::{app_class, jstr, with_jni};

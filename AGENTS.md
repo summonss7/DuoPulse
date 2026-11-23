@@ -244,6 +244,20 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   Результат — e2e/mobile/rotate-fullscreen-smoke-last-run.json (gitignore,
   рантайм-артефакт).
 
+- `e2e/mobile/header-live-smoke.mjs` — стенд ЖИВОГО ОБНОВЛЕНИЯ ШАПКИ
+  web-оверлея (карточка 212): debug-APK + CDP 9223 + wg-stand; состав ряда 1
+  (бейдж вкладок/«⬇»/щит VPN — нативные Kotlin-вьюхи, читаются uiautomator-
+  дампом по content-desc) обновляется пингом mobile_web_header_ping без смены
+  адреса оверлея. 10 проверок: закрытие видео-вкладки DOM-кликом листа при
+  ВИДИМОМ оверлее (лист под оверлеем невидим, но DOM жив — единственный путь
+  «без смены адреса») убирает «⬇»/бейдж, logcat подтверждает живой переопрос
+  (header-state с новым составом); тоннель wg-stand вкл/выкл (VPN-команды —
+  аргументы под ключом params, use_profile поднимает/гасит) двигает щит;
+  спрятанный оверлей (тап «Вкладки» шапки — hide) при изменении счёта даёт
+  «header-ping: … спрятан» БЕЗ новых header-state (пустых переопросов нет).
+  Результат — e2e/mobile/header-live-smoke-last-run.json (gitignore,
+  рантайм-артефакт).
+
 - `e2e/subs/embed-subs-probe.mjs` — стенд ДОРОЖЕК СУБТИТРОВ ПЛЕЕР-ФРЕЙМОВ
   кино-сайтов (карточки 199/225): живая страница фильма uakinogo.io; таб
   плеера №2 (data-provider="1", дефолт стенда) включает OOPIF api.embf.net,

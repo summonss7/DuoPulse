@@ -259,6 +259,7 @@ fn mobile_run() {
             mobile_open::mobile_open_url,
             mobile_web::mobile_web_open,
             mobile_web::mobile_web_close,
+            mobile_web::mobile_web_header_ping,
             mobile_adblock::mobile_adblock_status,
             mobile_adblock::mobile_adblock_set_enabled,
             mobile_private::mobile_private_cleanup,

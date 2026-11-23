@@ -8574,3 +8574,41 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   (паритет Chrome); адблок ВКЛ (дефолт) — клик навигирует, регрессий нет.
 - Коммит: 51b4ba2 fix(sites): duopulse-227 — мёртвые клики по ссылкам uakinogo.io
   (popup-шим window.open + beeparentdo в duopulse-sites); версия 0.1.99
+
+## 23.11.2026, 06:51–07:08 — duopulse-212: шапка web-оверлея — живое обновление бейджа вкладок, «⬇» и щита VPN
+- Проблема (найдено в duopulse-210): состав ряда 1 шапки web-оверлея (кнопка вкладок
+  с бейджем, «⬇», щит VPN) синхронизировался хуком __duopulseHeaderState только из
+  syncChrome — на смене URL/открытии/показе оверлея. Пока оверлей открыт, состояние
+  старта могло измениться (закрылась вкладка → бейдж врёт; поднялся/упал тоннель →
+  щит опаздывает) — «зеркало старта» расходилось с оригиналом до следующей смены
+  адреса.
+- Фикс — событийная подписка вместо переопроса по таймеру:
+  - src/mobile/header-ping.ts (новый): чистое ядро signalOnChange (debounce-очередь
+    «пачка событий → один send» + фильтр одинаковых сигнатур — шум renderBadge,
+    перезаписывающего textContent тем же значением, пингов не порождает) и
+    DOM-обвязка watchHeaderState (MutationObserver на .m-tabs-badge и .m-vpn-shield
+    старта + внешний флаг extra()).
+  - src/mobile/mobile.ts: watchHeaderState подключён после инициализации вкладок/VPN;
+    onTabActive зовёт notify() — смена videoOpen («⬇») тоже пингует; send — invoke
+    mobile_web_header_ping.
+  - src-tauri/src/mobile_web.rs + lib.rs: команда mobile_web_header_ping → JNI
+    MobileWebHelper.headerPing (дескриптор тот же, что open/close — регресс-урок
+    duopulse-211 учтён).
+  - MobileWebHelper.kt: headerPing переопросивает __duopulseHeaderState (syncHeaderState)
+    ТОЛЬКО у видимого оверлея; спрятанный молчит — пустых переопросов нет, батарея
+    не жжётся. Диагностические Log.d: итоговый состав «header-state: …» и подавленный
+    «header-ping: … спрятан» (след для смоуков).
+- e2e/mobile/header-live-smoke.mjs (новый стенд, debug-APK + CDP 9223 + wg-stand):
+  10 проверок — видео-вкладка + открытый оверлей (бейдж «1», есть «⬇», нет щита);
+  закрытие вкладки из листа ПРЯМЫМ DOM-кликом при ВИДИМОМ оверлее → «⬇» исчез,
+  бейдж опустел, адрес оверлея НЕ менялся, в logcat живой header-state с новым
+  составом; тоннель wg-stand вкл/выкл (use_profile) → щит появляется/исчезает без
+  смены адреса; спрятанный оверлей (тап «Вкладки» — hide) при изменении счёта →
+  «header-ping: … спрятан» и НЕТ новых header-state (пустых переопросов нет).
+  Результат — e2e/mobile/header-live-smoke-last-run.json (gitignore).
+- Как проверено: vitest 802/802 (+5 — header-ping.test.ts: debounce-сворачивание,
+  фильтр одинаковой сигнатуры, повторное изменение, чтение свежего состояния в
+  flush); typecheck чист; живой прогон на эмуляторе (AVD DuoPulse218, debug-APK
+  0.1.99) — 10/10 проверок стенда.
+- Коммит: см. git log (duopulse-212); версия НЕ поднималась и НЕ собиралась —
+  флажок Артёма build: false (aila-418, 23.11.2026 06:27).

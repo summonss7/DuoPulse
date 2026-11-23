@@ -555,6 +555,8 @@ object MobileWebHelper {
         // ⬇ — как старт: есть только при открытом видео (duopulse-210)
         musicBtn?.visibility = if (video) View.VISIBLE else View.GONE
         shieldBtn?.visibility = if (vpn) View.VISIBLE else View.GONE
+        // duopulse-212: след для смоука — переопрос шёл и с каким составом
+        Log.d(TAG, "header-state: tabs=$tabs video=$video vpn=$vpn")
       } catch (e: Exception) {
         Log.d(TAG, "header-state: ${e.message}")
       }
@@ -976,6 +978,21 @@ object MobileWebHelper {
     val act = MainActivity.current ?: return "error: активность не готова"
     act.runOnUiThread { close() }
     return "closed"
+  }
+
+  /** Пинг «состав шапки старта изменился» (duopulse-212, mobile_web_header_ping
+   *  из UI-webview): переопросить __duopulseHeaderState — бейдж вкладок/«⬇»/
+   *  щит VPN оверлея обновляются без смены его адреса. Дескриптор тот же, что
+   *  у open/close (Context, String, String) → String — параметры не нужны,
+   *  но обязательны jni_impl в mobile_web.rs. СПРЯТАННЫЙ оверлей молчит:
+   *  переопрос (evaluateJavascript) только у видимого — батарея. */
+  @JvmStatic fun headerPing(context: Context, unused: String, unused2: String): String {
+    val act = MainActivity.current ?: return "error: активность не готова"
+    act.runOnUiThread {
+      if (!hidden && overlay != null) syncHeaderState()
+      else Log.d(TAG, "header-ping: оверлей спрятан — переопроса нет (duopulse-212)")
+    }
+    return "ok"
   }
 
   /** Разобрать оверлей совсем (выход/закрытие): WebView destroy — память. */
