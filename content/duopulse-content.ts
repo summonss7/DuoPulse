@@ -97,6 +97,7 @@ import {
 } from "./adapters/embed";
 import { installSelectionTranslate } from "./translate-select";
 import { installAudioBalance } from "./audio-balance";
+import { installPopupShim } from "./popup-shim";
 import { installPasswordFill } from "./passwords-fill";
 import { installSubsDownload } from "./download-subs";
 import { lastDuoEnabled, preferredLangs } from "./defaults";
@@ -129,6 +130,11 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
   // до включения пассивен (звук страниц не трогаем). Ставится и в топ, и во
   // фреймы плееров (embed-агент ниже — только пересылка субтитров).
   installAudioBalance(document, window);
+  // Компенсация window.open-попапов (duopulse-227): WebView2 гасит не-http
+  // попапы, window.open даёт null — кликундеры кино-сайтов падают на
+  // document.write и съедают клики пользователей целиком. Ставится и в топ,
+  // и во фреймы (до ветки frame-агента), не зависит от адблока.
+  installPopupShim(window);
   // Плеер-фреймы кино-сайтов (duopulse-199, техзад из duopulse-198):
   // контентный WebMessage-канал во фреймы не достаёт (ответы PostWebMessage —
   // только top-level), поэтому в кадре фрейма работает агент-ретранслятор
