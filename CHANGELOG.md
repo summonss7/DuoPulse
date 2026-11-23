@@ -8460,3 +8460,20 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Коммит: 0580bea — fix(ui): duopulse-222 (правки: index.html, src/style.css, src/chrome.ts,
   src/download-panel/panel.ts, src/chrome/dl-indicator-model.ts(+test), удалён
   src/chrome/dl-indicator.ts, README.md, карточка, CHANGELOG).
+
+## 23.11.2026, 05:58 — duopulse-223: вопрос «почему браузер показывается как Microsoft Edge 157.0.0.0»
+- Начало работы: 23.11.2026, 05:55
+- Окончание работы: 23.11.2026, 05:58
+- Что сделано: отвечен вопрос Артёма из хаба пожеланий (w_P7i0xh9QVF9gYqop). Причина: веб-движок DuoPulse
+  на Windows — системный Microsoft Edge WebView2 Runtime (Chromium, обновляется через Windows Update);
+  сайты определяют браузер по User-Agent движка, а UA WebView2 несёт токен Edg/157.0.0.0. Проверил код —
+  проект нигде не подменяет UA вебвью (нет .user_agent()/set_user_agent, «Edg/» в исходниках нет), страницы
+  видят штатный движковый UA. «.0.0.0» вместо полной версии — User-Agent Reduction в Chromium (заморозка
+  младших цифр), как у Chrome. В ответе предложена опция: собственный токен в конец UA (как Brave/Vivaldi) —
+  отдельной правкой по желанию; полную подмену UA отсоветовал (риск «браузер не поддерживается», бот-блоки
+  Google/YouTube). Код и файлы проекта НЕ менялись (правило aila-181: вопрос — весь результат это ответ).
+  Ответ отправлен в «Хаб ИИ» (ai-outbox.jsonl, kind:msg, wish w_P7i0xh9QVF9gYqop, to summons,
+  id ai_duopulse223_ans). Карточка duopulse-223 закрыта (status: done).
+- Как проверено: grep по src-tauri/bridge (подмена UA отсутствует), протокол ai-hub.md (формат kind:msg),
+  JSON дописан python-ом с ensure_ascii=False (ловушка printf из памяти).
+- Коммит: <будет заполнен после коммита карточки и CHANGELOG>.
