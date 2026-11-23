@@ -9,6 +9,7 @@
 // поверх пустой части плеера; клики по видео мимо HUD проходят как раньше.
 
 import { OFFSET_LIMIT_MS } from "../engine/subtitles-engine";
+import { syncTopLayerOnFullscreen } from "./top-layer";
 
 /** Шаг сдвига, мс (docs/03 §4 п.3: шаг 100 мс — колесо, клавиши, слайдер). */
 export const OFFSET_STEP_MS = 100;
@@ -151,6 +152,19 @@ export class OffsetHud {
 
     root.append(caption, value, slider, reset);
     document.documentElement.appendChild(root);
+    // Полноэкранный режим (duopulse-232): HUD — такой же fixed-элемент,
+    // фулскрин-элемент прячет его за top layer; поднимаем popover'ом и
+    // перепозиционируем по новой геометрии видео (видимый HUD сохраняем,
+    // скрытый не воскрешаем).
+    document.addEventListener(
+      "fullscreenchange",
+      () => {
+        if (!this.root?.isConnected) return;
+        syncTopLayerOnFullscreen(this.root);
+        if (this.visible && this.video) this.show(this.currentMs, this.video, this.side);
+      },
+      { passive: true },
+    );
 
     // Ввод уходит в движок через onSet; взаимодействие держит HUD открытым.
     slider.addEventListener("input", () => {

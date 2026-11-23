@@ -64,7 +64,14 @@ export function presetSets(base: BaseTrackInfo[], translations: TranslationLangI
 }
 
 /** Нормализованный id для сравнения наборов: применённый перевод идёт как
- * «yt:en+ru», пресет — голым кодом «ru»; совпадение — по суффиксу. */
+ * «yt:en+ru», пресет — голым кодом «ru»; совпадение — по суффиксу.
+ * duopulse-232: дорожка плеер-фрейма «embed:ru:1» — тоже «ru» (языковая
+ * часть id; формат cinemar «embed:cinemar:N» языка не несёт — остаётся как
+ * есть, подсветка пресета просто не сработает). */
 export function normalizeTrackId(id: string): string {
+  if (id.startsWith("embed:")) {
+    const seg = id.split(":")[1] ?? "";
+    return /^[a-z]{2,3}(-[a-z0-9-]+)?$/i.test(seg) ? seg : id;
+  }
   return id.includes("+") ? id.slice(id.indexOf("+") + 1) : id;
 }

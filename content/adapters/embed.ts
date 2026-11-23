@@ -67,8 +67,73 @@ export function langOfTrackName(name: string): string {
 }
 
 /** Базовый код языка без подтега и регистра — сравнение с целью перевода. */
-function embedBaseLang(lang: string): string {
+export function embedBaseLang(lang: string): string {
   return lang.trim().toLowerCase().split("-")[0] ?? "";
+}
+
+/** Кандидаты «перевода» из ДОРОЖЕК САМОГО ПЛЕЕРА (duopulse-232: «не могу
+ * включить русский и английский двумя строками, как на Ютубе»): кино-плееры
+ * часто держат готовые .vtt на нескольких языках (Eng. full / Рус. / Укр.),
+ * но список translations у embed-адаптера был пуст — панель не предлагала
+ * вторую строку дуо из дорожек плеера, дефолт включал одну дорожку, а «Перевод»
+ * вёл только в облако. Оригинал — та же эвристика, что выбирает дефолт-набор
+ * (сигнал плеера original → en-предпочтение duopulse-184 → первая); переводы —
+ * прочие дорожки другим базовым языком, по одной на язык ( голый код — как
+ * tlang у YouTube, резолв — resolveEmbedIds). */
+export function embedTranslationsOf(tracks: readonly EmbedTrackInfo[]): { lang: string; name: string }[] {
+  if (tracks.length === 0) return [];
+  const original =
+    tracks.find((t) => t.original) ??
+    tracks.find((t) => embedBaseLang(t.lang) === "en") ??
+    tracks[0];
+  const out: { lang: string; name: string }[] = [];
+  const seen = new Set([embedBaseLang(original.lang)]);
+  for (const t of tracks) {
+    if (t === original) continue;
+    const lang = embedBaseLang(t.lang);
+    if (lang === "" || lang === "und" || seen.has(lang)) continue;
+    seen.add(lang);
+    out.push({ lang, name: t.name });
+  }
+  return out;
+}
+
+/** Разрешение id выбора в дорожки фрейма (duopulse-232): панель/дефолт шлют
+ * перевод ГОЛЫМ кодом языка (контракт tlang, «yt:en» + «ru»); для embed он
+ * резолвится в дорожку плеера этого языка, не занятую явным id. Неизвестное —
+ * в unknown (пофактовый отказ, как у resolveIds YouTube). */
+export function resolveEmbedIds(
+  tracks: readonly EmbedTrackInfo[],
+  ids: readonly string[],
+): { wanted: EmbedTrackInfo[]; unknown: string[] } {
+  const byId = new Map(tracks.map((t) => [t.id, t]));
+  const unknown: string[] = [];
+  const wanted: EmbedTrackInfo[] = [];
+  const taken = new Set<string>();
+  for (const id of ids) {
+    const direct = byId.get(id);
+    if (direct) {
+      if (!taken.has(direct.id)) {
+        taken.add(direct.id);
+        wanted.push(direct);
+      }
+      continue;
+    }
+    // Голый код языка («ru», «zh-Hans»): дорожка этого языка, ещё не занятая
+    // (сравнение по базовому коду — подтег не мешает, как у tlang).
+    if (!id.startsWith("embed:") && /^[a-z]{2,3}(-[a-z0-9-]+)?$/i.test(id)) {
+      const hit = tracks.find(
+        (t) => embedBaseLang(t.lang) === embedBaseLang(id) && !taken.has(t.id),
+      );
+      if (hit) {
+        taken.add(hit.id);
+        wanted.push(hit);
+        continue;
+      }
+    }
+    unknown.push(id);
+  }
+  return { wanted, unknown };
 }
 
 /** Решение об автопереводе дорожки плеер-фрейма (duopulse-196: дуо на

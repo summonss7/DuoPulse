@@ -113,3 +113,30 @@ describe("normalizeTrackId", () => {
     expect(normalizeTrackId("file:ru")).toBe("file:ru");
   });
 });
+
+// duopulse-232: пресеты дуо на дорожках плеера кино-сайта (embed) — перевод
+// голым кодом, применённая дорожка «embed:ru:1» сравнивается как «ru».
+describe("presetSets + normalizeTrackId — embed (duopulse-232)", () => {
+  it("Дуо en+ru из дорожек плеера, ids — оригинал + голый код", () => {
+    const sets = presetSets(
+      [
+        base({ id: "embed:en:0", lang: "en", name: "Eng. full" }),
+        base({ id: "embed:uk:1", lang: "uk", name: "Укр. повні" }),
+        base({ id: "embed:ru:2", lang: "ru", name: "Рус. полные" }),
+      ],
+      [tlang("uk"), tlang("ru")],
+    );
+    expect(sets.map((s) => s.ids)).toEqual([
+      ["embed:en:0"],
+      ["embed:en:0", "ru"],
+      ["embed:en:0", "ru", "uk"],
+    ]);
+  });
+
+  it("normalizeTrackId: embed-язык → код, cinemar-формат без языка — как есть", () => {
+    expect(normalizeTrackId("embed:ru:1")).toBe("ru");
+    expect(normalizeTrackId("embed:zh-Hans:4")).toBe("zh-Hans");
+    expect(normalizeTrackId("embed:cinemar:0")).toBe("embed:cinemar:0");
+    expect(normalizeTrackId("yt:en+ru")).toBe("ru");
+  });
+});

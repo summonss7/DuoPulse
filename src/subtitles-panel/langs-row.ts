@@ -56,13 +56,21 @@ export function effectiveBase(
 /** Выбор строки по набору: оригинал — платформенная строка с role=original
  * (нет — первая платформенная; на локальном видео — файловая с языком,
  * duopulse-177); перевод — первая строка-перевод: платформенная «yt:en+ru»
- * (язык по нормализации id) или облачная «cloud:xx». */
+ * (язык по нормализации id), соседняя платформенная дорожка другим языком
+ * (duopulse-232: дуо из дорожек плеера кино-сайта, id «embed:ru:1») или
+ * облачная «cloud:xx». */
 export function langRowState(tracks: AppliedTrackInfo[]): LangRowState {
   const platform = tracks.filter(isPlatform);
   const file = tracks.find((t) => t.source === "file" && t.lang !== "und" && t.lang !== "");
   const original = platform.find((t) => t.role === "original") ?? platform[0] ?? file ?? null;
   const platformTo = platform.find((t) => t.id.includes("+"));
   if (platformTo) return { fromId: original?.id ?? null, to: { kind: "platform", lang: normalizeTrackId(platformTo.id) } };
+  // duopulse-232: пара из двух дорожек платформы/плеера — вторая строка и есть
+  // «перевод» строки языков (селект покажет её среди вариантов платформы).
+  const pairTo =
+    original &&
+    platform.find((t) => t !== original && baseLang(t.lang) !== baseLang(original.lang));
+  if (pairTo) return { fromId: original.id, to: { kind: "platform", lang: baseLang(pairTo.lang) } };
   const cloud = tracks.find((t) => t.id.startsWith("cloud:"));
   if (cloud) return { fromId: original?.id ?? null, to: { kind: "cloud", lang: baseLang(cloud.lang) } };
   return { fromId: original?.id ?? null, to: { kind: "none" } };

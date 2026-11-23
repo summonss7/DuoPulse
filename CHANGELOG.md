@@ -8722,3 +8722,38 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   ассетами, APK/setup HTTP 200; GH-фид stable/windows/x86_64/0.1.99 → 0.1.100.
 - Коммит: 5ae66c9 fix(sites) duopulse-230 (код) + релизный коммит версии
   0.1.100 (tauri.conf/package/Cargo, см. git log) + карточка 230.
+
+## 23.11.2026, 16:25 — uakinogo.io: субтитры исчезают в полном экране + дуо «русский и английский» двумя строками (duopulse-232)
+- Начало работы: 23.11.2026, 15:22
+- Окончание работы: 23.11.2026, 16:25
+- Что сделано:
+  - Фулскрин: диагноз живым CDP-пробником (локальный стенд + кросс-доменный iframe) — Fullscreen API
+    поднимает элемент плеера в top layer, плашка субтитров/HUD (position:fixed) остаётся ПОД
+    ::backdrop и исчезает; у кино-сайтов фулскрин просит плеер OOPIF — в топ-документе
+    fullscreenElement = сам IFRAME, DOM внутрь не добавить. Фикс — новый content/overlay/top-layer.ts:
+    на fullscreenchange плашка и HUD синхронизации поднимаются в top layer Popover API
+    (popover="manual" + showPopover(), UA-стили [popover] гасятся явно), на выходе атрибут снимается;
+    репозиция дважды (сразу + rAF). Покрывает контейнер в своём документе, сам <video> и
+    плеер-фрейм кино-сайта; рантайм без Popover API молча деградирует к прежнему поведению.
+  - Дуо из дорожек плеера: embed-список translations больше не пуст — embedTranslationsOf отдаёт
+    дорожки самого плеера другими языками (голый код — контракт tlang), резолв кода в дорожку —
+    resolveEmbedIds (content/adapters/embed.ts); дефолт video-auto на многоязычном плеере включает
+    ДВЕ строки (en+ru) без облака, автоперевод облаком остаётся соло-дорожкам; роли embed-дорожек
+    (en-предпочтение) дают правило «перевод сверху, оригинал снизу»; панель: селект/нативное меню
+    «Перевод» и пресет «Дуо en+ru» предлагают дорожки плеера, normalizeTrackId сравнивает embed-id
+    с кодом языка, langRowState узнаёт пару дорожек платформы как дуо (src/subtitles-panel/).
+  - Стенды: новый ПОСТОЯННЫЙ офлайн-стенд e2e/subs/fullscreen-subtitles.mjs (порт 8897, OOPIF
+    sub1.localhost с инлайн makePlayer — топология эмбеда; 14 проверок: оба фулскрина по
+    :popover-open/геометрии/тексту, авто-дуо en+ru с переводом сверху, выходы); живой
+    e2e/subs/embed-subs-probe.mjs получил проверку авто-дуо (6 проверок теперь).
+  - Документация: docs/03 §10 (фулскрин — механика top layer + дуо эмбеда), AGENTS.md (стенды).
+  - Релиз 0.1.101: версия синхронно в tauri.conf/package/Cargo(+lock); каналы Aila (манифест
+    5 ассетов: сетап+sig+фиды+APK — android-build.sh + --publish-only досборка манифеста, урок 229),
+    GitHub Pages (stable+canary), хаб «Скачать», C:\DuoPulse. Backup: backup_2026-11-23_16-17-21.
+- Как проверено: vitest 824 passed (+8 новых: embedTranslationsOf/resolveEmbedIds, langRowState
+  embed-пара, presetSets/normalizeTrackId), tsc чист; офлайн-стенд fullscreen-subtitles 14/14
+  (скриншоты обоих фулскринов проверены визуально: плашка и дуо-строки видимы поверх); живой
+  embed-subs-probe uakinogo 6/6 (авто-дуо embed:en:0(1775)+embed:ru:3(1844) поднялись сами,
+  реплики идут; перевод gtx — soft, квота); манифест канала по HTTPS = 0.1.101 + 5 ассетов,
+  APK/setup HTTP 200.
+- Коммит: см. ниже (fix duopulse-232 + release duopulse-232, push origin main).

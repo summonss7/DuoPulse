@@ -337,6 +337,24 @@ async function probeRun() {
       embedTracks.map((t) => `${t.id}(${t.name})`).join(", ") || "пусто",
     );
 
+    // (3b) duopulse-232: авто-дуо из дорожек САМОГО плеера — video-auto на
+    // списке с несколькими языками включает ДВЕ строки (en + цель правила
+    // ru/uk) без облака; проверяем ДО явного выбора стенда (перезапишет его).
+    {
+      let auto = null;
+      for (let i = 0; i < 15 && !auto; i++) {
+        const st = JSON.parse((await evalIn(page, SUBS_STATE)) || "null");
+        if (st?.engine?.tracks?.some((t) => (t.cues ?? 0) > 0)) auto = st;
+        else await sleep(1000);
+      }
+      const tracks = auto?.engine?.tracks ?? [];
+      check(
+        "авто-дуо из дорожек плеера (duopulse-232: две строки без облака)",
+        tracks.length === 2 && tracks.some((t) => t.lang === WANT_LANG) && tracks.some((t) => t.lang !== WANT_LANG && t.lang !== "und"),
+        tracks.map((t) => `${t.id}:${t.lang}(${t.cues})`).join(", ") || "набор пуст",
+      );
+    }
+
     // (4) выбор дорожки: загрузка агентом фрейма + разбор Core-парсером.
     const enId = enTrack?.id ?? `embed:${WANT_LANG}:0`;
     await evalIn(page, `window.__duopulseContent.selectTracks([${JSON.stringify(enId)}])`);

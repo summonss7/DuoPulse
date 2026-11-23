@@ -91,7 +91,10 @@ import { asrStatus, asrTrackFrom, requestAsrTrack } from "./adapters/asr";
 import {
   EmbedHost,
   autoTranslateEmbedDecision,
+  embedBaseLang,
+  embedTranslationsOf,
   isFrameContext,
+  resolveEmbedIds,
   startFrameAgent,
   type EmbedTrackInfo,
   type FrameVideoProxy,
@@ -625,10 +628,10 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
     ids: string[],
     via: string,
   ): Promise<{ loaded: number; failures: { id: string; reason: string }[]; unknown: string[] }> => {
-    const known = new Map(embedTracks.map((t) => [t.id, t]));
-    const unknown = ids.filter((id) => !known.has(id));
+    // duopulse-232: перевод может идти голым кодом языка (панель/дефолт —
+    // контракт tlang): резолвим в дорожку плеера этого языка.
+    const { wanted, unknown } = resolveEmbedIds(embedTracks, ids);
     const failures = unknown.map((id) => ({ id, reason: "неизвестный id дорожки" }));
-    const wanted = ids.map((id) => known.get(id)).filter((t): t is EmbedTrackInfo => t !== undefined);
     if (wanted.length === 0) return { loaded: 0, failures, unknown };
     const keyAtStart = currentVideo?.videoKey ?? null;
     // Уточнение длительности (isRefinedVideoKey) — то же видео: загрузка,
@@ -638,6 +641,14 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
       return k === keyAtStart || (k !== null && keyAtStart !== null && isRefinedVideoKey(keyAtStart, k));
     };
     const loadSeq = ++selectSeq; // параллельный selectTracks гасит прогресс прошлого
+    // Роль дорожки (duopulse-232): оригинал — сигнал плеера или та же
+    // en-предпочтение, что выбирает дефолт-набор (duopulse-184) — правило
+    // показа «перевод сверху, оригинал снизу» (duopulse-206) работает и для
+    // пары дорожек плеера без сигнала языка аудио (cinemar).
+    const originalCandidate =
+      embedTracks.find((t) => t.original) ??
+      embedTracks.find((t) => embedBaseLang(t.lang) === "en") ??
+      embedTracks[0];
     const out: Track[] = [];
     for (const info of wanted) {
       try {
@@ -649,7 +660,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
           id: info.id,
           source: "embed",
           lang: info.lang,
-          role: info.original ? "original" : "translation",
+          role: info === originalCandidate ? "original" : "translation",
           cues,
           name: info.name,
         };
@@ -721,8 +732,11 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
   let embedAnnounced = "";
 
   /** Список embed-дорожек в каркасе AdapterTrackList — потребление то же,
-   * что у YouTube (дефолт-набор Alt+D, панель), но переводы tlang пусты:
-   * вторая строка дуо — облачный перевод или соседняя дорожка плеера.
+   * что у YouTube (дефолт-набор Alt+D, панель). duopulse-232: переводы —
+   * ДОРОЖКИ САМОГО ПЛЕЕРА другими языками (embedTranslationsOf, голый код —
+   * контракт tlang): панель предлагает дуо «Eng + Рус» без облака, дефолт
+   * video-auto собирает две строки сразу; облачный перевод остаётся для
+   * соло-дорожек (duopulse-196) и ручного выбора.
    * duopulse-230: дубляж без дорожек даёт ПУСТОЙ список с note — панель
    * объяснит, что субтитры есть у других дубляжей плеера. */
   const embedAdapterList = (): AdapterTrackList | null =>
@@ -741,7 +755,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
             translatable: true,
             original: t.original,
           })),
-          translations: [],
+          translations: embedTranslationsOf(embedTracks),
           warnings: [],
           note: embedTracks.length === 0
             ? "У этого дубляжа плеера нет субтитров — попробуйте другой дубляж в списке плеера"
@@ -762,7 +776,9 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
         original: b.original,
         translatable: b.translatable,
       })),
-      translations: [],
+      // duopulse-232: переводы-дорожки плеера доходят и до панели (селект
+      // «Перевод»/пресет «Дуо»), не только до дефолт-набора в content-слое.
+      translations: list.translations.map((t) => ({ lang: t.lang, name: t.name })),
       // duopulse-230: note и эмбед-пути («дубляж без субтитров»), контракт
       // тот же, что у YouTube-фолбэка (duopulse-228)
       note: list.note ?? "",

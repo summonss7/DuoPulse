@@ -247,3 +247,23 @@ describe("fromChange/toChange + файл (duopulse-177)", () => {
     expect(actions).toEqual([{ type: "remove", id: "cloud:ru" }]);
   });
 });
+
+// duopulse-232: пара дорожек плеера кино-сайта (embed) — вторая строка
+// распознаётся «переводом» строки языков (селект показывает её значением).
+describe("langRowState — дуо из дорожек плеера (duopulse-232)", () => {
+  it("embed-пара: from = первая дорожка, to = платформенный язык второй", () => {
+    const row = langRowState([
+      applied({ id: "embed:en:0", lang: "en", name: "Eng. full", source: "embed" }),
+      applied({ id: "embed:ru:1", lang: "ru", name: "Рус. полные", source: "embed", role: "translation" }),
+    ]);
+    expect(row).toEqual({ fromId: "embed:en:0", to: { kind: "platform", lang: "ru" } });
+  });
+
+  it("та же дорожка языка — не перевод (дуо не выдумываем)", () => {
+    const row = langRowState([
+      applied({ id: "embed:en:0", lang: "en", source: "embed" }),
+      applied({ id: "embed:en:2", lang: "en", source: "embed" }),
+    ]);
+    expect(row.to).toEqual({ kind: "none" });
+  });
+});

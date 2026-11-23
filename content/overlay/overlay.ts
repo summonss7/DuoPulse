@@ -20,6 +20,7 @@
 import type { ActiveRow } from "../engine/subtitles-engine";
 import { baseStyle } from "../defaults";
 import { ensureFontFamilyLoaded } from "../fonts";
+import { syncTopLayerOnFullscreen } from "./top-layer";
 import {
   MARGIN_MAX_PCT,
   PLATE_MAX_SHARE,
@@ -372,7 +373,19 @@ export class SubtitlesOverlay {
     };
     window.addEventListener("resize", reposition, { passive: true });
     window.addEventListener("scroll", reposition, { passive: true, capture: true });
-    document.addEventListener("fullscreenchange", reposition, { passive: true });
+    // Полноэкранный режим (duopulse-232): сначала top layer (popover поверх
+    // фулскрин-элемента — без него плашка за ::backdrop), затем геометрия —
+    // дважды: layout фулскрина устаканивается асинхронно, ранний замер даёт
+    // прежний прямоугольник.
+    document.addEventListener(
+      "fullscreenchange",
+      () => {
+        if (this.container?.isConnected) syncTopLayerOnFullscreen(this.container);
+        reposition();
+        requestAnimationFrame(() => reposition());
+      },
+      { passive: true },
+    );
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(reposition);
     }

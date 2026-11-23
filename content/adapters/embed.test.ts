@@ -11,8 +11,10 @@ import {
   autoTranslateEmbedDecision,
   langOfTrackName,
   observePlayerApiXhr,
+  embedTranslationsOf,
   parseCinemarSubtitles,
   parseMakePlayerCc,
+  resolveEmbedIds,
 } from "./embed";
 import type { Cue, Track } from "../types";
 
@@ -385,5 +387,63 @@ describe("observePlayerApiXhr (duopulse-225)", () => {
     } finally {
       window.XMLHttpRequest = saved;
     }
+  });
+});
+
+// duopulse-232: дуо из дорожек САМОГО плеера — переводы для каркаса
+// AdapterTrackList (голые коды, контракт tlang) и резолв выбора панели.
+describe("embedTranslationsOf / resolveEmbedIds (duopulse-232)", () => {
+  const info = (id: string, lang: string, name: string, original = false) => ({
+    id, lang, name, url: `https://cdn.example/${id}.vtt`, original,
+  });
+
+  it("переводы — прочие языки оригинала, по одному на язык, und мимо", () => {
+    const tracks = [
+      info("embed:en:0", "en", "Eng. full", true),
+      info("embed:uk:1", "uk", "Укр. повні"),
+      info("embed:uk:2", "uk", "Укр. форсовані"),
+      info("embed:ru:3", "ru", "Рус. полные"),
+      info("embed:und:4", "und", "Chanyel"),
+    ];
+    expect(embedTranslationsOf(tracks)).toEqual([
+      { lang: "uk", name: "Укр. повні" },
+      { lang: "ru", name: "Рус. полные" },
+    ]);
+  });
+
+  it("оригинал без сигнала плеера — en-предпочтение, соло-дорожка без переводов", () => {
+    expect(embedTranslationsOf([info("embed:ru:0", "ru", "Рус. полные")])).toEqual([]);
+    expect(
+      embedTranslationsOf([
+        info("embed:ru:0", "ru", "Рус. полные"),
+        info("embed:en:1", "en", "Eng. full"),
+      ]),
+    ).toEqual([{ lang: "ru", name: "Рус. полные" }]);
+  });
+
+  it("резолв: явные id + голый код языка в незанятую дорожку", () => {
+    const tracks = [
+      info("embed:en:0", "en", "Eng. full", true),
+      info("embed:uk:1", "uk", "Укр. повні"),
+      info("embed:ru:3", "ru", "Рус. полные"),
+    ];
+    expect(resolveEmbedIds(tracks, ["embed:en:0", "ru"])).toEqual({
+      wanted: [tracks[0], tracks[2]],
+      unknown: [],
+    });
+    // подтег языка резолвится в тот же базовый; повтор языка не дублирует
+    // дорожку (вторая — честный unknown, дубликатной строки не возникает)
+    expect(resolveEmbedIds(tracks, ["ru-RU"])).toEqual({
+      wanted: [tracks[2]],
+      unknown: [],
+    });
+    expect(resolveEmbedIds(tracks, ["ru", "ru-RU"])).toEqual({
+      wanted: [tracks[2]],
+      unknown: ["ru-RU"],
+    });
+    expect(resolveEmbedIds(tracks, ["embed:xx:9", "cinemar"])).toEqual({
+      wanted: [],
+      unknown: ["embed:xx:9", "cinemar"],
+    });
   });
 });

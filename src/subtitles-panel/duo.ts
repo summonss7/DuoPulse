@@ -261,8 +261,11 @@ function renderPresets(): void {
     const chip = el<HTMLButtonElement>("button", "duo-chip", p.label);
     chip.type = "button";
     chip.dataset.ids = p.ids.join("\u0000");
+    // duopulse-232: обе стороны нормализованы — пресет с голым кодом перевода
+    // совпадает с применённой дорожкой плеера («ru» ≡ «embed:ru:1»).
+    const ids = p.ids.map(normalizeId);
     chip.dataset.on = String(
-      p.ids.length === current.length && p.ids.every((id, i) => id === current[i]),
+      ids.length === current.length && ids.every((id, i) => id === current[i]),
     );
     chip.title = p.ids.join(" + ");
     box.append(chip);

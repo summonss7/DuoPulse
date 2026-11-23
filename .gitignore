@@ -45,6 +45,7 @@ e2e/adblock/mobile-adblock-smoke-last-run.json
 # Рантайм-артефакт стенда кинотеатров (e2e/adblock/sites-ads-probe.mjs, duopulse-188)
 e2e/adblock/sites-ads-last-run.json
 e2e/subs/embed-subs-last-run.json
+e2e/subs/fullscreen-subtitles-last-run.json
 e2e/adblock/frame-storm-last-run.json
 
 # Рантайм-артефакт cleartext-стенда релиза (e2e/mobile/http-release-smoke.mjs, duopulse-146)
