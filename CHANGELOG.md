@@ -8457,6 +8457,6 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   открывает/закрывает панель ?panel=download, завершение гасит пульс, duopulse://settings
   без загрузок скрывает кнопку, возврат на http возвращает; консоль UI без исключений.
   Пробник одноразовый в %TEMP%, удалён.
-- Коммит: см. «cards: duopulse-222» в истории git (правки: index.html, src/style.css,
-  src/chrome.ts, src/download-panel/panel.ts, src/chrome/dl-indicator-model.ts(+test),
-  удалён src/chrome/dl-indicator.ts, README.md).
+- Коммит: 0580bea — fix(ui): duopulse-222 (правки: index.html, src/style.css, src/chrome.ts,
+  src/download-panel/panel.ts, src/chrome/dl-indicator-model.ts(+test), удалён
+  src/chrome/dl-indicator.ts, README.md, карточка, CHANGELOG).
