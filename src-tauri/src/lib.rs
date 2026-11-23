@@ -116,6 +116,12 @@ pub mod subtitles;
 pub mod history;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod mobile_history;
+// Фетчер фавиконов (duopulse-235): тот же модуль, что бин main.rs даёт
+// десктопному history.favicon, — для значков закладок мобильной ветки
+// (mobile_history::history_favicon). Тоже только мобильным таргетам —
+// десктопная либа остаётся тонкой.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod favicon;
 // Конфиг внешнего прокси (задача 1.8) — мобильным таргетам либы с этапа 6
 // duopulse-169: типы ProxyConfig/ProxyState тянет vpn-модуль (роутер и DTO
 // статуса), сам внешний прокси мобильной ветке не нужен — UI его не показывает.
@@ -312,6 +318,9 @@ fn mobile_run() {
             mobile_history::history_group_set_sort,
             mobile_history::history_group_toggle_bookmark,
             mobile_history::history_bookmark_move,
+            // Фавикон сайта для значков закладок (duopulse-235): паритет
+            // десктопного history.favicon, фетч — favicon.rs мобильной либы.
+            mobile_history::history_favicon,
             mobile_account::aila_status,
             mobile_account::aila_login,
             mobile_account::aila_logout,

@@ -2016,8 +2016,10 @@ fn history_bookmark_list(
 /// history.favicon: фавикон сайта для строки закладок (duopulse-161) —
 /// как в больших браузерах: `<link rel=icon>` из HTML страницы, фолбэки
 /// /favicon.ico и /apple-touch-icon.png, ответ — data-URL. Кэш по хосту в
-/// профиле (позитив 30 дней, негатив 7), фетч — в фоне (spawn_blocking),
-/// сетевой путь — локальный SOCKS5-роутер, если поднят (как у WebView2).
+/// профиле (позитив 30 дней, негатив 7; сайт не дошёл — 10 минут,
+/// duopulse-235: офлайн-показ не оставляет бейджи-буквы на неделю), фетч —
+/// в фоне (spawn_blocking), сетевой путь — локальный SOCKS5-роутер, если
+/// поднят (как у WebView2).
 #[tauri::command]
 async fn history_favicon(
     app: AppHandle,
@@ -2044,13 +2046,13 @@ async fn history_favicon(
         .try_state::<Option<crate::vpn::router::Router>>()
         .and_then(|r| r.inner().as_ref().map(crate::vpn::router::Router::port));
     let fetch_url = params.url.clone();
-    let icon = tauri::async_runtime::spawn_blocking(move || {
-        crate::favicon::fetch_data_url(&fetch_url, socks_port)
+    let fetched = tauri::async_runtime::spawn_blocking(move || {
+        crate::favicon::fetch_icon(&fetch_url, socks_port)
     })
     .await
     .map_err(|e| e.to_string())?;
-    let _ = history.favicon_put(&host, icon.as_deref().unwrap_or(""));
-    Ok(HistoryFaviconResult { icon })
+    let _ = history.favicon_put_fetched(&host, fetched.icon.as_deref(), fetched.responded);
+    Ok(HistoryFaviconResult { icon: fetched.icon })
 }
 
 // --- карточка duopulse-058: группы избранного --------------------------------

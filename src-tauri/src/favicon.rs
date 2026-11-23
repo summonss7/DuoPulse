@@ -1,4 +1,5 @@
-//! Фетчер фавиконов сайтов (карточка duopulse-161) для строки закладок.
+//! Фетчер фавиконов сайтов (карточка duopulse-161) для строки закладок
+//! десктопа и значков закладок мобильной ветки (duopulse-235).
 //! Прежняя схема UI — `<img src="{origin}/favicon.ico">` — покрывала только
 //! сайты с корневым .ico (YouTube, OLX); современные сайты часто объявляют
 //! иконку только `<link rel="icon">` в HTML (SVG/PNG, произвольный путь) и
@@ -12,9 +13,12 @@
 //!    Content-Type/расширение; HTML-ответ (бот-блок, редирект на страницу)
 //!    иконкой не считается;
 //! 5. результат — data-URL (`data:image/…;base64,…`), кэш — таблица
-//!    favicons профиля (history::HistoryStore), там же негатив-кэш.
+//!    favicons профиля (history::HistoryStore), там же негатив-кэш;
+//! 6. «иконки нет» различается с «сайт не дошёл» (duopulse-235): команды
+//!    history.favicon пишут негатив на 7 дней только когда сайт ответил
+//!    ([`FetchedIcon::responded`]), офлайн — короткий негатив на повтор.
 //!
-//! Сеть — тем же путём, что и WebView2: через локальный SOCKS5-роутер
+//! Сеть — тем же путём, что и вебвью: через локальный SOCKS5-роутер
 //! приложения, когда он поднят (прокси/VPN), иначе напрямую.
 
 use std::io::Read;
@@ -36,17 +40,38 @@ const TIMEOUT: Duration = Duration::from_secs(6);
 /// Максимум кандидатов на скачивание (парс головы + два фолбэка).
 const MAX_CANDIDATES: usize = 4;
 
-/// Иконка сайта: Some(data-URL) или None («иконки нет», негатив-кэш).
+/// Иконка сайта: Some(data-URL) или None («иконки нет»). Только значок —
+/// причине «нет» (сайт без иконки или сеть не дошла) нужен [`fetch_icon`].
 pub fn fetch_data_url(page_url: &str, socks_port: Option<u16>) -> Option<String> {
+    fetch_icon(page_url, socks_port).icon
+}
+
+/// Исход фетча для команд history.favicon (duopulse-235): `responded` — сайт
+/// ответил хотя бы на один запрос кандидата-иконки (любой статус), то есть
+/// «иконки нет» сказал сам сайт; false — ни один кандидат не дошёл (офлайн,
+/// DNS, обрыв, таймаут коннекта), о причине судить рано.
+pub struct FetchedIcon {
+    pub icon: Option<String>,
+    pub responded: bool,
+}
+
+/// Фетч иконки сайта с исходом «сайт отвечал / не дошло» (этапы — в шапке).
+pub fn fetch_icon(page_url: &str, socks_port: Option<u16>) -> FetchedIcon {
+    let no_icon = |responded| FetchedIcon {
+        icon: None,
+        responded,
+    };
     let base = match url::Url::parse(page_url) {
         Ok(u) if u.scheme() == "https" || u.scheme() == "http" => u,
-        _ => return None, // внутренние страницы (duopulse://) и мусор
+        _ => return no_icon(false), // внутренние страницы (duopulse://) и мусор
     };
     let mut builder = ureq::AgentBuilder::new()
         .timeout(TIMEOUT)
         .timeout_connect(Duration::from_secs(4));
     if let Some(port) = socks_port {
-        let proxy = ureq::Proxy::new(format!("socks5://127.0.0.1:{port}")).ok()?;
+        let Ok(proxy) = ureq::Proxy::new(format!("socks5://127.0.0.1:{port}")) else {
+            return no_icon(false);
+        };
         builder = builder.proxy(proxy);
     }
     let agent = builder.build();
@@ -58,16 +83,24 @@ pub fn fetch_data_url(page_url: &str, socks_port: Option<u16>) -> Option<String>
     links.push(format!("{origin}/favicon.ico"));
     links.push(format!("{origin}/apple-touch-icon.png"));
     let mut tried: Vec<String> = Vec::new();
+    let mut responded = false;
     for link in links {
         if tried.iter().any(|t| t == &link) || tried.len() >= MAX_CANDIDATES {
             continue;
         }
         tried.push(link.clone());
-        if let Some(data) = download_icon(&agent, &link) {
-            return Some(data);
+        match download_icon(&agent, &link) {
+            Candidate::Icon(data) => {
+                return FetchedIcon {
+                    icon: Some(data),
+                    responded: true,
+                };
+            }
+            Candidate::Miss => responded = true,
+            Candidate::Unreached => {}
         }
     }
-    None
+    no_icon(responded)
 }
 
 /// `<link rel=…>` страницы по убыванию приоритета: заявленный размер (any —
@@ -216,37 +249,57 @@ fn parse_sizes(sizes: &str) -> Option<u32> {
     w.parse::<u32>().ok()
 }
 
-/// Скачать кандидата и собрать data-URL; None — не иконка (HTML/мусор/404,
+/// Исход кандидата: иконка; сайт ответил, но не иконкой (HTML/мусор/404 —
+/// перебор продолжается следующим кандидатом); запрос не дошёл (обрыв,
+/// таймаут, DNS) — тоже следующий кандидат, но «сайт отвечал» не ставится.
+enum Candidate {
+    Icon(String),
+    Miss,
+    Unreached,
+}
+
+/// Скачать кандидата и собрать data-URL; Miss — не иконка (HTML/мусор/404,
 /// перебор продолжается следующим кандидатом).
-fn download_icon(agent: &ureq::Agent, link: &str) -> Option<String> {
-    let resp = agent
+fn download_icon(agent: &ureq::Agent, link: &str) -> Candidate {
+    let resp = match agent
         .get(link)
         .set("User-Agent", UA)
         .set("Accept", "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8")
         .call()
-        .ok()?;
+    {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, _)) => return Candidate::Miss, // 4xx/5xx — сайт ответил
+        Err(_) => return Candidate::Unreached,
+    };
     let ctype = resp.content_type().to_ascii_lowercase();
     if ctype.starts_with("text/html") {
-        return None; // бот-блок/редирект на страницу — не иконка
+        return Candidate::Miss; // бот-блок/редирект на страницу — не иконка
     }
     let mut body = Vec::new();
     let mut chunk = [0u8; 16 * 1024];
     let mut reader = resp.into_reader();
     loop {
-        let n = reader.read(&mut chunk).ok()?;
+        let n = match reader.read(&mut chunk) {
+            Ok(n) => n,
+            // ответ оборвался посреди тела (слабая сеть) — «иконки нет»
+            // сайт не говорил, повторим
+            Err(_) => return Candidate::Unreached,
+        };
         if n == 0 {
             break;
         }
         body.extend_from_slice(&chunk[..n]);
         if body.len() > ICON_LIMIT {
-            return None;
+            return Candidate::Miss;
         }
     }
     if body.is_empty() {
-        return None;
+        return Candidate::Miss;
     }
-    let mime = sniff_mime(&body, &ctype, link)?;
-    Some(format!("data:{mime};base64,{}", base64(&body)))
+    match sniff_mime(&body, &ctype, link) {
+        Some(mime) => Candidate::Icon(format!("data:{mime};base64,{}", base64(&body))),
+        None => Candidate::Miss,
+    }
 }
 
 /// MIME иконки: магия байтов → Content-Type → расширение адреса. None —
@@ -375,6 +428,26 @@ mod tests {
         assert_eq!(sniff_mime(b"\x01\x02\x03", "", "https://a/img.png"), Some("image/png"));
         assert_eq!(sniff_mime(b"\x01\x02\x03", "text/html", "u"), None);
         assert_eq!(sniff_mime(b"\x01\x02\x03", "", "u"), None);
+    }
+
+    /// duopulse-235: сайт, до которого не дошли (закрытый порт — отказ
+    /// соединения), — «иконки нет» не установлено: все кандидаты Unreached,
+    /// иначе офлайн-показ закладок записал бы негатив на неделю. Без сети:
+    /// 127.0.0.1:1 не слушает никто.
+    #[test]
+    fn unreachable_site_is_not_answered() {
+        let fetched = fetch_icon("http://127.0.0.1:1/", None);
+        assert!(fetched.icon.is_none());
+        assert!(!fetched.responded, "отказ соединения — сайт не отвечал");
+    }
+
+    /// Внутренние страницы — без сети и без «ответа»: вызов не должен
+    /// считаться достижением сайта.
+    #[test]
+    fn internal_page_is_not_answered() {
+        let fetched = fetch_icon("duopulse://history", None);
+        assert!(fetched.icon.is_none());
+        assert!(!fetched.responded);
     }
 
     /// Живой прогон (не в CI): как в-duopulse-161 — реальные сайты, хост

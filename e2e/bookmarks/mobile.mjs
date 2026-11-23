@@ -10,7 +10,12 @@
 //   3) сенсорное перекладывание: long-press (350 мс) по строке → pointermove
 //      на чип группы → pointerup — синтетические PointerEvent (слушатели
 //      DOM-уровня, как DragEvent в 099): из вида группы — перенос, из «Все» —
-//      добавление (много-членство сохраняется).
+//      добавление (много-членство сохраняется);
+//   2a) фавиконы сайтов в значках (duopulse-235): значок строки списка и чип
+//      строки под адресом получают <img class="bm-fav"> из команды
+//      history.favicon мобильной либы (паритет десктопа); детерминированно —
+//      локальный сервер стенда с <link rel=icon>, «сайт не дошёл» — бейдж-
+//      буква остаётся.
 // Приложение и adb-форвард должны быть уже подняты (стенд их не запускает —
 // эмулятор/устройство выбирает запускающий):
 //   adb forward tcp:9223 localabstract:webview_devtools_remote_<pid>
@@ -121,6 +126,94 @@ const main = async () => {
   check("чипы: «Все», «Избранное · 1», «Море · 1»", v.groups.map((g) => `${g.name}·${g.count}`).join("|") === "Избранное·1|Море·1", JSON.stringify(v.groups));
   check("строки с заголовками и меткой хоста", v.bookmarks.length === 2, JSON.stringify(v.bookmarks.map((b) => b.title)));
   await cdp.shot("e2e/bookmarks/mobile-view.png");
+
+  // ── 2a. фавиконы сайтов в значках (duopulse-235) ──────────────────────
+  // До карточки мобильная ветка не регистрировала history.favicon (команда
+  // жила только в десктопном bridge.rs) — чипы и строки рисовали бейджи-буквы
+  // цветом домена. Теперь тот же конвейер, что на Windows: значок строки
+  // списка и чип строки под адресом получают <img class="bm-fav"> (data-URL из
+  // favicon.rs), загрузка гасит бейдж-букву (has-fav). Детерминированно без
+  // живого сайта: локальный сервер стенда (с эмулятора — 10.0.2.2) отдаёт
+  // страницу с <link rel=icon>, Core фетчит сам (ureq напрямую). «Сайт не
+  // дошёл» — закрытый порт на самом устройстве: иконки нет, остаётся бейдж-
+  // буква (кэш — короткий негатив). Ключ кэша — хост, путь роли не играет:
+  // холодный сетевой фетч Core — на первом прогоне профиля (позитив живёт
+  // 30 дней), повторные прогоны читают кэш — сетевой путь отдельно держат
+  // cargo-тесты favicon.rs.
+  const http = await import("node:http");
+  // 1×1 PNG: валидная иконка без внешних файлов
+  const ICON_PNG =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const srv = http.createServer((req, res) => {
+    if (req.url === "/page.html") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end('<!doctype html><html><head><title>235</title><link rel="icon" href="/icon.png"></head><body>fav</body></html>');
+    } else if (req.url === "/icon.png") {
+      res.writeHead(200, { "Content-Type": "image/png" });
+      res.end(Buffer.from(ICON_PNG, "base64"));
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("404");
+    }
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const SITE = `http://10.0.2.2:${srv.address().port}`;
+  const DEAD = "http://127.0.0.1:1/duopulse-235"; // устройство: порт закрыт
+  const FAV = `${SITE}/page.html`;
+  // перерисовка экрана «на холодную»: закрыть → открыть со стартового экрана
+  const reopen = async () => {
+    await cdp.eval(`document.querySelector(".m-bm-back").click()`);
+    await sleep(150);
+    await cdp.eval(`document.querySelector(".m-bm-open").click()`);
+  };
+  const waitFor = async (expr, ms = 10000) => {
+    for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(200)) {
+      if (await cdp.eval(expr)) return true;
+    }
+    return false;
+  };
+  await cdp.eval(`(async () => {
+    await ${INVOKE}("history_bookmark_add", { params: { url: "${FAV}", title: "235 иконка", groupId: null } });
+    await ${INVOKE}("history_bookmark_add", { params: { url: "${DEAD}", title: "235 мёртвый", groupId: null } });
+    return 1;
+  })()`);
+  await reopen();
+  v = await waitFor(`(() => {
+    const row = document.querySelector('.m-bm-row[data-url="${FAV}"]');
+    const img = row?.querySelector(".m-bm-main > .m-bm-badge.has-fav img.bm-fav");
+    return !!img && img.complete && img.naturalWidth > 0 && row.querySelector(".m-bm-badge").style.background === "";
+  })()`);
+  check("фавикон в строке списка: <link rel=icon> страницы → img в значке (внутри кнопки открытия), бейдж-буква погашена", v === true, "");
+  const chipOk = await waitFor(`(() => {
+    const b = document.querySelector('.m-bmbar-chip[data-url="${FAV}"] .m-bmbar-badge.has-fav');
+    const img = b?.querySelector("img.bm-fav");
+    return !!img && img.complete && img.naturalWidth > 0;
+  })()`);
+  v = await cdp.eval(`(() => {
+    const b = document.querySelector('.m-bmbar-chip[data-url="${FAV}"] .m-bmbar-badge');
+    const img = b?.querySelector("img.bm-fav");
+    return { has: !!b?.classList.contains("has-fav"), ok: !!img && img.complete && img.naturalWidth > 0, src: String(img?.getAttribute("src") ?? "").slice(0, 22) };
+  })()`);
+  check("фавикон в чипе строки под адресом (тот же хост — из кэша Core)", chipOk && v.has && v.ok && v.src === "data:image/png;base64,", JSON.stringify(v));
+  v = await cdp.eval(`(async () => { const r = await ${INVOKE}("history_favicon", { params: { url: "${FAV}" } }); return { icon: String(r.icon ?? "").slice(0, 22) }; })()`);
+  check("history.favicon в мобильной либе: повторный вызов — data-URL из кэша", v.icon === "data:image/png;base64,", JSON.stringify(v));
+  v = await cdp.eval(`(async () => { const r = await ${INVOKE}("history_favicon", { params: { url: "${DEAD}" } }); return { icon: r.icon ?? null }; })()`);
+  check("сайт не дошёл (закрытый порт) — icon: null", v.icon === null, JSON.stringify(v));
+  await sleep(600);
+  v = await cdp.eval(`(() => {
+    const b = document.querySelector('.m-bm-row[data-url="${DEAD}"] .m-bm-badge');
+    return { letter: b?.textContent, fav: !!b?.classList.contains("has-fav"), img: !!b?.querySelector("img"), bg: b?.style.background.includes("linear-gradient") };
+  })()`);
+  check("иконки нет — в строке остаётся бейдж-буква цветом домена", v.letter === "2" && !v.fav && !v.img && v.bg, JSON.stringify(v));
+  await cdp.shot("e2e/bookmarks/mobile-favicons.png");
+  // уборка: служебные закладки и сервер — дальше сценарий 104 на своих двух
+  await cdp.eval(`(async () => {
+    await ${INVOKE}("history_bookmark_remove", { params: { url: "${FAV}" } });
+    await ${INVOKE}("history_bookmark_remove", { params: { url: "${DEAD}" } });
+    return 1;
+  })()`);
+  await reopen();
+  srv.close();
 
   // «+» — инлайн-ввод новой группы
   v = await cdp.eval(`(() => {

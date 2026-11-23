@@ -5,7 +5,8 @@
 // экрана из меню «⋮» поверх видео (duopulse-193) — happy-dom ниже.
 
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(true),
@@ -297,5 +298,96 @@ describe("MobileBookmarks: строка под адресом (duopulse-219)", (
       "https://a.example/",
     ]);
     bmInst.closeView();
+  });
+});
+
+// ── duopulse-235: фавикон сайта в значках закладок ──────────────────────────
+// Значок = бейдж-буква + applyFavicon (общий с десктопом): команда Core
+// history.favicon отдаёт data-URL → <img> поверх бейджа, загрузка гасит букву
+// (has-fav); «иконки нет» — бейдж, как прежде. Значок строки списка — внутри
+// кнопки открытия (тап по иконке — открыть закладку). Сам фетч — в Rust
+// (favicon.rs) и живой прогон e2e.
+describe("MobileBookmarks: фавикон сайта в значках (duopulse-235)", () => {
+  const invokeMock = vi.mocked(invoke);
+  const icon = "data:image/png;base64,AAA";
+  const withIcon = "https://fav235a.example/watch?v=1";
+  const noIcon = "https://fav235b.example/";
+  const bookmarks = [
+    bm(withIcon, "Видео", 2),
+    bm(noIcon, "Без иконки", 1),
+  ];
+  const api = () => ({
+    history: {
+      groupList: vi.fn().mockResolvedValue({ groups: [] }),
+      bookmarkList: vi.fn().mockResolvedValue({ bookmarks, total: bookmarks.length }),
+    },
+  });
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = `
+      <div id="mobile">
+        <div id="mUrlrow"><input id="mOmnibox"><button id="mGo"></button></div>
+        <main class="m-content">
+          <section id="mStart"><p class="m-hint"></p></section>
+        </main>
+      </div>`;
+    // history.favicon — мок Core: одному хосту иконка, прочим «иконки нет»
+    invokeMock.mockImplementation((cmd, args) => {
+      if (cmd !== "history_favicon") return Promise.resolve(true);
+      const { url } = (args as { params: { url: string } }).params;
+      return Promise.resolve({ icon: url === withIcon ? icon : null });
+    });
+  });
+
+  afterEach(() => invokeMock.mockReturnValue(Promise.resolve(true)));
+
+  const make = (opened: string[] = []): MobileBookmarks =>
+    new MobileBookmarks(
+      { currentVideo: () => null, open: (u) => opened.push(u), note: () => {} },
+      api() as unknown as ConstructorParameters<typeof MobileBookmarks>[1],
+    );
+
+  it("чип строки: history.favicon → img поверх бейджа, загрузка гасит букву", async () => {
+    make();
+    await settle();
+    const badge = document.querySelector<HTMLElement>(`.m-bmbar-chip[data-url="${withIcon}"] .m-bmbar-badge`)!;
+    expect(badge.textContent).toBe("В"); // до ответа Core — бейдж-буква
+    await vi.waitFor(() => expect(badge.querySelector("img.bm-fav")).not.toBeNull());
+    expect(invokeMock).toHaveBeenCalledWith("history_favicon", { params: { url: withIcon } });
+    const img = badge.querySelector("img.bm-fav") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBe(icon);
+    img.dispatchEvent(new Event("load"));
+    expect(badge.classList.contains("has-fav")).toBe(true);
+    expect(badge.style.background).toBe(""); // цвет домена уступил иконке
+  });
+
+  it("строка списка: значок внутри кнопки открытия — тап по иконке открывает", async () => {
+    const opened: string[] = [];
+    const inst = make(opened);
+    await inst.openView();
+    const row = [...document.querySelectorAll<HTMLElement>(".m-bm-row")].find((r) => r.dataset.url === withIcon)!;
+    expect(row).toBeTruthy();
+    const badge = row.querySelector<HTMLElement>(".m-bm-main > .m-bm-badge")!;
+    expect(badge).toBeTruthy(); // не снаружи кнопки: иначе тап по значку мимо
+    expect(row.querySelector(".m-bm-main > .m-bm-texts > .m-bm-title")?.textContent).toBe("Видео");
+    await vi.waitFor(() => expect(badge.querySelector("img.bm-fav")).not.toBeNull());
+    badge.querySelector("img.bm-fav")!.dispatchEvent(new Event("click", { bubbles: true }));
+    expect(opened).toEqual([withIcon]);
+  });
+
+  it("иконки нет — остаётся бейдж-буква цветом домена", async () => {
+    const inst = make();
+    await inst.openView();
+    const row = [...document.querySelectorAll<HTMLElement>(".m-bm-row")].find((r) => r.dataset.url === noIcon)!;
+    const badge = row.querySelector<HTMLElement>(".m-bm-badge")!;
+    await settle();
+    await settle(); // ответ Core «иконки нет» отыграл
+    expect(invokeMock).toHaveBeenCalledWith("history_favicon", { params: { url: noIcon } });
+    expect(badge.querySelector("img.bm-fav")).toBeNull();
+    expect(badge.classList.contains("has-fav")).toBe(false);
+    expect(badge.textContent).toBe("Б");
+    expect(badge.style.background).toContain("linear-gradient");
   });
 });

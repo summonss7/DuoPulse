@@ -20,10 +20,10 @@ use crate::history::contract::{
     BookmarkGroupInfo, HistoryBookmarkAddParams, HistoryBookmarkListParams,
     HistoryBookmarkListResult, HistoryBookmarkMoveParams, HistoryBookmarkRemoveParams,
     HistoryBookmarkUpdateParams, HistoryDeleteRangeParams, HistoryDeleteUrlsParams,
-    HistoryGroupAddParams, HistoryGroupListResult, HistoryGroupMoveParams,
-    HistoryGroupRemoveParams, HistoryGroupRenameParams, HistoryGroupSetSortParams,
-    HistoryGroupToggleBookmarkParams, HistoryListParams, HistoryListResult,
-    HistoryVisitParams,
+    HistoryFaviconParams, HistoryFaviconResult, HistoryGroupAddParams, HistoryGroupListResult,
+    HistoryGroupMoveParams, HistoryGroupRemoveParams, HistoryGroupRenameParams,
+    HistoryGroupSetSortParams, HistoryGroupToggleBookmarkParams, HistoryListParams,
+    HistoryListResult, HistoryVisitParams,
 };
 use crate::history::{GroupFilter, HistoryStore};
 
@@ -246,6 +246,46 @@ pub fn history_delete_range(
     params: HistoryDeleteRangeParams,
 ) -> Result<(), String> {
     history.delete_range(params.from_ms, params.to_ms)
+}
+
+/// history.favicon: фавикон сайта для значков закладок (duopulse-235, паритет
+/// десктопного bridge.rs — до него мобильная строка рисовала только
+/// бейджи-буквы): тот же фетчер favicon.rs — `<link rel=icon>` из HTML
+/// страницы, фолбэки /favicon.ico и /apple-touch-icon.png, ответ — data-URL;
+/// кэш по хосту в профиле (позитив 30 дней, негатив 7; сайт не дошёл — 10
+/// минут: офлайн-показ закладок не оставляет бейджи-буквы на неделю).
+/// Команда async — sync бежала бы на главном потоке и держала бы UI всё
+/// время сети; сетевой путь — SOCKS5-роутер процесса, если поднят.
+#[tauri::command]
+pub async fn history_favicon(
+    history: tauri::State<'_, std::sync::Arc<HistoryStore>>,
+    params: HistoryFaviconParams,
+) -> Result<HistoryFaviconResult, String> {
+    let history = history.inner().clone();
+    // ключ кэша и рамки фетча — http/https хост (внутренние страницы без
+    // иконки, бейдж-буква остаётся)
+    let host = url::Url::parse(&params.url)
+        .ok()
+        .filter(|u| u.scheme() == "https" || u.scheme() == "http")
+        .and_then(|u| u.host_str().map(str::to_string));
+    let Some(host) = host else {
+        return Ok(HistoryFaviconResult { icon: None });
+    };
+    // негатив-кэш — тоже ответ: не фетчим сайты без иконки на каждом рендере
+    if let Some(cached) = history.favicon_get(&host) {
+        return Ok(HistoryFaviconResult {
+            icon: (!cached.is_empty()).then_some(cached),
+        });
+    }
+    let socks_port = crate::vpn::router::socks_port();
+    let fetch_url = params.url.clone();
+    let fetched = tauri::async_runtime::spawn_blocking(move || {
+        crate::favicon::fetch_icon(&fetch_url, socks_port)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let _ = history.favicon_put_fetched(&host, fetched.icon.as_deref(), fetched.responded);
+    Ok(HistoryFaviconResult { icon: fetched.icon })
 }
 
 // ---------------------------------------------------------------------------

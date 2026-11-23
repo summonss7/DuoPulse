@@ -12,12 +12,29 @@
 // пожелание «переходить по закладкам прямо оттуда») — по умолчанию включена,
 // переключатель в меню «⋮»; и сортировка списка закладок (алфавит/обратно/
 // по дате) — кнопка «⇅» в шапке экрана.
+// duopulse-235: значки закладок — фавикон сайта из Core (history.favicon, как
+// на десктопе) поверх бейджа-буквы: в чипах строки и строках списка (список
+// раньше был вовсе без значков — «не понять, куда нажимать»).
 
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
 import { MAX_GROUP_DEPTH, groupPath, groupTreeOrder } from "../chrome/groups-tree";
-import { bmBarModel, badgeHue, badgeHost, badgeLetter } from "../chrome/bmbar";
+import { bmBarModel, badgeHue, badgeHost, badgeLetter, applyFavicon } from "../chrome/bmbar";
 import { t } from "../i18n";
+
+/** Значок закладки (duopulse-235): бейдж-буква цветом домена, поверх —
+ *  фавикон сайта (applyFavicon: Core разбирает `<link rel=icon>` страницы);
+ *  иконка загрузилась — буква гаснет, иконки нет — остаётся буква. */
+function bmBadge(cls: string, url: string, label: string): HTMLElement {
+  const host = badgeHost(url);
+  const hue = badgeHue(host || url);
+  const ico = document.createElement("i");
+  ico.className = cls;
+  ico.textContent = badgeLetter(label, host);
+  ico.style.background = `linear-gradient(145deg, hsl(${hue} 46% 46%), hsl(${hue} 46% 33%))`;
+  applyFavicon(ico, url);
+  return ico;
+}
 
 /** Что выбрал пользователь в ряду чипов: «Все» или конкретная группа. */
 export type GroupSel = "all" | number;
@@ -308,13 +325,7 @@ export class MobileBookmarks {
       el.className = label ? "m-bmbar-chip" : "m-bmbar-chip m-bmbar-icon";
       el.dataset.url = url;
       el.title = label ? `${label}\n${url}` : url;
-      // бейдж-буква с цветом домена — как чипы десктопной строки
-      const host = badgeHost(url);
-      const ico = document.createElement("i");
-      ico.className = "m-bmbar-badge";
-      ico.textContent = badgeLetter(label, host);
-      ico.style.background = `linear-gradient(145deg, hsl(${badgeHue(host || url)} 46% 46%), hsl(${badgeHue(host || url)} 46% 33%))`;
-      el.append(ico);
+      el.append(bmBadge("m-bmbar-badge", url, label));
       if (label) {
         const span = document.createElement("span");
         span.className = "m-bmbar-label";
@@ -630,7 +641,11 @@ export class MobileBookmarks {
       sub.className = "m-bm-sub";
       const names = (b.groups ?? []).map((r) => r.name).join(" · ");
       sub.textContent = names ? `${hostLabel(b.url)} · ${names}` : hostLabel(b.url);
-      main.append(title, sub);
+      // значок сайта внутри кнопки открытия: тап по иконке — открыть закладку
+      const texts = document.createElement("span");
+      texts.className = "m-bm-texts";
+      texts.append(title, sub);
+      main.append(bmBadge("m-bm-badge", b.url, b.title), texts);
       main.addEventListener("click", () => {
         this.closeView();
         this.host.open(b.url);

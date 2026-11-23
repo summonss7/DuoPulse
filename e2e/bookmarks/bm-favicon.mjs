@@ -242,7 +242,9 @@ try {
 } finally {
   step("уборка");
   await killOurExes();
-  vite.kill();
+  // vite.kill() на Windows убивает только npm-оболочку — дерево npm→node
+  // (cmd.exe → vite) остаётся висеть на 5173 (найдено в duopulse-235)
+  try { await run("taskkill", ["/PID", String(vite.pid), "/T", "/F"]); } catch {}
   httpServer.close();
   try {
     fs.rmSync(tmp, { recursive: true, force: true });

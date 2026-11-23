@@ -55,6 +55,9 @@ const DEDUP_MS: i64 = 60_000;
 /// подтянется сам), негатив «иконки нет» — 7 дней.
 const FAVICON_OK_MS: i64 = 30 * 24 * 3600 * 1000;
 const FAVICON_ERR_MS: i64 = 7 * 24 * 3600 * 1000;
+/// Негатив «сайт не дошёл» (duopulse-235: офлайн, обрыв, таймаут коннекта):
+/// «иконки нет» сайт не говорил — повторяем скоро, не через неделю.
+const FAVICON_RETRY_MS: i64 = 10 * 60 * 1000;
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -359,6 +362,28 @@ impl HistoryStore {
     /// Записать фавикон хоста (пустая строка — «иконки нет»).
     pub fn favicon_put(&self, host: &str, data: &str) -> Result<(), String> {
         self.favicon_put_at(host, data, now_ms())
+    }
+
+    /// Запомнить исход фетча (duopulse-235): иконка — позитив на 30 дней;
+    /// сайт ответил и иконки нет (`responded`) — негатив на 7 дней; сайт не
+    /// ДОШЁЛ (офлайн, обрыв, таймаут коннекта) — негатив на FAVICON_RETRY_MS:
+    /// один показ закладок без сети не должен оставлять бейджи-буквы на неделю.
+    pub fn favicon_put_fetched(
+        &self,
+        host: &str,
+        icon: Option<&str>,
+        responded: bool,
+    ) -> Result<(), String> {
+        let now = now_ms();
+        match (icon, responded) {
+            (Some(data), _) => self.favicon_put_at(host, data, now),
+            (None, true) => self.favicon_put_at(host, "", now),
+            // запись «в прошлом» возрастом 7 дней − срок повтора: TTL
+            // негатива в favicon_get один, протухнет через FAVICON_RETRY_MS
+            (None, false) => {
+                self.favicon_put_at(host, "", now - (FAVICON_ERR_MS - FAVICON_RETRY_MS))
+            }
+        }
     }
 
     /// `favicon_put` с заданным временем (тесты проверяют TTL кэша).
@@ -4322,5 +4347,55 @@ mod tests {
         s.favicon_put_at("noicon.example", "", now_ms() - 8 * 24 * 3600 * 1000)
             .unwrap();
         assert_eq!(s.favicon_get("noicon.example"), None);
+    }
+
+    /// duopulse-235: исход фетча в кэш — иконка и «сайт ответил без иконки»
+    /// как прежде (30 дней / 7 дней), «сайт не дошёл» — негатив на 10 минут:
+    /// иконка подтянется, как только сеть вернётся, но не фетчится каждый
+    /// рендер.
+    #[test]
+    fn favicon_fetched_outcome_ttls() {
+        let s = HistoryStore::open_in_memory().unwrap();
+        let age = |host: &str| {
+            let at: i64 = s
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT updated_at FROM favicons WHERE host = ?1",
+                    [host],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            now_ms() - at
+        };
+        s.favicon_put_fetched("ok.example", Some("data:image/png;base64,AAA"), true)
+            .unwrap();
+        assert_eq!(
+            s.favicon_get("ok.example"),
+            Some("data:image/png;base64,AAA".to_string())
+        );
+        assert!(age("ok.example") < 60_000, "позитив — свежая запись");
+
+        s.favicon_put_fetched("noicon.example", None, true).unwrap();
+        assert_eq!(s.favicon_get("noicon.example"), Some(String::new()));
+        assert!(
+            age("noicon.example") < 60_000,
+            "сайт ответил без иконки — 7 дней"
+        );
+
+        s.favicon_put_fetched("offline.example", None, false)
+            .unwrap();
+        assert_eq!(
+            s.favicon_get("offline.example"),
+            Some(String::new()),
+            "сразу — негатив: не фетчить каждый рендер"
+        );
+        // возраст записи 7 дней − 10 минут → протухнет через 10 минут
+        let offline_age = age("offline.example");
+        assert!(
+            FAVICON_ERR_MS - FAVICON_RETRY_MS <= offline_age && offline_age < FAVICON_ERR_MS,
+            "возраст {offline_age} мс"
+        );
     }
 }

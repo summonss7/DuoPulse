@@ -250,6 +250,37 @@
   font-style: normal;
   color: #fff;
   flex: none;
+  position: relative; /* фавикон сайта — поверх бейджа (duopulse-235) */
+}
+
+/* duopulse-235: фавикон сайта в значке закладки (паритет .bm-ico десктопа):
+   <img> вешает applyFavicon (history.favicon → data-URL); загрузился —
+   has-fav гасит букву и значок принимает форму иконки сайта; иконки нет —
+   бейдж-буква цветом домена, как прежде */
+.m-bmbar-badge .bm-fav,
+.m-bm-badge .bm-fav {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.m-bmbar-badge.has-fav,
+.m-bm-badge.has-fav {
+  color: transparent; /* буква не просвечивает сквозь прозрачные места иконки */
+}
+
+.m-bmbar-badge.has-fav {
+  border-radius: 6px;
+}
+
+.m-bmbar-badge.has-fav .bm-fav,
+.m-bm-badge.has-fav .bm-fav {
+  opacity: 1;
 }
 
 .m-bmbar-label {
@@ -936,14 +967,42 @@ body.m-private .m-bar input {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 10px;
   background: none;
   border: 0;
   color: var(--text-primary);
   font: inherit;
   text-align: start;
   padding: 0;
+}
+
+/* duopulse-235: значок закладки в строке — бейдж-буква цветом домена,
+   поверх — фавикон сайта (правила .bm-fav — у .m-bmbar-badge выше) */
+.m-bm-badge {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-style: normal;
+  color: #fff;
+}
+
+.m-bm-badge.has-fav {
+  border-radius: 8px;
+}
+
+.m-bm-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .m-bm-title {
