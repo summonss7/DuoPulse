@@ -8353,3 +8353,43 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   contract_file_is_up_to_date зелёный.
 - Коммит: 89afcf5 feat(bookmarks): duopulse-219 — мобильная строка закладок
   под адресом + сортировка закладок в обеих версиях
+
+## 23.11.2026 05:20 — duopulse-220: субтитры на YouTube Shorts (починка включения)
+- Начало работы: 23.11.2026 01:17
+- Окончание работы: 23.11.2026 05:20
+- Что сделано:
+  - Жалоба: «на коротких видео шорцы субтитры почему-то не работают, хотя
+    они есть на этих видео, но не включаются автоматически и вообще я [не
+    могу] его включить». Корень найден живыми CDP-пробами страниц /shorts/:
+    в DOM живут ВИДИМЫЙ #shorts-player (настоящий плеер с дорожками) и
+    СКРЫТЫЙ #movie_player 0×0 ([hidden]) с пустым getPlayerResponse-ответом
+    (без videoDetails/captions) — адаптер и транспорт искали плеер только по
+    id movie_player и брали заглушку: canTracks false, дуо сам не
+    поднимался, Alt+D/панель собирали пустоту.
+  - content/adapters/youtube.ts: новый findPlayerElement — кандидаты
+    #shorts-player и #movie_player, побеждает ответ, чей videoDetails.videoId
+    совпадает с id из URL; при отсутствии совпадения (SPA-переход/
+    инициализация) пустая заглушка предпочтительнее чужого устаревшего
+    ответа. Подключён в listTracks (путь player-api) и PlayerApiTransport
+    (программируется именно shorts-player: loadModule(captions)+
+    setOption(track) → перехват timedtext — живая проба подтвердила, что
+    путь на Shorts работает без изменений).
+  - Попутно выяснено (без правок): timedtext шортов приходит в формате pb3
+    (wireMagic pb3, эксперимент exp=xpe) даже на запрос fmt=json3 — парсер
+    Core (parse_json3 по сырым ключам events/tStartMs/segs[].utf8/
+    tOffsetMs/aAppend) уже совместим с pb3, лишние верхние уровни
+    игнорируются; гашение нативного слоя (.ytp-caption-window-container)
+    на Shorts тоже работает.
+- Как проверено: vitest 774/774 (6 новых: findPlayerElement ×4, список
+  дорожек адаптера на Shorts, транспорт программирует shorts-player);
+  cargo test 455 passed / 0 failed; typecheck чист. Живой e2e-прогон
+  debug-сборки на YouTube Shorts (CDP, шорт 9f5qX7mjjCs, ro asr): video-auto
+  сам поднял дуо (дорожка в движке), список по пути player-api, плашка с
+  репликами видна (activeRows), нативные субтитры плеера погашены, ручное
+  вкл/выкл живо, переключение ArrowDown на следующий шорт — videoKey, список
+  дорожек и дуо обновились сами.
+- Коммит: ab33c90 fix(youtube): duopulse-220 — субтитры на YouTube Shorts
+  не включались
+- Версия НЕ поднималась и сборки НЕ делались — флажок Артёма build: false
+  (aila-418) для этой карточки. README/ROADMAP задача не касается (Shorts
+  там упомянуты только в контексте закладок и рекламы).
