@@ -95,18 +95,24 @@ export function planAfterClose(order: readonly number[], closingId: number, acti
   return rest[Math.min(i, rest.length - 1)] ?? null;
 }
 
-/** Пауза плеера в iframe (прямой postMessage команды IFrame API —YT.Player
- *  на родителе для этого не нужен). Скрытие вкладки этим не лечится только
- *  если плеер ещё не инициализировался — тогда и играть нечему. */
-export function pauseFrame(frame: HTMLIFrameElement): void {
+/** Команда плееру в iframe (прямой postMessage команды IFrame API — YT.Player
+ *  на родителе для этого не нужен): pauseVideo фоновым, playVideo — реплей
+ *  фоновой музыки активной (duopulse-237). */
+function commandFrame(frame: HTMLIFrameElement, func: "pauseVideo" | "playVideo"): void {
   try {
     frame.contentWindow?.postMessage(
-      JSON.stringify({ event: "command", func: "pauseVideo", args: [] }),
+      JSON.stringify({ event: "command", func, args: [] }),
       "https://www.youtube.com",
     );
   } catch {
     /* кросс-доменный доступ не нужен, но пусть молчит */
   }
+}
+
+/** Пауза плеера в iframe. Скрытие вкладки этим не лечится только если плеер
+ *  ещё не инициализировался — тогда и играть нечему. */
+export function pauseFrame(frame: HTMLIFrameElement): void {
+  commandFrame(frame, "pauseVideo");
 }
 
 /** Что делает open() с видео: заменить активную вкладку (навигация в строке
@@ -283,6 +289,21 @@ export class MobileTabs {
     this.persist();
     this.renderBadge();
     this.host.onActive(null);
+  }
+
+  /** Реплей фоновой музыки после onPause-паузы (duopulse-237): playVideo
+   *  ТОЛЬКО в активную вкладку — ту, что играла до ухода приложения в фон.
+   *  Прежде Kotlin слал playVideo во все iframe, и в фоне звучали все вкладки
+   *  разом (жалоба «играют все вкладки, а нужно чтобы играла только
+   *  активная»): фоновые скрыты и стоят на паузе — их трогать нельзя. Кто
+   *  активен, знает модель (не DOM-видимость: под просмотрщиком PDF активная
+   *  вкладка тоже скрыта). Активной нет — false, ничего не шлём. */
+  resumeActive(): boolean {
+    if (this.activeId === null) return false;
+    const frame = this.frames.get(this.activeId);
+    if (!frame) return false;
+    commandFrame(frame, "playVideo");
+    return true;
   }
 
   /** Закрыть вкладку (крестик в листе). */

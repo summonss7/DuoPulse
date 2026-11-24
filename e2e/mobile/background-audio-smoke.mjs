@@ -23,6 +23,20 @@
 //   7) закрытие оверлея останавливает музыку → сервис гаснет;
 //   8) возврат в приложение — UI жив;
 //   9) YouTube-embed (soft): вкладка-видео играет → HOME → играет.
+// Вкладки duopulse-237 (жалоба «в фоне играют все вкладки — нужна только
+// активная»; прежде Kotlin слал playVideo во все iframe разом) — тоже без
+// сети: iframe вкладок — ЗАГЛУШКИ с источником youtube (CDP Fetch подменяет
+// документ вкладки до сети; локальная страница не годится — targetOrigin
+// youtube не совпал бы), часы duo — фейк FAKE_JS UI-страницы (идут, пока
+// «вкладка играет», встают на hidden — как медиа под WebView.onPause, — и
+// снова идут по playVideo, дошедшему до активной вкладки):
+//   10) активная играет → HOME → playVideo дошёл ТОЛЬКО ей, в фоне часы
+//       идут, сервис жив; источник — файл / web-оверлей → вкладкам ничего;
+//   11) переключился на вкладку на паузе и сразу ушёл → тишина, сервис гаснет;
+//   12) «переключился, включил и сразу ушёл» (быстрее тика зонда) → играет
+//       включённая, прежняя молчит — и путь «снимок до onPause» подтверждён;
+//   13) скачок часов на непроигрываемой вкладке (30→900) — не «играет»;
+//   14) файловое видео поверх активной вкладки → в фоне только файл.
 // Запуск (debug-APK установлен, приложение запущено, эмулятор поднят):
 //   node e2e/mobile/background-audio-smoke.mjs
 // Результат — e2e/mobile/background-audio-smoke-last-run.json (gitignore).
@@ -103,6 +117,7 @@ async function connectTarget(t) {
   let id = 0;
   const pending = new Map();
   const contexts = [];
+  const listeners = new Map();
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.id && pending.has(m.id)) {
@@ -113,6 +128,10 @@ async function connectTarget(t) {
     }
     if (m.method === "Runtime.executionContextCreated")
       contexts.push(m.params.context);
+    for (const h of listeners.get(m.method) ?? []) {
+      // слушатель стенда не должен рвать соединение
+      try { h(m.params); } catch { /* диагностика — в консоли */ }
+    }
   };
   const send = (method, params = {}) =>
     new Promise((res, rej) => {
@@ -158,7 +177,12 @@ async function connectTarget(t) {
     new Promise((_, rej) => setTimeout(() => rej(new Error("цель не отвечает")), 6000)),
   ]);
   if (ping !== 1) throw new Error("цень не отвечает (пинг)");
-  return { url: t.url, evalJs, invoke, contexts, close: () => ws.close() };
+  /** Подписка на события CDP-цели (Fetch.requestPaused — вкладки-заглушки). */
+  const on = (method, handler) => {
+    if (!listeners.has(method)) listeners.set(method, []);
+    listeners.get(method).push(handler);
+  };
+  return { url: t.url, evalJs, invoke, contexts, send, on, close: () => ws.close() };
 }
 
 async function connectUi() {
@@ -299,6 +323,132 @@ async function mediaUri(name) {
   throw new Error(`MediaStore не увидел ${name}`);
 }
 
+// ── вкладки-заглушки (duopulse-237) ───────────────────────────────────────
+
+/** videoId двух вкладок стенда. */
+const TAB_A = "dp237aaaa11";
+const TAB_B = "dp237bbbb22";
+
+/** Причина реплея в logcat для гонки «включил и сразу ушёл» (см. phase 12). */
+const RACE = "шли в момент ухода";
+
+/** «Плеер» вкладки-заглушки: пишет команды IFrame API (func@Date.now()) и
+ *  докладывает о них родителю строкой — не JSON, чужие слушатели UI-страницы
+ *  её игнорируют. */
+const STUB_JS =
+  "window.__dpCmds=[];window.__dpId=location.pathname.split('/').pop();" +
+  "addEventListener('message',function(e){var d=e.data;" +
+  "if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){}}" +
+  "if(!d||d.event!=='command')return;" +
+  "window.__dpCmds.push(d.func+'@'+Date.now());" +
+  "parent.postMessage('__dp:cmd:'+d.func+':'+window.__dpId,'*')});";
+
+/** Документ вкладки-заглушки. */
+const TAB_STUB =
+  "<!doctype html><meta charset=utf-8>" +
+  "<meta name=viewport content=\"width=device-width,initial-scale=1\">" +
+  "<body style=\"margin:0;background:#101418;color:#BDFE4F;font:16px system-ui\">" +
+  "<div style=\"display:flex;height:100vh;align-items:center;justify-content:center\">" +
+  "e2e duopulse-237</div><script>" + STUB_JS + "</scr" + "ipt>";
+
+/** Фейк часов duo UI-страницы (подменяет __duopulseMobileDuo — его читает
+ *  зонд Kotlin): часы идут, пока «вкладка играет» (set — рука стенда), встают
+ *  на hidden и снова идут по playVideo, дошедшему до активной вкладки. */
+const FAKE_JS =
+  "(function(){window.__dpRealDuo=window.__dpRealDuo||window.__duopulseMobileDuo;" +
+  "var f=window.__dpFake={id:'',playing:false,base:0,at:Date.now()};" +
+  "f.now=function(){return f.playing?f.base+(Date.now()-f.at)/1000:f.base};" +
+  "f.set=function(id,playing,base){f.id=id;f.base=base==null?f.now():base;" +
+  "f.at=Date.now();f.playing=!!playing;return f.now()};" +
+  "window.__dpVis=[];" +
+  "addEventListener('message',function(e){var s=e.data;" +
+  "if(typeof s!=='string'||s.indexOf('__dp:cmd:')!==0)return;" +
+  "var p=s.split(':'),func=p[2],id=p[3];if(id!==f.id)return;" +
+  "f.base=f.now();f.at=Date.now();f.playing=func==='playVideo';" +
+  "window.__dpVis.push(func+'@'+id)});" +
+  "addEventListener('visibilitychange',function(){" +
+  "window.__dpVis.push((document.hidden?'hidden':'visible')+'@'+Date.now());" +
+  "if(document.hidden&&f.playing){f.base=f.now();f.at=Date.now();f.playing=false}});" +
+  "window.__duopulseMobileDuo=function(){return{videoId:f.id,clock:f.now()}};return 1})()";
+
+/** Вкладки стенда (duopulse-237): две вкладки, их iframe — заглушки с
+ *  источником youtube. Возвращает ручки: set — часы активной вкладки ('' —
+ *  вкладки нет), switchTo — строка листа вкладок, cmds — команды вкладки,
+ *  playCount — playVideo в обе с последнего reset. Читает вкладки только
+ *  через waitFor: «не дождались» не должно выглядеть как «команд не было». */
+async function tabStand(ui) {
+  await ui.send("Fetch.enable", {
+    patterns: [{ urlPattern: "https://www.youtube.com/embed/*", requestStage: "Request" }],
+  });
+  ui.on("Fetch.requestPaused", (p) => {
+    ui.send("Fetch.fulfillRequest", {
+      requestId: p.requestId,
+      responseCode: 200,
+      responseHeaders: [{ name: "Content-Type", value: "text/html; charset=utf-8" }],
+      body: Buffer.from(TAB_STUB).toString("base64"),
+    }).catch(() => {});
+  });
+  await ui.evalJs(FAKE_JS);
+  // прошлый прогон мог оборваться во фазе вкладок, а сессия вкладок переживает
+  // перезапуск (localStorage) — начинаем без чужих вкладок
+  await ui.evalJs(
+    `(() => { const s = window.__duopulseMobileTabs(); if (!s.count) return 0;` +
+      `window.__duopulseShowTabs(); document.querySelector('.m-tabs-close-all').click();` +
+      `return s.count })()`,
+  );
+  for (const id of [TAB_A, TAB_B])
+    await ui.evalJs(`window.__duopulseOpenVideo(${JSON.stringify(id)})`);
+
+  /** Контекст вкладки — iframe в процессе UI-webview (та же CDP-цель). */
+  const ctx = async (videoId) => {
+    for (const c of ui.contexts) {
+      if (c.origin !== "https://www.youtube.com" || !c.auxData?.isDefault) continue;
+      const href = await ui.evalJs("location.href", c.id).catch(() => "");
+      if (!href.includes(`/embed/${videoId}`)) continue;
+      return c.id;
+    }
+    return null;
+  };
+  const read = async (videoId) => {
+    const c = await waitFor(() => ctx(videoId), 15000, `вкладка ${videoId}`);
+    return JSON.parse(await ui.evalJs("JSON.stringify(window.__dpCmds)", c));
+  };
+  return {
+    set: (id, playing, base) =>
+      ui.evalJs(`window.__dpFake.set(${JSON.stringify(id)},${!!playing},${base ?? "null"})`),
+    /** Строка листа вкладок — DOM-клик (тот же обработчик, что у тапа). */
+    switchTo: async (videoId) => {
+      const ok = await ui.evalJs(
+        `(() => { window.__duopulseShowTabs();` +
+          `const i = window.__duopulseMobileTabs().tabs.findIndex((t) => t.videoId === ${JSON.stringify(videoId)});` +
+          `const row = document.querySelectorAll('.m-tabs-sheet .m-tabs-main')[i];` +
+          `if (!row) return false; row.click(); return true })()`,
+      );
+      if (!ok) throw new Error("строка вкладки не найдена: " + videoId);
+    },
+    cmds: read,
+    reset: async () => {
+      for (const id of [TAB_A, TAB_B]) {
+        const c = await ctx(id);
+        if (c) await ui.evalJs("window.__dpCmds.length=0", c);
+      }
+    },
+    playCount: async () => {
+      let n = 0;
+      for (const id of [TAB_A, TAB_B])
+        n += (await read(id)).filter((x) => x.startsWith("playVideo@")).length;
+      return n;
+    },
+    /** Часы активной вкладки идут (два замера). */
+    advancing: async () => {
+      const a = await ui.evalJs("window.__dpFake.now()");
+      await sleep(2500);
+      return (await ui.evalJs("window.__dpFake.now()")) > a + 0.5;
+    },
+    vis: () => ui.evalJs("JSON.stringify(window.__dpVis.slice(-24))"),
+  };
+}
+
 // ── сценарий ─────────────────────────────────────────────────────────────
 
 const main = async () => {
@@ -333,10 +483,34 @@ const main = async () => {
   // чистый старт: закрыть оверлей/плеер, домой, приложение на передний план
   shell(`am start -n ${PKG}/.MainActivity`);
   await sleep(1500);
-  const ui = await connectUi();
+  // цель UI-webview появляется не сразу после холодного старта (переустановка
+  // APK + force-stop): ждём её, а не первый же /json
+  const ui = await waitFor(() => connectUi(), 20000, "CDP-цель UI-webview", 1000);
   await ui.invoke("mobile_web_close", {}).catch(() => {});
   await ui.evalJs(`window.__duopulseGoHome && window.__duopulseGoHome()`);
   await sleep(1200);
+
+  // вкладки-заглушки duopulse-237 весь смоук лежат в фоне без активной —
+  // фазы 218 идут на чистом старте, как прежде; проверки «вкладкам ничего»
+  // внутри фаз 4 и 6 (источник — файл / web-оверлей)
+  const tab = await tabStand(ui);
+  await ui.evalJs(`window.__duopulseGoHome && window.__duopulseGoHome()`);
+  await sleep(800);
+  /** playVideo среди команд вкладки. */
+  const plays = (list) => list.filter((x) => x.startsWith("playVideo@")).length;
+  /** Метка времени устройства; logcat хелпера С метки — по времени, а не по
+   *  номеру строки: кольцо буфера чужими логами фазу не рвёт. */
+  const mark = () => shell("date '+%m-%d %H:%M:%S.000'").trim();
+  const since = (m) =>
+    shell(`logcat -d -s DuoPulseMedia -T '${m}'`)
+      .split("\n")
+      .filter((l) => / D DuoPulseMedia\b/.test(l));
+  /** Причина реплея из строки «вкладка перезапущена (…; причина)». */
+  const reasonOf = (lines) => {
+    const l = lines.find((x) => x.includes("вкладка перезапущена"));
+    const m = l && l.match(/;\s*([^)]*)\)\s*$/);
+    return m ? m[1] : "";
+  };
 
   // ── Фаза 1: файловый плеер из «Открыть с помощью» ──────────────────────
   adb(["push", mp4, "/sdcard/Download/duopulse-218-tone.mp4"]);
@@ -389,6 +563,12 @@ const main = async () => {
   const t4 = await ui.evalJs(`document.querySelector('.m-video-el')?.currentTime ?? -1`);
   check("5. HOME: музыка продолжает играть", t4 > t3 + 3, `t≈${t4?.toFixed?.(1)}`);
   check("5. HOME: звук течёт", audioFlowing());
+  // duopulse-237: источник — файл, вкладки не заводятся (прежде playVideo
+  // после паузы уходил во все iframe разом)
+  check(
+    "5. HOME: вкладки не заводятся (источник — файловое видео)",
+    (await tab.playCount()) === 0,
+  );
 
   // ── Фаза 5: пауза кнопкой «⏸» уведомления (ACTION_PAUSE сервиса — тот же
   // путь, что PendingIntent уведомления; shell-uid чужой сервис не пускает,
@@ -444,6 +624,7 @@ const main = async () => {
   );
   check("8. HOME: звук течёт", audioFlowing());
   check("8. HOME: сервис жив", mediaServiceOn());
+  check("8. HOME: вкладки не заводятся (источник — web-оверлей)", (await tab.playCount()) === 0);
 
   // закрытие оверлея останавливает музыку → сервис гаснет (invoke может
   // отклониться промисом при повторном закрытии — не роняет стенд)
@@ -459,6 +640,152 @@ const main = async () => {
   );
   check("10. возврат: UI жив (headerState отвечает)", st === true);
   ov.close();
+
+  // ── Фаза 7b (duopulse-237): в фоне играет ТОЛЬКО активная вкладка ───────
+  // Жалоба: «играют все вкладки, а нужно чтобы играла только активная» —
+  // прежде Kotlin после onPause-паузы слал playVideo во все iframe разом.
+  const home = () => shell("input keyevent 3");
+  const back = async () => {
+    shell(`am start -n ${PKG}/.MainActivity`);
+    await sleep(2000);
+  };
+
+  // A. активная играет → HOME → перезапущена только она, в фоне идёт
+  await ui.evalJs(`window.__duopulseGoHome && window.__duopulseGoHome()`); // файловый плеер прочь
+  await tab.set("", false, 0);
+  await waitFor(() => !mediaServiceOn(), 30000, "сервис погашен перед фазой вкладок");
+  await tab.switchTo(TAB_B);
+  await tab.set(TAB_B, true, 100);
+  await waitFor(mediaServiceOn, 12000, "сервис по часам duo активной вкладки");
+  check("14. сервис фоновой музыки поднят по часам duo активной вкладки", true);
+  await sleep(1500); // ещё тик зонда: кэш «играет» — о вкладке B
+  await tab.reset();
+  let m = mark();
+  await home();
+  await sleep(3000);
+  const [a1, b1] = [await tab.cmds(TAB_A), await tab.cmds(TAB_B)];
+  check(
+    "15. HOME: активная вкладка перезапущена (playVideo дошёл ей)",
+    plays(b1) === 1,
+    `команды B: ${b1.join(",") || "—"}`,
+  );
+  check(
+    "16. HOME: фоновая вкладка НЕ запущена (playVideo не было)",
+    plays(a1) === 0,
+    `команды A: ${a1.join(",") || "—"}`,
+  );
+  const logA = since(m);
+  check(
+    "17. logcat: «вкладка перезапущена (только активная: 1; …)»",
+    logA.some((l) => l.includes("только активная: 1")),
+    reasonOf(logA),
+  );
+  await sleep(5000); // суммарно ≥8 с в фоне
+  check("18. в фоне часы активной вкладки идут, сервис жив", (await tab.advancing()) && mediaServiceOn());
+  await back();
+
+  // B. играла B → переключился на стоящую на паузе A и сразу ушёл: в фоне тишина
+  await tab.reset();
+  await tab.switchTo(TAB_A);
+  await tab.set(TAB_A, false, 30);
+  await home();
+  await sleep(3000);
+  const [a2, b2] = [await tab.cmds(TAB_A), await tab.cmds(TAB_B)];
+  check("19. переключился на вкладку на паузе и сразу ушёл: она НЕ заведена", plays(a2) === 0);
+  check("20. … прежняя (играла до переключения) тоже молчит", plays(b2) === 0);
+  await waitFor(() => !mediaServiceOn(), 30000, "сервис погашен (в фоне никто не играет)");
+  check("21. в фоне никто не играет — сервис погашен", true);
+  await back();
+
+  // C. играла B → переключился на A, включил и сразу ушёл — быстрее тика
+  // зонда: играет A, B молчит. До 4 раундов: в окно «переключение → HOME»
+  // (~0,4 с) тик попадает не каждый раз, а путь «снимок до onPause» (RACE)
+  // подтверждается только чистым раундом
+  const reasons = [];
+  for (let round = 1; round <= 4; round++) {
+    await tab.switchTo(TAB_B);
+    await tab.set(TAB_B, true, 200);
+    await waitFor(mediaServiceOn, 12000, "сервис (вкладка B играет)");
+    await sleep(1500);
+    await tab.reset();
+    m = mark();
+    await tab.switchTo(TAB_A);
+    await tab.set(TAB_A, true, 30);
+    await home();
+    await sleep(3000);
+    const [a3, b3] = [await tab.cmds(TAB_A), await tab.cmds(TAB_B)];
+    const reason = reasonOf(since(m));
+    reasons.push(reason || "(реплея не было)");
+    check(
+      `22. «переключился, включил и сразу ушёл» (раунд ${round}): играет включённая, прежняя молчит`,
+      plays(a3) === 1 && plays(b3) === 0,
+      reason || "реплея не было",
+    );
+    await back();
+    if (reason === RACE) break;
+  }
+  check(
+    "23. путь «шли в момент ухода» подтверждён: снимок до onPause раньше паузы",
+    reasons.includes(RACE),
+    reasons.join(" / "),
+  );
+
+  // D. обе на паузе; переключение на «давно смотренную» — часы прыгнули
+  // (30→900): игрой не считается, сервис не поднимается
+  await tab.set(TAB_A, false);
+  await waitFor(() => !mediaServiceOn(), 30000, "сервис погашен (обе вкладки на паузе)");
+  m = mark();
+  await tab.switchTo(TAB_B);
+  await tab.set(TAB_B, false, 900);
+  await sleep(5500); // ≥2 тиков зонда о новой вкладке
+  check(
+    "24. скачок часов на непроигрываемой вкладке не поднимает сервис (ложного «играет» нет)",
+    !since(m).some((l) => l.includes("playback-on")) && !mediaServiceOn(),
+  );
+  await tab.reset();
+  await home();
+  await sleep(5000);
+  const [a4, b4] = [await tab.cmds(TAB_A), await tab.cmds(TAB_B)];
+  check("25. HOME на паузе: ни одна вкладка не заведена", plays(a4) === 0 && plays(b4) === 0);
+  await waitFor(() => !mediaServiceOn(), 30000, "сервис погашен (фон, обе на паузе)");
+  check("26. в фоне тишина — сервис погашен", true);
+  await back();
+
+  // E. файловое видео поверх активной вкладки («Открыть с помощью» не снимает
+  // вкладку с активной): в фоне перезапускается файл, вкладка молчит
+  await tab.switchTo(TAB_B);
+  adb(["shell", "am", "start", "-a", "android.intent.action.VIEW",
+    "-d", uri, "-t", "video/mp4", "--grant-read-uri-permission",
+    "-n", `${PKG}/.MainActivity`]);
+  await waitFor(playerPlays, 30000, "файловый плеер поверх вкладки");
+  await waitFor(mediaServiceOn, 12000, "сервис по файловому видео");
+  await sleep(2500);
+  const e0 = await ui.evalJs(`document.querySelector('.m-video-el')?.currentTime ?? -1`);
+  await tab.reset();
+  await home();
+  await sleep(5000);
+  const e1 = await ui.evalJs(`document.querySelector('.m-video-el')?.currentTime ?? -1`);
+  check("27. файловое видео поверх активной вкладки: в фоне идёт файл", e1 > e0 + 3, `t ${e0?.toFixed?.(1)}→${e1?.toFixed?.(1)}`);
+  check("28. … вкладка под плеером НЕ заведена", (await tab.playCount()) === 0);
+  await back();
+  // плеер заглушить тем же путём, что «⏸» уведомления
+  shell(
+    `run-as ${PKG} am startservice --user 0 -n ${PKG}/.MediaPlaybackService -a dev.duopulse.media.PAUSE`,
+  );
+  await sleep(1500);
+
+  const tabDiag = { reasons, vis: JSON.parse(await tab.vis().catch(() => "[]")) };
+
+  // вкладки-заглушки прочь (мягкая фаза YouTube ниже открывает настоящую),
+  // часы duo — настоящие, перехват Fetch снят
+  const left = await ui.evalJs(
+    `(() => { window.__duopulseGoHome(); window.__duopulseShowTabs();` +
+      `document.querySelector('.m-tabs-close-all').click();` +
+      `window.__duopulseMobileDuo = window.__dpRealDuo;` +
+      `return window.__duopulseMobileTabs().count })()`,
+  );
+  await ui.send("Fetch.disable");
+  check("29. вкладки-заглушки закрыты, сессия вкладок чиста (не мешает другим стендам)", left === 0);
 
   // ── Фаза 8 (soft): YouTube-embed ───────────────────────────────────────
   await ui.evalJs(`window.__duopulseGoHome && window.__duopulseGoHome()`);
@@ -530,7 +857,11 @@ const main = async () => {
   const ok = results.every((r) => r.ok);
   writeFileSync(
     OUT,
-    JSON.stringify({ ok, results, log: mediaLog(), at: new Date().toISOString() }, null, 2),
+    JSON.stringify(
+      { ok, results, log: mediaLog(), tabs: tabDiag, at: new Date().toISOString() },
+      null,
+      2,
+    ),
   );
   console.log(
     ok

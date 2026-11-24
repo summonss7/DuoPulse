@@ -1,12 +1,15 @@
 // Тесты вкладок мобильной ветки (duopulse-123): чистые функции — разбор
 // сохранённой сессии, сериализация, план закрытия вкладки и план открытия.
 // DOM-логика (iframe, пауза фоновых, лист-переключатель) — живой прогон на
-// эмуляторе (как e2e/bookmarks, хук __duopulseMobileTabs).
+// эмуляторе (как e2e/bookmarks, хук __duopulseMobileTabs); реплей фоновой
+// музыки только активной вкладки (duopulse-237) — happy-dom ниже.
 
-import { describe, expect, it } from "vitest";
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLOSED_CAP,
   MAX_TABS,
+  MobileTabs,
   parseSavedTabs,
   planAfterClose,
   planOpen,
@@ -133,5 +136,102 @@ describe("pushClosed (стек «Восстановить вкладку», duop
     let st: { videoId: string; title: string }[] = [];
     for (let i = 0; i < 4; i++) st = pushClosed(st, { videoId: `vid${i}pad1234`, title: "" }, 2);
     expect(st).toHaveLength(2);
+  });
+});
+
+describe("MobileTabs.resumeActive — реплей фоновой музыки только активной вкладки (duopulse-237)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    // iframe вкладок не ходят в сеть: стенду нужен только postMessage
+    (
+      window as unknown as { happyDOM: { settings: { disableIframePageLoading: boolean } } }
+    ).happyDOM.settings.disableIframePageLoading = true;
+    document.body.innerHTML = `
+      <header class="m-bar-top"><button id="mPrivate"></button></header>
+      <main class="m-content"></main>`;
+  });
+
+  const make = () =>
+    new MobileTabs({
+      content: document.querySelector<HTMLElement>(".m-content")!,
+      bar: document.querySelector<HTMLElement>(".m-bar-top")!,
+      note: () => {},
+      isPrivate: () => false,
+      onActive: () => {},
+    });
+
+  /** Окно iframe — шпион postMessage (кросс-доменное окно в happy-dom не живое). */
+  const spyFrame = (frame: HTMLIFrameElement) => {
+    const postMessage = vi.fn();
+    Object.defineProperty(frame, "contentWindow", { value: { postMessage }, configurable: true });
+    return postMessage;
+  };
+
+  /** Команды IFrame API из вызовов шпиона: имя функции + targetOrigin. */
+  const commands = (spy: ReturnType<typeof vi.fn>) =>
+    spy.mock.calls.map(([data, origin]) => ({
+      func: (JSON.parse(data as string) as { func: string }).func,
+      origin,
+    }));
+
+  it("две вкладки: playVideo уходит только во вторую (активную), фоновая молчит", () => {
+    const tabs = make();
+    tabs.open("aaa11111111", "", true);
+    const first = spyFrame(document.querySelectorAll<HTMLIFrameElement>("iframe.m-tab")[0]);
+    tabs.open("bbb22222222", "", true);
+    const frames = document.querySelectorAll<HTMLIFrameElement>("iframe.m-tab");
+    const second = spyFrame(frames[1]);
+    expect(frames[0].hidden).toBe(true);
+    expect(frames[1].hidden).toBe(false);
+    // само переключение ставит прежнюю на паузу — и только это ей шлётся
+    expect(commands(first)).toEqual([{ func: "pauseVideo", origin: "https://www.youtube.com" }]);
+    first.mockClear();
+
+    expect(tabs.resumeActive()).toBe(true);
+    expect(commands(first)).toEqual([]);
+    expect(commands(second)).toEqual([
+      { func: "playVideo", origin: "https://www.youtube.com" },
+    ]);
+  });
+
+  it("переключение: после возврата на первую реплей идёт первой, второй — ничего", () => {
+    const tabs = make();
+    tabs.open("aaa11111111", "", true);
+    tabs.open("bbb22222222", "", true);
+    const frames = document.querySelectorAll<HTMLIFrameElement>("iframe.m-tab");
+    const first = spyFrame(frames[0]);
+    const second = spyFrame(frames[1]);
+
+    tabs.switchTo(1);
+    first.mockClear();
+    second.mockClear();
+    expect(tabs.resumeActive()).toBe(true);
+    expect(commands(first)).toEqual([{ func: "playVideo", origin: "https://www.youtube.com" }]);
+    expect(commands(second)).toEqual([]);
+  });
+
+  it("активной нет («домой» / новая вкладка): false, ни одной командой не шлём", () => {
+    const tabs = make();
+    tabs.open("aaa11111111", "", true);
+    tabs.open("bbb22222222", "", true);
+    const spies = [...document.querySelectorAll<HTMLIFrameElement>("iframe.m-tab")].map(spyFrame);
+
+    tabs.newTab();
+    spies.forEach((s) => s.mockClear());
+    expect(tabs.resumeActive()).toBe(false);
+    spies.forEach((s) => expect(commands(s)).toEqual([]));
+  });
+
+  it("фоновая остаётся на паузе: playVideo в неё не приходит ни при переключениях, ни при реплее", () => {
+    const tabs = make();
+    tabs.open("aaa11111111", "", true);
+    tabs.open("bbb22222222", "", true);
+    const first = spyFrame(document.querySelectorAll<HTMLIFrameElement>("iframe.m-tab")[0]);
+
+    tabs.switchTo(1);
+    tabs.switchTo(2);
+    first.mockClear();
+    expect(tabs.resumeActive()).toBe(true);
+    expect(commands(first)).toEqual([]);
   });
 });

@@ -892,6 +892,14 @@ async function navigate(input: string, newTab = false): Promise<void> {
   tabs.open(id, "", true);
 };
 
+// duopulse-237: реплей после onPause-паузы при уходе приложения в фон (Kotlin
+// MobileMediaHelper.onActivityPauseEnd) — только АКТИВНАЯ вкладка, та, что
+// играла. Прежде Kotlin слал playVideo во все iframe разом, и в фоне звучали
+// все вкладки (жалоба «играют все вкладки, а нужно чтобы играла только
+// активная»). Хук вызывается, лишь когда зонд решил, что источник — вкладка.
+(window as { __duopulseBgReplay?: () => boolean }).__duopulseBgReplay = () =>
+  tabs.resumeActive();
+
 /** Вход для «⬇» web-оверлея (duopulse-207): открыть YouTube-видео во
  *  встроенном плеере и поднять лист загрузок (аудио/видео/субтитры) — та же
  *  кнопка «⬇», что в шапке ветки. Лист ждёт готовности движка видео

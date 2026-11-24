@@ -41,6 +41,13 @@ import androidx.core.content.ContextCompat
  *    принцип, что детектор замерзания clock.ts; позволяет читать состояние
  *    КРОСС-ДОМЕННОГО iframe без доступа к нему). Кросс-доменные iframe-плееры
  *    чужих сайтов (SoundCloud и пр.) зонд не видит — известный предел v1;
+ *  - реплей (duopulse-237): после onPause-паузы перезапускается ТОЛЬКО то, что
+ *    играло в момент ухода, — источники UI-webview разведены: вкладка YouTube
+ *    (playVideo в АКТИВНУЮ вкладку — хук фронта __duopulseBgReplay, кто
+ *    активен, знает модель вкладок) либо файловое <video>. Прежде playVideo
+ *    уходил во все iframe сразу, и в фоне звучали все вкладки разом (фоновые
+ *    скрыты и стоят на паузе — жалоба «играют все вкладки, а нужно чтобы
+ *    играла только активная»);
  *  - стоп: зонд видит остановку (≤4 с) — сервис гасится, сессия деактивируется.
  *    Пауза из шторки/медиа-кнопок — JS-посылка pauseVideo во все iframe (прямой
  *    postMessage IFrame API, как пауза фоновых вкладок tabs.ts) + pause()
@@ -86,12 +93,16 @@ object MobileMediaHelper {
    *  затык сети) не должен глушить музыку — стойкость против флапа. */
   private var quietTicks = 0
 
-  /** Момент последнего «играет» зонда ПО ОКНУ (elapsedRealtime): латч против
+  /** Момент последнего «играет» зонда ПО ИСТОЧНИКУ (elapsedRealtime): латч против
    *  гонки «музыка только началась, тик ещё не видел прироста, а активность
    *  уже уходит в фон» — 8 с держат решение wantedNow() утвердительным.
    *  Раздельность важна реплею: играет web-оверлей — реплей tauri-окна
-   *  перехватил бы аудио-фокус (фокус один на приложение). */
-  private var lastUiPlayingAt = 0L
+   *  перехватил бы аудио-фокус (фокус один на приложение); внутри tauri-окна
+   *  (duopulse-237) — файловое видео и вкладка тоже отдельно: реплей
+   *  перезапускает только тот источник, что играл. */
+  private const val LATCH_MS = 8000L
+  private var lastUiFilePlayingAt = 0L
+  private var lastUiTabPlayingAt = 0L
   private var lastOverlayPlayingAt = 0L
 
   /** Цикл погашен (активность разрушена): летящий колбэк зонда не должен
@@ -99,10 +110,39 @@ object MobileMediaHelper {
   private var stopped = false
 
   // кэш последнего зонда (UI-нить: тики и колбэки evaluateJavascript там же)
-  private var uiPlaying = false
+  private var uiFilePlaying = false
+
+  /** Часы duo активной вкладки шли между тиками (кэш — о вкладке uiVideoId). */
+  private var uiTabPlaying = false
   private var uiClock = -1.0
+  private var uiVideoId: String? = null
   private var uiVideoOpen = false
   private var overlayPlaying = false
+
+  /** Часы duo, прочитанные ДО super.onPause (onActivityPauseBegin): разница с
+   *  послепаузным снимком показывает, шла ли музыка в сам момент ухода. */
+  private var preClock: Double? = null
+  private var preVideoId: String? = null
+
+  /** Разбор снимка UI-webview (SNAP_JS, и тик, и обе точки реплея). */
+  private class UiState(raw: String?) {
+    private val parts = (raw ?: "")
+      .trim()
+      .removeSurrounding("\"")
+      .split("|")
+      .map { it.substringAfter('=') }
+
+    /** Файловое <video> играет. */
+    val filePlaying = parts.getOrNull(0) == "1"
+
+    /** Начатый <video> топ-документа (currentTime>0, не кончился). */
+    val started = parts.getOrNull(1) == "1"
+
+    /** Часы duo АКТИВНОЙ ВКЛАДКИ (секунды; нет вкладки/сессии — null). */
+    val clock = parts.getOrNull(2)?.toDoubleOrNull()
+    val videoOpen = parts.getOrNull(3) == "1"
+    val id = parts.getOrNull(4)?.takeIf { it.isNotEmpty() }
+  }
 
   /** Запуск зонд-цикла (MainActivity.onCreate). */
   fun start() {
@@ -130,11 +170,12 @@ object MobileMediaHelper {
   private fun probe() {
     val tw = MainActivity.tauriWebView
     if (tw == null) {
-      uiPlaying = false
+      uiFilePlaying = false
+      uiTabPlaying = false
       uiClock = -1.0
       uiVideoOpen = false
     } else {
-      tw.evaluateJavascript(UI_PROBE) { r -> onUiProbe(r) }
+      tw.evaluateJavascript(SNAP_JS) { r -> onUiProbe(r) }
     }
     MobileWebHelper.probeMedia { on ->
       overlayPlaying = on
@@ -144,26 +185,29 @@ object MobileMediaHelper {
   }
 
   /**
-   * Зонд UI-webview: файловое видео + часы duo + признак открытой видео-вкладки
-   * (оптимистичный старт при уходе в фон: плеер мог заиграть <2 с назад, зонд
-   * прироста ещё не видел). Ответ — строка "f=0|c=123.456|v=1" (c=- : duo-сессии
-   * нет), evaluateJavascript отдаёт её JSON-закодированной — снимаем кавычки.
+   * Зонд UI-webview (тик): файловое видео + часы duo активной вкладки +
+   * признак открытой видео-вкладки (оптимистичный старт при уходе в фон:
+   * плеер мог заиграть <2 с назад, зонд прироста ещё не видел). Снимок —
+   * SNAP_JS, evaluateJavascript отдаёт строку JSON-закодированной (кавычки
+   * снимаются в UiState).
    */
   private fun onUiProbe(raw: String?) {
-    val parts = (raw ?: "")
-      .trim()
-      .removeSurrounding("\"")
-      .split("|")
-      .map { it.substringAfter('=') }
-    val file = parts.getOrNull(0) == "1"
-    val clock = parts.getOrNull(1)?.toDoubleOrNull()
-    val videoOpen = parts.getOrNull(2) == "1"
+    val st = UiState(raw)
 
-    val advanced = uiClock >= 0 && clock != null && clock > uiClock + CLOCK_ADVANCE
-    uiPlaying = file || advanced
-    if (uiPlaying) lastUiPlayingAt = android.os.SystemClock.elapsedRealtime()
-    uiClock = clock ?: -1.0
-    uiVideoOpen = videoOpen
+    // прирост часов — только той же вкладки: после переключения часы новые
+    // (у просмотренного видео — его прежняя позиция), скачок к ней игрой
+    // не считается (duopulse-237: ложное «играет» на один тик поднимало
+    // сервис и реплей вкладки, которую никто не включал)
+    val advanced = st.videoOpen && st.id == uiVideoId && uiClock >= 0 &&
+      st.clock != null && st.clock > uiClock + CLOCK_ADVANCE
+    val now = android.os.SystemClock.elapsedRealtime()
+    uiFilePlaying = st.filePlaying
+    uiTabPlaying = advanced
+    if (st.filePlaying) lastUiFilePlayingAt = now
+    if (advanced) lastUiTabPlayingAt = now
+    uiClock = st.clock ?: -1.0
+    uiVideoId = st.id
+    uiVideoOpen = st.videoOpen
     apply()
   }
 
@@ -171,7 +215,7 @@ object MobileMediaHelper {
    *  тика подряд — стойкость к буферизационным затыкам одиночного тика). */
   private fun apply() {
     if (stopped) return
-    if (uiPlaying || overlayPlaying) {
+    if (uiFilePlaying || uiTabPlaying || overlayPlaying) {
       quietTicks = 0
       startPlayback()
     } else {
@@ -183,15 +227,20 @@ object MobileMediaHelper {
   /** Синхронное решение для onPause активности (см. onActivityPause): зонд
    *  живёт тиками по 2 с, между тиками «нажал play и сразу ушёл» решает
    *  оптимизм открытой видео-вкладки — фоновый цикл погасит лишнее за ≤4 с. */
-  private fun wantedNow(): Boolean =
-    uiPlaying || overlayPlaying || uiVideoOpen ||
+  private fun wantedNow(): Boolean {
+    val now = android.os.SystemClock.elapsedRealtime()
+    return uiFilePlaying || uiTabPlaying || overlayPlaying || uiVideoOpen ||
       // латч: музыка играла в последние 8 с — гонка «музыка только началась,
       // тик зонда прироста ещё не видел, активность уже уходит» не должна
       // глушить только что включённую музыку (поймано смоуком duopulse-218)
-      (lastUiPlayingAt > 0 &&
-        android.os.SystemClock.elapsedRealtime() - lastUiPlayingAt < 8000L) ||
-      (lastOverlayPlayingAt > 0 &&
-        android.os.SystemClock.elapsedRealtime() - lastOverlayPlayingAt < 8000L)
+      (startedRecently(lastUiFilePlayingAt, now)) ||
+      (startedRecently(lastUiTabPlayingAt, now)) ||
+      (startedRecently(lastOverlayPlayingAt, now))
+  }
+
+  /** Источник играл в последние LATCH_MS (латч зонда, см. поля last*PlayingAt). */
+  private fun startedRecently(at: Long, now: Long): Boolean =
+    at > 0 && now - at < LATCH_MS
 
   /**
    * Уход активности из поля зрения (MainActivity.onPause): решаем СИНХРОННО
@@ -207,7 +256,18 @@ object MobileMediaHelper {
    */
   fun onActivityPauseBegin(): Boolean {
     val keep = wantedNow()
-    if (keep) blockWindowEvents = true
+    if (keep) {
+      blockWindowEvents = true
+      // часы duo ДО super.onPause (duopulse-237): запрос уходит в рендерер
+      // раньше паузы — послепаузный снимок реплея сравнит с ним
+      preClock = null
+      preVideoId = null
+      MainActivity.tauriWebView?.evaluateJavascript(SNAP_JS) { r ->
+        val st = UiState(r)
+        preClock = st.clock
+        preVideoId = st.id
+      }
+    }
     return keep
   }
 
@@ -224,37 +284,49 @@ object MobileMediaHelper {
       MobileWebHelper.resumeForBackground()
       // перезапуск ТОГО, что играло: решение самостоятельное (кэш зонда
       // ненадёжен в момент паузы — колбэк «тихо» от только что запауженного
-      // WryActivity WebView способен сбросить uiPlaying прямо между тиками):
-      // начатое видео в топ-документе ИЛИ свежие часы duo (кейс «нажал play
-      // и сразу ушёл»). Реплей трогает только НАЧАТЫЕ элементы (currentTime>0)
-      // — не заводить то, что пользователь ставил на паузу сам.
-      tw.evaluateJavascript(
-        "(function(){var s=false,c=null;" +
-          "try{var q=document.querySelector('video');" +
-          "if(q&&q.currentTime>0.1&&!q.ended)s=true}catch(e){}" +
-          "try{var d=window.__duopulseMobileDuo?window.__duopulseMobileDuo():null;" +
-          "if(d&&typeof d.clock==='number')c=d.clock}catch(e){}" +
-          "return 's='+(s?1:0)+'|c='+(c===null?'-':c)})()"
-      ) { fresh ->
-        val parts = (fresh ?: "").removeSurrounding("\"").split("|")
-          .map { it.substringAfter('=') }
-        val started = parts.getOrNull(0) == "1"
-        val clock = parts.getOrNull(1)?.toDoubleOrNull()
-        // реплей трогает только TAURI-окно и только когда оно было источником:
-        // играет web-оверлей — PLAY_JS в tauri перехватил бы аудио-фокус
-        // (фокус один на приложение: WebView-«пауза по потере фокуса» гасила
-        // музыку оверлея, поймано смоуком duopulse-218)
+      // WryActivity WebView способен сбросить флаги прямо между тиками).
+      // Реплей трогает только НАЧАТЫЕ элементы (currentTime>0) и только
+      // АКТИВНУЮ вкладку — не заводить то, что пользователь ставил на паузу
+      // сам, и фоновые вкладки (duopulse-237).
+      tw.evaluateJavascript(SNAP_JS) { raw ->
+        val st = UiState(raw)
         val now = android.os.SystemClock.elapsedRealtime()
-        val overlaySource = overlayPlaying || lastOverlayPlayingAt > 0 && now - lastOverlayPlayingAt < 8000L
-        val tauriRecent = lastUiPlayingAt > 0 && now - lastUiPlayingAt < 8000L
-        val tauriSource = uiPlaying ||
-          (!overlaySource && tauriRecent && started) ||
-          (!overlaySource && clock != null && uiClock >= 0 && clock > uiClock)
-        if (tauriSource) {
-          tw.evaluateJavascript(PLAY_JS, null)
-          Log.d(TAG, "background-play: медиа перезапущено (started=$started clock=${clock ?: "-"})")
-        } else {
+        val preAt = preClock
+        val preId = preVideoId
+        // реплей tauri-окна не должен перехватывать аудио-фокус у играющего
+        // web-оверлея (фокус один на приложение: WebView-«пауза по потере
+        // фокуса» гасила музыку оверлея, поймано смоуком duopulse-218)
+        val overlaySource = overlayPlaying ||
+          startedRecently(lastOverlayPlayingAt, now)
+        // кэш последнего тика валиден, только если вкладка с тех пор та же:
+        // после переключения «играло» — про прежнюю вкладку
+        val sameTab = st.id == uiVideoId
+        val fileSource = st.filePlaying ||
+          (!overlaySource && startedRecently(lastUiFilePlayingAt, now) && st.started)
+        // вкладка играла — одно из трёх (в логе — какое: диагностика жалоб)
+        val tabReason = when {
+          // часы шли на последнем тике
+          sameTab && uiTabPlaying -> "по последнему тику"
+          // ушли вперёд после тика («нажал play и сразу ушёл»)
+          !overlaySource && sameTab && st.clock != null && uiClock >= 0 && st.clock > uiClock ->
+            "прирост после тика"
+          // шли в сам момент ухода: между снимком до onPause и этим (после
+          // паузы) часы ушли вперёд — верно и для «переключился на вкладку,
+          // включил и сразу ушёл», когда тик старой вкладки ещё в кэше
+          !overlaySource && st.clock != null && preAt != null &&
+            st.id != null && st.id == preId && st.clock > preAt -> "шли в момент ухода"
+          else -> null
+        }
+        if (fileSource) tw.evaluateJavascript(FILE_REPLAY_JS, null)
+        if (tabReason != null) {
+          tw.evaluateJavascript(TAB_REPLAY_JS) { r ->
+            Log.d(TAG, "background-play: вкладка перезапущена (только активная: $r; $tabReason)")
+          }
+        }
+        if (!fileSource && tabReason == null) {
           Log.d(TAG, "background-play: реплей не нужен (${if (overlayPlaying) "источник — оверлей" else "не играло"})")
+        } else if (fileSource) {
+          Log.d(TAG, "background-play: медиа перезапущено (started=${st.started} clock=${st.clock ?: "-"})")
         }
       }
       Log.d(TAG, "background-play: веб-окна держим активными (400 мс)")
@@ -437,17 +509,22 @@ object MobileMediaHelper {
     }
   }
 
-  /** Зонд UI-webview (см. onUiProbe): f — файловое видео играет, c — часы duo
-   *  (секунды или -), v — открыта видео-вкладка. */
-  private val UI_PROBE =
-    "(function(){var f=0,c='-',v=0;" +
+  /** Снимок UI-webview (UiState): "p=0|s=1|c=123.456|v=1|i=videoId" — p —
+   *  файловое <video> играет, s — начатый <video> топ-документа, v — открыта
+   *  активная видео-вкладка, c — её часы duo (секунды или -), i — её videoId
+   *  (или пусто). Часы читаются ТОЛЬКО при открытой вкладке: без вкладки
+   *  duo-сессия вкладкой не бывает, а реплей по ним завёл бы всё равно не её
+   *  (duopulse-237). Один снимок на тик и обе точки реплея — нигде не разъедется. */
+  private val SNAP_JS =
+    "(function(){var p=0,s=0,c='-',v=0,i='';" +
       "try{var q=document.querySelector('video');" +
-      "if(q&&!q.paused&&!q.ended&&q.currentTime>0.1)f=1}catch(e){}" +
-      "try{var d=window.__duopulseMobileDuo?window.__duopulseMobileDuo():null;" +
-      "if(d&&typeof d.clock==='number')c=d.clock}catch(e){}" +
+      "if(q&&q.currentTime>0.1&&!q.ended){s=1;if(!q.paused)p=1}}catch(e){}" +
       "try{var h=window.__duopulseHeaderState?window.__duopulseHeaderState():null;" +
       "if(h&&h.video)v=1}catch(e){}" +
-      "return 'f='+f+'|c='+c+'|v='+v})()"
+      "if(v){try{var d=window.__duopulseMobileDuo?window.__duopulseMobileDuo():null;" +
+      "if(d&&typeof d.clock==='number')c=d.clock;" +
+      "if(d&&typeof d.videoId==='string')i=d.videoId}catch(e){}}" +
+      "return 'p='+p+'|s='+s+'|c='+c+'|v='+v+'|i='+i})()"
 
   /** Пауза UI-webview: postMessage IFrame API доходит и до кросс-доменных
    *  embed-iframe YouTube (отправитель — топ-документ). */
@@ -458,15 +535,19 @@ object MobileMediaHelper {
       "document.querySelectorAll('video,audio').forEach(function(m){" +
       "try{m.pause()}catch(e){}})})()"
 
-  /** Реплей после снятия onPause-паузы (страница ещё видима — до onStop):
-   *  только НАЧАТЫЕ элементы (currentTime>0 — не заводить то, что пользователь
-   *  ставил на паузу сам) + playVideo в iframe-ы (кросс-доменно). */
-  private val PLAY_JS =
+  /** Реплей файлового видео после снятия onPause-паузы (страница ещё видима —
+   *  до onStop): только НАЧАТЫЕ элементы (currentTime>0 — не заводить то, что
+   *  пользователь ставил на паузу сам). */
+  private val FILE_REPLAY_JS =
     "(function(){document.querySelectorAll('video,audio').forEach(function(m){" +
-      "try{if(m.currentTime>0&&!m.ended)m.play()}catch(e){}});" +
-      "document.querySelectorAll('iframe').forEach(function(f){" +
-      "try{f.contentWindow.postMessage(" +
-      "JSON.stringify({event:'command',func:'playVideo',args:[]}),'*')}catch(e){}})})()"
+      "try{if(m.currentTime>0&&!m.ended)m.play()}catch(e){}})})()"
+
+  /** Реплей вкладки YouTube (duopulse-237): playVideo только в АКТИВНУЮ
+   *  вкладку — хук фронта __duopulseBgReplay (модель вкладок знает, кто
+   *  активен; под просмотрщиком PDF активная по DOM скрыта). Отвечает 1/0. */
+  private val TAB_REPLAY_JS =
+    "(function(){try{return (window.__duopulseBgReplay&&window.__duopulseBgReplay())?1:0}" +
+      "catch(e){return 0}})()"
 
   /** Сервис жив (для смоуков/диагностики). */
   fun isServiceOn(): Boolean = serviceOn
