@@ -18,10 +18,15 @@ import {
   chipView,
   folderReorderAllowed,
   bmFolderPanelHeight,
+  dropEdge,
+  folderPlacement,
   isExternalBmDrag,
+  isExternalFolderDrag,
   parseDragPayload,
+  parseDragFolder,
   uniqueGroupName,
   BM_DRAG_MIME,
+  BM_FOLDER_MIME,
 } from "./bmbar";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge/gen/types";
 
@@ -277,5 +282,42 @@ describe("duopulse-160: drag через webview-границу и новая г�
     );
     // регистр не важен — как проверка дубликата в Core
     expect(uniqueGroupName("Музыка", ["МУЗЫКА"])).toBe("Музыка (2)");
+  });
+});
+
+describe("duopulse-242: краевые зоны дропа папки и перенос папок", () => {
+  it("dropEdge: края — «до»/«после», середина — «внутрь» (жалоба «хотел рядом, зашла внутрь»)", () => {
+    const w = 100;
+    expect(dropEdge(5, w)).toBe("before"); // < 30% — слева от цели
+    expect(dropEdge(29, w)).toBe("before");
+    expect(dropEdge(31, w)).toBe("into"); // середина
+    expect(dropEdge(50, w)).toBe("into");
+    expect(dropEdge(69, w)).toBe("into");
+    expect(dropEdge(71, w)).toBe("after"); // > 70% — справа от цели
+    expect(dropEdge(95, w)).toBe("after");
+    expect(dropEdge(0, 0)).toBe("into"); // вырожденный размер — не «до»
+  });
+
+  it("folderPlacement: «внутрь» — цель родителем; края — рядом в ряду цели", () => {
+    const own = [7, 2, 16, 18]; // сестринские ряда (по позиции)
+    expect(folderPlacement("into", null, own, 16)).toEqual({ parent: 16, beforeId: null });
+    expect(folderPlacement("before", null, own, 16)).toEqual({ parent: null, beforeId: 16 });
+    expect(folderPlacement("after", null, own, 7)).toEqual({ parent: null, beforeId: 2 });
+    expect(folderPlacement("after", null, own, 16)).toEqual({ parent: null, beforeId: 18 });
+    // последняя в ряду — «после» = конец (null)
+    expect(folderPlacement("after", null, own, 18)).toEqual({ parent: null, beforeId: null });
+    // «до» неизвестной цели — конец (страховка, не путь UI)
+    expect(folderPlacement("before", 3, [1, 2], 99)).toEqual({ parent: 3, beforeId: null });
+  });
+
+  it("isExternalFolderDrag/parseDragFolder: свой MIME несёт id папки, мусор — null", () => {
+    expect(isExternalFolderDrag([BM_FOLDER_MIME])).toBe(true);
+    expect(isExternalFolderDrag([BM_DRAG_MIME, "text/plain"])).toBe(false);
+    expect(isExternalFolderDrag([])).toBe(false);
+    const get = (m: string): string =>
+      m === BM_FOLDER_MIME ? JSON.stringify({ folder: 19 }) : "";
+    expect(parseDragFolder(get)).toBe(19);
+    expect(parseDragFolder(() => "{не json")).toBe(null);
+    expect(parseDragFolder(() => JSON.stringify({ url: "https://x" }))).toBe(null);
   });
 });

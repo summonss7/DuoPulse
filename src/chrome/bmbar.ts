@@ -32,6 +32,14 @@
 // duopulse-219: правый клик по пустому месту — ещё и «Сортировать…»
 // (алфавит/обратный/по дате добавления; порядок пишет bmbar_reorder),
 // меню папки — режим живой сортировки группы (group_set_sort).
+// duopulse-242: дроп папки на папку — КРАЕВЫЕ зоны (левая треть «рядом
+// слева», правая «рядом справа», середина «внутрь») — раньше вся папка
+// считалась «внутрь», и «поставить рядом» вкладывало папку внутрь соседки
+// (жалоба Артёма: AI «левее» Network зашла внутрь, назад не достать); папка
+// за правым краем последнего пункта — в конец ряда (дроп «в пустоту» молчал);
+// папки перетаскиваются и МЕЖДУ webview (BM_FOLDER_MIME: строка ↔ панель
+// папки), dragend обновляет строку — кросс-webview-переносы не оставляют
+// устаревшего рендера.
 import { listen } from "@tauri-apps/api/event";
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
@@ -140,6 +148,59 @@ export function barSortUrls(
  * текст — External-ветка dragover/drop строки и панели папки. */
 export function isExternalBmDrag(types: readonly string[]): boolean {
   return types.includes(BM_DRAG_MIME) || types.includes("text/plain");
+}
+
+/** Свой MIME-тип drag-слоя ПАПОК (duopulse-242): закладки ходят между webview
+ *  (строка ↔ панель папки) под BM_DRAG_MIME, но в dragover данные читать
+ *  нельзя (только types) — приёмник не отличит закладку от папки. Папки
+ *  ходят под отдельным типом: строка заранее показывает краевые зоны
+ *  («рядом»), а не только «внутрь». */
+export const BM_FOLDER_MIME = "application/x-duopulse-bm-folder";
+
+/** Похоже ли на drag ПАПКИ (чистая, тестится): External-ветка dragover/drop
+ *  строки и панели папки. */
+export function isExternalFolderDrag(types: readonly string[]): boolean {
+  return types.includes(BM_FOLDER_MIME);
+}
+
+/** Payload дропа ПАПКИ (чистая, тестится): id перетаскиваемой группы;
+ *  чужой/битый payload — null, дроп игнорируется. */
+export function parseDragFolder(get: (mime: string) => string): number | null {
+  try {
+    const v = JSON.parse(get(BM_FOLDER_MIME)) as { folder?: unknown };
+    return typeof v.folder === "number" && Number.isFinite(v.folder) ? v.folder : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Зона дропа по краям цели (чистая, тестится, duopulse-242): <0.3 длины —
+ *  «до цели», >0.7 — «после», середина — «внутрь». Жалоба Артёма: весь
+ *  диапазон над папкой считался «внутрь» — «хотел поставить рядом, а она
+ *  зашла внутрь»; теперь края дают вставку рядом, как в Chrome. */
+export function dropEdge(offset: number, size: number): "before" | "into" | "after" {
+  if (size <= 0) return "into";
+  const rel = offset / size;
+  if (rel < 0.3) return "before";
+  return rel > 0.7 ? "after" : "into";
+}
+
+/** Куда ставится перетаскиваемая папка при дропе на папку-цель (чистая,
+ *  тестится, duopulse-242): «внутрь» — цель родителем (позиция в конец);
+ *  края — родитель ЦЕЛИ и место рядом с ней (after — перед следующей
+ *  сестринской, последняя — в конец). Чужой родитель не отсекается: путь
+ *  «перенос под родителя → перестановка» собирает вызов drop. */
+export function folderPlacement(
+  zone: "before" | "into" | "after",
+  targetParent: number | null,
+  siblings: readonly number[],
+  target: number,
+): { parent: number | null; beforeId: number | null } {
+  if (zone === "into") return { parent: target, beforeId: null };
+  const at = siblings.indexOf(target);
+  if (zone === "before") return { parent: targetParent, beforeId: at >= 0 ? target : null };
+  const next = at >= 0 ? siblings[at + 1] : undefined;
+  return { parent: targetParent, beforeId: next ?? null };
 }
 
 /** Payload дропа закладки: url + группа-источник (null — источник не
@@ -567,31 +628,63 @@ export function initBmBar(): void {
     if (fid !== undefined) {
       dragFolderId = Number(fid);
       item.classList.add("dragging");
+      // payload для приёмников в ДРУГИХ webview (панель папки, duopulse-242):
+      // id папки — приёмник знает форму подсветки по MIME-типу заранее
+      e.dataTransfer?.setData(BM_FOLDER_MIME, JSON.stringify({ folder: dragFolderId }));
       if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
     }
   });
   bar().addEventListener("dragover", (e) => {
-    // внешний drag закладки (из панели папки — другой webview, duopulse-160):
-    // свой ход только в папку-цель, маркеров-вставки нет (порядок чипов
-    // чужой закладки на строке не меняется)
-    const external =
+    // внешний drag (панель папки — другой webview): закладка (duopulse-160)
+    // ходит только в папку-цель; папка (duopulse-242) — как своя: краевые
+    // зоны «рядом»/«внутрь» на папках и выход на уровень строки
+    const extBm =
       !dragUrl &&
       dragFolderId === null &&
       !!e.dataTransfer &&
       isExternalBmDrag([...e.dataTransfer.types]);
-    if (!dragUrl && dragFolderId === null && !external) return;
+    const extFolder =
+      !dragUrl &&
+      dragFolderId === null &&
+      !!e.dataTransfer &&
+      isExternalFolderDrag([...e.dataTransfer.types]);
+    if (!dragUrl && dragFolderId === null && !extBm && !extFolder) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
     const folder = (e.target as HTMLElement).closest<HTMLElement>(".bm-folder");
     clearDragMarks("insert");
     if (folder) {
-      // на папке: чип — перенос в неё (duopulse-151), папка — вложение
-      if ((dragUrl && folder.dataset.url === undefined) || dragFolderId !== null || external) {
-        folder.classList.add("drop-target");
+      const folderId = Number(folder.dataset.folder);
+      // ПАПКА над папкой: краевые зоны (duopulse-242) — левая треть «рядом
+      // слева», правая «рядом справа» (маркер-вставка), середина — вложение
+      // (подсветка); подсветки честные: показываем только то, что сработает
+      // (внешнюю папку в dragover не проверить — данных нет, показываем
+      // оптимистично, drop сам валидирует и молча не сработает)
+      if (dragFolderId !== null || extFolder) {
+        const r = folder.getBoundingClientRect();
+        const zone = dropEdge(e.clientX - r.left, r.width);
+        const target = groupsById.get(folderId);
+        const targetParent = target?.parentId ?? null;
+        const own = siblingsOfParent(targetParent).map((g) => g.id);
+        const place = folderPlacement(zone, targetParent, own, folderId);
+        const dragParent =
+          dragFolderId !== null ? groupsById.get(dragFolderId)?.parentId ?? null : null;
+        const sameParent = extFolder || dragParent === targetParent;
+        if (zone === "into" || !sameParent) {
+          const ok =
+            extFolder || canGroupMoveTo([...groupsById.values()], dragFolderId as number, place.parent);
+          if (ok) folder.classList.add("drop-target");
+        } else if (place.beforeId !== null && place.beforeId !== dragFolderId) {
+          folder.classList.add(zone === "before" ? "drop-before" : "drop-after");
+        }
+        return;
       }
+      // ЧИП (свой или внешний) над папкой — перенос в неё (duopulse-151):
+      // чипы между папками не ставятся (порядок строки — чипы, затем папки)
+      if (dragUrl || extBm) folder.classList.add("drop-target");
       return;
     }
-    if (external) return;
+    if (extBm) return;
     // между пунктами: маркер-вставка у ближайшего правого соседа своего ряда
     const items = [...bar().querySelectorAll<HTMLElement>(".bm-item")];
     const next = items.find((el) => {
@@ -599,15 +692,31 @@ export function initBmBar(): void {
       return r.left + r.width / 2 > e.clientX;
     });
     if (!next) {
+      // правее последнего пункта: папка — в конец ряда (duopulse-242), чип —
+      // маркер после последнего чипа (в конец чипов, до первой папки)
       const last = items[items.length - 1];
-      last?.classList.add("drop-after");
+      if (dragUrl && last?.dataset.folder !== undefined) {
+        const lastChip = [...items].reverse().find((el) => el.dataset.url !== undefined);
+        lastChip?.classList.add("drop-after");
+      } else {
+        last?.classList.add("drop-after");
+      }
       return;
     }
     if (dragUrl && next.dataset.url !== undefined) next.classList.add("drop-before");
+    if (dragUrl && next.dataset.folder !== undefined) {
+      // курсор между чипами и папками: чип встанет в конец чипов — маркер
+      // после последнего чипа (duopulse-242, раньше подсветки не было вовсе)
+      const lastChip = [...items].reverse().find((el) => el.dataset.url !== undefined);
+      lastChip?.classList.add("drop-after");
+    }
     if (dragFolderId !== null && next.dataset.folder !== undefined) {
       if (folderReorderAllowed(folderModel(), dragFolderId, Number(next.dataset.folder))) {
         next.classList.add("drop-before");
       }
+    }
+    if (extFolder && next.dataset.folder !== undefined) {
+      next.classList.add("drop-before");
     }
   });
   bar().addEventListener("drop", (e) => {
@@ -617,6 +726,31 @@ export function initBmBar(): void {
       if (!e.dataTransfer) return;
       const folder = (e.target as HTMLElement).closest<HTMLElement>(".bm-folder");
       const payload = parseDragPayload((m) => e.dataTransfer?.getData(m) ?? "");
+      const extFolderId = isExternalFolderDrag([...e.dataTransfer.types])
+        ? parseDragFolder((m) => e.dataTransfer?.getData(m) ?? "")
+        : null;
+      if (extFolderId !== null && folder) {
+        // внешний drag ПАПКИ (панель → строка, duopulse-242): та же механика
+        // краевых зон, что у своей папки — «рядом» или «внутрь»
+        e.preventDefault();
+        clearDragMarks();
+        const folderId = Number(folder.dataset.folder);
+        const r = folder.getBoundingClientRect();
+        const zone = dropEdge(e.clientX - r.left, r.width);
+        const target = groupsById.get(folderId);
+        const targetParent = target?.parentId ?? null;
+        const own = siblingsOfParent(targetParent).map((g) => g.id);
+        void placeFolder(extFolderId, folderPlacement(zone, targetParent, own, folderId));
+        return;
+      }
+      if (extFolderId !== null) {
+        // внешняя папка на ФОН строки (мимо папок) — вынос на уровень строки
+        // (root): главный жест «забрать папку из вложенности» (duopulse-242)
+        e.preventDefault();
+        clearDragMarks();
+        void placeFolder(extFolderId, { parent: null, beforeId: null });
+        return;
+      }
       if (!folder || !payload) return;
       e.preventDefault();
       clearDragMarks();
@@ -635,20 +769,17 @@ export function initBmBar(): void {
       return;
     }
     if (folder && fid !== null) {
-      // папка → папка: вложение (group_move), с проверками дерева
+      // папка → папка (duopulse-242): краевые зоны — «рядом слева/справа»
+      // или «внутрь» (group_move), с проверками дерева
       clearDragMarks();
       dragFolderId = null;
-      const target = Number(folder.dataset.folder);
-      const g = [...groupsById.values()];
-      if (canGroupMoveTo(g, fid, target)) {
-        void bridge.history
-          .groupMove({ id: fid, parentId: target })
-          .then(refreshBmBar)
-          .catch((er) => {
-            err(er);
-            void refreshBmBar();
-          });
-      }
+      const folderId = Number(folder.dataset.folder);
+      const r = folder.getBoundingClientRect();
+      const zone = dropEdge(e.clientX - r.left, r.width);
+      const target = groupsById.get(folderId);
+      const targetParent = target?.parentId ?? null;
+      const own = siblingsOfParent(targetParent).map((g) => g.id);
+      void placeFolder(fid, folderPlacement(zone, targetParent, own, folderId));
       return;
     }
     // вставка между пунктами: ближайший правый сосед своего ряда
@@ -689,12 +820,30 @@ export function initBmBar(): void {
             void refreshBmBar();
           });
       }
+      return;
+    }
+    if (fid !== null && !next) {
+      // дроп правее последнего пункта — папка в конец своего ряда
+      // (duopulse-242: раньше дроп «в пустоту» молча ничего не делал)
+      clearDragMarks();
+      dragFolderId = null;
+      void bridge.history
+        .groupReorder({ id: fid, beforeId: null })
+        .then(refreshBmBar)
+        .catch((er) => {
+          err(er);
+          void refreshBmBar();
+        });
     }
   });
   bar().addEventListener("dragend", () => {
     dragUrl = "";
     dragFolderId = null;
     clearDragMarks();
+    // дроп мог упасть в ДРУГОЙ webview (панель папки) и переложить чип/папку
+    // — строка обновится сама по своему drop; здесь страхуемся от устаревания
+    // после кросс-webview-переносов (duopulse-242)
+    void refreshBmBar();
   });
   void refreshBmBar();
 }
@@ -854,3 +1003,38 @@ function beginFolderRename(id: number): void {
 /** Папка под курсором (делегированный hover) и таймер открытия. */
 let hoverFolder: HTMLElement | null = null;
 let hoverTimer: number | null = null;
+
+/** Сестринские группы родителя (по позиции, из последнего рендера строки):
+ *  список-контекст для вставки «рядом» с целью (folderPlacement). */
+function siblingsOfParent(parent: number | null): BookmarkGroupInfo[] {
+  return [...groupsById.values()]
+    .filter((g) => (g.parentId ?? null) === parent)
+    .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+}
+
+/** Исполнить план дропа папки (duopulse-242, чистых шагов два): «внутрь» —
+ *  перенос под родителя-цель (проверка дерева, group_move ставит в конец);
+ *  «рядом» — если родитель чужой, сперва перенос под родителя ЦЕЛИ, затем
+ *  перестановка перед beforeId. Оба шага идемпотентны, провал проверки —
+ *  молча ничего не делаем (подсветка обмануть не должна). */
+async function placeFolder(
+  fid: number,
+  place: { parent: number | null; beforeId: number | null },
+): Promise<void> {
+  try {
+    const g = groupsById.get(fid);
+    if (!g || g.isDefault) return;
+    const sameParent = (g.parentId ?? null) === place.parent;
+    if (!sameParent) {
+      if (!canGroupMoveTo([...groupsById.values()], fid, place.parent)) return;
+      await bridge.history.groupMove({ id: fid, parentId: place.parent });
+    }
+    if (place.parent !== fid && place.beforeId !== null && place.beforeId !== fid) {
+      await bridge.history.groupReorder({ id: fid, beforeId: place.beforeId });
+    }
+    await refreshBmBar();
+  } catch (e) {
+    err(e);
+    await refreshBmBar();
+  }
+}

@@ -663,6 +663,24 @@ body {
 .bm-row.bm-back:hover {
   color: var(--text-primary);
 }
+/* duopulse-242: крошка «‹ родитель» — цель выноса подпапки на уровень выше
+   (drop во время drag&drop): та же рамка-неон, что у подгрупп */
+.bm-row.bm-back.drop-target {
+  background: var(--hover-neutral);
+  box-shadow: inset 0 0 0 1px var(--accent-neon);
+  color: var(--text-primary);
+}
+/* duopulse-242: рамка вокруг панели — «брось в открытую папку» (внешняя
+   закладка/папка мимо строк): раньше подсветки не было вовсе */
+.bm-menu.drop-root {
+  box-shadow: inset 0 0 0 1px var(--accent-neon);
+}
+/* duopulse-242: папка-цель на строке — иконка Folder подхватывает неон,
+   «внутрь» читается с первого взгляда */
+.bm-folder.drop-target svg,
+.bm-row.bm-sub.drop-target svg {
+  color: var(--accent-neon);
+}
 .bm-row.bm-empty {
   color: var(--text-muted);
   cursor: default;

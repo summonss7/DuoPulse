@@ -26,7 +26,9 @@
 //! «bmbar:sort:<режим>» (сортировка чипов строки) и
 //! «bmgroup:sort:<id группы>:<режим>» (живая сортировка папки) — duopulse-219,
 //! а также меню ПАНЕЛИ папки: «bmrow:section» / «bmrow:rename:<url>» /
-//! «bmrow:delete:<url>» / «bmsection:new» (duopulse-189) — их выбор
+//! «bmrow:delete:<url>» / «bmsection:new» (duopulse-189) и меню подпапки
+//! «bmsub:rename:<id>» / «bmsub:up:<id>» / «bmsub:delete:<id>» (duopulse-242)
+//! — их выбор
 //! уходит не в UI-webview, а в панель-webview (emit_to chrome-panel).
 //! Содержимое папки строки закладок — панель-webview bmfolder
 //! (chrome_panel.rs, duopulse-147): список не сделать нативным меню —
@@ -283,6 +285,33 @@ fn build_bmrow_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>
 fn build_bmsection_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, String> {
     let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
     menu.append(&item(app, "bmsection:new", "Создать раздел…", true, None)?)
+        .map_err(|e| format!("меню: {e}"))?;
+    Ok(menu)
+}
+
+/// Меню ПОДПАПКИ открытой папки (duopulse-242): раньше правый клик по строке
+/// подпапки в панели молчал (или предлагал «Создать раздел…» из меню пустого
+/// места), а вытащить подпапку из родителя было НЕЛЬЗЯ никак — ни drag&drop
+/// (строки подпапок не были draggable), ни меню. Жалоба Артёма: перетащил
+/// папку AI «левее», она зашла внутрь Network, назад не достать. Состав:
+/// «Переименовать…» / «Переместить на уровень выше» (group_move в родителя
+/// открытой папки — тот самый выход из вложенности, UI зовёт с проверками
+/// canGroupMoveTo) / «Удалить папку» (group_remove — с подгруппами,
+/// закладки остаются, как у папок строки). id группы — в пункте меню.
+fn build_bmsub_menu(app: &AppHandle, payload: &Value) -> Result<Menu<tauri::Wry>, String> {
+    let menu = Menu::new(app).map_err(|e| format!("меню: {e}"))?;
+    let key = payload
+        .get("id")
+        .and_then(Value::as_i64)
+        .unwrap_or(-1)
+        .to_string();
+    menu.append(&item(app, &format!("bmsub:rename:{key}"), "Переименовать…", true, None)?)
+        .map_err(|e| format!("меню: {e}"))?;
+    menu.append(&item(app, &format!("bmsub:up:{key}"), "Переместить на уровень выше", true, None)?)
+        .map_err(|e| format!("меню: {e}"))?;
+    menu.append(&PredefinedMenuItem::separator(app).map_err(|e| format!("меню: {e}"))?)
+        .map_err(|e| format!("меню: {e}"))?;
+    menu.append(&item(app, &format!("bmsub:delete:{key}"), "Удалить папку", true, None)?)
         .map_err(|e| format!("меню: {e}"))?;
     Ok(menu)
 }
@@ -679,6 +708,7 @@ pub async fn ui_menu_open(
         "bmbar" => build_bmbar_menu(&app)?,
         "bmrow" => build_bmrow_menu(&app, &payload)?,
         "bmsection" => build_bmsection_menu(&app)?,
+        "bmsub" => build_bmsub_menu(&app, &payload)?,
         other => return Err(format!("неизвестное меню: {other}")),
     };
     let window = app.get_window("main").ok_or("окно main не найдено")?;
@@ -743,6 +773,12 @@ pub fn emit_action(app: &AppHandle, id: &str) {
         serde_json::json!({ "menu": "bmrow", "act": "delete", "url": url })
     } else if id == "bmsection:new" {
         serde_json::json!({ "menu": "bmsection", "act": "section" })
+    } else if let Some(g) = id.strip_prefix("bmsub:rename:") {
+        serde_json::json!({ "menu": "bmsub", "act": "rename", "groupId": g.parse::<i64>().unwrap_or(-1) })
+    } else if let Some(g) = id.strip_prefix("bmsub:up:") {
+        serde_json::json!({ "menu": "bmsub", "act": "up", "groupId": g.parse::<i64>().unwrap_or(-1) })
+    } else if let Some(g) = id.strip_prefix("bmsub:delete:") {
+        serde_json::json!({ "menu": "bmsub", "act": "delete", "groupId": g.parse::<i64>().unwrap_or(-1) })
     } else if let Some(rest) = id.strip_prefix("duo:") {
         let (act, param) = rest.split_once(':').unwrap_or((rest, ""));
         match act {
@@ -780,12 +816,13 @@ pub fn emit_action(app: &AppHandle, id: &str) {
     } else {
         return;
     };
-    // Меню панели папки (duopulse-189) открывается ТОЛЬКО из панель-webview
+    // Меню панели папки (duopulse-189; bmsub — duopulse-242) открывается
+    // ТОЛЬКО из панель-webview
     // — выбор уходит туда; UI-webview такие события не ждёт (его обработчики
     // switch-ят по menu и неизвестный вид молча пропустят, но и слать незачем).
     if matches!(
         action.get("menu").and_then(Value::as_str),
-        Some("bmrow") | Some("bmsection")
+        Some("bmrow") | Some("bmsection") | Some("bmsub")
     ) {
         let _ = app.emit_to(
             tauri::EventTarget::Webview {

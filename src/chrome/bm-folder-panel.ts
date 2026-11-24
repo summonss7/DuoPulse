@@ -26,6 +26,13 @@
 // duopulse-173: правый клик в панели — «Создать раздел…»: подгруппа внутри
 // открытой папки (уникальное имя «Новый раздел», сразу инлайн-правка на
 // новой строке); глубина дерева ≤ 3 — на третьем уровне пункт не предлагается.
+// duopulse-242: подпапки СТАЛИ ПЕРЕТАСКИВАЕМЫМИ (раньше draggable был только
+// у строк-закладок — вытащить папку из папки было нельзя никак): соседки —
+// краевые зоны «рядом»/«внутрь» (dropEdge), крошка «‹ родитель» — вынос на
+// уровень выше, фон — в конец подпапок; внешняя папка со строки (BM_FOLDER_MIME)
+// — в открытую папку/соседку/на уровень выше. Правый клик по подпапке — меню
+// bmsub: «Переименовать…» / «Переместить на уровень выше» / «Удалить папку»
+// (жалоба Артёма: «перетащил папку левее — зашла внутрь, назад не достать»).
 // Группа — из ?group=<id> (передал открывший, ui_panel_open query).
 import { bridge } from "../bridge";
 import type { BookmarkGroupInfo, HistoryBookmark } from "../bridge";
@@ -37,9 +44,15 @@ import {
   chipView,
   uniqueGroupName,
   BM_DRAG_MIME,
+  BM_FOLDER_MIME,
   isExternalBmDrag,
+  isExternalFolderDrag,
   parseDragPayload,
+  parseDragFolder,
+  dropEdge,
+  folderPlacement,
 } from "./bmbar";
+import { canGroupMoveTo } from "./groups-tree";
 import { beginInlineRename } from "./bm-rename";
 import { closePanel } from "./panel-window";
 import { onOverlayMenuAction, openOverlayMenu } from "./overlay-menu";
@@ -56,6 +69,10 @@ let stack: number[] = [];
 /** Открытая группа последнего рендера (глубина — можно ли вкладывать
  *  ещё раздел, duopulse-173; дерево групп ≤ 3 уровней). */
 let openGroup: BookmarkGroupInfo | null = null;
+
+/** Все группы последнего рендера: проверки переносов (canGroupMoveTo) и
+ *  план дропа подпапок (duopulse-242). */
+let allGroups: BookmarkGroupInfo[] = [];
 
 /** Порядок закладок панели после drag&drop (чистая, тестится): dragged
  * вынимается и вставляется на индекс at (0 = верх, клампится). */
@@ -93,6 +110,7 @@ async function renderPanel(): Promise<void> {
       return;
     }
     openGroup = curGroup;
+    allGroups = groups;
     const kids = groups
       .filter((g) => g.parentId === cur)
       .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
@@ -119,6 +137,7 @@ function renderRows(
   el.replaceChildren();
   // имена для инлайн-правки (duopulse-149) — рендер уже без адреса-фолбэка
   bmTitleByUrl = new Map(bookmarks.map((b) => [b.url, b.title.trim()]));
+  subNameById = new Map(kids.map((k) => [k.id, k.name]));
   const parent = cur.parentId != null ? groups.find((g) => g.id === cur.parentId) : undefined;
   if (parent) {
     const back = document.createElement("button");
@@ -141,6 +160,8 @@ function renderRows(
     row.type = "button";
     row.className = "bm-row bm-sub";
     row.dataset.sub = String(k.id);
+    row.draggable = true; // duopulse-242: подпапку можно перетащить — рядом,
+    // внутрь соседки и ВЫНЕСТИ наружу (крошка «‹ родитель» / строка)
     row.innerHTML =
       '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M1.8 4.2c0-.6.5-1.1 1.1-1.1h3l1.4 1.6h5.8c.6 0 1.1.5 1.1 1.1v6.9c0 .6-.5 1.1-1.1 1.1H2.9c-.6 0-1.1-.5-1.1-1.1z"/></svg>';
     const label = document.createElement("span");
@@ -203,8 +224,13 @@ function renderRows(
 
 /** Тянутая закладка (url) — маркеры вставки и подгруппы-цели. */
 let dragUrl = "";
+/** Тянутая подпапка (id группы, duopulse-242): перестановка среди сестёр,
+ *  вложение в соседку, вынос наружу крошкой «‹ родитель» или на строку. */
+let dragSubId: number | null = null;
 /** Имена закладок последнего рендера (стартовое значение input правки). */
 let bmTitleByUrl = new Map<string, string>();
+/** Имена подпапок последнего рендера (правка из меню bmsub, duopulse-242). */
+let subNameById = new Map<number, string>();
 
 /** Можно ли создать подгруппу в открытой папке (duopulse-173): дерево
  *  групп ≤ 3 уровней — внутри подгруппы 3-го уровня уже нельзя. */
@@ -276,7 +302,41 @@ export function initBmFolderPanel(): void {
   // панель-webview («bmrow»/«bmsection»); чужие виды сюда не приходят, но
   // фильтр оставляем — слушатель общий у UI-бандла.
   onOverlayMenuAction((a) => {
-    if (a.menu !== "bmrow" && a.menu !== "bmsection") return;
+    if (a.menu !== "bmrow" && a.menu !== "bmsection" && a.menu !== "bmsub") return;
+    // меню подпапки (duopulse-242): «Переместить на уровень выше» — главный
+    // выход из вложенности без drag&drop (жалоба: «не могу забрать папку
+    // назад»); «Переименовать…» — инлайн; «Удалить папку» — как у папок строки
+    if (a.menu === "bmsub") {
+      const id = typeof a.groupId === "number" ? a.groupId : -1;
+      if (a.act === "up") {
+        void moveSubUp(id);
+        return;
+      }
+      if (a.act === "delete") {
+        void deleteSub(id);
+        return;
+      }
+      if (a.act === "rename") {
+        const row = panel().querySelector<HTMLElement>(`.bm-sub[data-sub="${id}"]`);
+        if (!row) return; // строка ушла (панель перерисовалась) — тишина
+        beginInlineRename({
+          host: row,
+          initial: subNameById.get(id) ?? "",
+          allowEmpty: false, // папка без имени не видна в дереве
+          ariaLabel: t("Переименовать группу"),
+          save: (title) => {
+            void bridge.history
+              .groupRename({ id, name: title })
+              .then(renderPanel)
+              .catch((e2) => {
+                err(e2);
+                void renderPanel();
+              });
+          },
+        });
+      }
+      return;
+    }
     if (a.menu === "bmsection" || a.act === "section") {
       void createSection();
       return;
@@ -343,9 +403,18 @@ export function initBmFolderPanel(): void {
   // правый клик — нативное меню закладки (duopulse-189): «Создать раздел…»
   // / «Переименовать…» / «Удалить закладку» — системный popup поверх всех
   // webview (HTML-меню пряталось за видео у коротких папок, duopulse-189).
-  // Клик мимо закладки — «Создать раздел…» в открытой папке (duopulse-173)
+  // Правый клик по ПОДПАПКЕ — своё меню bmsub (duopulse-242): переименовать,
+  // вынести на уровень выше, удалить; раньше меню у подпапки не было вовсе —
+  // клик по ней предлагал «Создать раздел…» из меню пустого места. Клик мимо
+  // закладок — «Создать раздел…» в открытой папке (duopulse-173)
   panel().addEventListener("contextmenu", (e) => {
     if ((e.target as HTMLElement).closest("input")) return; // правка имени
+    const sub = (e.target as HTMLElement).closest<HTMLElement>(".bm-sub");
+    if (sub) {
+      e.preventDefault();
+      openOverlayMenu("bmsub", e.clientX, e.clientY, { id: Number(sub.dataset.sub) });
+      return;
+    }
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
     if (row) {
       e.preventDefault();
@@ -357,6 +426,16 @@ export function initBmFolderPanel(): void {
     showSectionMenu(e.clientX, e.clientY);
   });
   panel().addEventListener("dragstart", (e) => {
+    const sub = (e.target as HTMLElement).closest<HTMLElement>(".bm-sub");
+    if (sub) {
+      dragSubId = Number(sub.dataset.sub);
+      sub.classList.add("dragging");
+      // payload для приёмников в ДРУГИХ webview (строка закладок): id папки
+      // — по MIME-типу приёмник заранее показывает краевые зоны (duopulse-242)
+      e.dataTransfer?.setData(BM_FOLDER_MIME, JSON.stringify({ folder: dragSubId }));
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+      return;
+    }
     const row = (e.target as HTMLElement).closest<HTMLElement>(".bm-row[data-url]");
     const url = row?.dataset.url;
     if (!url) return;
@@ -372,20 +451,57 @@ export function initBmFolderPanel(): void {
     if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
   });
   panel().addEventListener("dragover", (e) => {
-    // внешний drag закладки (чип строки — другой webview, duopulse-160):
-    // цель — подгруппа или сама папка (без позиции: чужой порядок не правим)
-    const external =
-      !dragUrl && !!e.dataTransfer && isExternalBmDrag([...e.dataTransfer.types]);
-    if (!dragUrl && !external) return;
+    // внешний drag (другой webview, duopulse-160/242): закладка — подгруппа
+    // или сама папка; ПАПКА — как своя подпапка: краевые зоны, вынос крошкой
+    const types = e.dataTransfer ? [...e.dataTransfer.types] : [];
+    const extFolder = !dragUrl && dragSubId === null && isExternalFolderDrag(types);
+    const external = !dragUrl && dragSubId === null && isExternalBmDrag(types);
+    if (!dragUrl && dragSubId === null && !extFolder && !external) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
     clearMarks("insert");
     const sub = (e.target as HTMLElement).closest<HTMLElement>(".bm-sub");
+    const back = (e.target as HTMLElement).closest<HTMLElement>(".bm-back");
+    // ПАПКА (своя подпапка или внешняя, duopulse-242): крошка — вынос на
+    // уровень выше; соседка — края «рядом»/середина «внутрь»; фон — конец
+    // подпапок (своя) или перенос в открытую папку (внешняя, рамка панели)
+    if (dragSubId !== null || extFolder) {
+      if (back) {
+        back.classList.add("drop-target");
+        return;
+      }
+      if (sub) {
+        const r = sub.getBoundingClientRect();
+        const zone = dropEdge(e.clientY - r.top, r.height);
+        if (zone === "into") {
+          const ok =
+            extFolder ||
+            (dragSubId !== null && canGroupMoveTo(allGroups, dragSubId, Number(sub.dataset.sub)));
+          if (ok) sub.classList.add("drop-target");
+        } else if (dragSubId === null || Number(sub.dataset.sub) !== dragSubId) {
+          sub.classList.add(zone === "before" ? "drop-before" : "drop-after");
+        }
+        return;
+      }
+      if (dragSubId !== null) {
+        const subs = [...panel().querySelectorAll<HTMLElement>(".bm-sub")];
+        subs[subs.length - 1]?.classList.add("drop-after");
+      } else {
+        panel().classList.add("drop-root");
+      }
+      return;
+    }
     if (sub) {
+      // закладка (своя или внешняя) над подгруппой — перенос в неё
       sub.classList.add("drop-target");
       return;
     }
-    if (external) return;
+    if (external) {
+      // внешняя закладка мимо подпапок — перенос в саму папку (в конец):
+      // рамка вокруг панели, раньше подсветки не было вовсе (duopulse-242)
+      panel().classList.add("drop-root");
+      return;
+    }
     // маркер-вставка у первой строки ниже курсора (вертикальный список)
     const rows = [...panel().querySelectorAll<HTMLElement>(".bm-row[data-url]")];
     const next = rows.find((el) => {
@@ -395,9 +511,36 @@ export function initBmFolderPanel(): void {
     (next ?? rows[rows.length - 1])?.classList.add(next ? "drop-before" : "drop-after");
   });
   panel().addEventListener("drop", (e) => {
-    if (!dragUrl && !e.dataTransfer) return;
+    if (!dragUrl && dragSubId === null && !e.dataTransfer) return;
+    const types = e.dataTransfer ? [...e.dataTransfer.types] : [];
+    const extFolder = !dragUrl && dragSubId === null && isExternalFolderDrag(types);
     const sub = (e.target as HTMLElement).closest<HTMLElement>(".bm-sub");
-    // внешний drag (чип строки, duopulse-160): подгруппа — перенос в неё,
+    const back = (e.target as HTMLElement).closest<HTMLElement>(".bm-back");
+    const cur = stack[stack.length - 1] ?? -1;
+    // ПАПКА: своя подпапка (duopulse-242) или внешняя (строка → панель)
+    if (dragSubId !== null || extFolder) {
+      const fid = dragSubId ?? parseDragFolder((m) => e.dataTransfer?.getData(m) ?? "");
+      dragSubId = null;
+      if (fid === null) return;
+      e.preventDefault();
+      clearMarks();
+      const own = allGroups.filter((g) => (g.parentId ?? null) === cur).map((g) => g.id);
+      if (back) {
+        // крошка «‹ родитель»: вынести папку на уровень выше открытой
+        void applyFolderPlacement(fid, { parent: openGroup?.parentId ?? null, beforeId: null });
+        return;
+      }
+      if (sub) {
+        const r = sub.getBoundingClientRect();
+        const zone = dropEdge(e.clientY - r.top, r.height);
+        void applyFolderPlacement(fid, folderPlacement(zone, cur, own, Number(sub.dataset.sub)));
+        return;
+      }
+      // фон/строки закладок: своя — в конец подпапок, внешняя — в папку
+      void applyFolderPlacement(fid, { parent: cur, beforeId: null });
+      return;
+    }
+    // внешний drag закладки (чип строки, duopulse-160): подгруппа — перенос в неё,
     // любое другое место панели — перенос в саму папку (в конец)
     if (!dragUrl) {
       const payload = parseDragPayload((m) => e.dataTransfer?.getData(m) ?? "");
@@ -429,7 +572,11 @@ export function initBmFolderPanel(): void {
   });
   panel().addEventListener("dragend", () => {
     dragUrl = "";
+    dragSubId = null;
     clearMarks();
+    // дроп мог упасть в ДРУГОЙ webview (строка закладок) и переложить папку
+    // — панель перерисуется по факту (duopulse-242, раньше устаревала)
+    void renderPanel();
   });
 }
 
@@ -438,9 +585,10 @@ function clearMarks(mark: "insert" | "all" = "all"): void {
   for (const el of panel().querySelectorAll(".bm-row.drop-before, .bm-row.drop-after")) {
     el.classList.remove("drop-before", "drop-after");
   }
+  panel().classList.remove("drop-root"); // рамка «в открытую папку» (duopulse-242)
   if (mark === "all") {
-    for (const el of panel().querySelectorAll(".bm-sub.drop-target")) {
-      el.classList.remove("drop-target");
+    for (const el of panel().querySelectorAll(".bm-row.drop-target")) {
+      el.classList.remove("drop-target"); // подгруппы И крошка «‹ родитель»
     }
     panel().querySelector(".bm-row.dragging")?.classList.remove("dragging");
   }
@@ -480,6 +628,61 @@ async function moveBookmark(
       await bridge.history.groupToggleBookmark({ url, groupId: src, on: false });
     }
     await bridge.history.groupToggleBookmark({ url, groupId: target, on: true });
+    await renderPanel();
+  } catch (e) {
+    err(e);
+    await renderPanel();
+  }
+}
+
+/** Исполнить план дропа/выноса ПАПКИ в панели (duopulse-242): «внутрь» —
+ *  перенос под родителя-цель (group_move ставит в конец, проверки дерева);
+ *  «рядом»/вынос — если родитель чужой, сперва перенос под нового родителя,
+ *  затем перестановка перед beforeId. Провал проверки — молча ничего (рамка
+ *  подсветки обманывать не должна). */
+async function applyFolderPlacement(
+  fid: number,
+  place: { parent: number | null; beforeId: number | null },
+): Promise<void> {
+  try {
+    const g = allGroups.find((x) => x.id === fid);
+    if (!g || g.isDefault) return;
+    if ((g.parentId ?? null) !== place.parent) {
+      if (!canGroupMoveTo(allGroups, fid, place.parent)) return;
+      await bridge.history.groupMove({ id: fid, parentId: place.parent });
+    }
+    if (place.beforeId !== null && place.beforeId !== fid) {
+      await bridge.history.groupReorder({ id: fid, beforeId: place.beforeId });
+    }
+    await renderPanel();
+  } catch (e) {
+    err(e);
+    await renderPanel();
+  }
+}
+
+/** Вынести подпапку на уровень выше открытой (menu-action bmsub:up,
+ *  duopulse-242): parent открытой папки — корень или общая с ней группа;
+ *  вверх глубина только убывает, цикл невозможен (родитель — предок), но
+ *  проверку оставляем на общих основаниях. */
+async function moveSubUp(id: number): Promise<void> {
+  const parent = openGroup?.parentId ?? null;
+  try {
+    if (!canGroupMoveTo(allGroups, id, parent)) return;
+    await bridge.history.groupMove({ id, parentId: parent });
+    await renderPanel();
+  } catch (e) {
+    err(e);
+    await renderPanel();
+  }
+}
+
+/** Удалить подпапку открытой папки (menu-action bmsub:delete, duopulse-242):
+ *  Core сносит группу с подгруппами, закладки остаются без членства — как
+ *  «Удалить группу» у папок строки (duopulse-163). */
+async function deleteSub(id: number): Promise<void> {
+  try {
+    await bridge.history.groupRemove({ id });
     await renderPanel();
   } catch (e) {
     err(e);

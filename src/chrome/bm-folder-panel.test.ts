@@ -30,6 +30,12 @@ const bm = vi.hoisted(() => ({
   bookmarkList: vi.fn(),
   groupAdd: vi.fn(),
   groupRename: vi.fn(),
+  groupMove: vi.fn(),
+  groupReorder: vi.fn(),
+  groupRemove: vi.fn(),
+  groupSetSort: vi.fn(),
+  groupToggleBookmark: vi.fn(),
+  bookmarkMove: vi.fn(),
   bookmarkRemove: vi.fn(),
   bookmarkUpdate: vi.fn(),
   favicon: vi.fn(),
@@ -196,5 +202,72 @@ describe("duopulse-173/189: контекстные меню панели пап�
     document.getElementById("bmFolder")!.dispatchEvent(off);
     expect(off.defaultPrevented).toBe(false);
     expect(invokes.length).toBe(before); // команды меню не было
+  });
+});
+
+describe("duopulse-242: меню подпапки и вынос из вложенности", () => {
+  /** Открыть панель папки 7 (Network) с подпапкой 19 (AI) внутри; возвращает
+   *  живой массив групп (моки переносов мутируют его — панель перерисуется). */
+  const openWithSub = async (): Promise<
+    { id: number; name: string; parentId: number | null; depth: number;
+      position: number; sortBy: string; count: number; isDefault: boolean }[]
+  > => {
+    const groups = [
+      { id: 7, name: "Network", parentId: null, depth: 1, position: 1, sortBy: "manual", count: 2, isDefault: false },
+      { id: 19, name: "AI", parentId: 7, depth: 2, position: 10, sortBy: "manual", count: 2, isDefault: false },
+    ];
+    bm.groupList.mockImplementation(() => Promise.resolve({ groups }));
+    bm.bookmarkList.mockResolvedValue({ bookmarks: [], total: 0 });
+    bm.favicon.mockResolvedValue({ icon: null });
+    window.history.replaceState(null, "", "/?panel=bmfolder&group=7");
+    document.getElementById("bmFolder")!.replaceChildren();
+    openBmFolderPanel();
+    await vi.waitFor(() => expect(document.querySelector('.bm-sub[data-sub="19"]')).toBeTruthy());
+    return groups;
+  };
+
+  it("правый клик по подпапке — меню bmsub с её id (раньше меню не было)", async () => {
+    await openWithSub();
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
+    document.querySelector('.bm-sub[data-sub="19"]')!.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(lastMenu()?.args).toMatchObject({ kind: "bmsub", payload: { id: 19 } });
+  });
+
+  it("«Переместить на уровень выше» — groupMove под родителя открытой папки (null = строка)", async () => {
+    const groups = await openWithSub();
+    bm.groupMove.mockImplementation((p: { id: number; parentId: number | null }) => {
+      const g = groups.find((x) => x.id === p.id);
+      if (g) g.parentId = p.parentId;
+      return Promise.resolve();
+    });
+    pickMenu({ menu: "bmsub", act: "up", groupId: 19 });
+    await vi.waitFor(() => expect(bm.groupMove).toHaveBeenCalledWith({ id: 19, parentId: null }));
+    // перерисовка: AI больше не ребёнок Network — ушла на уровень строки
+    await vi.waitFor(() => expect(document.querySelector('.bm-sub[data-sub="19"]')).toBeNull());
+  });
+
+  it("«Удалить папку» — groupRemove, строка подпапки уходит", async () => {
+    const groups = await openWithSub();
+    bm.groupRemove.mockImplementation((p: { id: number }) => {
+      const at = groups.findIndex((x) => x.id === p.id);
+      if (at >= 0) groups.splice(at, 1);
+      return Promise.resolve();
+    });
+    pickMenu({ menu: "bmsub", act: "delete", groupId: 19 });
+    await vi.waitFor(() => expect(bm.groupRemove).toHaveBeenCalledWith({ id: 19 }));
+    await vi.waitFor(() => expect(document.querySelector('.bm-sub[data-sub="19"]')).toBeNull());
+  });
+
+  it("«Переименовать…» — инлайн-правка имени подпапки на её строке", async () => {
+    await openWithSub();
+    bm.groupRename.mockResolvedValue(undefined);
+    pickMenu({ menu: "bmsub", act: "rename", groupId: 19 });
+    const input = (await vi.waitFor(() =>
+      document.querySelector<HTMLInputElement>('.bm-sub[data-sub="19"] input.bm-rename'),
+    ))!;
+    input.value = "ИИ";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(bm.groupRename).toHaveBeenCalledWith({ id: 19, name: "ИИ" }));
   });
 });

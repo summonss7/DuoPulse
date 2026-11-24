@@ -10,7 +10,17 @@ import { listen } from "@tauri-apps/api/event";
 
 /** Действие из меню: menu — вид меню, остальные поля — по виду. */
 export interface MenuAction {
-  menu: "tab" | "star" | "duo" | "bmfolder" | "bmchip" | "bmgroup" | "bmbar" | "bmrow" | "bmsection";
+  menu:
+    | "tab"
+    | "star"
+    | "duo"
+    | "bmfolder"
+    | "bmchip"
+    | "bmgroup"
+    | "bmbar"
+    | "bmrow"
+    | "bmsection"
+    | "bmsub";
   [k: string]: unknown;
 }
 
@@ -18,7 +28,17 @@ export interface MenuAction {
  * панель-webview — локальные координаты панели, Core сам прибавит её
  * позицию в окне, duopulse-189). */
 export function openOverlayMenu(
-  kind: "tab" | "star" | "duo" | "bmfolder" | "bmchip" | "bmgroup" | "bmbar" | "bmrow" | "bmsection",
+  kind:
+    | "tab"
+    | "star"
+    | "duo"
+    | "bmfolder"
+    | "bmchip"
+    | "bmgroup"
+    | "bmbar"
+    | "bmrow"
+    | "bmsection"
+    | "bmsub",
   x: number,
   y: number,
   payload: unknown,
