@@ -243,6 +243,30 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   первый). Проверка панелей — InsetsSource type=statusBars в dumpsys window.
   Результат — e2e/mobile/rotate-fullscreen-smoke-last-run.json (gitignore,
   рантайм-артефакт).
+- `e2e/mobile/google-video-smoke.mjs` — стенд ВИДЕО-РЕЗУЛЬТАТОВ ВЫДАЧИ GOOGLE
+  мобильной ветки (карточка 236: жалоба «открываю видео из поиска — блокировка
+  рекламы не срабатывает, играет прямо на сайте Google»): debug-APK + CDP 9223,
+  живой поиск Google. Причина — «▶»-миниатюра ролика YouTube в мобильной выдаче это
+  кнопка плеера Google («Відтворити в Google»): видео играет В САМОМ ДОКУМЕНТЕ
+  выдачи (адрес получает #sv=…), навигации нет — shouldOverrideUrlLoading /
+  onPageStarted / DPURL молчат. Фикс — document-start пейлоад
+  assets/duopulse/google-video.js (WebViewCompat.addDocumentStartJavaScript;
+  рантайм без DOCUMENT_START_SCRIPT — тот же текст в onPageFinished): на
+  страницах google /search|/url в главном фрейме capture-слушатель click (и
+  Enter/пробел по role=button) гасит клик по «▶»-миниатюре или ссылке ролика
+  YouTube и репортит console.log("DPYT:<id>") → onConsole → openVideoInPlayer;
+  юнит-тесты пейлоада на скелете разметки выдачи — src/mobile/google-video.test.ts.
+  12 проверок: выдача с [data-vid], пейлоад в документе, тап «▶» → встроенный
+  плеер (хук __duopulseOpenVideo + омнибокс, оверлей спрятан, в logcat нет
+  загрузки YouTube), «назад» → выдача без плеера Google, тап по заголовку,
+  вкладка «Відео» (&udm=7), «Про цей результат» — не наш, Enter по
+  сфокусированной миниатюре (живой keyevent 66), инкогнито-оверлей (приватный
+  профиль) и возврат в обычный режим. Ловушки: плеер Google в выдаче узнаётся по
+  #sv= в hash — НЕ по iframe youtube.com/embed (скрытый стаб 0×0 есть в выдаче
+  всегда, старый маркер давал ложный «открывался»); «пейлоад не трогает» — по
+  вызовам хука и репортам DPYT, а не по defaultPrevented синтетического клика
+  (его ставит и сам обработчик Google). Результат —
+  e2e/mobile/google-video-smoke-last-run.json (gitignore, рантайм-артефакт).
 
 - `e2e/mobile/header-live-smoke.mjs` — стенд ЖИВОГО ОБНОВЛЕНИЯ ШАПКИ
   web-оверлея (карточка 212): debug-APK + CDP 9223 + wg-stand; состав ряда 1

@@ -96,3 +96,4 @@ e2e/mobile/rotate-fullscreen-smoke-last-run.json
 
 # Рантайм-артефакт стенда фоновой музыки (e2e/mobile/background-audio-smoke.mjs, duopulse-218)
 e2e/mobile/background-audio-smoke-last-run.json
+e2e/mobile/google-video-smoke-last-run.json

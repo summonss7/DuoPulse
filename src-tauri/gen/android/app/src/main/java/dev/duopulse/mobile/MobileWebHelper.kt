@@ -894,6 +894,13 @@ object MobileWebHelper {
    * переход на YouTube-видео — откатить SPA-навигацию (выдача остаётся под
    *  оверлеем) и открыть видео во встроенном плеере. */
   private fun onConsole(msg: String) {
+    // duopulse-236: клик по ролику YouTube в выдаче Google (пейлоад
+    //  google-video.js) — сразу во встроенный плеер, минуя плеер Google
+    if (msg.startsWith("DPYT:")) {
+      val id = msg.removePrefix("DPYT:")
+      if (!hidden && id.matches(Regex(ID_RE))) openVideoInPlayer(id)
+      return
+    }
     if (!msg.startsWith("DPURL:")) return
     val url = msg.removePrefix("DPURL:")
     if (url == lastReportedUrl) return
@@ -1610,6 +1617,8 @@ object MobileWebHelper {
         Log.d(TAG, "overlay-loaded: $url")
         syncChrome(url)
         installUrlWatch(view)
+        // duopulse-236: фолбэк рантайма без DOCUMENT_START_SCRIPT
+        injectGoogleVideoLate(view, url)
         // захват паролей из форм (duopulse-165): пейлоад идемпотентен
         // (маркер __dpPassWatch), повтор на том же документе — тишина
         injectPassCapture(view)
@@ -1703,6 +1712,8 @@ object MobileWebHelper {
     // duopulse-218: щит window-visibility — фоновая музыка оверлея
     MobileMediaHelper.shield(wv)
     webView = wv
+    // duopulse-236: видео-результаты выдачи Google — во встроенный плеер
+    installGoogleVideo(wv)
 
     ov.addView(col)
     root.addView(ov, FrameLayout.LayoutParams(
@@ -2062,5 +2073,58 @@ object MobileWebHelper {
       "if(window.navigation)navigation.addEventListener('navigatesuccess',s);" +
       "setInterval(s,700)})"
     wv.evaluateJavascript("$js()", null)
+  }
+
+  /** Пейлоад assets/duopulse/google-video.js (кэш на процесс). */
+  private var googleVideoJs: String? = null
+
+  /** Хост поиска Google (google.com, google.com.ua, …). */
+  private val GOOGLE_HOST = Regex("(^|\\.)google\\.[a-z.]+$")
+
+  private fun googleVideoScript(wv: WebView): String {
+    googleVideoJs?.let { return it }
+    val js = try {
+      wv.context.assets.open("duopulse/google-video.js")
+        .use { it.readBytes().toString(Charsets.UTF_8) }
+    } catch (e: Exception) {
+      Log.d(TAG, "google-video: пейлоад не прочитан (${e.message})")
+      ""
+    }
+    googleVideoJs = js
+    return js
+  }
+
+  /** Перехват видео-результатов выдачи Google (duopulse-236, жалоба «открываю
+   *  видео из поиска — реклама не блокируется, играет прямо на сайте Google»):
+   *  миниатюра «▶» и заголовок ролика YouTube открывают плеер Google в самом
+   *  документе выдачи — без навигации, мимо shouldOverrideUrlLoading /
+   *  onPageStarted / DPURL. Пейлоад ловит клик раньше обработчиков страницы
+   *  и репортит 'DPYT:<id>' консолью (onConsole). Document-start — на всяком
+   *  документе (хост проверяет сам скрипт). */
+  private fun installGoogleVideo(wv: WebView) {
+    try {
+      if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+      val js = googleVideoScript(wv)
+      if (js.isEmpty()) return
+      WebViewCompat.addDocumentStartJavaScript(wv, js, setOf("*"))
+    } catch (e: Exception) {
+      Log.d(TAG, "google-video: document-start не зарегистрирован (${e.message})")
+    }
+  }
+
+  /** Фолбэк рантайма без DOCUMENT_START_SCRIPT: тот же пейлоад после загрузки
+   *  страницы поиска (идемпотентен — маркер __dpGoogleVideo); клик раньше
+   *  окончания загрузки остаётся за Google. */
+  private fun injectGoogleVideoLate(wv: WebView, url: String) {
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
+    val host = try {
+      Uri.parse(url).host?.lowercase()
+    } catch (e: Exception) {
+      null
+    }
+    if (host == null || !GOOGLE_HOST.containsMatchIn(host)) return
+    val js = googleVideoScript(wv)
+    if (js.isEmpty()) return
+    wv.evaluateJavascript(js, null)
   }
 }
