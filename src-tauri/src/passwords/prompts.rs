@@ -117,6 +117,9 @@ impl PasswordPrompts {
     /// Android о режиме не знает (маркера __DUOPULSE_INCOGNITO__ там нет),
     /// фронт мобильной ветки ставит флаг (mobile_password_incognito). В
     /// инкогнито кандидата не запоминаем вовсе — не предлагаем и не пишем.
+    // Потребитель — мобильная ветка (mobile_pass.rs) и тесты; в бине десктопа
+    // не вызывается — мёртвость разрешена явно (duopulse-231).
+    #[cfg_attr(desktop, allow(dead_code))]
     pub fn offer_overlay(
         &self,
         store: &PasswordStore,
@@ -135,6 +138,9 @@ impl PasswordPrompts {
 
     /// Забыть кандидата без решения (закрылся web-оверлей — мобильный аналог
     /// on_tabs_changed: поверхность, на которой сабмитили, исчезла).
+    // Потребитель — мобильная ветка (mobile_pass.rs) и тесты; в бине десктопа
+    // не вызывается — мёртвость разрешена явно (duopulse-231).
+    #[cfg_attr(desktop, allow(dead_code))]
     pub fn clear(&self) {
         *self.current.lock().unwrap() = None;
     }

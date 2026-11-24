@@ -17,6 +17,9 @@ use super::PasswordStore;
 /// Записи «только пароль» (пустой логин, duopulse-194) в лист не попадают:
 /// нативный лист выбора без имени не отличим, мобильное заполнение пустого
 /// логина — вопрос паритета на будущее.
+// Потребители — мобильная ветка (mobile_pass.rs) и тесты; в бине десктопа
+// не вызывается — мёртвость разрешена явно (duopulse-231).
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn accounts_for_url(store: &PasswordStore, incognito: bool, url: &str) -> Vec<String> {
     if incognito {
         return Vec::new();
@@ -36,6 +39,9 @@ pub fn accounts_for_url(store: &PasswordStore, incognito: bool, url: &str) -> Ve
 /// логин, битый URL и чужой логин сайта — None. Единственный путь пароля
 /// наружу — evaluateJavascript точечного заполнения полей (мгновение
 /// в памяти, в JS-переменных не хранится).
+// Потребители — мобильная ветка (mobile_pass.rs) и тесты; в бине десктопа
+// не вызывается — мёртвость разрешена явно (duopulse-231).
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn credential_for_url(
     store: &PasswordStore,
     incognito: bool,

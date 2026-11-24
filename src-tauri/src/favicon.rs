@@ -42,6 +42,8 @@ const MAX_CANDIDATES: usize = 4;
 
 /// Иконка сайта: Some(data-URL) или None («иконки нет»). Только значок —
 /// причине «нет» (сайт без иконки или сеть не дошла) нужен [`fetch_icon`].
+// Зовёт только тест ниже — вне тестов не компилируется (duopulse-231).
+#[cfg(test)]
 pub fn fetch_data_url(page_url: &str, socks_port: Option<u16>) -> Option<String> {
     fetch_icon(page_url, socks_port).icon
 }

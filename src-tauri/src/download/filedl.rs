@@ -404,19 +404,6 @@ pub fn filedl_reveal(app: tauri::AppHandle, params: FileDlRevealParams) -> Resul
 mod tests {
     use super::*;
 
-    fn info(id: u64, url: &str, state: &str) -> FileDlInfo {
-        FileDlInfo {
-            id,
-            url: url.into(),
-            file_name: format!("f{id}.bin"),
-            path: format!("D:\\dl\\f{id}.bin"),
-            state: state.into(),
-            received: 0,
-            speed: 0,
-            error: None,
-        }
-    }
-
     #[test]
     fn file_name_of_sanitizes_and_defaults() {
         assert_eq!(file_name_of("трек: лучший?"), "трек_ лучший_");

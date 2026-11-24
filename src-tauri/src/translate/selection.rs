@@ -141,6 +141,7 @@ impl SelectionEngine {
     }
 
     /// Движок с компактными таймингами (юнит-тесты без реальных пауз).
+    #[cfg(test)]
     pub fn with_timings(retry429_ms: u64, cooldown_secs: u64) -> Self {
         Self {
             retry429_ms,

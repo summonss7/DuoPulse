@@ -28,8 +28,8 @@ pub fn parse(input: &str) -> ParsedCues {
     let mut warnings: Vec<ParseWarning> = Vec::new();
     let mut top_cue_starts: Vec<i64> = Vec::new();
     let mut in_events = false;
-    /// Поля `Format:` секции [Events] нижним регистром; стандартный порядок
-    /// ASS — до первого Format (файлы без Format тоже встречаются).
+    // Поля `Format:` секции [Events] нижним регистром; стандартный порядок
+    // ASS — до первого Format (файлы без Format тоже встречаются).
     let mut event_fields: Vec<String> = DEFAULT_EVENT_FIELDS
         .iter()
         .map(|s| s.to_string())

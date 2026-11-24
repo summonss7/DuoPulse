@@ -103,6 +103,8 @@ pub fn valid_video_id(id: &str) -> bool {
 /// Разрешённые хосты duo_fetch_cues/duo_yt_player: YouTube и его CDN контента
 /// (timedtext отдаёт www.youtube.com; подписанные googlevideo — на будущее),
 /// хосты gtx (см. GTX_HOSTS).
+// Потребители — мобильная сетевая часть (mod net) и тесты; на десктопе мёртв.
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn fetch_host_allowed(host: &str) -> bool {
     let h = host.to_ascii_lowercase();
     h == "youtube.com"
@@ -122,6 +124,8 @@ pub const GTX_HOSTS: [&str; 2] = ["clients5.google.com", "translate.googleapis.c
 /// сразу, а не молотить таймауты/паузы минутами (кнопка ASR «занята» до
 /// конца конвейера). Таймауты/429/чужие HTTP сюда НЕ входят — им ретраи
 /// положены.
+// Потребители — мобильная сетевая часть (mod net) и тесты; на десктопе мёртв.
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn is_offline_error(msg: &str) -> bool {
     let m = msg.to_ascii_lowercase();
     [
@@ -177,6 +181,8 @@ fn video_id_guard() {
 
 /// Проверка URL cue-запроса: https + домен из allowlist (url::Url — общая
 /// зависимость; сам запрос строит команда через agent().get).
+// Потребители — мобильная сетевая часть (mod net) и тесты; на десктопе мёртв.
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn check_fetch_url(raw: &str) -> Result<url::Url, String> {
     let parsed = url::Url::parse(raw).map_err(|e| format!("некорректный URL: {e}"))?;
     if parsed.scheme() != "https" {
@@ -194,6 +200,8 @@ pub fn check_fetch_url(raw: &str) -> Result<url::Url, String> {
 /// (куча слов одним cue); json3 + parse_json3_rolling показывает пословно
 /// одной строкой (фикс duopulse-113). Подпись fmt не покрывает — тот же
 /// приём, что fmt=vtt в duo_download_subtitle.
+// Потребители — мобильная сетевая часть (mod net) и тесты; на десктопе мёртв.
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn cue_url_json3(raw: &str) -> String {
     if raw.contains("fmt=") {
         url::Url::parse(raw)
@@ -282,16 +290,22 @@ pub fn split_joined(joined: &str, expected: usize) -> Option<Vec<String>> {
 }
 
 /// Ключ кэша пачки gtx (from/to/тексты через \u{1}).
+// Потребители — мобильная сетевая часть (mod net) и тесты; на десктопе мёртв.
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn gtx_cache_key(from: &str, to: &str, texts: &[String]) -> String {
     format!("{from}\u{1}{to}\u{1}{}", texts.join("\u{1}"))
 }
 
 /// Потолок перевода выделения, символов — паритет с десктопным пунктом меню
 /// (translate/selection.rs MAX_SELECTION_CHARS): текст идёт в GET-query.
+// Потребитель — check_selection ниже (мобильная net и тесты); на десктопе мёртв.
+#[cfg_attr(desktop, allow(dead_code))]
 pub const MAX_SELECTION_CHARS: usize = 1500;
 
 /// Проверка запроса перевода выделения (duopulse-103): trim текста/цели,
 /// лимит длины; (текст, цель) или ошибка строкой (фронтенд покажет в бабле).
+// Потребители — мобильная сетевая часть (mod net) и тесты; на десктопе мёртв.
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn check_selection(text: &str, target: &str) -> Result<(String, String), String> {
     let text = text.trim();
     if text.is_empty() {

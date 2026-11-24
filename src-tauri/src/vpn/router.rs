@@ -71,6 +71,10 @@ static PORTS: std::sync::OnceLock<(u16, u16)> = std::sync::OnceLock::new();
 
 /// SOCKS5-порт роутера процесса (None — роутер не поднимался). Фетчи Core
 /// мобильной ветки проходят через него тем же путём, что WebView2 десктопа.
+// Потребители — мобильные модули (duo_mobile.rs, mobile_asr.rs,
+// mobile_history.rs); в бине десктопа не вызывается — мёртвость разрешена
+// явно (duopulse-231).
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn socks_port() -> Option<u16> {
     PORTS.get().map(|(socks, _)| *socks)
 }
@@ -143,6 +147,9 @@ impl Policy {
 #[derive(Clone)]
 pub struct Router {
     port: u16,
+    // Читает только мобильный ProxyController (mobile_vpn.rs через
+    // [`Router::http_port`]) и тесты — на десктопе мёртв (duopulse-231).
+    #[cfg_attr(desktop, allow(dead_code))]
     http_port: u16,
     policy: Arc<RwLock<Policy>>,
     events: Arc<RouteEvents>,
@@ -235,6 +242,9 @@ impl Router {
 
     /// Порт HTTP-листенера (CONNECT/absolute-form) — для ProxyController
     /// WebView Android (MobileProxyHelper получает его через JNI-вызов).
+    // Потребители — мобильная ветка (mobile_vpn.rs) и тесты; в бине десктопа
+    // не вызывается — мёртвость разрешена явно (duopulse-231).
+    #[cfg_attr(desktop, allow(dead_code))]
     pub fn http_port(&self) -> u16 {
         self.http_port
     }

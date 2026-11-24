@@ -42,11 +42,6 @@ impl LocalModelSize {
     pub fn file_name(self) -> &'static str {
         super::models::spec(self).file_name
     }
-
-    /// Ожидаемый размер скачивания, байт (реестр — models.rs).
-    pub fn bytes(self) -> u64 {
-        super::models::spec(self).bytes
-    }
 }
 
 fn default_openai_url() -> String {
@@ -144,6 +139,9 @@ pub fn load_config(dir: &Path) -> AsrConfig {
 /// Сохранён ли раздел "asr" в settings.json (мобильная ветка отличает
 /// «дефолт десктопа» от осознанного выбора пользователя: duopulse-168 —
 /// свежему конфигу телефон предлагает tiny, а не десктопный base).
+// Потребители — мобильная ветка (mobile_asr.rs) и тесты; в бине десктопа
+// не вызывается — мёртвость разрешена явно (duopulse-231).
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn has_saved_config(dir: &Path) -> bool {
     let raw = std::fs::read_to_string(dir.join("settings.json")).unwrap_or_default();
     serde_json::from_str::<serde_json::Value>(&raw)

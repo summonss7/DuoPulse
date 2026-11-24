@@ -85,15 +85,10 @@ pub enum AsrEndpoint {
         key: String,
         model: String,
     },
-    /// Локальная нативная библиотека whisper.cpp (Android, duopulse-168):
-    /// libwhisperjni.so через MobileAsrHelper — HTTP нет вообще, транспорт
-    /// [`local_jni`] ходит JNI-вызовами; base_url-подобная роль у model_path.
-    LocalJni { model_path: String },
 }
 
 impl AsrEndpoint {
     /// Полный URL запроса и заголовки (Content-Type проставляет транспорт).
-    /// LocalJni сюда не попадает: конвейер ведёт его мимо HTTP (core.rs).
     fn request(&self) -> (String, Vec<(&'static str, String)>) {
         match self {
             Self::LocalWhisper { base_url } => (
@@ -104,7 +99,6 @@ impl AsrEndpoint {
                 format!("{}/audio/transcriptions", base_url.trim_end_matches('/')),
                 vec![("Authorization", format!("Bearer {key}"))],
             ),
-            Self::LocalJni { model_path } => (format!("jni:whisper:{model_path}"), Vec::new()),
         }
     }
 }

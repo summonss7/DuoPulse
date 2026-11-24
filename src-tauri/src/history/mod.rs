@@ -360,6 +360,9 @@ impl HistoryStore {
     }
 
     /// Записать фавикон хоста (пустая строка — «иконки нет»).
+    // Зовут только тесты (рабочий путь — favicon_put_fetched) — вне тестов
+    // не компилируется (duopulse-231).
+    #[cfg(test)]
     pub fn favicon_put(&self, host: &str, data: &str) -> Result<(), String> {
         self.favicon_put_at(host, data, now_ms())
     }
@@ -3312,7 +3315,7 @@ mod tests {
         let fav = store.group_list().unwrap().remove(0);
         let work = store.group_add("Работа", None).unwrap();
         let media = store.group_add("Медиа", None).unwrap();
-        let other = store.group_add("Прочее", None).unwrap();
+        store.group_add("Прочее", None).unwrap();
         let docs = store.group_add("Документы", Some(work.id)).unwrap();
         let roots = |store: &HistoryStore| -> Vec<String> {
             store

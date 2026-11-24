@@ -187,6 +187,9 @@ const URI_PREFIX: &str = "mobilevideo://localhost";
 
 /// Процент-декодирование сегмента пути (фронтенд кодирует encodeURIComponent;
 /// зависимость percent-encoding ради одной функции не тащим).
+// Потребители — serve мобильных таргетов и тесты; вне их не компилируется
+// (иначе либа на хосте ругается мёртвой функцией, duopulse-231).
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());

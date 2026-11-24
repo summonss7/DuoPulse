@@ -734,6 +734,9 @@ impl AdblockService {
 
     /// Глобальный тумблер мобильной ветки (duopulse-144, без AppHandle):
     /// меню «⋮» оверлея и настройки мобильного UI.
+    // Потребитель — только мобильная ветка (mobile_adblock.rs); в бине
+    // десктопа не вызывается — мёртвость разрешена явно (duopulse-231).
+    #[cfg_attr(desktop, allow(dead_code))]
     pub fn set_enabled_mobile(&self, on: bool) -> Result<(), String> {
         self.set_enabled_inner(None, on).map(|_| ())
     }
@@ -875,6 +878,9 @@ impl AdblockService {
     /// [`Self::cosmetic_generic_selectors`]) не выполняется: она требует
     /// обратного рейнда со страницей; hide-набор уже несёт host-специфичные и
     /// misc-generic правила — основная косметика работает.
+    // Потребитель — только мобильная ветка (mobile_adblock.rs); в бине
+    // десктопа не вызывается — мёртвость разрешена явно (duopulse-231).
+    #[cfg_attr(desktop, allow(dead_code))]
     pub fn cosmetic_injection_script(&self, url: &str) -> String {
         let res = self.cosmetic_resources(url);
         if !res.active || !res.ready {
@@ -1781,6 +1787,9 @@ fn fetch_list(source: &str) -> Result<String, String> {
 /// пути и Accept-заголовку; неизвестное — «other» (нетипизированные правила
 /// `||host^` матчатся при любом типе, так что основная сетевая фильтрация
 /// работает и без точного типа).
+// Потребители — мобильная ветка (mobile_adblock.rs) и тесты; в бине десктопа
+// не вызывается — мёртвость разрешена явно (duopulse-231).
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn guess_request_type(uri: &str, accept: Option<&str>, is_main_frame: bool) -> &'static str {
     if is_main_frame {
         return "document";
@@ -2133,14 +2142,12 @@ mod tests {
             "https://doubleclick.net/x",
             "https://google.com/page",
         ];
-        let t0 = std::time::Instant::now();
         let mut total_engine = std::time::Duration::ZERO;
         for url in &urls {
             let t = std::time::Instant::now();
             let _ = eng.url_cosmetic_resources(url);
             total_engine += t.elapsed();
         }
-        let engine_time = t0.elapsed();
         let mut known_times = Vec::new();
         for url in &known {
             let t = std::time::Instant::now();
@@ -3076,7 +3083,7 @@ mod tests {
             "a.test##+js(rpnt, script, foo, bar)".to_string(),
             true,
         )];
-        let mut engine = trusted_engine_from_texts(&texts).unwrap();
+        let engine = trusted_engine_from_texts(&texts).unwrap();
         let s = service();
         s.set_engine(trusted_engine_from_texts(&texts).unwrap());
         let live = s.cosmetic_resources("https://a.test/");

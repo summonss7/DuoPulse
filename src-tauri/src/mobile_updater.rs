@@ -30,7 +30,7 @@
 // (latest.json, minisign) и манифест v2 не читает — ветки не пересекаются.
 //
 // Модуль компилируется всеми таргетами (структуры/выбор ассета/тесты —
-// хостовые), JNI-часть — только Android.
+// хостовые), JNI-часть и разбор манифеста — только Android.
 
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +72,9 @@ pub struct UpdateAsset {
     pub sha256: Option<String>,
 }
 
+/// Манифест v2 канала (manifest.json): читает его только android-проверка
+/// обновления (updater_check) — прочие таргеты структуру не строят.
+#[cfg(target_os = "android")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Manifest {
@@ -100,6 +103,7 @@ pub struct UpdateCheck {
 
 /// Числовое сравнение x.y[.z…] — как у десктопного updater (суффиксы
 /// обрезаются, недостающий хвост — 0).
+#[cfg(any(target_os = "android", test))]
 pub(crate) fn version_lt(a: &str, b: &str) -> bool {
     let parts = |v: &str| -> Vec<u64> {
         v.split('.')
@@ -126,6 +130,7 @@ pub(crate) fn version_lt(a: &str, b: &str) -> bool {
 /// пропускаем). Эмуляторные x86-сборки не предлагаем — только arm64 или
 /// универсальное имя без abi в названии (канал публикует универсальный APK:
 /// он же работает и на эмуляторе живой проверки).
+#[cfg(any(target_os = "android", test))]
 pub(crate) fn pick_apk(assets: &[UpdateAsset]) -> Option<&UpdateAsset> {
     assets
         .iter()

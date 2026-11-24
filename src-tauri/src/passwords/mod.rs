@@ -409,7 +409,7 @@ impl PasswordStore {
             return Err("пароль пуст".into());
         }
         let now = now_ms();
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         for row in rows_of(&conn)? {
             if row.origin != origin {
                 continue;
@@ -462,7 +462,7 @@ impl PasswordStore {
         username: Option<&str>,
         password: Option<&str>,
     ) -> Result<(), String> {
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         let row: Option<(String, String, String)> = conn
             .query_row(
                 "SELECT origin, url, title FROM logins WHERE id=?",
@@ -663,7 +663,7 @@ impl PasswordStore {
         never_save: &[String],
     ) -> Result<MergeStats, String> {
         let mut stats = MergeStats::default();
-        let mut conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap();
         for r in remote {
             if r.password.is_empty() {
                 continue; // мусорный документ не ломает слияние (пустой

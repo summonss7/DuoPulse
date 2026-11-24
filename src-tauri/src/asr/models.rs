@@ -15,7 +15,6 @@ use super::config::LocalModelSize;
 /// HuggingFace ggerganov/whisper.cpp — сверка при скачивании; «битый» CDN
 /// или обрыв даёт честный отказ, а не падение whisper при загрузке).
 pub struct ModelSpec {
-    pub size: LocalModelSize,
     pub file_name: &'static str,
     pub bytes: u64,
     pub sha256: &'static str,
@@ -26,19 +25,16 @@ pub struct ModelSpec {
 pub fn spec(size: LocalModelSize) -> ModelSpec {
     match size {
         LocalModelSize::Tiny => ModelSpec {
-            size,
             file_name: "ggml-tiny.bin",
             bytes: 77_691_713,
             sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
         },
         LocalModelSize::Base => ModelSpec {
-            size,
             file_name: "ggml-base.bin",
             bytes: 147_951_465,
             sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
         },
         LocalModelSize::Small => ModelSpec {
-            size,
             file_name: "ggml-small.bin",
             bytes: 487_601_967,
             sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
@@ -58,6 +54,9 @@ pub fn model_path(profile_dir: &Path, size: LocalModelSize) -> PathBuf {
 
 /// Быстрая проверка «на месте»: файл существует и совпадает размер (для
 /// статуса настроек; полная сверка sha256 — при скачивании).
+// Потребители — мобильная ветка (mobile_asr.rs) и тесты; в бине десктопа
+// не вызывается — мёртвость разрешена явно (duopulse-231).
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn is_downloaded(profile_dir: &Path, size: LocalModelSize) -> bool {
     let s = spec(size);
     std::fs::metadata(model_path(profile_dir, size))
@@ -66,6 +65,8 @@ pub fn is_downloaded(profile_dir: &Path, size: LocalModelSize) -> bool {
 }
 
 /// sha256 файла (потоком; модель до 0,5 ГБ — единицы секунд).
+// Зовёт только тест ниже — вне тестов не компилируется (duopulse-231).
+#[cfg(test)]
 pub fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = std::fs::File::open(path).map_err(|e| format!("открыть {}: {e}", path.display()))?;
     let mut hasher = Sha256::new();
@@ -161,6 +162,9 @@ pub fn download_model(
 }
 
 /// Удалить модель и её возможный .part-хвост (возврат — было ли что удалять).
+// Потребители — мобильная ветка (mobile_asr.rs) и тесты; в бине десктопа
+// не вызывается — мёртвость разрешена явно (duopulse-231).
+#[cfg_attr(desktop, allow(dead_code))]
 pub fn delete_model(profile_dir: &Path, size: LocalModelSize) -> Result<bool, String> {
     let mut removed = false;
     for path in [
