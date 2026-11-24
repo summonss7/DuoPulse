@@ -47,7 +47,10 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   content/ (контент-скрипты, сборка build-content), e2e/ (постоянные e2e-инструменты),
   scripts/, builds/.
 - **Команды**: npm run dev | build (включают build-content) | typecheck | release;
-  npm run gen:bridge (после правок Rust-команд).
+  npm run gen:bridge (после правок Rust-команд); `cargo build`/`cargo test` (из `src-tauri/`)
+  без warnings (duopulse-231) — линкер-шум «.rsrc merge failure» на windows-gnu снят в
+  `src-tauri/build.rs` (нейтральный default-manifest.o через `-B`; причина —
+  default-manifest.o тулчейна winlibs с языком 1033, не дубликат манифеста приложения).
 - **Тесты**: npm run test (vitest).
 - **Релизы**: версия одна на всех (tauri.conf.json = package.json = Cargo.toml; рассинхрон
   проверяет android-build.sh, синхронизирует release.mjs). Мобильный release публикуется в
@@ -55,6 +58,9 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   оба канала + хаб + C:\DuoPulse) обязан выходить В ТОМ ЖЕ СЕАНСЕ, что и задача, менявшая
   десктопный код (src/, src-tauri/, bridge/, content/), — иначе Windows-канал отстаёт:
   0.1.16–0.1.20 вышли только мобильными, десктоп застрял на 0.1.15 (duopulse-120).
+  Полный релиз обеих платформ — по порядку: `npm run release` → `scripts/android-build.sh
+  release` → `node scripts/release.mjs --publish-only` (android-build.sh перезатирает манифест
+  канала одним APK, duopulse-234; полный набор — 5 ассетов).
 - **Отчётность**: CHANGELOG.md в корне; карточки — CARDS/; планы — ROADMAP.md.
 
 <!-- E2E-ИНСТРУМЕНТЫ -->

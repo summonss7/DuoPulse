@@ -8950,3 +8950,67 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Коммит: a6bd317 fix(mobile): duopulse-237 — в фоне играет только активная вкладка: реплей
   после паузы трогает лишь то, что играло; док-коммит с CHANGELOG и карточкой 237 — следующим
   коммитом; push origin main.
+## 24.11.2026, 08:01 — Сборка: чистые cargo build / cargo test без warnings и без линкер-шума .rsrc; версия 0.1.103 (duopulse-231)
+- Начало работы: 24.11.2026, 03:20
+- Окончание работы: 24.11.2026, 08:01
+- Что сделано:
+  - Снимок оказался шире карточки: не 17, а 34 предупреждения (4 в lib на хосте + 30 в бине;
+    карточка считала без тестовых целей). Закрыты все, поведение программы не менялось.
+  - Мобильные остатки, мёртвые в бине десктопа (18): #[cfg_attr(desktop, allow(dead_code))]
+    с комментарием о потребителе — по образцу duo_mobile.rs (duopulse-228): adblock
+    (set_enabled_mobile, cosmetic_injection_script, guess_request_type), asr/config
+    (has_saved_config), asr/models (is_downloaded, delete_model), passwords (accounts_for_url,
+    credential_for_url, offer_overlay, clear), duo_mobile (fetch_host_allowed, is_offline_error,
+    check_fetch_url, cue_url_json3, gtx_cache_key, MAX_SELECTION_CHARS, check_selection),
+    vpn/router (socks_port, http_port — поле и метод).
+  - cfg-гейтинг в либе по файловому образцу mobile_updater.rs (4): Manifest — только Android;
+    version_lt, pick_apk — Android+тесты; mobile_video::percent_decode — Android/iOS+тесты.
+  - Только для тестов, #[cfg(test)] (4): favicon::fetch_data_url, HistoryStore::favicon_put,
+    models::sha256_file, SelectionEngine::with_timings.
+  - Мёртвое везде — удалено (3): LocalModelSize::bytes(), поле ModelSpec.size, вариант
+    AsrEndpoint::LocalJni.
+  - Тестовый мусор (9): хелпер filedl::info; неиспользуемые mut (passwords ×3, тест adblock);
+    переменные t0/engine_time и other в тестах; doc-комментарий перед локальной переменной
+    в ass.rs.
+  - Линкер-шум «.rsrc merge failure: multiple non-default manifests» (каждая сборка
+    windows-gnu). Причина: драйвер gcc тулчейна winlibs подмешивает к каждой ссылке свой
+    default-manifest.o (дефолтный манифест CRT) с языком ресурса 1033 (LANGUAGE 9,1); рядом
+    с манифестом приложения из tauri-winres BFD при слиянии .rsrc видит два «не-дефолтных»
+    манифеста ID 1. Дубликата .manifest в build.rs/tauri.conf нет — предположение карточки
+    не подтвердилось. Лечение — src-tauri/build.rs: тот же манифест собирается windres с
+    LANGUAGE 0,0 в OUT_DIR и подаётся драйверу ключом -B<каталог>/ (затеняет эндфайл
+    тулчейна; -L его не затеняет), нейтральный дефолт BFD отбрасывает сам — в exe остаётся
+    один манифест, приложения. Нет windres или таргет не windows-gnu x86_64/i686 — сборка
+    как раньше. Системный тулчейн не тронут.
+  - Версия 0.1.103 (флажок сборки включён Артёмом 24.11 06:25): tauri.conf.json =
+    package.json = Cargo.toml = Cargo.lock; релиз обычным порядком — npm run release (десктоп:
+    канал Aila, GitHub Pages, хаб, C:\DuoPulse), scripts/android-build.sh release (APK), затем
+    node scripts/release.mjs --publish-only — полный манифест канала из 5 ассетов (после
+    android-build.sh в манифесте остаётся один APK — ловушка карточки 234).
+  - Выявлено вне карточки: карточка 240 (12 Android-only предупреждений мобильного таргета),
+    карточка 241 (вопрос Артёму: закрывать ли тот же линкер-шум в остальных Rust-проектах).
+- Как проверено: cargo build, cargo test --no-run и cargo test — 0 warnings (контроль с
+  CARGO_INCREMENTAL=0 и финальный прогон перед коммитом — тоже 0, линкер-шума нет);
+  cargo test — lib 36 passed / 1 ignored, bin 478 passed / 0 failed / 6 ignored; rustfmt по
+  build.rs чист; vitest 71 файл / 855 тестов. PE debug-exe: ровно один манифест 24/1
+  (приложения, зависимость Common-Controls v6). Мобильная ветка: cargo check --lib --target
+  aarch64-linux-android — exit 0, предупреждений 16 → 12 против HEAD (снимок HEAD через git
+  archive), новых нет. Релиз 0.1.103: десктоп собран за 4,5 мин без предупреждений
+  компилятора и без «rsrc merge»; остальные проверки релиза — строкой ниже.
+  07:12–07:17). APK 0.1.103 (aarch64): scripts/android-build.sh release — exit 0, подписан
+  (duopulse-release.keystore), в логе те же 12 Android-only предупреждений (карточка 240),
+  новых нет; затем node scripts/release.mjs --publish-only. Манифест канала Aila по HTTPS =
+  0.1.103, 5 ассетов (сетап, .sig, latest.json, latest-canary.json, APK), sha256 каждого =
+  локальная сборка; фиды GitHub Pages stable/canary для клиентов 0.1.102 и 0.1.103 отвечают
+  0.1.103; корень builds/ — сетап и APK 0.1.103 (устаревшие 0.1.102 убраны);
+  C:/DuoPulse/duopulse.exe = target/release (sha256 совпал). PE release-exe: один манифест
+  24/1/1033, 334 байта (приложения, Common-Controls v6). Smoke: release-exe жив через 12 с
+  (окно «DuoPulse 0.1.103 · 24.11.2026 07:12»), снят без остатка процессов. APK:
+  versionName 0.1.103, versionCode 1103, arm64-v8a, apksigner verify ок, libduopulse_lib.so
+  в упаковке. Окно, когда в манифесте канала был только APK, — около минуты (07:31–07:32).
+  Не проверено: живой прогон release-APK на эмуляторе (поведение мобильной ветки не менялось;
+  эмулятор не занимался, чтобы не сбивать стенды соседней срочной задачи) — Android-таргет
+  покрыт cargo check и самой release-сборкой.
+- Коммит: 1909d97 chore(build): duopulse-231 — чистые cargo build/test без warnings (34
+  прежних) и без линкер-шума .rsrc; релиз и документация — release: duopulse-231 (тем же
+  сеансом), push origin main.
