@@ -9072,4 +9072,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
     HTTPS: 0.1.104, 5 ассетов (сетап, .sig, latest.json, latest-canary.json, APK).
     Smoke: release-exe жив, окно «DuoPulse 0.1.104 · 24.11.2026 20:47». Профиль Артёма
     проверен SQL-выборкой: AI — корень (position 1, перед Network).
-- Коммит: (см. ниже — тем же сеансом, push origin main)
+- Коммит: dd1d6f8 fix(bookmarks): duopulse-242 — папки «рядом» против «внутрь» (краевые зоны дропа), вынос из вложенности (drag подпапок, меню «на уровень выше»), релиз 0.1.104; push origin main (тем же сеансом).
