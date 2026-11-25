@@ -269,6 +269,7 @@ fn mobile_run() {
             mobile_adblock::mobile_adblock_status,
             mobile_adblock::mobile_adblock_set_enabled,
             mobile_private::mobile_private_cleanup,
+            mobile_private::mobile_private_cookies,
             mobile_settings::mobile_ui_lang_set,
             mobile_download::cmd::duo_mobile_formats,
             mobile_download::cmd::duo_download_begin,

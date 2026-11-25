@@ -390,9 +390,30 @@ object MobileWebHelper {
 
   /** Целевой UA для адреса (duopulse-192): YouTube в «расширенном» режиме —
    *  десктопный (вис 191 был у пары «десктопный Polymer + мобильный UA»),
-   *  всё прочее — дефолтный мобильный. */
+   *  всё прочее — дефолтный мобильный. duopulse-247 (жалоба «постоянно
+   *  нужно входить в аккаунт, замучили проверки Google»): в цепочке входа
+   *  Google куки (SID/SAPISID и пр., домен .google.com) выдаются на
+   *  accounts.google.com, а живут и используются страницами YouTube —
+   *  одна пара «фингерпринт куательства/фингерпринт использования» с
+   *  разными UA для Google выглядела подозрительной и провоцировала
+   *  повторные проверки/сбросы сессии. Потому в расширенном режиме
+   *  десктопный UA получают и страницы логина/верификации Google
+   *  (accounts/myaccount/consent) — весь вход в одинаковой «одежде».
+   *  accounts.youtube.com уже подматывается хостом YouTube. */
+  private fun googleLoginHost(url: String): Boolean {
+    val u = try {
+      Uri.parse(url)
+    } catch (e: Exception) {
+      return false
+    }
+    val host = u.host?.lowercase() ?: return false
+    return host == "accounts.google.com" || host == "myaccount.google.com" ||
+      host == "consent.google.com" || host == "familylink.google.com"
+  }
+
   private fun uaFor(url: String, base: String): String =
-    if (youTubeHost(url) && ytDesktopSafe()) desktopUa(base) else base
+    if ((youTubeHost(url) || googleLoginHost(url)) && ytDesktopSafe())
+      desktopUa(base) else base
 
   private fun ytDesktopSafe(): Boolean =
     MainActivity.current?.let { ytDesktop(it) } ?: true
@@ -1053,6 +1074,10 @@ object MobileWebHelper {
     (ov.parent as? FrameLayout)?.removeView(ov)
     ov.removeAllViews()
     wv?.let { MobileMediaHelper.unshield(it) }
+    // duopulse-247: сессия оверлея могла поставить свежие куки (вход на
+    // сайте) — форсируем запись до смерти WebView (ленивый коммит Chromium
+    // терял их на убийстве процесса)
+    try { CookieManager.getInstance().flush() } catch (e: Exception) { /* не смертельно */ }
     wv?.apply {
       stopLoading()
       loadUrl("about:blank")
@@ -1586,13 +1611,13 @@ object MobileWebHelper {
         // той паре и обязан вис 191: выставить десктоп-UA и перезапросить
         // (второй проход идёт правильным UA — цикла нет). Уход с YouTube —
         // вернуть мобильный UA (duopulse-210: ТОЖЕ с перезапуском — голый
-        // сброс UA отменял навигацию, «клин до конца сессии» карточки 192)
-        if (youTubeHost(url) && ytDesktopSafe()) {
-          if (uaMismatched(url)) {
-            loadWithUa(url)
-            return
-          }
-        } else if (defaultUa != null && view.settings.userAgentString != defaultUa) {
+        // сброс UA отменял навигацию, «клин до конца сессии» карточки 192).
+        // duopulse-247: цель сравнивается с uaFor ВСЯ, а не с дефолтом —
+        // в расширенном режиме десктопный UA теперь носят и страницы входа
+        // Google (accounts/myaccount/consent); сравнение «≠ defaultUa»
+        // перезагружало бы их в цикле (loadWithUa при совпавшем UA —
+        // просто loadUrl, onStartPage — снова, и так по кругу)
+        if (uaMismatched(url)) {
           loadWithUa(url)
           return
         }

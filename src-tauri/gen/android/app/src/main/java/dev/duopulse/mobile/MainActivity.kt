@@ -3,6 +3,7 @@ package dev.duopulse.mobile
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
@@ -31,6 +32,10 @@ class MainActivity : TauriActivity() {
 
   override fun onDestroy() {
     if (current === this) {
+      // duopulse-247: куки (входы Ютуба/Google и всех сайтов) переживают
+      // смерть процесса — Chromium пишет их на диск лениво, без flush вход
+      // «сегодня» терялся на убийстве приложения «завтра»
+      try { CookieManager.getInstance().flush() } catch (e: Exception) { /* не смертельно */ }
       MobileFullscreen.dismiss()
       MobileWebHelper.destroy()
       // duopulse-218: веб-окна умирают вместе с активностью — музыку глушим
@@ -91,6 +96,10 @@ class MainActivity : TauriActivity() {
   // пока старт ещё разрешён (между onPause и onStop)
   override fun onPause() {
     val keep = MobileMediaHelper.onActivityPauseBegin()
+    // duopulse-247: уход в фон — форсируем запись куки общего профиля
+    // (системный WebView коммитит их на диск отложенно; убийство процесса
+    // из кэша теряло свежие входы сайтов) — до super, пока окно живо
+    try { CookieManager.getInstance().flush() } catch (e: Exception) { /* не смертельно */ }
     super.onPause()
     if (keep) MobileMediaHelper.onActivityPauseEnd()
   }

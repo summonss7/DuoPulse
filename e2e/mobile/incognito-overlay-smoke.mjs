@@ -8,6 +8,9 @@
 // excluded-диапазоне, см. память проекта) + уникальный ?r= на каждое
 // открытие (мёртвые CDP-цели прошлых WebView висят в /json вечно).
 // Проверки:
+//   0) (duopulse-247) до инкогнито кука common=1 общего профиля записана;
+//      после полного инкогнито-цикла она уцелела — removeAllCookies общего
+//      профиля при входе/выходе из режима сносил и нормальные логины;
 //   1) инкогнито из UI (очки старта, __duopulseTogglePrivate) включён;
 //   2) запрос из omnibox в инкогнито открыт В ПРИЛОЖЕНИИ: CDP-цель
 //      страницы жива, topResumedActivity — DuoPulse, Chrome не поднимался;
@@ -17,7 +20,7 @@
 //   5) следов не остаётся: повторный инкогнито-оверлей куки не видит
 //      (профиль снесён teardown'ом);
 //   6) после выхода из инкогнито обычный оверлей жив, профиль чист
-//      (регресс обычного пути).
+//      (регресс обычного пути), куки общего профиля целы (duopulse-247).
 // Запуск (APK установлен, эмулятор поднят): node e2e/mobile/incognito-overlay-smoke.mjs
 // Результат — e2e/mobile/incognito-overlay-smoke-last-run.json (gitignore,
 // рантайм-артефакт). Скриншоты — %TEMP%/duopulse-211-*.png.
@@ -173,6 +176,22 @@ try {
 
   const chrome0 = chromePid();
 
+  // 0) (duopulse-247, жалоба «постоянно нужно входить в аккаунт») кука
+  //    общего профиля ДО инкогнито: после полного инкогнито-цикла она
+  //    обязана уцелеть — прежний mobile_private_cleanup делал
+  //    removeAllCookies ВСЕГО общего профиля при каждом входе/выходе
+  //    из режима, снося и нормальные логины сайтов
+  const r0 = uniq();
+  omniboxGo(ui, `${STAND}?set=common&r=${r0}`);
+  const ov0 = await overlayPage(r0).catch(() => null);
+  check("общий профиль: обычный оверлей до инкогнито открыт", !!ov0);
+  if (!ov0) throw new Error("оверлей до инкогнито не открылся");
+  const c0 = await cookies(ov0);
+  check("общий профиль: кука common=1 записана", c0.includes("common=1"),
+    `cookie=«${c0}»`);
+  await ui.invoke("mobile_web_close", {});
+  await sleep(1200);
+
   // 1) инкогнито включён из UI (очки старта — тот же переключатель)
   await ui.evalJs("window.__duopulseTogglePrivate()");
   let on = false;
@@ -251,6 +270,8 @@ try {
     const c4 = await cookies(ov4);
     check("после выхода: общий профиль чист (приватных следов нет)", !c4.includes("priv=1"),
       `cookie=«${c4}»`);
+    check("после выхода: кука общего профиля уцелела (duopulse-247 — логины сайтов переживают инкогнито)",
+      c4.includes("common=1"), `cookie=«${c4}»`);
     const top4 = topActivity();
     check("после выхода: поверх — DuoPulse", top4.startsWith(`${PKG}/`), top4);
   }
