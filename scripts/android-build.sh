@@ -15,21 +15,31 @@
 #      без апдейтера — ловушка). Debug в хаб не идёт.
 #   5. подписанный release-APK публикуется в канал обновлений Aila
 #      (манифест v2 — 📡 «в канале» хаба и проверка обновлений в приложении)
-#      общим издателем D:\Scheduler\tools\publish-update.cjs (aila-388).
+#      общим издателем D:\Scheduler\tools\publish-update.cjs (aila-388) —
+#      ОБЪЕДИНЕНИЕМ с десктоп-набором той же версии из builds/duopulse_<ver>_release/
+#      (сетап+sig+фиды): манифест канала один на обе платформы, а сервер пишет
+#      его по списку одной публикации — своей стороной набор затирался и после
+#      android-сборки выпадали 4 десктоп-ассета (duopulse-234).
+# Аргумент publish-only — без сборки: перепубликовать готовый release-APK из
+# builds/ (починка канала/перепроверка без пересборки), как --publish-only
+# у release.mjs.
 # Подпись release: keystore src-tauri/gen/android/duopulse-release.keystore,
 # пароль в gitignored src-tauri/gen/android/keystore.properties (схема
 # novagrid-059; нет файла — APK без подписи, на телефон не встанет).
 # Тулчейн по умолчанию (env переопределяет): ANDROID_HOME=%LOCALAPPDATA%/Android/Sdk,
 # NDK — новейший из $ANDROID_HOME/ndk, JAVA_HOME — jbr Android Studio,
 # gnu-тулчейн rust — directory override src-tauri (rustup).
-# Usage: scripts/android-build.sh [debug|release] [targets...]   (default release aarch64)
+# Usage: scripts/android-build.sh [debug|release|publish-only] [targets...]   (default release aarch64)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 TYPE="${1:-release}"
-if [ "$TYPE" = "debug" ] || [ "$TYPE" = "release" ]; then shift || true; else TYPE=release; fi
+PUBLISH_ONLY=0
+if [ "$TYPE" = "publish-only" ]; then
+  PUBLISH_ONLY=1; TYPE="release"; shift || true
+elif [ "$TYPE" = "debug" ] || [ "$TYPE" = "release" ]; then shift || true; else TYPE=release; fi
 # таргеты: по умолчанию aarch64 (телефоны) для release; debug — + x86_64 (эмулятор)
 if [ $# -gt 0 ]; then TARGETS=("$@"); else
   if [ "$TYPE" = "debug" ]; then TARGETS=(aarch64 x86_64); else TARGETS=(aarch64); fi
@@ -55,21 +65,36 @@ export JAVA_HOME="${JAVA_HOME:-$(cygpath -m '/c/Program Files/Android/Android St
 # src-tauri; MinGW для dlltool/windres уже в PATH сборок проекта)
 export PATH="/c/Users/CUSTOM/msys64/ucrt64/bin:$PATH"
 
-# 1) фронтенд (тот же dist/, что ест десктоп)
-echo "==> Building frontend..."
-npm run build
-
-# 2) APK через tauri CLI (cwd src-tauri/: там tauri.conf.json и gen/android);
-#    release — режим CLI по умолчанию, отдельный флаг только у debug
-echo "==> Building android shell ($TYPE, targets: ${TARGETS[*]})..."
-TYPE_FLAG=(); [ "$TYPE" = "debug" ] && TYPE_FLAG=(--debug)
-(cd src-tauri && node ../node_modules/@tauri-apps/cli/tauri.js android build "${TYPE_FLAG[@]}" --apk --target "${TARGETS[@]}")
-
-# 3) артефакт → builds/ (версия + тип — правила проекта)
-APK_SRC="src-tauri/gen/android/app/build/outputs/apk/universal/$TYPE/app-universal-$TYPE.apk"
-[ -f "$APK_SRC" ] || { echo "!! APK не найден: $APK_SRC" >&2; exit 1; }
+# 1–3) сборка (publish-only пропускает — канал репабликуется готовым APK из
+#       builds/, без пересборки; как --publish-only у release.mjs)
 OUT_DIR="$ROOT/builds/duopulse_${VER}_android_$TYPE"
-mkdir -p "$OUT_DIR"
+APK_NAME="DuoPulse-$VER-android-$TYPE.apk"
+if [ "$PUBLISH_ONLY" = 1 ]; then
+  # готовый артефакт: версионная папка, иначе корневая копия хаба (шаг 4) —
+  # тогда восстанавливаем версионную из неё, чтобы шаги ниже шли как всегда
+  APK_SRC="$OUT_DIR/$APK_NAME"
+  if [ ! -f "$APK_SRC" ] && [ -f "$ROOT/builds/$APK_NAME" ]; then
+    mkdir -p "$OUT_DIR"
+    cp -f "$ROOT/builds/$APK_NAME" "$APK_SRC"
+  fi
+  [ -f "$APK_SRC" ] || { echo "!! publish-only: готового $APK_NAME нет в builds/ (версионная папка и корень) — сначала обычная сборка" >&2; exit 1; }
+  echo "==> publish-only: публикация готового APK v$VER (${APK_SRC#$ROOT/}) без сборки…"
+else
+  # 1) фронтенд (тот же dist/, что ест десктоп)
+  echo "==> Building frontend..."
+  npm run build
+
+  # 2) APK через tauri CLI (cwd src-tauri/: там tauri.conf.json и gen/android);
+  #    release — режим CLI по умолчанию, отдельный флаг только у debug
+  echo "==> Building android shell ($TYPE, targets: ${TARGETS[*]})..."
+  TYPE_FLAG=(); [ "$TYPE" = "debug" ] && TYPE_FLAG=(--debug)
+  (cd src-tauri && node ../node_modules/@tauri-apps/cli/tauri.js android build "${TYPE_FLAG[@]}" --apk --target "${TARGETS[@]}")
+
+  # 3) артефакт → builds/ (версия + тип — правила проекта)
+  APK_SRC="src-tauri/gen/android/app/build/outputs/apk/universal/$TYPE/app-universal-$TYPE.apk"
+  [ -f "$APK_SRC" ] || { echo "!! APK не найден: $APK_SRC" >&2; exit 1; }
+  mkdir -p "$OUT_DIR"
+fi
 
 # подпись release: keystore.properties (секрет, в git не входит) + keystore
 SIGNED=""
@@ -88,12 +113,19 @@ if [ "$TYPE" = "release" ]; then
     echo "   на телефон не встанет. Схема подписи — шапка этого скрипта." >&2
   fi
 fi
+# publish-only без подписи не публикует — падаем сразу, а не молча выходим
+if [ "$PUBLISH_ONLY" = 1 ] && [ -z "$SIGNED" ]; then
+  echo "!! publish-only: APK не подписан — публиковать нельзя, пересоберите обычной сборкой" >&2
+  exit 1
+fi
 
 SUFFIX=""
 if [ "$TYPE" = "release" ] && [ -z "$SIGNED" ]; then SUFFIX="-unsigned"; fi
 APK_NAME="DuoPulse-$VER-android-$TYPE$SUFFIX.apk"
-cp -f "$APK_SRC" "$OUT_DIR/$APK_NAME"
-echo "==> Done: ${OUT_DIR#$ROOT/}/$APK_NAME"
+if [ "$PUBLISH_ONLY" != 1 ]; then
+  cp -f "$APK_SRC" "$OUT_DIR/$APK_NAME"
+  echo "==> Done: ${OUT_DIR#$ROOT/}/$APK_NAME"
+fi
 
 # 4) хаб «Скачать» Aila: сервер сканирует корень builds/ (duopulse-063) —
 #    свежий release-APK туда, устаревшие — вон (debug не публикуем)
@@ -126,11 +158,31 @@ if [ "$TYPE" = "release" ]; then
   #    неуспех публикации — ошибка сборки (канал не должен молча отставать).
   if [ -n "$SIGNED" ] && [ -f "D:/Scheduler/tools/publish-update.cjs" ]; then
     echo "==> Публикация в канал обновлений Aila…"
+    # Объединение канала (duopulse-234): манифест один на обе платформы, а
+    # сервер пишет его по списку одной публикации — свой набор затирал чужой
+    # (после android-сборки из манифеста выпадали 4 десктоп-ассета). Вместе
+    # с APK публикуем и десктоп-набор той же версии из
+    # builds/duopulse_<ver>_release/ (сетап, подпись, tauri-фиды), если он
+    # собран, — манифест всегда несёт полный набор обеих платформ.
+    EXTRA="$(cygpath -m "$ROOT/builds/$HUB_APK")"
+    DESK_DIR="$ROOT/builds/duopulse_${VER}_release"
+    DESK_N=0
+    for f in "DuoPulse_${VER}_x64-setup.exe" "DuoPulse_${VER}_x64-setup.exe.sig" latest.json latest-canary.json; do
+      if [ -f "$DESK_DIR/$f" ]; then
+        EXTRA="$EXTRA,$(cygpath -m "$DESK_DIR/$f")"
+        DESK_N=$((DESK_N+1))
+      fi
+    done
+    if [ "$DESK_N" -gt 0 ]; then
+      echo "    + десктоп-набор v$VER ($DESK_N файл(ов) из ${DESK_DIR#$ROOT/}) — публикация объединяется (duopulse-234)"
+    else
+      echo "    !! десктоп-набор v$VER не найден (${DESK_DIR#$ROOT/}) — манифест выйдет только с APK"
+    fi
     MSYS_NO_PATHCONV=1 node "D:/Scheduler/tools/publish-update.cjs" duopulse \
       --version "$VER" \
-      --extra "$(cygpath -m "$ROOT/builds/$HUB_APK")" \
+      --extra "$EXTRA" \
       --notes-file "$(cygpath -m "$ROOT/CHANGELOG.md")" \
       || { echo "!! Публикация в канал Aila не удалась — канал отстанет от сборки." \
-           "   Aila включена? Повторите: node D:/Scheduler/tools/publish-update.cjs duopulse --version $VER --extra builds/$HUB_APK --notes-file CHANGELOG.md" >&2; exit 1; }
+           "   Aila включена? Повторите: scripts/android-build.sh publish-only" >&2; exit 1; }
   fi
 fi

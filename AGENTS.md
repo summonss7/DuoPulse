@@ -59,8 +59,12 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   десктопный код (src/, src-tauri/, bridge/, content/), — иначе Windows-канал отстаёт:
   0.1.16–0.1.20 вышли только мобильными, десктоп застрял на 0.1.15 (duopulse-120).
   Полный релиз обеих платформ — по порядку: `npm run release` → `scripts/android-build.sh
-  release` → `node scripts/release.mjs --publish-only` (android-build.sh перезатирает манифест
-  канала одним APK, duopulse-234; полный набор — 5 ассетов).
+  release` → `node scripts/release.mjs --publish-only` (закрывающая перепубликация, теперь
+  страховочная). Каждая публикация несёт ОБЪЕДИНЕНИЕ платформ: манифест канала один на
+  обе, и каждая сторона докладывает артефакты другой из builds/ (android-build.sh —
+  десктоп-набор builds/duopulse_<в>_release/, release.mjs — APK из корня builds/),
+  полный набор — 5 ассетов (duopulse-234). Починка канала без пересборки:
+  `scripts/android-build.sh publish-only` или `node scripts/release.mjs --publish-only`.
 - **Отчётность**: CHANGELOG.md в корне; карточки — CARDS/; планы — ROADMAP.md.
 
 <!-- E2E-ИНСТРУМЕНТЫ -->
