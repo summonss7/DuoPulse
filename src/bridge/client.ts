@@ -101,6 +101,7 @@ import type {
   TranslateTestParams,
   TranslateTestResult,
   TranslateClearCacheResult,
+  TranslatePageBeginParams,
   UpdaterCheckResult,
   UpdaterStatusResult,
   VpnAddRuleParams,
@@ -390,6 +391,12 @@ export const bridge = {
     /** translate.clear_cache (задача 5.1, приватность): очистить кэш
      *  переведённых дорожек — повторные просмотры снова в провайдер. */
     clearCache: () => invoke<TranslateClearCacheResult>("translate_clear_cache"),
+    /** translate.page_begin (карточка duopulse-244): перевод всей страницы
+     *  активной вкладки («Перевести страницу…» в «⋮»-меню) — document-
+     *  событие в активную вкладку, бар и пачки gtx — контент-слой.
+     *  target=null — последний выбор бара (память Core, дефолт ru). */
+    pageBegin: (params: TranslatePageBeginParams) =>
+      invoke<void>("translate_page_begin", { params }),
   },
   updater: {
     /** updater.status (задача 5.2): текущая версия, канал/автопроверка,

@@ -190,6 +190,7 @@ export interface DuoPulseBridgeContract {
   TabsSleepParams: TabsSleepParams;
   TabsWakeParams: TabsWakeParams;
   TranslateClearCacheResult: TranslateClearCacheResult;
+  TranslatePageBeginParams: TranslatePageBeginParams;
   TranslateSetSettingsParams: TranslateSetSettingsParams;
   TranslateConfig: TranslateConfig;
   TranslateTestParams: TranslateTestParams;
@@ -1756,6 +1757,15 @@ export interface TranslateClearCacheResult {
    * Удалено строк кэша.
    */
   cleared: number;
+}
+/**
+ * Параметры translate.page_begin (карточка duopulse-244): перевод всей страницы активной вкладки — пункт «⋮»-меню.
+ */
+export interface TranslatePageBeginParams {
+  /**
+   * Целевой язык, код («ru»); по умолчанию — последний выбор бара перевода страницы (память Core, дефолт ru).
+   */
+  target?: string | null;
 }
 /**
  * translate.set_settings: value — конфиг без ключей (ключи — только DPAPI); secret — ключ API выбранного провайдера (value.provider): None — не менять, Some("") — удалить, Some(k) — перезаписать.

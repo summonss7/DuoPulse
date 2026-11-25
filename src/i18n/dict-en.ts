@@ -292,6 +292,7 @@ export const dict: Record<string, string> = {
   "Меню браузера": "Browser menu",
   "Новая вкладка инкогнито": "New incognito tab",
   "Переоткрыть закрытую": "Reopen closed tab",
+  "Перевести страницу…": "Translate page…",
   "Проверить обновления…": "Check for updates…",
   "Блокировщик": "Ad blocker",
   "Вкл/выкл блокировщик рекламы": "Enable/disable the ad blocker",

@@ -719,6 +719,17 @@ pub struct SubtitlesTranslateTrackParams {
     pub target_lang: String,
 }
 
+/// Параметры translate.page_begin (карточка duopulse-244): перевод всей
+/// страницы активной вкладки — пункт «⋮»-меню.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslatePageBeginParams {
+    /// Целевой язык, код («ru»); по умолчанию — последний выбор бара
+    /// перевода страницы (память Core, дефолт ru).
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
 /// Частичный патч стиля плашки (docs/03 §6 SubtitleStyle): неназванные поля
 /// не меняются; клампы — в content-оверлее (mergeStyle, задача 3.4). Цвета
 /// строк/плашки и обводка — карточка duopulse-059 (hex #rrggbb / bool),
@@ -1331,6 +1342,9 @@ pub fn contract_json() -> serde_json::Value {
                                  "result": schema!(TranslateTestResult) },
             "translate.clear_cache": { "handler": "translate_clear_cache", "params": null,
                                         "result": schema!(TranslateClearCacheResult) },
+            "translate.page_begin": { "handler": "translate_page_begin",
+                                       "params": schema!(TranslatePageBeginParams),
+                                       "result": null },
             "updater.status": { "handler": "updater_status", "params": null,
                                 "result": schema!(crate::updater::UpdaterStatusResult) },
             "updater.check": { "handler": "updater_check", "params": null,
@@ -3297,6 +3311,45 @@ fn subtitles_translate_track(
     )
 }
 
+/// translate.page_begin: перевод всей страницы активной вкладки (карточка
+/// duopulse-244, пункт «⋮»-меню «Перевести страницу»). Диспатчит
+/// document-событие duopulse-translate-page (паттерн subtitles.translate_
+/// track); контент-слой (content/page-translate.ts) сам собирает текстовые
+/// узлы и водит пачки бесплатным gtx (WebMessage «gtx-translate», конвейер
+/// yt_fallback) — команда только запускает, прогресс живёт в баре контента.
+/// Цель — параметр или последний выбор бара (память translate_menu).
+#[tauri::command]
+fn translate_page_begin(
+    app: AppHandle,
+    manager: tauri::State<crate::tabs::TabManager>,
+    params: TranslatePageBeginParams,
+) -> Result<(), String> {
+    let target = match &params.target {
+        Some(t) => {
+            let lang = t.trim().to_ascii_lowercase();
+            if !is_lang_code(&lang) {
+                return Err("целевой язык — код из 2–3 букв (ru, es, pt-br)".into());
+            }
+            lang
+        }
+        None => {
+            // память пункта меню — windows-модуль; прочие десктоп-таргеты
+            // (не собираются) не должны ломать проверку
+            #[cfg(windows)]
+            let target = crate::translate_menu::last_page_target();
+            #[cfg(not(windows))]
+            let target = "ru".to_string();
+            target
+        }
+    };
+    eval_active_event(
+        &app,
+        &manager,
+        "duopulse-translate-page",
+        &serde_json::json!({ "target": target }),
+    )
+}
+
 fn proxy_settings(cfg: &proxy::ProxyConfig, dir: &std::path::Path) -> ProxySettings {
     ProxySettings {
         enabled: cfg.enabled,
@@ -3655,6 +3708,7 @@ pub fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         translate_set_settings,
         translate_test,
         translate_clear_cache,
+        translate_page_begin,
         updater_status,
         updater_check,
         updater_install,

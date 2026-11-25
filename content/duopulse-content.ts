@@ -100,6 +100,7 @@ import {
   type FrameVideoProxy,
 } from "./adapters/embed";
 import { installSelectionTranslate } from "./translate-select";
+import { installPageTranslate } from "./page-translate";
 import { installAudioBalance } from "./audio-balance";
 import { installPopupShim } from "./popup-shim";
 import { installPasswordFill } from "./passwords-fill";
@@ -151,6 +152,12 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
   // Перевод выделенного текста (карточка duopulse-098): слушатели contextmenu
   // и WebMessage begin/result; пункт контекстного меню — нативный (Core).
   const selectionTranslate = installSelectionTranslate({ post: postToCore });
+  // Перевод всей страницы (карточка duopulse-244, «как в Chrome»): входы —
+  // пункт контекстного меню (WebMessage «translate-page») и пункт «⋮»-меню
+  // (document-событие duopulse-translate-page); пачки — бесплатный gtx
+  // (WebMessage «gtx-translate», конвейер фолбэк-дорожек), бар с целью/
+  // оригиналом и дочиткой динамики — content/page-translate.ts.
+  const pageTranslate = installPageTranslate({ post: postToCore });
   // Пароли (этап 2 duopulse-108): формы логина → кандидат «Сохранить пароль?»
   // по сабмиту и автозаполнение по клику; инкогнито — модуль пассивен.
   const passwordFill = installPasswordFill({ post: postToCore });
@@ -1240,6 +1247,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
       cloud: ReturnType<typeof cloudTranslateStatus>;
       asr: ReturnType<typeof asrStatus>;
       translateSelection: ReturnType<typeof selectionTranslate.state>;
+      pageTranslate: ReturnType<typeof pageTranslate.state>;
       passwords: ReturnType<typeof passwordFill.state>;
     } {
       return {
@@ -1264,6 +1272,7 @@ type ContentVideo = DetectedVideo & { frameProxy?: FrameVideoProxy };
         cloud: cloudTranslateStatus(),
         asr: asrStatus(),
         translateSelection: selectionTranslate.state(),
+        pageTranslate: pageTranslate.state(),
         passwords: passwordFill.state(),
       };
     },

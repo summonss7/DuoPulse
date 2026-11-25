@@ -278,6 +278,7 @@ export const dict: Record<string, string> = {
   "Меню браузера": "Ponuka prehliadača",
   "Новая вкладка инкогнито": "Nová karta inkognito",
   "Переоткрыть закрытую": "Znovu otvoriť zatvorenú",
+  "Перевести страницу…": "Preložiť stránku…",
   "Проверить обновления…": "Skontrolovať aktualizácie…",
   "Блокировщик": "Blokovanie reklám",
   "Вкл/выкл блокировщик рекламы": "Zapnúť/vypnúť blokovanie reklám",

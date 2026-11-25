@@ -60,6 +60,12 @@ menu.addEventListener("click", (e) => {
     case "reopen":
       void bridge.tabs.reopen().catch(err);
       break;
+    case "translatePage":
+      // «Перевести страницу…» (duopulse-244, как в Chrome): цель — последний
+      // выбор бара перевода (память Core); бар с селектом цели и «Оригинал»
+      // покажет контент-слой активной вкладки (context/page-translate.ts).
+      void bridge.translate.pageBegin({ target: null }).catch(err);
+      break;
     case "openvideo":
       // «Открыть видео…» (duopulse-176): нативный диалог → file://-вкладка,
       // играет встроенный плеер WebView2 (субтитры .srt — дропом/Alt+D).

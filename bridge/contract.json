@@ -5320,6 +5320,26 @@
         "type": "object"
       }
     },
+    "translate.page_begin": {
+      "handler": "translate_page_begin",
+      "params": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Параметры translate.page_begin (карточка duopulse-244): перевод всей страницы активной вкладки — пункт «⋮»-меню.",
+        "properties": {
+          "target": {
+            "default": null,
+            "description": "Целевой язык, код («ru»); по умолчанию — последний выбор бара перевода страницы (память Core, дефолт ru).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "TranslatePageBeginParams",
+        "type": "object"
+      },
+      "result": null
+    },
     "translate.set_settings": {
       "handler": "translate_set_settings",
       "params": {

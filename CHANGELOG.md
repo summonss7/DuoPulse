@@ -9073,3 +9073,51 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
     Smoke: release-exe жив, окно «DuoPulse 0.1.104 · 24.11.2026 20:47». Профиль Артёма
     проверен SQL-выборкой: AI — корень (position 1, перед Network).
 - Коммит: dd1d6f8 fix(bookmarks): duopulse-242 — папки «рядом» против «внутрь» (краевые зоны дропа), вынос из вложенности (drag подпапок, меню «на уровень выше»), релиз 0.1.104; push origin main (тем же сеансом).
+
+## 25.11.2026, 07:07 — duopulse-244: перевод всей страницы «как в Chrome» + релиз 1.1.1
+- Начало работы: 25.11.2026, 02:17 (диспетчер), 02:20 — копия проекта backup.bat (backups/backup_2026-11-25_02-20-26)
+- Окончание работы: 25.11.2026, 07:07
+- Что сделано (карточка duopulse-244, пожелание Артёма «переводить всю страницу как в хроме… версия 1.1.1»):
+  - Контент-слой: новый модуль content/page-translate.ts — сбор переводимых текстовых
+    узлов TreeWalker'ом (служебные теги/code/pre, translate=no, contenteditable и узлы
+    собственных UI — мимо), пачки ≤ 40 строк / ≤ 1200 символов, замена textContent с
+    сохранением пробельного контура, оригиналы — в Map (кнопка «Оригинал» возвращает),
+    бар поверх страницы (CSSOM, гайд 06 §6): селект 15 языков (как у бабла выделения),
+    «Оригинал»/«Показать перевод», «×» (спрятать бар — перевод живёт), прогресс
+    «Переводим… N%», MutationObserver-дочитка динамически добавленного контента
+    (дебаунс 700 мс), отмена устаревших ответов счётчиком поколений.
+  - Сеть БЕЗ нового кода: пачки идут существующим бесплатным gtx-конвейером
+    «gtx-translate» (yt_fallback.rs — hosts failover clients5/googleapis, dj=1,
+    построчный фолбэк при смёрживании строк).
+  - Входы: пункт «Перевести страницу (на <цель>)» в НАТИВНОМ контекстном меню — всегда
+    (translate_menu.rs, над «Перевести выделение»; клик → WebMessage «translate-page»);
+    пункт «Перевести страницу…» в «⋮»-меню (index.html + src/chrome/mainmenu.ts →
+    новая bridge-команда translate.page_begin → eval_active_event диспатчит
+    document-событие duopulse-translate-page в активную вкладку); цель запоминается
+    (WebMessage «translate-page-set-target» из бара → подписи меню, main.rs),
+    дефолт ru. Контракт bridge v15: translate.page_begin (bridge.rs + gen types,
+    src/bridge/client.ts). i18n: пункт меню переведён (en/ro/ar/uk/sk).
+  - Версия 1.1.1 (мажорная веха по пожеланию): package.json = tauri.conf.json =
+    Cargo.toml. Мобильная ветка паритета — отдельной карточкой duopulse-245 (todo):
+    web-оверлей Android не получает десктопный бандл, подъём — своя задача.
+- Как проверено:
+  - Юнит-тесты: vitest — 72 файла / 876 тестов зелёные (новый
+    content/page-translate.test.ts — 14: контур пробелов, фильтры узлов, пачки,
+    полный прогон от WebMessage- и document-входа, бар, «Оригинал», смена цели
+    (память Core), ошибка конвейера, отмена устаревшего ответа, «×»/возврат бара
+    без сети, динамика MutationObserver, пустая страница); tsc --noEmit чисто;
+    client.test.ts — покрытие контракта; i18n-тест — словари без пропусков.
+  - Rust: cargo build и cargo test — без warnings (duopulse-231), 514 тестов зелёные.
+  - E2E-стенд e2e/page/page-translate-smoke.mjs (новый, постоянный, в AGENTS.md):
+    13/13 ЖИВЫМ gtx — пункт «⋮»-меню в DOM UI, invoke translate_page_begin из
+    UI-webview реальным путём, фазы translating→translated, h1 «Good morning world» →
+    «Доброе утро, мир», контур пробелов узла сохранён, script-узел не тронут, бар
+    «Переведено на Русский» с селектом ru, поздний узел дочитан наблюдателем,
+    «Оригинал» вернул английский, повторный запуск (target=null — память Core) —
+    перевод заново. Артефакт e2e/page/page-translate-last-run.json (gitignore).
+  - Релиз 1.1.1 (полный, порядок duopulse-234): npm run release — NSIS-сетап
+    (6,2 МБ), каналы Aila+GitHub Pages, хаб «Скачать» и C:\DuoPulse обновлены;
+    scripts/android-build.sh release — APK 1.1.1 подписан (38,1 МБ), канал Aila;
+    node scripts/release.mjs --publish-only — манифест канала: 1.1.1, 5 ассетов
+    (сетап, .sig, latest.json, latest-canary.json, APK) — проверено curl'ом.
+- Коммит: (хеш ниже, docs-коммитом)

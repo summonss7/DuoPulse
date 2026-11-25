@@ -727,6 +727,9 @@ unsafe fn referer_of(
 ///   выбор бабла, gtx-конвейер — translate_menu::translate_selection_for_
 ///   page, ответ — WebMessage «translate-selection-result» тому же
 ///   документу;
+/// - «translate-page-set-target» — цель перевода всей страницы (карточка
+///   duopulse-244): селект бара content/page-translate.ts; запоминается
+///   для подписи пункта контекстного меню и дефолта «⋮»-меню;
 /// - «asr-begin» — распознавание речи (карточка duopulse-060): content-слой
 ///   добыл URL аудио в контексте страницы (адаптер YouTube / src видео),
 ///   Core скачивает его тем же сетевым путём (SOCKS5-роутер), декодирует,
@@ -1042,6 +1045,13 @@ unsafe fn install_content_messaging(core: &ICoreWebView2, app: &AppHandle, tab_i
                             parsed["reqId"].as_u64().unwrap_or(0),
                         );
                     }
+                }
+            } else if parsed["duopulse"] == "translate-page-set-target" {
+                // Цель перевода страницы из бара контента (карточка
+                // duopulse-244): подпись пункта контекстного меню и дефолт
+                // «⋮»-меню (bridge translate.page_begin) ведут на неё.
+                if let Some(target) = parsed["target"].as_str() {
+                    translate_menu::note_page_target(target);
                 }
             } else if parsed["duopulse"] == "asr-begin" {
                 // Распознавание речи (карточка duopulse-060): URL аудио — у

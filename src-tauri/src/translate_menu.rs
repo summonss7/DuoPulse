@@ -25,6 +25,16 @@
 //! в контексте страницы (content/translate-select.ts) — рендерится поверх
 //! контента композитором вкладки, слои WebView2 (карточка duopulse-086) не
 //! участвуют.
+//!
+//! Перевод ВСЕЙ страницы (карточка duopulse-244, «как в Chrome»): пункт
+//! «Перевести страницу (на <цель>)» добавляется всегда — над пунктом
+//! выделения. Клик шлёт WebMessage «translate-page» {reqId, target}
+//! (start_page_translate): контент-слой (content/page-translate.ts) сам
+//! собирает текстовые узлы и водит пачки бесплатным gtx общим конвейером
+//! «gtx-translate» (yt_fallback), Core сетью тут не занимается. Цель —
+//! память last_page_target (WebMessage «translate-page-set-target» из бара
+//! контента; дефолт ru). Второй вход — «⋮»-меню (bridge translate.page_begin,
+//! document-событие duopulse-translate-page в активную вкладку).
 
 #![cfg(windows)]
 
@@ -43,9 +53,37 @@ use crate::translate::selection::{selection_menu_label, norm_targets, SelectionE
 /// ответов на смену языков в баббле (content различает свежий/устаревший).
 static SELECTION_REQ: AtomicU64 = AtomicU64::new(1);
 
+/// Счётчик запросов перевода страницы (duopulse-244): reqId begin-сообщений
+/// контент-слою (пачки он водит сам через «gtx-translate»).
+static PAGE_REQ: AtomicU64 = AtomicU64::new(1);
+
 /// Последний выбор бабла перевода (сессия): источник («» — авто) и целевые
 /// языки (дефолт [«ru»]) — подпись пункта меню ведёт на них.
 static LAST_LANGS: Mutex<(String, Vec<String>)> = Mutex::new((String::new(), Vec::new()));
+
+/// Последняя цель перевода страницы (карточка duopulse-244): выбор селекта
+/// бара контента; подпись пункта меню и дефолт bridge-команды «⋮»-меню.
+static LAST_PAGE_TARGET: Mutex<String> = Mutex::new(String::new());
+
+/// Текущая цель перевода страницы («ru», пока не выбирали другое).
+pub(crate) fn last_page_target() -> String {
+    let guard = LAST_PAGE_TARGET.lock().unwrap();
+    if guard.is_empty() {
+        "ru".into()
+    } else {
+        guard.clone()
+    }
+}
+
+/// Запомнить цель перевода страницы (WebMessage «translate-page-set-target»
+/// из бара контент-слоя, main.rs).
+pub(crate) fn note_page_target(target: &str) {
+    let t = target.trim().to_ascii_lowercase();
+    if t.is_empty() {
+        return;
+    }
+    *LAST_PAGE_TARGET.lock().unwrap() = t;
+}
 
 /// Движок gtx-перевода выделений: кэш фрагментов + кулдаун 429 — один на
 /// приложение, состояние переживает вкладки (лимит общий на IP).
@@ -117,7 +155,8 @@ pub(crate) unsafe fn install_translate_menu(
     }
 }
 
-/// Добавить «Перевести выделение» в меню, если есть выделенный текст.
+/// Добавить «Перевести страницу» (всегда, duopulse-244) и «Перевести
+/// выделение» (при непустом выделении) в контекстное меню.
 /// Ошибки глотаем с журналом — страница не должна страдать.
 unsafe fn add_menu_item(
     core: &ICoreWebView2,
@@ -127,22 +166,20 @@ unsafe fn add_menu_item(
 ) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2Environment9, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
-        COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
     };
     use windows_core::{Interface, HSTRING, PWSTR};
 
-    let Ok(target) = args.ContextMenuTarget() else {
-        return;
-    };
-    let mut sel_pw = PWSTR::null();
-    if target.SelectionText(&mut sel_pw).is_err() {
-        return;
-    }
-    let selection = webview2_com::CoTaskMemPWSTR::from(sel_pw).to_string();
-    let selection = selection.trim().to_string();
-    if selection.is_empty() {
-        return; // нечего переводить — меню штатное
-    }
+    // выделение может быть пустым — пункт страницы добавляется и тогда
+    let selection = args
+        .ContextMenuTarget()
+        .ok()
+        .and_then(|target| {
+            let mut sel_pw = PWSTR::null();
+            target.SelectionText(&mut sel_pw).ok().map(|_| sel_pw)
+        })
+        .map(|sel_pw| webview2_com::CoTaskMemPWSTR::from(sel_pw).to_string())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
     let Ok(env9) = env.cast::<ICoreWebView2Environment9>() else {
         eprintln!("[translate] CreateContextMenuItem не поддержан средой");
         return;
@@ -154,47 +191,107 @@ unsafe fn add_menu_item(
         return;
     };
 
-    let (source, targets) = last_langs();
-    let label = selection_menu_label(&source, &targets);
-    let Ok(item) = env9.CreateContextMenuItem(
-        &HSTRING::from(label),
+    // Пункт «Перевести выделение» — при непустом выделении (duopulse-098);
+    // вставка ПЕРВЫМ, чтобы пункт страницы ниже лёг над ним.
+    if !selection.is_empty() {
+        let (source, targets) = last_langs();
+        let label = selection_menu_label(&source, &targets);
+        let Ok(item) = env9.CreateContextMenuItem(
+            &HSTRING::from(label),
+            &empty_icon,
+            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
+        ) else {
+            eprintln!("[translate] пункт меню не создан");
+            return;
+        };
+        let core_item = core.clone();
+        let app_item = app.clone();
+        let text_item = selection;
+        let source_item = source;
+        let targets_item = targets;
+        let res = item.add_CustomItemSelected(
+            &CustomItemSelectedEventHandler::create(Box::new(move |_item, _args| {
+                start_selection_translate(&app_item, &core_item, &text_item, &source_item, &targets_item);
+                Ok(())
+            })),
+            std::ptr::null_mut(),
+        );
+        if res.is_err() {
+            eprintln!("[translate] подписка на клик пункта не встала");
+            return;
+        }
+        // Пункт меню — сверху, после него разделитель (паттерн расширений Chrome).
+        if insert_top(&env9, &args, &empty_icon, &item).is_err() {
+            return;
+        }
+    }
+    // Пункт «Перевести страницу» (duopulse-244) — над выделением, как
+    // «Перевести на…» в Chrome; в меню всегда (выделение не обязательно).
+    // Вставка в 0/1 поверх выделения даёт порядок
+    // [страница, сеп, выделение, сеп, штатные…].
+    let page_target = last_page_target();
+    let page_label = format!("Перевести страницу (на {page_target})");
+    let Ok(page) = env9.CreateContextMenuItem(
+        &HSTRING::from(page_label),
         &empty_icon,
         COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
     ) else {
-        eprintln!("[translate] пункт меню не создан");
+        eprintln!("[translate] пункт меню страницы не создан");
         return;
     };
-    let core_item = core.clone();
-    let app_item = app.clone();
-    let text_item = selection;
-    let source_item = source;
-    let targets_item = targets;
-    let res = item.add_CustomItemSelected(
+    let core_page = core.clone();
+    let res = page.add_CustomItemSelected(
         &CustomItemSelectedEventHandler::create(Box::new(move |_item, _args| {
-            start_selection_translate(&app_item, &core_item, &text_item, &source_item, &targets_item);
+            start_page_translate(&core_page);
             Ok(())
         })),
         std::ptr::null_mut(),
     );
     if res.is_err() {
-        eprintln!("[translate] подписка на клик пункта не встала");
+        eprintln!("[translate] подписка на клик пункта страницы не встала");
         return;
     }
-    // Пункт меню — сверху, после него разделитель (паттерн расширений Chrome).
+    let _ = insert_top(&env9, &args, &empty_icon, &page);
+    // Handled НЕ ставим: WebView2 показывает штатное меню с нашими пунктами.
+}
+
+/// Вставить пункт меню первым (индекс 0) с разделителем (индекс 1).
+unsafe fn insert_top(
+    env9: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment9,
+    args: &ICoreWebView2ContextMenuRequestedEventArgs,
+    empty_icon: &windows::Win32::System::Com::IStream,
+    item: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2ContextMenuItem,
+) -> Result<(), ()> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR;
+    use windows_core::HSTRING;
     let Ok(items) = args.MenuItems() else {
-        return;
+        return Err(());
     };
-    if items.InsertValueAtIndex(0, &item).is_err() {
-        return;
+    if items.InsertValueAtIndex(0, item).is_err() {
+        return Err(());
     }
     if let Ok(sep) = env9.CreateContextMenuItem(
         &HSTRING::new(),
-        &empty_icon,
+        empty_icon,
         COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
     ) {
         let _ = items.InsertValueAtIndex(1, &sep);
     }
-    // Handled НЕ ставим: WebView2 показывает штатное меню с нашим пунктом.
+    Ok(())
+}
+
+/// Клик «Перевести страницу»: begin-сообщение контент-слою (content/
+/// page-translate.ts) — он сам собирает текстовые узлы и водит пачки
+/// бесплатным gtx (WebMessage «gtx-translate», конвейер фолбэк-дорожек);
+/// ядро сетью здесь не занимается. Мы уже на главном потоке (COM-обработчик).
+fn start_page_translate(core: &ICoreWebView2) {
+    let req_id = PAGE_REQ.fetch_add(1, Ordering::Relaxed);
+    let begin = serde_json::json!({
+        "duopulse": "translate-page",
+        "reqId": req_id,
+        "target": last_page_target(),
+    });
+    crate::post_to_page(Some(core), &begin);
 }
 
 /// Клик по пункту меню: begin-сообщение баблу (UI-поток) + фоновый перевод

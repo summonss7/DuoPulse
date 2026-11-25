@@ -228,6 +228,7 @@ const cases: Record<string, { path: string[]; params?: unknown }> = {
   },
   "translate.test": { path: ["translate", "test"], params: { text: null, targetLang: "ru" } },
   "translate.clear_cache": { path: ["translate", "clearCache"] },
+  "translate.page_begin": { path: ["translate", "pageBegin"], params: { target: null } },
   "updater.status": { path: ["updater", "status"] },
   "updater.check": { path: ["updater", "check"] },
   "updater.install": { path: ["updater", "install"] },
