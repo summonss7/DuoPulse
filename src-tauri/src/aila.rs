@@ -485,8 +485,12 @@ impl AilaAccount {
     /// Один круг синхронизации одного ключа appdata: pull → merge → push
     /// (если разошлись). `merge` вливает удалённый документ (None — облако
     /// пусто) в локальное хранилище и возвращает локальный документ к отправке;
-    /// `count_of` — число записей документа (статистика «было в облаке»).
-    /// Ответ — (записей было в облаке, push?, revision после круга).
+    /// `count_of` — число записей документа (статистика «было в облаке»);
+    /// `normalize` — необязательная нормализация локального документа под
+    /// состав удалённого перед сравнением (duopulse-238: без неё смешанные
+    /// версии — поле, которого старая сторона не знает — перезаливали бы
+    /// документ каждый круг без изменения данных). Ответ — (записей было в
+    /// облаке, push?, revision после круга).
     fn appdata_round<D, F>(
         agent: &ureq::Agent,
         server: &str,
@@ -494,6 +498,7 @@ impl AilaAccount {
         key_id: &str,
         sync_key: &[u8; 32],
         count_of: impl Fn(&D) -> u64,
+        normalize: Option<&dyn Fn(&D, &D) -> D>,
         mut merge: F,
     ) -> Result<(u64, bool, u64), String>
     where
@@ -518,11 +523,19 @@ impl AilaAccount {
         let remote_count = remote_doc.as_ref().map(count_of).unwrap_or(0);
         // --- merge (локальные правки при этом остаются — push ниже) ---
         let local_doc = merge(remote_doc.as_ref())?;
-        // --- push, если документы разошлись ---
-        let same_as_remote = remote_doc
-            .as_ref()
-            .map(|d| serde_json::to_value(d).ok() == serde_json::to_value(&local_doc).ok())
-            == Some(true);
+        // --- push, если документы разошлись («по смыслу», duopulse-238:
+        // локальный документ сперва нормализуется под состав удалённого —
+        // иначе смешанные версии перезаливали бы документ каждый круг) ---
+        let same_as_remote = match (&remote_doc, normalize) {
+            (Some(r), Some(norm)) => {
+                let local_norm = norm(r, &local_doc);
+                serde_json::to_value(r).ok() == serde_json::to_value(&local_norm).ok()
+            }
+            (Some(r), None) => {
+                serde_json::to_value(r).ok() == serde_json::to_value(&local_doc).ok()
+            }
+            (None, _) => false,
+        };
         let mut pushed = false;
         if !same_as_remote {
             let blob = seal_blob(sync_key, &local_doc)?;
@@ -616,6 +629,7 @@ impl AilaAccount {
             KEY_PASSWORDS,
             &sync_key,
             |d: &VaultDoc| d.logins.len() as u64,
+            None,
             |remote| {
                 if let Some(d) = remote {
                     pw_stats = passwords.merge_remote(&d.logins, &d.never_save)?;
@@ -636,6 +650,13 @@ impl AilaAccount {
             KEY_BOOKMARKS,
             &bookmarks_key,
             |d: &BookmarkSyncDoc| d.bookmarks.len() as u64,
+            // сравнение «по смыслу» (duopulse-238): документ старой версии
+            // не несёт members/надгробий member, время дефолтной группы —
+            // локальная справка машины; локальный нормализуется под состав
+            // удалённого, чтобы не перезаливать облако каждый круг
+            Some(&|r: &BookmarkSyncDoc, l: &BookmarkSyncDoc| {
+                history.normalize_sync_doc_for_compare(r, l)
+            }),
             |remote| {
                 if let Some(d) = remote {
                     bm_stats = history.merge_sync_doc(d)?;

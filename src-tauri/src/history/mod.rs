@@ -1841,6 +1841,67 @@ impl HistoryStore {
         Ok(stats)
     }
 
+    // --- duopulse-238: сравнение документов синка «по смыслу» ---------------
+
+    /// Нормализовать локальный документ под состав удалённого для сравнения
+    /// (duopulse-238): несущие данные равны — лишнего push нет. Два вида
+    /// расхождений к несущим не относятся:
+    /// 1. Смешанные версии (≤0.1.101 ↔ 0.1.102): старая сторона не знает
+    ///    `members` (serde отбрасывает незнакомые поля) и надгробий member не
+    ///    создаёт — её экспорт заведомо без них, и дословное сравнение JSON
+    ///    видело расхождение на каждом круге синка без изменения данных
+    ///    (лишние seal+PUT и рост revision, пока все устройства не обновятся).
+    ///    Документ без members в закладках — отправитель старой версии: время
+    ///    членств облаку сейчас всё равно не доставить, для сравнения оно
+    ///    убирается; надгробия member убираются, если удалённый их не несёт
+    ///    (свежее снятие всё равно меняет состав групп — push состоится по
+    ///    нему).
+    /// 2. Время создания группы по умолчанию — локальная справка каждой
+    ///    машины («Избранное» создаётся при первом открытии профиля, merge
+    ///    чужой created_at существующим группам не подставляет, удалить
+    ///    дефолтную нельзя — надгробий на неё не бывает): в сравнении
+    ///    локальная принимает время удалённого документа той же группы.
+    /// Реальное расхождение несущей части (новая/удалённая закладка, состав
+    /// групп, надгробия bookmark/group) даёт push как раньше.
+    pub fn normalize_sync_doc_for_compare(
+        &self,
+        remote: &BookmarkSyncDoc,
+        local: &BookmarkSyncDoc,
+    ) -> BookmarkSyncDoc {
+        let mut doc = local.clone();
+        if remote.bookmarks.iter().all(|b| b.members.is_empty()) {
+            for b in &mut doc.bookmarks {
+                b.members.clear();
+            }
+            if !remote.tombstones.iter().any(|t| t.kind == TOMBSTONE_MEMBER) {
+                doc.tombstones.retain(|t| t.kind != TOMBSTONE_MEMBER);
+            }
+        }
+        let default_name: Option<String> = {
+            let conn = self.conn.lock().expect("history: лок не отравлен");
+            conn.query_row(
+                "SELECT name FROM bookmark_groups WHERE is_default = 1",
+                [],
+                |r| r.get(0),
+            )
+            .ok()
+        };
+        if let Some(name) = default_name {
+            let remote_created = remote
+                .groups
+                .iter()
+                .find(|g| g.name == name)
+                .map(|g| g.created_at);
+            if let (Some(r_created), Some(g)) = (
+                remote_created,
+                doc.groups.iter_mut().find(|g| g.name == name),
+            ) {
+                g.created_at = r_created;
+            }
+        }
+        doc
+    }
+
     // --- задача 5.1: экспорт/импорт профиля -----------------------------------
 
     /// Дамп всех закладок (экспорт профиля; url — ключ, даты сохраняются).
@@ -3971,6 +4032,145 @@ mod tests {
         let b = HistoryStore::open_in_memory().unwrap();
         b.merge_sync_doc(&legacy).unwrap();
         assert_eq!(member_groups(&b, url), vec!["Музыка"]);
+    }
+
+    /// duopulse-238: сверка документов для круга синка «по смыслу». Модель
+    /// круга appdata_round (aila.rs): удалённый документ сперва вливается
+    /// merge_sync_doc, затем решается push — сравнением удалённого с
+    /// нормализованным локальным. Здесь — только само сравнение; сетевая
+    /// механика в e2e (e2e/sync).
+    fn doc_same_as_remote(
+        store: &HistoryStore,
+        remote: &BookmarkSyncDoc,
+        local: &BookmarkSyncDoc,
+    ) -> bool {
+        let normalized = store.normalize_sync_doc_for_compare(remote, local);
+        serde_json::to_value(remote).ok() == serde_json::to_value(&normalized).ok()
+    }
+
+    /// duopulse-238: смешанные версии (≤0.1.101 ↔ 0.1.102) без изменения
+    /// данных — push НЕТ: удалённый документ старой версии (без members и
+    /// надгробий member) равен локальному ново-версионному после
+    /// нормализации; дословное сравнение (без нормализатора) видело бы
+    /// расхождение каждый круг.
+    #[test]
+    fn sync_doc_mixed_versions_unchanged_no_push() {
+        let a = HistoryStore::open_in_memory().unwrap();
+        let music = a.group_add("Музыка", None).unwrap();
+        a.bookmark_add_to("https://m.example/track", "Трек", Some(music.id))
+            .unwrap();
+        let local = a.export_sync_doc().unwrap();
+        assert!(
+            local.bookmarks.iter().any(|b| !b.members.is_empty()),
+            "фикстура: локальный документ несёт members"
+        );
+
+        // удалённый документ — как его выплюнула бы старая версия: serde
+        // отбросил members; надгробий member нет и не будет
+        let mut remote = local.clone();
+        for b in &mut remote.bookmarks {
+            b.members.clear();
+        }
+        remote.tombstones.clear();
+        assert!(
+            serde_json::to_value(&remote).ok() != serde_json::to_value(&local).ok(),
+            "санитарная проверка: дословное сравнение видит расхождение (members)"
+        );
+        assert!(
+            doc_same_as_remote(&a, &remote, &local),
+            "по смыслу документы равны — push не нужен"
+        );
+
+        // то же после вливания удалённого документа (круг merge): локальные
+        // данные не изменились — export_sync_doc равен прежнему локальному
+        a.merge_sync_doc(&remote).unwrap();
+        let local2 = a.export_sync_doc().unwrap();
+        assert!(doc_same_as_remote(&a, &remote, &local2));
+    }
+
+    /// duopulse-238: реальное расхождение несущей части — push есть и при
+    /// старом удалённом документе: новая закладка, снятие членства (состав
+    /// groups меняется), надгробие bookmark, новое надгробие member у
+    /// документа новой версии.
+    #[test]
+    fn sync_doc_mixed_versions_real_diff_still_pushes() {
+        let a = HistoryStore::open_in_memory().unwrap();
+        let music = a.group_add("Музыка", None).unwrap();
+        let url = "https://m.example/track";
+        a.bookmark_add_to(url, "Трек", Some(music.id)).unwrap();
+        let mut remote = a.export_sync_doc().unwrap();
+        for b in &mut remote.bookmarks {
+            b.members.clear();
+        }
+        remote.tombstones.clear(); // как в облаке после старой версии
+
+        // 1) новая локальная закладка
+        a.bookmark_add_to("https://new.example/", "Новая", None)
+            .unwrap();
+        assert!(!doc_same_as_remote(
+            &a,
+            &remote,
+            &a.export_sync_doc().unwrap()
+        ));
+
+        // 2) снятие членства: на новой версии остаётся надгробие member —
+        // несущая часть (groups) меняется, push есть
+        let a2 = HistoryStore::open_in_memory().unwrap();
+        let music2 = a2.group_add("Музыка", None).unwrap();
+        let url2 = "https://m.example/track";
+        a2.bookmark_add_to(url2, "Трек", Some(music2.id)).unwrap();
+        let remote2 = {
+            let mut r = a2.export_sync_doc().unwrap();
+            for b in &mut r.bookmarks {
+                b.members.clear();
+            }
+            r.tombstones.clear();
+            r
+        };
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a2.group_toggle_bookmark(url2, music2.id, false).unwrap();
+        let after_removal = a2.export_sync_doc().unwrap();
+        assert!(has_member_tombstone(&after_removal, "Музыка", url2));
+        assert!(!doc_same_as_remote(&a2, &remote2, &after_removal));
+
+        // 3) удаление закладки — надгробие bookmark: push есть
+        let a3 = HistoryStore::open_in_memory().unwrap();
+        a3.bookmark_add_to("https://gone.example/", "Удалюсь", None)
+            .unwrap();
+        let mut remote3 = a3.export_sync_doc().unwrap();
+        remote3.bookmarks.clear();
+        remote3.tombstones.clear(); // пустое облако засеяли вливанием
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        a3.bookmark_remove("https://gone.example/").unwrap();
+        let after_delete = a3.export_sync_doc().unwrap();
+        assert!(after_delete
+            .tombstones
+            .iter()
+            .any(|t| t.kind == TOMBSTONE_BOOKMARK && t.key == "https://gone.example/"));
+        assert!(!doc_same_as_remote(&a3, &remote3, &after_delete));
+
+        // 4) новый документ НОВОЙ версии несёт надгробие member — удалённый
+        //    документ новой версии НЕ нормализуется (members есть), снятие
+        //    доехало бы push'ем
+        let a4 = HistoryStore::open_in_memory().unwrap();
+        let music4 = a4.group_add("Музыка", None).unwrap();
+        let url4 = "https://m.example/track";
+        a4.bookmark_add_to(url4, "Трек", Some(music4.id)).unwrap();
+        a4.group_toggle_bookmark(url4, music4.id, false).unwrap();
+        let remote4 = a4.export_sync_doc().unwrap(); // надгробие member внутри
+        assert!(has_member_tombstone(&remote4, "Музыка", url4));
+        let b4 = HistoryStore::open_in_memory().unwrap();
+        b4.merge_sync_doc(&remote4).unwrap();
+        let local4 = b4.export_sync_doc().unwrap();
+        assert!(
+            local4.tombstones.iter().any(|t| t.kind == TOMBSTONE_MEMBER),
+            "фикстура: после merge у получателя есть надгробие member"
+        );
+        assert!(
+            doc_same_as_remote(&b4, &remote4, &local4),
+            "обе стороны новой версии: надгробие member у обеих, время дефолтной \
+             группы нормализовано — лишнего push нет"
+        );
     }
 
     /// duopulse-233: профиль до 0.1.102 (членства без added_at) открывается;
