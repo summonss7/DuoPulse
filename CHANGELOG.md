@@ -9243,4 +9243,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   платформ: npm run release (десктоп stable+canary, фид GitHub Pages, хаб Aila,
   C:\DuoPulse) → scripts/android-build.sh release (подписанный APK, канал Aila) →
   release.mjs --publish-only (манифест канала — полный набор, 5 ассетов).
-- Коммит: (см. ниже, дописано после коммита)
+- Коммит: b8ef0ad fix(auth): duopulse-247 — логины сайтов переживают инкогнито (cleanup без removeAllCookies, блок кук общ. профиля mobile_private_cookies на время режима), десктопный UA для Google-входа в расширенном режиме, CookieManager.flush; смоук 17 проверок, релиз 1.1.3 (обе платформы, 5 ассетов); push origin main.
