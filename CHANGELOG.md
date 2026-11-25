@@ -9120,4 +9120,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
     scripts/android-build.sh release — APK 1.1.1 подписан (38,1 МБ), канал Aila;
     node scripts/release.mjs --publish-only — манифест канала: 1.1.1, 5 ассетов
     (сетап, .sig, latest.json, latest-canary.json, APK) — проверено curl'ом.
-- Коммит: (хеш ниже, docs-коммитом)
+- Коммит: 6460032 feat(translate): duopulse-244 — перевод всей страницы «как в Chrome»: пункт в ⋮-меню (bridge translate.page_begin) и контекстном меню, контент-модуль page-translate (пачки gtx, бар с языком/«Оригинал», дочитка динамики), релиз 1.1.1; push origin main (тем же сеансом). Полный релиз 1.1.1 опубликован до коммита: каналы Aila (манифест, 5 ассетов) + GitHub Pages (duopulse-updates: bef9f93, df995ca).
