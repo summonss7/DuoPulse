@@ -9183,4 +9183,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
     манифест канала: 1.1.2, 5 ассетов (сетап, .sig, latest.json, latest-canary.json,
     APK) — проверено curl'ом. Десктоп не отстаёт (duopulse-120): обе платформы
     в одном сеансе.
-- Коммит: <HASH> feat(translate): duopulse-245 — мобильный перевод всей страницы web-оверлея (паритет 244): пейлоад page-translate.js (веб-фетч gtx, duopulse-208), пункт «🌐 Перевести страницу…» в ⋮-меню оверлея, смоук e2e/mobile, релиз 1.1.2; push origin main.
+- Коммит: 0d726db feat(translate): duopulse-245 — мобильный перевод всей страницы web-оверлея (паритет 244): пейлоад page-translate.js (веб-фетч gtx, duopulse-208), пункт «🌐 Перевести страницу…» в ⋮-меню оверлея, смоук e2e/mobile, релиз 1.1.2; push origin main.
