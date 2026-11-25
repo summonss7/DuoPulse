@@ -9121,3 +9121,66 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
     node scripts/release.mjs --publish-only — манифест канала: 1.1.1, 5 ассетов
     (сетап, .sig, latest.json, latest-canary.json, APK) — проверено curl'ом.
 - Коммит: 6460032 feat(translate): duopulse-244 — перевод всей страницы «как в Chrome»: пункт в ⋮-меню (bridge translate.page_begin) и контекстном меню, контент-модуль page-translate (пачки gtx, бар с языком/«Оригинал», дочитка динамики), релиз 1.1.1; push origin main (тем же сеансом). Полный релиз 1.1.1 опубликован до коммита: каналы Aila (манифест, 5 ассетов) + GitHub Pages (duopulse-updates: bef9f93, df995ca).
+
+## 25.11.2026, 07:10 — duopulse-245: перевод всей страницы в web-оверлее Android (паритет с десктопом) + релиз 1.1.2
+
+- Начало: 25.11.2026, 07:10 (GLM-5.3, сессия диспетчера). Окончание: 25.11.2026, 07:37.
+- Что изменено:
+  - **Пейлоад `src-tauri/gen/android/app/src/main/assets/duopulse/page-translate.js`** (новый,
+    паттерн google-video.js — IIFE, маркер `__dpPageTranslate`, только главный документ):
+    сбор текстовых узлов TreeWalker'ом (служебные теги/`translate=no`/contenteditable/только
+    цифры — мимо, свои узлы бара — по `[data-duopulse-translate]`), пачки ≤40 строк/≤1200
+    символов с паузой 150 мс, originals-Map с пробельным контуром (splitEdges), смена цели —
+    оригиналы на место и полный прогон заново, MutationObserver-дочитка динамики
+    (дебаунс 700 мс), бар CSSOM (статус с процентами, селект 15 языков десктопа, «Оригинал»/
+    «Показать перевод», «×»; спрятанный бар возвращает повторный вход), память последней цели
+    в localStorage (`duopulse.pageTranslateTarget`).
+  - **Транспорт — веб-фетч gtx ПРЯМО ИЗ СТРАНИЦЫ оверлея** (duopulse-208): браузерный
+    TLS-профиль Android System WebView обходит бот-блок gtx (тот же вывод, что у субтитров
+    UI-webview; ключей, Core-канала и JNI-моста не нужно). Два хоста
+    (translate.googleapis.com → clients5.google.com), dj=1-разбор как `parse_gtx_dj` Rust
+    (sentences[].trans, перенос строки пачки сохраняется внутри trans), несовпадение числа
+    строк — построчный добор (схема translate_batch/gtxWebBatch). Отказ: HTTP — честный
+    статус («gtx HTTP 429 (host)»), сеть/CSP — «сеть/CSP страницы запретили запрос»;
+    страницы со строгим CSP (connect-src без googleapis) — честное «Не получилось» в баре
+    (мобильного Core-фолбэка у оверлея нет: ureq на эмуляторе бот-блочится, потому веб-фетч
+    основной). Тест-хук `window.__dpPtFetch` (Response-подобный) — подмена транспорта
+    юнит-тестами и смоуком ДО begin.
+  - **Kotlin `MobileWebHelper.kt`**: пункт «🌐 Перевести страницу…» в «⋮»-меню шапки
+    оверлея (после «▶ Открыть в плеере duo») → `beginPageTranslate` (guarded
+    evaluateJavascript); инжекция пейлоада в `onPageFinished` (кэш текста на процесс,
+    идемпотентность маркером — паттерн injectPassCapture).
+  - **Смоук `e2e/mobile/page-translate-smoke.mjs`** (новый, постоянный, в AGENTS.md):
+    debug-APK + CDP 9223 + локальная страница :8896 (8899 — excluded-порт Windows).
+    23 проверки, две фазы: (A) детерминированная — транспорт подменён `__dpPtFetch`,
+    вход НАСТОЯЩИМ меню (uiautomator: «⋮» по content-desc «Меню», пункт по тексту),
+    перевод с контуром пробелов, script/цифры не тронуты, бар (статус «Переведено на
+    Русский», 15 языков, «Оригинал», «×»), «Оригинал»/«Показать перевод», смена цели
+    селектом → uk с памятью localStorage, дочитка позднего узла, «×»; (B) живой gtx —
+    заглушка снята, `begin('ru')` настоящим фетчем: «Второй абзац стенда» переведён,
+    бот-блок эмулятора обойдён (429 — ретрай ×1). Артефакт
+    e2e/mobile/page-translate-smoke-last-run.json (gitignore).
+  - Документация: README (строка «Перевод всей страницы» → «десктоп + Android
+    web-оверлей», пункт в мобильном разделе), ROADMAP M7 (duopulse-245 ✅),
+    AGENTS.md (стенд в e2e-инструментах).
+  - Версия 1.1.2 (package.json = tauri.conf.json = Cargo.toml = Cargo.lock).
+- Как проверено:
+  - Юнит-тесты: vitest — 73 файла / 894 теста зелёные (новый `src/mobile/
+    page-translate.test.ts` — 18: boot/API/фрейм, перевод с контуром, URL-контракт
+    gtx (client=gtx&dj=1, sl=auto, tl, q без контура), пачки 40+5, смёрж Google →
+    построчный добор, HTTP/сетевой отказ обоих хостов, пустая страница, невалидная
+    цель, бар/«Оригинал»/«×»/смена цели/память localStorage, дочитка динамики +
+    characterData не гоняет конвейер, stop()); tsc --noEmit чисто.
+  - Rust: cargo test — 478 тестов зелёные, 0 warnings (duopulse-231).
+  - E2E-смоук — 23/23 (выше), включая живой gtx; скриншоты
+    %TEMP%/duopulse-245-*.png (бар отрендерился — проверка зрением по памяти
+    duopulse-visual-qa-hallucination, первичный источник — CDP/DOM-строки).
+  - Релиз 1.1.2 (полный, порядок duopulse-234): `npm run release` — сетап
+    DuoPulse_1.1.2_x64-setup.exe (6,2 МБ), каналы Aila+GitHub Pages
+    (duopulse-updates: 007a900, 78fbd2a), хаб «Скачать» и C:\DuoPulse обновлены;
+    `scripts/android-build.sh release` — APK 1.1.2 подписан (38,1 МБ,
+    sha256 7d65df68a9f1…), канал Aila; `node scripts/release.mjs --publish-only` —
+    манифест канала: 1.1.2, 5 ассетов (сетап, .sig, latest.json, latest-canary.json,
+    APK) — проверено curl'ом. Десктоп не отстаёт (duopulse-120): обе платформы
+    в одном сеансе.
+- Коммит: <HASH> feat(translate): duopulse-245 — мобильный перевод всей страницы web-оверлея (паритет 244): пейлоад page-translate.js (веб-фетч gtx, duopulse-208), пункт «🌐 Перевести страницу…» в ⋮-меню оверлея, смоук e2e/mobile, релиз 1.1.2; push origin main.

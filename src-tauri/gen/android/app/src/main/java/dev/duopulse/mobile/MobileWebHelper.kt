@@ -784,6 +784,10 @@ object MobileWebHelper {
     items += "⟳  Обновить страницу" to { wv.reload() }
     if (wv.canGoForward()) items += "›  Вперёд" to { wv.goForward() }
     if (video != null) items += "▶  Открыть в плеере duo" to { openVideoInPlayer(video) }
+    // Перевод всей страницы (duopulse-245, паритет десктопа 244): пейлоад
+    // page-translate.js уже в документе (onPageFinished), begin — старт
+    // перевода с последней выбранной целью (пейлоад покажет бар с селектом)
+    items += "🌐  Перевести страницу…" to { beginPageTranslate(wv) }
     items += "⧉  Копировать ссылку" to { copyUrl(act, url) }
     items += "↗  Поделиться…" to { share(act, url) }
     items += "⌘  Открыть в браузере" to { openInBrowser(act, url) }
@@ -1619,6 +1623,9 @@ object MobileWebHelper {
         installUrlWatch(view)
         // duopulse-236: фолбэк рантайма без DOCUMENT_START_SCRIPT
         injectGoogleVideoLate(view, url)
+        // duopulse-245: перевод всей страницы — пейлоад готовит документ к
+        // пункту «⋮»-меню (идемпотентен, маркер __dpPageTranslate)
+        injectPageTranslate(view)
         // захват паролей из форм (duopulse-165): пейлоад идемпотентен
         // (маркер __dpPassWatch), повтор на том же документе — тишина
         injectPassCapture(view)
@@ -2126,5 +2133,40 @@ object MobileWebHelper {
     val js = googleVideoScript(wv)
     if (js.isEmpty()) return
     wv.evaluateJavascript(js, null)
+  }
+
+  /** Пейлоад assets/duopulse/page-translate.js (кэш на процесс). */
+  private var pageTranslateJs: String? = null
+
+  private fun pageTranslateScript(wv: WebView): String {
+    pageTranslateJs?.let { return it }
+    val js = try {
+      wv.context.assets.open("duopulse/page-translate.js")
+        .use { it.readBytes().toString(Charsets.UTF_8) }
+    } catch (e: Exception) {
+      Log.d(TAG, "page-translate: пейлоад не прочитан (${e.message})")
+      ""
+    }
+    pageTranslateJs = js
+    return js
+  }
+
+  /** Перевод всей страницы оверлея (duopulse-245, паритет десктопа 244):
+   *  пейлоад в каждый документ (onPageFinished — переводу ранний старт не
+   *  нужен, вход всегда от пользователя через «⋮»-меню; идемпотентен —
+   *  маркер __dpPageTranslate). Транспорт — веб-фетч gtx из самой страницы
+   *  (duopulse-208, браузерный TLS-профиль). */
+  private fun injectPageTranslate(wv: WebView) {
+    val js = pageTranslateScript(wv)
+    if (js.isEmpty()) return
+    wv.evaluateJavascript(js, null)
+  }
+
+  /** Пункт «Перевести страницу…» (⋮-меню): старт перевода текущего
+   *  документа (цель — последняя выбранная либо «ru»; пусто до инжекции —
+   *  guarded-вызов молчит, повтор из бара пойдёт после загрузки). */
+  private fun beginPageTranslate(wv: WebView) {
+    wv.evaluateJavascript(
+      "window.__duopulsePageTranslate && window.__duopulsePageTranslate.begin()", null)
   }
 }

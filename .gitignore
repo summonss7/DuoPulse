@@ -103,3 +103,6 @@ e2e/bookmarks/bm-drag242-last-run.json
 
 # Рантайм-артефакт стенда перевода страницы (e2e/page/page-translate-smoke.mjs, duopulse-244)
 e2e/page/page-translate-last-run.json
+
+# Рантайм-артефакт стенда мобильного перевода страницы (e2e/mobile/page-translate-smoke.mjs, duopulse-245)
+e2e/mobile/page-translate-smoke-last-run.json
