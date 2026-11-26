@@ -24,16 +24,28 @@
 //! заменой `"adSlots"`→`"no_ads"` в теле ответа ДО парсинга — плеер видит
 //! «рекламы нет» и сразу играет контент.
 
+// Самофетч ниже (fetch_and_rewrite) — только десктоп; читатель тела
+// мобильной либе не нужен (duopulse-240).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::io::Read;
 
 /// Потолок тела ответа для перезаписи: XHR /player — сотни КБ, документ
 /// /watch — единицы МБ; стриминг videoplayback под правила не попадает
 /// (точечные пути). Превышение — отказ от перезаписи (фолббек WebView2).
+// Потребитель — fetch_and_rewrite (десктопный COM-перехватчик main.rs);
+// мобильная либа подмену ответов не подключает (duopulse-240).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 /// Таймаут самофетча целиком (установка соединения + чтение тела).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Одна замена `/regex/replacement/flags` из опции `replace=`.
+///
+/// Поля читает только apply_ops — перезапись тела ответа (десктоп,
+/// COM-перехватчик main.rs); мобильная либа правила парсит и хранит,
+/// но не применяет — «поля не читаются» на ней погашено явно (duopulse-240).
+#[cfg_attr(mobile, allow(dead_code))]
 #[derive(Debug, Clone)]
 pub(crate) struct ReplaceOp {
     pub(crate) regex: regex::Regex,
@@ -352,6 +364,9 @@ fn parse_replace_value(value: &str) -> Option<ReplaceOp> {
 
 /// Применить цепочку замен к телу. Не-UTF-8 тело возвращается нетронутым
 /// (замены текстовые). Возвращает (тело, изменилось ли что-то).
+// Потребители — fetch_and_rewrite (десктоп, COM-перехватчик main.rs) и
+// тесты хоста; мобильная либа тела не подменяет (duopulse-240).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn apply_ops(body: &[u8], ops: &[ReplaceOp]) -> (Vec<u8>, bool) {
     if body.is_empty() {
         return (Vec::new(), false);
@@ -377,11 +392,16 @@ pub(crate) fn apply_ops(body: &[u8], ops: &[ReplaceOp]) -> (Vec<u8>, bool) {
 
 // ---------------------------------------------------------------------------
 // Самофетч + перезапись (вызов из фоновой нити COM-перехватчика)
+//
+// Раздел целиком — десктопный бин (COM-перехватчик WebView2 в main.rs);
+// мобильная либа подмену ответов не подключает — гейт по таргету
+// (duopulse-240).
 // ---------------------------------------------------------------------------
 
 /// Результат самофетча с применёнными заменами — материал для
 /// `CreateWebResourceResponse` в main.rs.
 #[derive(Debug)]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) struct RewrittenResponse {
     pub(crate) status: u16,
     pub(crate) reason: String,
@@ -396,6 +416,7 @@ pub(crate) struct RewrittenResponse {
 /// Заголовки запроса, которые не переносятся в самофетч: адресные (клиент
 /// ставит сам), кодирование (ответ нужен БЕЗ сжатия — замены текстовые) и
 /// хоп-заголовки туннеля.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn skip_request_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -411,6 +432,7 @@ fn skip_request_header(name: &str) -> bool {
     )
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn skip_response_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -431,6 +453,7 @@ fn skip_response_header(name: &str) -> bool {
 /// в сеть только через него (прямые/туннельные маршруты решает роутер), самофетч
 /// идёт тем же путём — IP-адрес и куки сессии согласованы с остальным трафиком
 /// плеера. None — роутера нет, соединение напрямую.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) fn fetch_and_rewrite(
     method: &str,
     url: &str,

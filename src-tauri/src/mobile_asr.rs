@@ -577,7 +577,7 @@ pub mod cmd {
         let app_for_progress = app.clone();
         let video_for_progress = video_id.clone();
         let engine_for_progress = engine_id.clone();
-        let mut on_chunk = |done: usize, total: usize| {
+        let on_chunk = |done: usize, total: usize| {
             emit_progress(
                 &app_for_progress,
                 &video_for_progress,

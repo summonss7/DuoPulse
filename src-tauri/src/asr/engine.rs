@@ -518,26 +518,6 @@ pub mod local_jni {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(4) as i32
     }
 
-    /// JNI-вызов в MobileAsrHelper (статика; ошибки JVM — строкой).
-    fn call_static_string(
-        method: &str,
-        sig: &str,
-        args: &[jni::objects::JValue],
-    ) -> Result<String, String> {
-        crate::mobile_jni::with_jni(|env, context| {
-            let class = crate::mobile_jni::app_class(env, context, HELPER)?;
-            let out = env
-                .call_static_method(&class, method, sig, args)
-                .map_err(|e| format!("{method}: {e}"))?
-                .l()
-                .map_err(|e| format!("{method}: {e}"))?;
-            let js = jni::objects::JString::from(out);
-            env.get_string(&js)
-                .map(|s| s.to_string_lossy().into_owned())
-                .map_err(|e| format!("{method}: строка: {e}"))
-        })
-    }
-
     /// Выгрузить контекст (nativeFree; ошибки не критичны).
     fn free_ctx(ctx_id: i64) {
         let _ = crate::mobile_jni::with_jni(|env, context| {

@@ -9375,3 +9375,36 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   только правки, тесты, коммит, CHANGELOG и отчёт.
 - Карточка CARDS/239 (duopulse-239): критерии готовности проверены по факту, status: done.
 - Коммит: 41d83c5 fix(e2e): duopulse-239 — стенды e2e/bookmarks и e2e/settings глушат дерево npm→vite (taskkill /T) вместо npm-оболочки; починены устаревшая проверка bmbar (панель папки вместо снесённого нативного меню) и двухмашиный settings (single-instance env + пустышка killOurExes), push origin main.
+
+## 26.11.2026, 06:29 — 06:47 — задача (карточка duopulse-240): превентивные warnings мобильной сборки aarch64-linux-android (12 шт.) погашены по образцу duopulse-231
+
+- Backup перед правками: backup.bat -q → backups/backup_2026-11-26_06-32-54 (правило проекта).
+- 12 Android-only warnings (мёртвый на мобильной либе код, на десктопе используемый бином
+  main.rs) убраны в 5 файлах src-tauri (+30/−22), поведение программы не менялось —
+  правки только cfg/allow/подчёркивание/удаление мёртвой приватной функции:
+  - adblock/replace.rs: раздел самофетча/перезаписи тел ответов ($replace, duopulse-050) —
+    use std::io::Read, MAX_BODY_BYTES, FETCH_TIMEOUT, apply_ops, RewrittenResponse,
+    skip_request_header, skip_response_header, fetch_and_rewrite — закрыт
+    cfg(not(any(android, ios))) по образцу соседних гейтов adblock/mod.rs: единственный
+    потребитель — десктопный COM-перехватчик main.rs (WebView2), мобильная либа механику
+    не подключает; сама подмена ответов на мобильной ветке НЕ включена (вне карточки);
+    поля ReplaceOp (regex/replacement/global читает только apply_ops) —
+    cfg_attr(mobile, allow(dead_code)) с комментарием (парсер правил на мобильных
+    поля по-прежнему пишет и хранит);
+  - adblock/mod.rs: replace_plan — cfg_attr(mobile, allow(private_interfaces)) с
+    комментарием: pub-метод отдаёт pub(crate)-тип ReplaceOp, реальный потребитель —
+    десктопный бин (компилирует adblock сам; в бинах линт не срабатывает), на десктопе
+    атрибут выключен — поведение то же;
+  - asr/engine.rs: удалён мёртвый везде fn call_static_string в local_jni (за всех зовут
+    call_static_method напрямую; на десктопе local_jni не компилируется вовсе);
+  - mobile_updater.rs: неиспользуемая переменная цикла attempt → _attempt;
+  - mobile_asr.rs: убран лишний mut у on_chunk (Fn-замыкание, зовётся по ссылке).
+- Как проверено: `cargo check --lib --target aarch64-linux-android` — 0 warnings
+  (было 12; тулчейн NDK 28.2.13676358: CC/CARGO_TARGET_…_LINKER =
+  aarch64-linux-android24-clang.cmd, AR = llvm-ar.exe, msys64-ucrt64 в PATH), контрольный
+  прогон с CARGO_INCREMENTAL=0 — тоже 0 warnings; десктоп не тронут: cargo build —
+  0 warnings, cargo test (bin+lib) — 0 warnings, lib 36 passed/1 ignored,
+  bin 480 passed/0 failed/6 ignored; vitest — 73 файла, 894 теста, зелёные.
+- Версия НЕ собиралась и НЕ поднималась — флажок Артёма build: false (aila-418):
+  только правки, тесты, коммит, CHANGELOG и отчёт.
+- Карточка CARDS/240 (duopulse-240): критерии готовности проверены по факту, status: done.

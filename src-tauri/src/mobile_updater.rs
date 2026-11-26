@@ -332,7 +332,7 @@ pub fn updater_download(
         );
         *last_emit = downloaded;
     };
-    'attempts: for attempt in 1..=MAX_ATTEMPTS {
+    'attempts: for _attempt in 1..=MAX_ATTEMPTS {
         let mut request = agent()
             .get(&url)
             .set("User-Agent", crate::duo_mobile::USER_AGENT);
