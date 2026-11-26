@@ -9374,4 +9374,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Версия НЕ собиралась и НЕ поднималась — флажок Артёма build: false (aila-418, 24.11 18:22):
   только правки, тесты, коммит, CHANGELOG и отчёт.
 - Карточка CARDS/239 (duopulse-239): критерии готовности проверены по факту, status: done.
-- Коммит: <hash> fix(e2e): duopulse-239 — стенды e2e/bookmarks и e2e/settings глушат дерево npm→vite (taskkill /T) вместо npm-оболочки; починены устаревшая проверка bmbar (панель папки вместо снесённого нативного меню) и двухмашиный settings (single-instance env + пустышка killOurExes), push origin main.
+- Коммит: 41d83c5 fix(e2e): duopulse-239 — стенды e2e/bookmarks и e2e/settings глушат дерево npm→vite (taskkill /T) вместо npm-оболочки; починены устаревшая проверка bmbar (панель папки вместо снесённого нативного меню) и двухмашиный settings (single-instance env + пустышка killOurExes), push origin main.
