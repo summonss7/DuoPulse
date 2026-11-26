@@ -51,6 +51,10 @@ todo | in_progress | review | done | blocked. В шапке может стоя�
   без warnings (duopulse-231) — линкер-шум «.rsrc merge failure» на windows-gnu снят в
   `src-tauri/build.rs` (нейтральный default-manifest.o через `-B`; причина —
   default-manifest.o тулчейна winlibs с языком 1033, не дубликат манифеста приложения).
+  По решению Артёма (duopulse-241, 24.11) сам файл тулчейна
+  `D:/tools/mingw64/x86_64-w64-mingw32/lib/default-manifest.o` заменён нейтральной копией
+  (LANGUAGE 0,0, оригинал рядом как `.orig`) — шум ушёл машинно у всех Rust-проектов
+  этого тулчейна; приём в build.rs остаётся страховкой от переустановки тулчейна.
 - **Тесты**: npm run test (vitest).
 - **Релизы**: версия одна на всех (tauri.conf.json = package.json = Cargo.toml; рассинхрон
   проверяет android-build.sh, синхронизирует release.mjs). Мобильный release публикуется в
