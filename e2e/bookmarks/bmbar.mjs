@@ -7,10 +7,10 @@
 //      --chrome-h 112px;
 //   3) правка через мост (bookmarkRemove) + переключение вкладки —
 //      tabs.updated с дебаунсом обновляет строку (чип исчез);
-//   4) наведение на папку (pointerover, dwell 250 мс) открывает нативное
-//      меню: выбор пункта клавиатурой (SendKeys DOWN+ENTER — окно поднято
-//      на передний план ALT-трюком, меню фонового окна клавиатуру не
-//      получает) навигирует активную вкладку на закладку папки;
+//   4) наведение на папку (pointerover, dwell 250 мс) открывает панель
+//      папки — панель-webview (duopulse-147; прежнее нативное меню снесено,
+//      SendKeys DOWN+ENTER уходил впустую): клик по строке-закладке панели
+//      навигирует активную вкладку на закладку папки;
 //   5) клик по чипу — навигация активной вкладки; CDP-сервер стенда клик
 //      переживает плохо (соединение рвётся — WS 1006), поэтому клик —
 //      последний CDP-шаг, а результат сверяем скриншотом окна (адресная
@@ -170,33 +170,6 @@ $g.CopyFromScreen($r.L, $r.T, 0, 0, $b.Size)
 $b.Save("${file.replaceAll("\\", "/")}", [System.Drawing.Imaging.ImageFormat]::Png)
 `;
 
-/** Окно приложения на передний план (ALT-трюк против защиты фокуса) —
- *  нужно ДО открытия нативного меню: меню фонового окна не получает
- *  клавиатуру, SendKeys уходит в чужое окно. */
-const foregroundApp = async () => {
-  await run("powershell", [
-    "-NoProfile",
-    "-Command",
-    `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class W2 {
-  [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-}
-"@
-$proc = Get-CimInstance Win32_Process -Filter "Name='duopulse.exe'" |
-  Where-Object { $_.ExecutablePath -eq '${EXE_PS}' } | Select-Object -First 1
-$p = Get-Process -Id $proc.ProcessId -ErrorAction Stop
-[W2]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
-[W2]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
-[W2]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-Start-Sleep -Milliseconds 400
-`,
-  ]).catch((e) => console.log("fg:", String(e).slice(0, 120)));
-};
-
 /** Скриншот с одним повтором: первый PS-запрос изредка падает (прогрев
  *  Add-Type), второй тем же скриптом проходит. */
 const shotWindow = async (file, foreground = true) => {
@@ -341,32 +314,49 @@ try {
   }, 8000);
   check("правка через мост + tabs.updated — чип исчез (дебаунс)", !!afterRemove, JSON.stringify(afterRemove));
 
-  // --- 6. наведение на папку — нативное меню + выбор пункта -------------------
-  // наведение открывает меню (dwell 250 мс), выбор — клавиатурой (DOWN+ENTER
-  // в нативное меню): menu-action → навигация активной вкладки. Скриншотами
-  // меню не сверяем: поднять окно без закрытия модального меню не вышло
-  // (ALT-трюк активацией меню закрывает) — функциональная проверка надёжнее.
+  // --- 6. наведение на папку — панель папки + клик по закладке ----------------
+  // наведение (dwell 250 мс) открывает панель-webview папки (нативное меню
+  // снесено в duopulse-147): панель появляется в /json как page с
+  // panel=bmfolder в адресе; клик по строке-закладке навигирует активную
+  // вкладку и закрывает панель. Проверяем функционально, по CDP цели панели.
   step("наведение на папку");
-  await foregroundApp(); // окно вперёд: меню фонового окна не получает клавиатуру
   await uiWs.evalIn(
     `document.querySelector('#bmbar .bm-folder').dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))`,
     false,
   );
-  await sleep(700); // dwell 250 мс + открытие нативного меню
-  await run("powershell", [
-    "-NoProfile",
-    "-Command",
-    `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{DOWN}{ENTER}')`,
-  ]).catch(() => {});
+  const panelT = await waitFor(async () => {
+    try {
+      const list = await (await fetch(`http://localhost:${CDP_PORT}/json`)).json();
+      return list.find((t) => t.type === "page" && /panel=bmfolder/.test(t.url)) ?? null;
+    } catch {
+      return null;
+    }
+  }, 8000);
+  let panelNote = "панель папки не открылась";
+  if (panelT) {
+    const panelWs = connect(panelT.webSocketDebuggerUrl);
+    // строка появляется после renderPanel (bridge-запрос группы) — ждём
+    const clicked = await waitFor(
+      () =>
+        panelWs
+          .evalIn(
+            `(() => { const r = [...document.querySelectorAll('.bm-row[data-url]')].find(x => x.dataset.url === ${JSON.stringify(L("git"))}); if (!r) return null; r.click(); return 1; })()`,
+          )
+          .catch(() => null),
+      8000,
+    );
+    panelWs.ws.close();
+    panelNote = clicked ? "" : "строка закладки в панели не найдена";
+  }
   const menuNav = await waitFor(async () => {
     const res = await uiWs.evalIn(`window.__duopulse.tabs.list()`);
     const a = (res?.tabs ?? []).find((t) => t.active);
     return a?.url === L("git") ? a : null;
   }, 8000);
   check(
-    "наведение на папку открыло меню, выбор пункта навигировал вкладку",
+    "наведение на папку открыло панель, клик по закладке навигировал вкладку",
     !!menuNav,
-    menuNav ? menuNav.url : "вкладка не ушла на закладку папки",
+    menuNav ? menuNav.url : panelNote || "вкладка не ушла на закладку папки",
   );
   await shotWindow(path.join(SHOT_DIR, "duopulse-143-bar.png"));
 
@@ -395,7 +385,13 @@ try {
   // порядок: приложение → vite → http; временный профиль не трогаем (следование
   // run.mjs), %TEMP% заберёт чистка системы
   await killOurExes();
-  vite.kill();
+  // vite.kill() на Windows убивает только npm-оболочку — дерево npm→node
+  // переживает скрипт и держит порт 5173 (strictPort) для следующих прогонов
+  try {
+    await run("taskkill", ["/PID", String(vite.pid), "/T", "/F"]);
+  } catch {
+    /* дерево уже мертво — ок */
+  }
   httpServer.close();
   process.exit(results.some((r) => !r.ok) ? 1 : 0);
 }

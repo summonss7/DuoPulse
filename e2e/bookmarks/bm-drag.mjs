@@ -391,7 +391,13 @@ try {
   check("стенд завершился без падения", false, String(e));
 } finally {
   try { app.kill(); } catch {}
-  try { vite.kill(); } catch {}
+  // vite.kill() на Windows убивает только npm-оболочку — дерево npm→node
+  // переживает скрипт и держит порт 5173 (strictPort) для следующих прогонов
+  try {
+    await run("taskkill", ["/PID", String(vite.pid), "/T", "/F"]);
+  } catch {
+    /* дерево уже мертво — ок */
+  }
   try { httpServer.close(); } catch {}
   await killOurExes();
   fs.rmSync(tmp, { recursive: true, force: true });

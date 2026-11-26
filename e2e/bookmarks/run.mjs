@@ -500,9 +500,13 @@ try {
   try {
     app.kill();
   } catch {}
+  // vite.kill() на Windows убивает только npm-оболочку — дерево npm→node
+  // переживает скрипт и держит порт 5173 (strictPort) для следующих прогонов
   try {
-    vite.kill();
-  } catch {}
+    await run("taskkill", ["/PID", String(vite.pid), "/T", "/F"]);
+  } catch {
+    /* дерево уже мертво — ок */
+  }
   try {
     httpServer.close();
   } catch {}

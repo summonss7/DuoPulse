@@ -38,6 +38,10 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const EXE = process.argv[2] || path.join(ROOT, "src-tauri", "target", "debug", "duopulse.exe");
+// WMI/Win32 отдают пути с обратными слэшами — для PS-сравнений ExecutablePath
+// (двойное экранирование здесь не нужно: Where-Object -eq — не WQL, строка
+// в одинарных кавычках сравнивается буквально)
+const EXE_PS = EXE.replaceAll("/", "\\");
 const CDP_PORT_A = 9238; // у каждой фазы свой порт: физически исключает
 const CDP_PORT_B = 9239; // подключение к целям прошлой машины
 const HTTP_PORT = 8907;
@@ -64,7 +68,7 @@ const killOurExes = async () => {
     await run("powershell", [
       "-NoProfile",
       "-Command",
-      `Get-CimInstance Win32_Process -Filter "Name='duopulse.exe'" | Where-Object { $_.ExecutablePath -eq '${EXE.replace(/\\/g, "\\\\")}' } | ForEach-Object { taskkill /PID $_.ProcessId /T /F }`,
+      `Get-CimInstance Win32_Process -Filter "Name='duopulse.exe'" | Where-Object { $_.ExecutablePath -eq '${EXE_PS}' } | ForEach-Object { taskkill /PID $_.ProcessId /T /F }`,
     ]);
   } catch {
     /* уже мертвы — ок */
@@ -140,6 +144,10 @@ async function launchApp(tmp, cdpPort) {
       ...process.env,
       APPDATA: tmp,
       DUOPULSE_START_URL: "duopulse://newtab",
+      // two-instance стенд: single-instance — ГЛОБАЛЬНЫЙ мьютекс (duopulse-163),
+      // машина A держит его до своей смерти — без переменной машина B молча
+      // гаснет, не подняв окна (конвенция всех стендов, см. main.rs)
+      DUOPULSE_E2E_NO_SINGLE_INSTANCE: "1",
       DUOPULSE_ADBLOCK_LISTS: "", // без списков: стенду не нужна сеть
       DUOPULSE_SLEEP_AFTER_SECS: "0",
       WEBVIEW2_USER_DATA_FOLDER: path.join(tmp, "webview2-data"),
@@ -169,11 +177,15 @@ async function launchApp(tmp, cdpPort) {
 }
 
 let failures = 0;
+// npm-оболочка vite: pid нужен finally ЛЮБОГО пути выхода (в т.ч. падения
+// фазы A/B ДО их внутренних try) — поэтому переменная снаружи основного try,
+// а дерево глушится во внешнем finally
+let vite = null;
 try {
   await killOurExes();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "duopulse-settings-e2e-"));
   const profilePath = path.join(tmp, "duopulse-profile.json"); // вне APPDATA: доступен обеим машинам
-  const vite = spawn("npm", ["run", "dev"], { cwd: ROOT, shell: true, stdio: "ignore" });
+  vite = spawn("npm", ["run", "dev"], { cwd: ROOT, shell: true, stdio: "ignore" });
   for (let i = 0; i < 60; i++) {
     try {
       await fetch("http://localhost:5173/");
@@ -338,7 +350,6 @@ try {
   } finally {
     b.ws.close();
     await killOurExes();
-    vite.kill();
     httpServer.close();
     try {
       await rmRetry(tmpB);
@@ -356,6 +367,15 @@ try {
   console.error("СТЕНД УПАЛ:", e);
 } finally {
   await killOurExes();
+  // vite.kill() на Windows убивает только npm-оболочку — дерево npm→node
+  // переживает скрипт и держит порт 5173 (strictPort) для следующих прогонов.
+  // Во внешнем finally: падение ДО внутренних try фаз (например, launchApp
+  // машины B) иначе оставляет сироту на порту
+  try {
+    if (vite) await run("taskkill", ["/PID", String(vite.pid), "/T", "/F"]);
+  } catch {
+    /* дерево уже мертво — ок */
+  }
 }
 
 failures += results.filter((r) => !r.ok).length;
