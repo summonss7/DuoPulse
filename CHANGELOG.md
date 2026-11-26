@@ -9409,3 +9409,37 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
   только правки, тесты, коммит, CHANGELOG и отчёт.
 - Карточка CARDS/240 (duopulse-240): критерии готовности проверены по факту, status: done.
 - Коммит: 8564dd8 fix(mobile): duopulse-240 — 12 warnings мобильной сборки погашены: cfg-гейт десктоп-механики $replace в replace.rs (самофетч/перезапись тел — потребитель COM-перехватчик main.rs), cfg_attr(mobile, allow) полей ReplaceOp и replace_plan с комментариями, удалён мёртвый call_static_string (engine.rs), _attempt и лишний mut, push origin main.
+
+## 26.11.2026, 06:43 — 06:53 — задача (карточка duopulse-241): линкер-шум «.rsrc merge failure» закрыт машинно — default-manifest.o тулчейна winlibs заменён нейтральной копией (решение Артёма, вариант 1)
+
+- Backup перед работой: backup.bat -q → backups/backup_2026-11-26_06-46-13 (правило проекта).
+- Выполнено решение Артёма от 24.11 08:35 (кнопка 1 — «починить машинно»). Заменён файл
+  тулчейна D:/tools/mingw64/x86_64-w64-mingw32/lib/default-manifest.o (вне репозитория)
+  нейтральной копией: тот же rc-текст дефолтного манифеста CRT (longPathAware/asInvoker),
+  но LANGUAGE 0,0 вместо 9,1 (1033) — собран windres тулчейна (-O coff -F pe-x86-64),
+  780 байт как у оригинала; оригинал сохранён рядом как default-manifest.o.orig.
+  Дампы windres: оригинал — LANGUAGE 9,1, установленная копия — LANGUAGE 0,0.
+- A/B-доказательство (линковка exe с манифестом приложения, БЕЗ приёма -B из build.rs):
+  ДО фикса — gcc test.c+app.o (манифест приложения в стиле tauri-winres: Common-Controls
+  v6, язык — дефолт windres 9,1) и rustc -C link-arg=app.o (та же связка, что в реальных
+  сборках; collect2-строка rustc показывает источник шума:
+  D:/tools/mingw64/x86_64-w64-mingw32/lib/default-manifest.o) — оба выдают
+  «.rsrc merge failure: multiple non-default manifests» (rustc — warning linker_messages).
+  ПОСЛЕ фикса — оба чисто (stderr gcc 0 байт), exe запускаются (exit 0), смёрженный exe
+  хранит манифест ПРИЛОЖЕНИЯ (Common-Controls, 9,1), нейтральный дефолтный CRT сброшен ld
+  как «дефолтный» — мёрж корректен. Примечание: атрибуция 231 подтверждена — real-сборки
+  линкуются crt2.o и default-manifest.o именно из D:/tools/mingw64 (winlibs PATH), не из
+  self-contained rustup; там default-manifest.o нет вовсе.
+- Контроль проекта: страх-й приём -B в src-tauri/build.rs перегенерирован (touch build.rs,
+  только mtime) → cargo build — 0 warnings, duopulse.exe переслинкован; cargo test (bin+lib)
+  — 0 warnings: lib 36 passed/1 ignored, bin 480 passed/0 failed/6 ignored (база duopulse-240).
+  Фронт/контент не менялись — vitest/typecheck не требуются.
+- acl-manifests.json регенерирован tauri-build при контрольной десктоп-сборке (десктоп-набор
+  с секцией updater; закоммиченный был от android-сборки 0.1.99, duopulse-229) — артефакт
+  регенерации, не часть задачи; включён в docs-коммит.
+- Правки репо: только документация — AGENTS.md (абзац «Команды») дополнен машинным фиксом
+  (какой файл тулчейна заменён, где оригинал, приём в build.rs — страховка от переустановки
+  тулчейна); код и версия НЕ тронуты. Версия НЕ собиралась и НЕ поднималась — флажок Артёма
+  build: false (aila-418): только правки, тесты, коммит, CHANGELOG и отчёт.
+- Карточка CARDS/241 (duopulse-241): критерии готовности проверены по факту, status: done.
+- Коммит: cee7a5e fix(toolchain): duopulse-241 — default-manifest.o тулчейна winlibs заменён нейтральной копией LANGUAGE 0,0 по решению Артёма (оригинал .orig рядом) — шум ушёл машинно у всех Rust-проектов тулчейна; AGENTS.md дополнен, push origin main.
