@@ -9408,3 +9408,4 @@ audioTracks[].original, которых в web-клиенте YouTube нет → 
 - Версия НЕ собиралась и НЕ поднималась — флажок Артёма build: false (aila-418):
   только правки, тесты, коммит, CHANGELOG и отчёт.
 - Карточка CARDS/240 (duopulse-240): критерии готовности проверены по факту, status: done.
+- Коммит: 8564dd8 fix(mobile): duopulse-240 — 12 warnings мобильной сборки погашены: cfg-гейт десктоп-механики $replace в replace.rs (самофетч/перезапись тел — потребитель COM-перехватчик main.rs), cfg_attr(mobile, allow) полей ReplaceOp и replace_plan с комментариями, удалён мёртвый call_static_string (engine.rs), _attempt и лишний mut, push origin main.

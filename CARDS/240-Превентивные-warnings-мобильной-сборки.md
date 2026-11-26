@@ -1,7 +1,7 @@
 ---
 id: duopulse-240
 title: Превентивные warnings мобильной сборки (aarch64-linux-android, 12 шт.)
-status: in_progress
+status: done
 priority: 2
 created: 2026-11-24
 updated: 2026-11-26
@@ -35,7 +35,7 @@ model: GLM-5.3
 - [x] `cargo check --lib --target aarch64-linux-android` (тулчейн NDK — рецепт в журнале 231) не выдаёт ни одного warning
 - [x] Десктоп не тронут: `cargo build` и `cargo test` (bin+lib) по-прежнему без warnings, cargo test и vitest зелёные
 - [x] Поведение программы не изменилось (правки — только cfg/allow/подчёркивания/удаление мёртвого; каждый allow пояснён комментарием)
-- [ ] CHANGELOG дополнен (дата-время начала и окончания, как проверено), коммит + push
+- [x] CHANGELOG дополнен (дата-время начала и окончания, как проверено), коммит + push
 
 ## Журнал
 - 24.11.2026, 06:52: карточка заведена в сеансе duopulse-231 (выявленная работа вне карточки, правило 3).
@@ -73,3 +73,7 @@ model: GLM-5.3
   lib 36 passed/1 ignored, bin 480 passed/0 failed/6 ignored; vitest — 73 файла,
   894 теста, зелёные. Поведение не менялось: правки — cfg/allow/подчёркивание/удаление
   мёртвой приватной функции.
+- 26.11.2026, 06:50: коммит кода 8564dd8 (5 файлов src-tauri + карточки 231/240/241
+  диспетчера + CHANGELOG), push origin main; критерии готовности проверены по факту —
+  все четыре выполнены; status: done. Отчёт в Aila («Хаб ИИ», wish w_5QwBe9XNCAkr).
+  Версия НЕ собиралась и НЕ поднималась — build: false (aila-418).
